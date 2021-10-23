@@ -1,0 +1,31 @@
+[package]
+name = "bgpkit-parser"
+version = "0.3.0"
+authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
+edition = "2021"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/bgpkit/bgpkit-parser"
+documentation = "https://docs.rs/bgpkit-parser"
+description = """
+A library to parse MRT/BGP binary data.
+"""
+keywords = ["bgp", "bgpkit", "mrt"]
+
+[dependencies]
+byteorder = "1.2"
+ipnetwork = "0.18"
+enum-primitive-derive = "0.1"
+num-traits = "0.1"
+chrono = "0.4"
+bgp-models = "0.3.4"
+
+# logging
+log="0.4"
+env_logger="0.9"
+itertools = "0.10.1"
+
+[dev-dependencies]
+bzip2="0.4"
+reqwest = { version = "0.11", features = ["json", "blocking", "stream"] }
+bgpkit-broker = "0.3.0"
