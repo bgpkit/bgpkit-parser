@@ -486,7 +486,7 @@ impl Display for BgpElem {
             ElemType::WITHDRAW => "W",
         };
         let format = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
+            "|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
             t, &self.timestamp,
             &self.peer_ip,
             &self.peer_asn,

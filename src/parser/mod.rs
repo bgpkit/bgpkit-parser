@@ -13,22 +13,24 @@ pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2
 
 pub use crate::error::ParserError;
 pub use mrt::mrt_elem::{BgpElem, Elementor, ElemType};
+use crate::io::get_reader;
 
-pub struct BgpkitParser<T: Read> {
-    input: T,
+pub struct BgpkitParser {
+    reader: Box<dyn Read>
 }
 
-impl<T: Read> BgpkitParser<T> {
-    pub fn new(input: T) -> BgpkitParser<T> {
-        BgpkitParser {
-            // input: Some(BufReader::new(input)),
-            input: input,
+impl BgpkitParser {
+    /// Creating a new parser from a object that implements [Read] trait.
+    pub fn new(path: &str) -> BgpkitParser{
+        BgpkitParser{
+            reader: get_reader(path)
         }
     }
 
     /// This is used in for loop `for item in parser{}`
     pub fn next(&mut self) -> Result<MrtRecord, ParserError> {
-        parse_mrt_record(&mut self.input)
+        parse_mrt_record(&mut self.reader)
     }
 }
+
 

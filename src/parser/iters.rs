@@ -1,25 +1,24 @@
 use log::{error, warn};
 use bgp_models::mrt::MrtRecord;
-use std::io::Read;
 use crate::{BgpElem, Elementor};
 use crate::error::ParserError;
 use crate::parser::BgpkitParser;
 
 /// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
-impl<T: Read> IntoIterator for BgpkitParser<T> {
+impl IntoIterator for BgpkitParser {
     type Item = BgpElem;
-    type IntoIter = ElemIterator<T>;
+    type IntoIter = ElemIterator;
 
     fn into_iter(self) -> Self::IntoIter {
         ElemIterator::new(self)
     }
 }
 
-impl<T: Read> BgpkitParser<T> {
-    pub fn into_record_iter(self) -> RecordIterator<T> {
+impl BgpkitParser {
+    pub fn into_record_iter(self) -> RecordIterator {
         RecordIterator::new(self)
     }
-    pub fn into_elem_iter(self) -> ElemIterator<T> {
+    pub fn into_elem_iter(self) -> ElemIterator {
         ElemIterator::new(self)
     }
 }
@@ -28,18 +27,20 @@ impl<T: Read> BgpkitParser<T> {
 MrtRecord Iterator
 **********/
 
-pub struct RecordIterator<T: Read> {
-    parser: BgpkitParser<T>,
+pub struct RecordIterator {
+    parser: BgpkitParser,
     count: u64,
 }
 
-impl<T: Read> RecordIterator<T> {
-    fn new(parser: BgpkitParser<T>) -> RecordIterator<T> {
-        RecordIterator { parser , count: 0 }
+impl RecordIterator {
+    fn new(parser: BgpkitParser) -> RecordIterator {
+        RecordIterator {
+            parser , count: 0,
+        }
     }
 }
 
-impl<T: Read> Iterator for RecordIterator<T> {
+impl Iterator for RecordIterator {
     type Item = MrtRecord;
 
     fn next(&mut self) -> Option<MrtRecord> {
@@ -78,20 +79,20 @@ impl<T: Read> Iterator for RecordIterator<T> {
 BgpElem Iterator
 **********/
 
-pub struct ElemIterator<T: Read> {
+pub struct ElemIterator {
     cache_elems: Vec<BgpElem>,
-    record_iter: RecordIterator<T>,
+    record_iter: RecordIterator,
     elementor: Elementor,
     count: u64,
 }
 
-impl<T: Read> ElemIterator<T> {
-    fn new(parser: BgpkitParser<T>) -> ElemIterator<T> {
+impl ElemIterator {
+    fn new(parser: BgpkitParser) -> ElemIterator {
         ElemIterator { record_iter: RecordIterator::new(parser) , count: 0 , cache_elems: vec![], elementor: Elementor::new()}
     }
 }
 
-impl<T: Read> Iterator for ElemIterator<T> {
+impl Iterator for ElemIterator {
     type Item = BgpElem;
 
     fn next(&mut self) -> Option<BgpElem> {
