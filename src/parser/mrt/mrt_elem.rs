@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use itertools::Itertools;
+use log::warn;
 
 /// Element type.
 ///
@@ -304,7 +305,7 @@ impl Elementor {
                         }
                     }
                     TableDumpV2Message::RibGenericEntries(_t) => {
-                        todo!()
+                        warn!("to_elem for TableDumpV2Message::RibGenericEntries not yet implemented");
                     }
                 }
             }
@@ -319,9 +320,6 @@ impl Elementor {
                         let peer_ip = v.peer_ip.clone();
                         let peer_asn = v.peer_asn.clone();
                         match v.bgp_message {
-                            BgpMessage::Open(_) => {
-                                todo!()
-                            }
                             BgpMessage::Update(e) => {
                                 let (
                                     as_path,
@@ -442,11 +440,8 @@ impl Elementor {
                                     }));
                                 }
                             }
-                            BgpMessage::Notification(_) => {
-                                todo!()
-                            }
-                            BgpMessage::KeepAlive(_) => {
-                                todo!()
+                            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive(_) => {
+                                // ignore Open Notification, and KeepAlive messages
                             }
                         }
                     }

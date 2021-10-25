@@ -25,7 +25,9 @@ pub fn parse_table_dump_v2_message<T: Read>(
         TableDumpV2Type::RibIpv6UnicastAddPath | TableDumpV2Type::RibIpv6MulticastAddPath => {
             TableDumpV2Message::RibAfiEntries(parse_rib_afi_entries(input, v2_type)?)
         },
-        TableDumpV2Type::RibGeneric| TableDumpV2Type::RibGenericAddPath| TableDumpV2Type::GeoPeerTable => { todo!()}
+        TableDumpV2Type::RibGeneric| TableDumpV2Type::RibGenericAddPath| TableDumpV2Type::GeoPeerTable => {
+            return Err(ParserError::Unsupported("TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string()))
+        }
     };
 
     Ok(msg)
