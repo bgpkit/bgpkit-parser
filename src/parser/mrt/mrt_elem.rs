@@ -20,7 +20,7 @@ use log::warn;
 ///
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,
@@ -32,7 +32,7 @@ pub enum ElemType {
 ///
 /// Note: it consumes more memory to construct BGP elements due to duplicate information
 /// shared between multiple elements of one MRT record.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BgpElem {
     pub timestamp: f64,
     pub elem_type: ElemType,
