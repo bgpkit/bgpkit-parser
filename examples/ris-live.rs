@@ -1,4 +1,4 @@
-use bgpkit_parser::parser::rislive::parse_ris_live_message;
+use bgpkit_parser::parse_ris_live_message;
 use serde_json::json;
 use tungstenite::{connect, Message};
 use url::Url;

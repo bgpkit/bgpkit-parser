@@ -169,3 +169,4 @@ pub use parser::BgpElem;
 pub use parser::ParserError;
 pub use parser::Elementor;
 pub use parser::iters::{ElemIterator, RecordIterator};
+pub use parser::rislive::parse_ris_live_message;
