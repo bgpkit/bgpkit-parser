@@ -6,6 +6,7 @@ pub(crate) mod utils;
 pub(crate) mod mrt;
 pub(crate) mod bgp;
 pub(crate) mod iters;
+pub(crate) mod bmp;
 
 pub(crate) use self::utils::*;
 pub(crate) use bgp::attributes::AttributeParser;
