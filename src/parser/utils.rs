@@ -25,6 +25,11 @@ macro_rules! drop_n{
 // Allow reading IPs from Reads
 pub trait ReadUtils: io::Read {
     #[inline]
+    fn read_64b(&mut self) -> io::Result<u64> {
+        self.read_u64::<BigEndian>()
+    }
+
+    #[inline]
     fn read_32b(&mut self) -> io::Result<u32> {
         self.read_u32::<BigEndian>()
     }

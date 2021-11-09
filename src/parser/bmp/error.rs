@@ -1,10 +1,13 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use crate::ParserError;
 
 #[derive(Debug)]
 pub enum ParserBmpError {
     InvalidOpenBmpHeader,
     UnsupportedOpenBmpMessage,
+    CorruptedBmpMessage,
+    TruncatedBmpMessage
 }
 
 impl Display for ParserBmpError {
@@ -16,6 +19,12 @@ impl Display for ParserBmpError {
             ParserBmpError::UnsupportedOpenBmpMessage => {
                 write!(f, "Unsupported OpenBMP message")
             }
+            ParserBmpError::CorruptedBmpMessage => {
+                write!(f, "Corrupted BMP message")
+            }
+            ParserBmpError::TruncatedBmpMessage => {
+                write!(f, "Truncated BMP message")
+            }
         }
     }
 }
@@ -25,5 +34,11 @@ impl Error for ParserBmpError{}
 impl std::convert::From<std::io::Error> for ParserBmpError {
     fn from(_: std::io::Error) -> Self {
         ParserBmpError::InvalidOpenBmpHeader
+    }
+}
+
+impl std::convert::From<ParserError> for ParserBmpError {
+    fn from(_: ParserError) -> Self {
+        ParserBmpError::CorruptedBmpMessage
     }
 }

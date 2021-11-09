@@ -159,6 +159,9 @@ extern crate chrono;
 extern crate ipnetwork;
 extern crate num_traits;
 
+#[macro_use]
+extern crate enum_primitive_derive;
+
 pub mod error;
 pub mod parser;
 
@@ -169,3 +172,6 @@ pub use parser::BgpElem;
 pub use parser::ParserError;
 pub use parser::Elementor;
 pub use parser::iters::{ElemIterator, RecordIterator};
+pub use parser::bmp::parse_openbmp_msg;
+pub use parser::bmp::parse_bmp_msg;
+pub use parser::bmp::parse_openbmp_header;
