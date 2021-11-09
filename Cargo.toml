@@ -33,4 +33,7 @@ hex="0.4.3"
 
 [dev-dependencies]
 bgpkit-broker = "0.3.0"
+# kafka
+tokio = { version = "1", features = ["full"] }
+rdkafka = "0.26"
 
