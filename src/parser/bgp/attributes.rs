@@ -1,6 +1,4 @@
-use std::{
-    io::{Read, Take},
-};
+use std::io::{Read, Take};
 use bgp_models::bgp::attributes::*;
 use bgp_models::network::*;
 
@@ -41,13 +39,30 @@ impl AttributeParser {
         let mut attributes: Attributes = vec![];
 
         while input.limit() > 0 {
-            // still has content to read
+            // has content to read
             let flag = input.read_u8()?;
             let attr_type = input.read_u8()?;
             let length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
                 0 => input.read_8b()? as u64,
                 _ => input.read_16b()? as u64,
             };
+
+            if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
+                /*
+                https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
+
+                > The third high-order bit (bit 2) of the Attribute Flags octet
+                > is the Partial bit.  It defines whether the information
+                > contained in the optional transitive attribute is partial (if
+                > set to 1) or complete (if set to 0).  For well-known attributes
+                > and for optional non-transitive attributes, the Partial bit
+                > MUST be set to 0.
+
+                */
+                let mut buf=Vec::with_capacity(length as usize);
+                input.read_to_end(&mut buf)?;
+                continue;
+            }
 
             let attr_type = match AttrType::from_u8(attr_type) {
                 Some(t) => t,
