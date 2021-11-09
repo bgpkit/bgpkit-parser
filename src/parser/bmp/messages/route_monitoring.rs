@@ -1,7 +1,7 @@
 use std::io::Read;
-use bgp_models::bgp::{BgpMessage, BgpUpdateMessage};
+use bgp_models::bgp::BgpMessage;
 use bgp_models::network::{Afi, AsnLength};
-use crate::parser::bgp::messages::{parse_bgp_message, parse_bgp_update_message};
+use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
 
 #[derive(Debug)]
