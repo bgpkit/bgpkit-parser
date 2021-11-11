@@ -5,7 +5,7 @@
 //! down MRT records into corresponding BGP elements, and thus allowing users to more conveniently
 //! process BGP information on a per-prefix basis.
 use bgp_models::bgp::attributes::*;
-use bgp_models::bgp::BgpMessage;
+use bgp_models::bgp::{BgpMessage, BgpUpdateMessage};
 use bgp_models::mrt::bgp4mp::Bgp4Mp;
 use bgp_models::mrt::tabledump::{Peer, TableDumpV2Message};
 use bgp_models::mrt::{MrtMessage, MrtRecord};
@@ -15,6 +15,7 @@ use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use itertools::Itertools;
 use log::warn;
+use crate::parser::bgp::messages::parse_bgp_update_message;
 
 /// Element type.
 ///
@@ -149,7 +150,148 @@ impl Elementor {
         Elementor { peer_table: None }
     }
 
+    /// Convert a [BgpMessage] to a vector of [BgpElem]s.
+    ///
+    /// A [BgpMessage] may include `Update`, `Open`, `Notification` or `KeepAlive` messages,
+    /// and only `Update` message contains [BgpElem]s.
+    pub fn bgp_to_elems(msg: BgpMessage, timestamp: f64, peer_ip: &IpAddr, peer_asn: &Asn) -> Vec<BgpElem> {
+        match msg {
+            BgpMessage::Update(msg) => {
+                Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
+            }
+            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive(_) => {
+                vec![]
+            }
+        }
+    }
 
+    /// Convert a [BgpUpdateMessage] to a vector of [BgpElem]s.
+    pub fn bgp_update_to_elems(msg: BgpUpdateMessage, timestamp: f64, peer_ip: &IpAddr, peer_asn: &Asn) -> Vec<BgpElem> {
+        let mut elems = vec![];
+
+        let (
+            as_path,
+            as4_path, // Table dump v1 does not have 4-byte AS number
+            origin,
+            next_hop,
+            local_pref,
+            med,
+            communities,
+            atomic,
+            aggregator,
+            announced,
+            withdrawn,
+        ) = get_relevant_attributes(msg.attributes);
+
+        let path = match (as_path, as4_path) {
+            (None, None) => None,
+            (Some(v), None) => Some(v),
+            (None, Some(v)) => Some(v),
+            (Some(v1), Some(v2)) => {
+                Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap())
+            }
+        };
+
+        let origin_asns = match &path {
+            None => None,
+            Some(p) => p.get_origin()
+        };
+
+        elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
+            timestamp: timestamp.clone(),
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: peer_ip.clone(),
+            peer_asn: peer_asn.clone(),
+            prefix: p,
+            next_hop: next_hop.clone(),
+            as_path: path.clone(),
+            origin_asns: origin_asns.clone(),
+            origin: origin.clone(),
+            local_pref: local_pref.clone(),
+            med: med.clone(),
+            communities: communities.clone(),
+            atomic: atomic.clone(),
+            aggr_asn: if let Some(v) = &aggregator {
+                Some(v.0.clone())
+            } else {
+                None
+            },
+            aggr_ip: if let Some(v) = &aggregator {
+                Some(v.1.clone())
+            } else {
+                None
+            },
+        }));
+
+        if let Some(nlri) = announced {
+            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
+                timestamp: timestamp.clone(),
+                elem_type: ElemType::ANNOUNCE,
+                peer_ip: peer_ip.clone(),
+                peer_asn: peer_asn.clone(),
+                prefix: p,
+                next_hop: next_hop.clone(),
+                as_path: path.clone(),
+                origin: origin.clone(),
+                origin_asns: origin_asns.clone(),
+                local_pref: local_pref.clone(),
+                med: med.clone(),
+                communities: communities.clone(),
+                atomic: atomic.clone(),
+                aggr_asn: if let Some(v) = &aggregator {
+                    Some(v.0.clone())
+                } else {
+                    None
+                },
+                aggr_ip: if let Some(v) = &aggregator {
+                    Some(v.1.clone())
+                } else {
+                    None
+                },
+            }));
+        }
+
+        elems.extend(msg.withdrawn_prefixes.into_iter().map(|p| BgpElem {
+            timestamp: timestamp.clone(),
+            elem_type: ElemType::WITHDRAW,
+            peer_ip: peer_ip.clone(),
+            peer_asn: peer_asn.clone(),
+            prefix: p,
+            next_hop: None,
+            as_path: None,
+            origin: None,
+            origin_asns: None,
+            local_pref: None,
+            med: None,
+            communities: None,
+            atomic: None,
+            aggr_asn: None,
+            aggr_ip: None,
+        }));
+        if let Some(nlri) = withdrawn {
+            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
+                timestamp: timestamp.clone(),
+                elem_type: ElemType::WITHDRAW,
+                peer_ip: peer_ip.clone(),
+                peer_asn: peer_asn.clone(),
+                prefix: p,
+                next_hop: None,
+                as_path: None,
+                origin: None,
+                origin_asns: None,
+                local_pref: None,
+                med: None,
+                communities: None,
+                atomic: None,
+                aggr_asn: None,
+                aggr_ip: None,
+            }));
+        };
+        elems
+    }
+
+
+    /// Convert a [MrtRecord] to a vector of [BgpElem]s.
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
         let mut elems = vec![];
         let t = record.common_header.timestamp.clone();
@@ -317,133 +459,9 @@ impl Elementor {
                     | Bgp4Mp::Bgp4MpMessageLocal(v)
                     | Bgp4Mp::Bgp4MpMessageAs4(v)
                     | Bgp4Mp::Bgp4MpMessageAs4Local(v) => {
-                        let peer_ip = v.peer_ip.clone();
-                        let peer_asn = v.peer_asn.clone();
-                        match v.bgp_message {
-                            BgpMessage::Update(e) => {
-                                let (
-                                    as_path,
-                                    as4_path, // Table dump v1 does not have 4-byte AS number
-                                    origin,
-                                    next_hop,
-                                    local_pref,
-                                    med,
-                                    communities,
-                                    atomic,
-                                    aggregator,
-                                    announced,
-                                    withdrawn,
-                                ) = get_relevant_attributes(e.attributes);
-
-                                let path = match (as_path, as4_path) {
-                                    (None, None) => None,
-                                    (Some(v), None) => Some(v),
-                                    (None, Some(v)) => Some(v),
-                                    (Some(v1), Some(v2)) => {
-                                        Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap())
-                                    }
-                                };
-
-                                let origin_asns = match &path {
-                                    None => None,
-                                    Some(p) => p.get_origin()
-                                };
-
-                                elems.extend(e.announced_prefixes.into_iter().map(|p| BgpElem {
-                                    timestamp: timestamp.clone(),
-                                    elem_type: ElemType::ANNOUNCE,
-                                    peer_ip: peer_ip.clone(),
-                                    peer_asn: peer_asn.clone(),
-                                    prefix: p,
-                                    next_hop: next_hop.clone(),
-                                    as_path: path.clone(),
-                                    origin_asns: origin_asns.clone(),
-                                    origin: origin.clone(),
-                                    local_pref: local_pref.clone(),
-                                    med: med.clone(),
-                                    communities: communities.clone(),
-                                    atomic: atomic.clone(),
-                                    aggr_asn: if let Some(v) = &aggregator {
-                                        Some(v.0.clone())
-                                    } else {
-                                        None
-                                    },
-                                    aggr_ip: if let Some(v) = &aggregator {
-                                        Some(v.1.clone())
-                                    } else {
-                                        None
-                                    },
-                                }));
-
-                                if let Some(nlri) = announced {
-                                    elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                                        timestamp: timestamp.clone(),
-                                        elem_type: ElemType::ANNOUNCE,
-                                        peer_ip: peer_ip.clone(),
-                                        peer_asn: peer_asn.clone(),
-                                        prefix: p,
-                                        next_hop: next_hop.clone(),
-                                        as_path: path.clone(),
-                                        origin: origin.clone(),
-                                        origin_asns: origin_asns.clone(),
-                                        local_pref: local_pref.clone(),
-                                        med: med.clone(),
-                                        communities: communities.clone(),
-                                        atomic: atomic.clone(),
-                                        aggr_asn: if let Some(v) = &aggregator {
-                                            Some(v.0.clone())
-                                        } else {
-                                            None
-                                        },
-                                        aggr_ip: if let Some(v) = &aggregator {
-                                            Some(v.1.clone())
-                                        } else {
-                                            None
-                                        },
-                                    }));
-                                }
-
-                                elems.extend(e.withdrawn_prefixes.into_iter().map(|p| BgpElem {
-                                    timestamp: timestamp.clone(),
-                                    elem_type: ElemType::WITHDRAW,
-                                    peer_ip: peer_ip.clone(),
-                                    peer_asn: peer_asn.clone(),
-                                    prefix: p,
-                                    next_hop: None,
-                                    as_path: None,
-                                    origin: None,
-                                    origin_asns: None,
-                                    local_pref: None,
-                                    med: None,
-                                    communities: None,
-                                    atomic: None,
-                                    aggr_asn: None,
-                                    aggr_ip: None,
-                                }));
-                                if let Some(nlri) = withdrawn {
-                                    elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                                        timestamp: timestamp.clone(),
-                                        elem_type: ElemType::WITHDRAW,
-                                        peer_ip: peer_ip.clone(),
-                                        peer_asn: peer_asn.clone(),
-                                        prefix: p,
-                                        next_hop: None,
-                                        as_path: None,
-                                        origin: None,
-                                        origin_asns: None,
-                                        local_pref: None,
-                                        med: None,
-                                        communities: None,
-                                        atomic: None,
-                                        aggr_asn: None,
-                                        aggr_ip: None,
-                                    }));
-                                }
-                            }
-                            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive(_) => {
-                                // ignore Open Notification, and KeepAlive messages
-                            }
-                        }
+                        elems.extend(
+                            Elementor::bgp_to_elems(v.bgp_message, timestamp, &v.peer_ip, &v.peer_asn)
+                        );
                     }
                 }
             }
