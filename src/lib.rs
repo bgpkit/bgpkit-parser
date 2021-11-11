@@ -38,7 +38,7 @@ fn main() {
 ```
 
 and it prints out
-```no_run
+```text
 total: 255849
 ```
 
@@ -103,7 +103,7 @@ There are two key data structure to understand for the parsing results: [MrtReco
 The MrtRecord is the data structrue that holds the unmodified, complete information parsed
 from the MRT data file. The code definition of the `MrtRecord` is defined in the crate `bgp-models` ([documentation][mrt-record-doc]).
 
-```no_run
+```ignore
 pub struct MrtRecord {
     pub common_header: CommonHeader,
     pub message: MrtMessage,
@@ -128,7 +128,7 @@ To facilitate simpler data analysis of BGP data, we defined a new data structure
 For example, when a bundled announcement of three prefixes P1, P2, P3 that shares the same AS path is processed, we break
 the single record into three different [BgpElem] objects, each presenting a prefix.
 
-```no_run
+```ignore
 pub struct BgpElem {
     pub timestamp: f64,
     pub elem_type: ElemType,
@@ -169,3 +169,4 @@ pub use parser::BgpElem;
 pub use parser::ParserError;
 pub use parser::Elementor;
 pub use parser::iters::{ElemIterator, RecordIterator};
+pub use parser::rislive::parse_ris_live_message;
