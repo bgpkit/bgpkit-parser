@@ -8,16 +8,17 @@ pub mod openbmp;
 pub mod error;
 pub mod messages;
 
+/// Parse OpenBMP `raw_bmp` message.
+///
+/// An OpenBMP `raw_bmp` message contains a [OpenBmpHeader] and a [BmpMessage].
 pub fn parse_openbmp_msg(reader: &mut Cursor::<Vec<u8>>) -> Result<BmpMessage, ParserBmpError> {
     let _header = parse_openbmp_header(reader)?;
     parse_bmp_msg(reader)
 }
 
-// TODO: change to Take<&mut Cursor<Vec<u8>>
+/// Parse a BMP message.
 pub fn parse_bmp_msg(reader: &mut Cursor::<Vec<u8>>) -> Result<BmpMessage, ParserBmpError>{
-
     let total_len = reader.get_ref().len() as u32 - reader.position() as u32;
-
     let common_header = parse_bmp_common_header(reader)?;
 
     let mut new_reader = if total_len>common_header.msg_len {
