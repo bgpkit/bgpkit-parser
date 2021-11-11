@@ -39,9 +39,7 @@ hex="0.4.3"
 
 [dev-dependencies]
 bgpkit-broker = "0.3.2"
-# kafka
-tokio = { version = "1", features = ["full"] }
-rdkafka = "0.26"
+kafka = "0.8"
 
 # websocket
 tungstenite="0.16.0"
