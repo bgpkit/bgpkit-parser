@@ -1,4 +1,5 @@
 # BGPKIT Parser
+[![Rust](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml/badge.svg)](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml)
 
 BGPKIT Parser aims to provides the most ergonomic MRT/BGP message parsing Rust API.
 
