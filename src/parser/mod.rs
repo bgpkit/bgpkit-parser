@@ -2,11 +2,11 @@ use std::io::Read;
 use bgp_models::mrt::MrtRecord;
 
 #[macro_use]
-pub(crate) mod utils;
-pub(crate) mod mrt;
-pub(crate) mod bgp;
-pub(crate) mod iters;
-pub(crate) mod bmp;
+pub mod utils;
+pub mod mrt;
+pub mod bgp;
+pub mod iters;
+pub mod rislive;
 
 pub(crate) use self::utils::*;
 pub(crate) use bgp::attributes::AttributeParser;
