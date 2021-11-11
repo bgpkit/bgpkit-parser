@@ -25,6 +25,11 @@ macro_rules! drop_n{
 // Allow reading IPs from Reads
 pub trait ReadUtils: io::Read {
     #[inline]
+    fn read_64b(&mut self) -> io::Result<u64> {
+        self.read_u64::<BigEndian>()
+    }
+
+    #[inline]
     fn read_32b(&mut self) -> io::Result<u32> {
         self.read_u32::<BigEndian>()
     }
@@ -37,6 +42,18 @@ pub trait ReadUtils: io::Read {
     #[inline]
     fn read_8b(&mut self) -> io::Result<u8> {
         self.read_u8()
+    }
+
+    fn read_n_bytes(&mut self, n_bytes: u64) -> io::Result<Vec<u8>>{
+        let mut buffer = Vec::with_capacity(n_bytes as usize);
+        self.take(n_bytes).read_to_end(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn read_n_bytes_to_string(&mut self, n_bytes: u64) -> io::Result<String>{
+        let mut buffer = Vec::with_capacity(n_bytes as usize);
+        self.take(n_bytes).read_to_end(&mut buffer)?;
+        Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
     }
 
     fn read_and_drop_n_bytes(&mut self, n_bytes: u64) -> io::Result<()>{
