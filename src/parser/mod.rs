@@ -4,6 +4,7 @@ use bgp_models::mrt::MrtRecord;
 #[macro_use]
 pub mod utils;
 pub mod mrt;
+pub mod bmp;
 pub mod bgp;
 pub mod iters;
 pub mod rislive;
