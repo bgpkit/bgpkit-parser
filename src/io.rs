@@ -56,7 +56,7 @@ mod tests {
             // there could be multiple origin ASNs (e.g. AS-Set as the origin)
             if let Some(origins) = &elem.origin_asns {
                 if origins.contains(&13335) {
-                    log::info!("{}", &elem);
+                    // log::info!("{}", &elem);
                 }
             }
         }

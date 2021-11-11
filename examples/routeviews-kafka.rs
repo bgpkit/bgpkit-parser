@@ -3,7 +3,7 @@ use rdkafka::{ClientConfig, ClientContext, Message};
 use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, StreamConsumer};
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
 use log::{info, error};
-use bgpkit_parser::parser::bmp::messages::{BmpMsgType, MessageBody};
+use bgpkit_parser::parser::bmp::messages::MessageBody;
 
 // A simple context to customize the consumer behavior and print a log line every time
 // offsets are committed
