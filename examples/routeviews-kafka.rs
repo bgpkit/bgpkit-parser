@@ -3,6 +3,7 @@ use rdkafka::{ClientConfig, ClientContext, Message};
 use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, StreamConsumer};
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
 use log::{info, error};
+use bgpkit_parser::parser::bmp::messages::{BmpMsgType, MessageBody};
 
 // A simple context to customize the consumer behavior and print a log line every time
 // offsets are committed
@@ -22,7 +23,7 @@ async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
         .set("session.timeout.ms", "60000")
         .set("enable.auto.commit", "true")
         //.set("statistics.interval.ms", "30000")
-        //.set("auto.offset.reset", "smallest")
+        .set("auto.offset.reset", "latest")
         .create_with_context(LoggingConsumerContext).unwrap();
 
     consumer
@@ -40,6 +41,12 @@ async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
                     match parse_bmp_msg(&mut reader) {
                         Ok(msg) => {
                             info!("Parsing OK: {:?}", msg.common_header.msg_type);
+                            match msg.message_body {
+                                MessageBody::RouteMonitoring(m) => {
+                                    dbg!(m.bgp_update);
+                                }
+                                _ => {}
+                            }
                         }
                         Err(e) => {
                             error!("{:?}", e);
