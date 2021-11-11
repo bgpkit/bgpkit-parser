@@ -62,12 +62,14 @@ The example below shows a relatively more interesting example that does the foll
 use bgpkit_parser::{BgpkitParser, BgpElem};
 fn main(){
     // set broker query parameters
-    let mut params = bgpkit_broker::QueryParams::new();
-    params = params.start_ts(1634693400);
-    params = params.end_ts(1634693400);
-    params = params.data_type("update");
-    let mut broker = bgpkit_broker::BgpkitBroker::new("https://api.broker.bgpkit.com/v1");
-    broker.set_params(&params);
+    let broker = bgpkit_broker::BgpkitBroker::new_with_params(
+       "https://api.broker.bgpkit.com/v1",
+       bgpkit_broker::QueryParams{
+           start_ts: Some(1634693400),
+           end_ts: Some(1634693400),
+           page: 1,
+           ..Default::default()
+    });
 
     // loop through data files found by broker
     for item in broker {
