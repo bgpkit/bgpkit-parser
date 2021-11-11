@@ -58,7 +58,7 @@ The example below shows a relatively more interesting example that does the foll
 - find all announcements originated from AS13335
 - print out the total count of the announcements
 
-```rust
+```no_run
 use bgpkit_parser::{BgpkitParser, BgpElem};
 fn main(){
     // set broker query parameters

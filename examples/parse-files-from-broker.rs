@@ -1,3 +1,4 @@
+use bgpkit_broker::{BgpkitBroker, QueryParams};
 use bgpkit_parser::{BgpElem, BgpkitParser};
 
 /// This example shows how use BGPKIT Broker to retrieve a number of data file pointers that matches
@@ -5,14 +6,16 @@ use bgpkit_parser::{BgpElem, BgpkitParser};
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let mut params = bgpkit_broker::QueryParams::new();
-    params = params.start_ts(1634693400);
-    params = params.end_ts(1634693400);
-    params = params.data_type("update");
-    let mut broker = bgpkit_broker::BgpkitBroker::new("https://api.broker.bgpkit.com/v1");
-    broker.set_params(&params);
+    let broker = BgpkitBroker::new_with_params(
+        "https://api.broker.bgpkit.com/v1",
+        QueryParams{
+            start_ts: Some(1634693400),
+            end_ts: Some(1634693400),
+            page: 1,
+            ..Default::default()
+        });
 
-    for item in broker {
+    for item in broker.into_iter().take(2) {
         log::info!("downloading updates file: {}", &item.url);
         let parser = BgpkitParser::new(item.url.as_str());
 
