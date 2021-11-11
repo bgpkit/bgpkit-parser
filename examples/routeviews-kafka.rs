@@ -19,7 +19,7 @@ async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
         .set("group.id", group_id)
         .set("bootstrap.servers", brokers)
         .set("enable.partition.eof", "false")
-        .set("session.timeout.ms", "6000")
+        .set("session.timeout.ms", "60000")
         .set("enable.auto.commit", "true")
         //.set("statistics.interval.ms", "30000")
         //.set("auto.offset.reset", "smallest")
