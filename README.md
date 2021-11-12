@@ -107,7 +107,7 @@ Here is an example of handling RIS-Live message streams. After connecting to the
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
 from on collector (`rrc21`). We can then loop and read messages from the websocket.
 
-```no_run
+```rust
 use bgpkit_parser::parse_ris_live_message;
 use serde_json::json;
 use tungstenite::{connect, Message};
@@ -145,7 +145,7 @@ fn main() {
 data received from their collectors. Below is an partial example of how we handle the raw bytes
 received from the Kafka stream. For full examples, check out the [examples folder on GitHub](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
 
-```ignore
+```rust
 let bytes = m.value;
 let mut reader = Cursor::new(Vec::from(bytes));
 let header = parse_openbmp_header(&mut reader).unwrap();
