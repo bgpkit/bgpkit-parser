@@ -32,7 +32,8 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                 let bytes = m.value;
                 let mut reader = Cursor::new(Vec::from(bytes));
                 let header = parse_openbmp_header(&mut reader).unwrap();
-                match parse_bmp_msg(&mut reader) {
+                let bmp_msg = parse_bmp_msg(&mut reader);
+                match bmp_msg {
                     Ok(msg) => {
                         let timestamp = header.timestamp;
                         let per_peer_header = msg.per_peer_header.unwrap();
