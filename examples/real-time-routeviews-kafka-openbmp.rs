@@ -35,13 +35,12 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                 let bmp_msg = parse_bmp_msg(&mut reader);
                 match bmp_msg {
                     Ok(msg) => {
-                        let timestamp = header.timestamp;
                         let per_peer_header = msg.per_peer_header.unwrap();
                         match msg.message_body {
                             MessageBody::RouteMonitoring(m) => {
                                 for elem in Elementor::bgp_to_elems(
                                     m.bgp_message,
-                                    timestamp,
+                                    header.timestamp,
                                     &per_peer_header.peer_ip,
                                     &per_peer_header.peer_asn
                                 )

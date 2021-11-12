@@ -1,3 +1,6 @@
+/*!
+Provides parsing for BMP and OpenBMP binary-formatted messages.
+*/
 use std::io::Cursor;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;

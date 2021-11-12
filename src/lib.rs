@@ -96,6 +96,91 @@ fn main(){
 }
 ```
 
+### Parsing Real-time Data Streams
+
+BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
+and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] messages. See the examples below and the documentation for more.
+
+#### Parsing Messages From RIS-Live
+
+Here is an example of handling RIS-Live message streams. After connecting to the websocket server,
+we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
+from on collector (`rrc21`). We can then loop and read messages from the websocket.
+
+```no_run
+use bgpkit_parser::parse_ris_live_message;
+use serde_json::json;
+use tungstenite::{connect, Message};
+use url::Url;
+
+const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
+
+/// This is an example of subscribing to RIS-Live's streaming data from one host (`rrc21`).
+///
+/// For more RIS-Live details, check out their documentation at https://ris-live.ripe.net/manual/
+fn main() {
+    // connect to RIPE RIS Live websocket server
+    let (mut socket, _response) =
+        connect(Url::parse(RIS_LIVE_URL).unwrap())
+            .expect("Can't connect to RIS Live websocket server");
+
+    // subscribe to messages from one collector
+    let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
+    socket.write_message(Message::Text(msg)).unwrap();
+
+    loop {
+        let msg = socket.read_message().expect("Error reading message").to_string();
+        if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
+            for elem in elems {
+                println!("{}", elem);
+            }
+        }
+    }
+}
+```
+
+#### Parsing OpenBMP Messages From RouteViews Kafka Stream
+
+[RouteViews](http://www.routeviews.org/routeviews/) provides a real-time Kafka stream of the OpenBMP
+data received from their collectors. Below is an partial example of how we handle the raw bytes
+received from the Kafka stream. For full examples, check out the [examples folder on GitHub](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
+
+```ignore
+let bytes = m.value;
+let mut reader = Cursor::new(Vec::from(bytes));
+let header = parse_openbmp_header(&mut reader).unwrap();
+let bmp_msg = parse_bmp_msg(&mut reader);
+match bmp_msg {
+    Ok(msg) => {
+        let timestamp = header.timestamp;
+        let per_peer_header = msg.per_peer_header.unwrap();
+        match msg.message_body {
+            MessageBody::RouteMonitoring(m) => {
+                for elem in Elementor::bgp_to_elems(
+                    m.bgp_message,
+                    timestamp,
+                    &per_peer_header.peer_ip,
+                    &per_peer_header.peer_asn
+                )
+                {
+                    info!("{}", elem);
+                }
+            }
+            _ => {}
+        }
+    }
+    Err(_e) => {
+        let hex = hex::encode(bytes);
+        error!("{}", hex);
+        break
+    }
+}
+```
+
+[ris-live-url]: https://ris-live.ripe.net
+[bmp-rfc]: https://datatracker.ietf.org/doc/html/rfc7854
+[openbmp-url]: https://www.openbmp.org/
+
 ## Data Representation
 
 There are two key data structure to understand for the parsing results: [MrtRecord][bgp_models::mrt::MrtRecord] and [BgpElem].

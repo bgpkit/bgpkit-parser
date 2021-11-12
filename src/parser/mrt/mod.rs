@@ -1,3 +1,6 @@
+/*!
+Parse MRT header and content, provides [BgpElem] struct for per-prefix information.
+*/
 pub mod mrt_record;
 pub mod mrt_elem;
 pub mod messages;

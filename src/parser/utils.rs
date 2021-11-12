@@ -1,3 +1,6 @@
+/*!
+Provides IO utility functions for read bytes of different length and converting to corresponding structs.
+*/
 use byteorder::{BigEndian, ReadBytesExt};
 use ipnetwork::{Ipv4Network, Ipv6Network, IpNetwork};
 use std::{

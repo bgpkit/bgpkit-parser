@@ -1,3 +1,6 @@
+/*!
+Provides parser iterator implementation.
+*/
 use log::{error, warn};
 use bgp_models::mrt::MrtRecord;
 use crate::{BgpElem, Elementor};
