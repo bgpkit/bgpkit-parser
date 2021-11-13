@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.5.0-rc.2"
+version = "0.5.0"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 readme = "README.md"
@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/bgpkit/bgpkit-parser"
 documentation = "https://docs.rs/bgpkit-parser"
 description = """
-A library to parse MRT/BGP binary data.
+A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
 
