@@ -8,6 +8,11 @@ pub enum ParserRisliveError {
     IncorrectRawBytes,
     IrregularRisLiveFormat,
     UnsupportedMessage,
+    ElemEndOfRibPrefix,
+    ElemUnknownOriginType(String),
+    ElemIncorrectAggregator(String),
+    ElemIncorrectPrefix(String),
+    ElemIncorrectIp(String),
 }
 
 impl Display for ParserRisliveError {
@@ -17,6 +22,21 @@ impl Display for ParserRisliveError {
             ParserRisliveError::IncorrectRawBytes => {write!(f, "incorrect raw bytes")}
             ParserRisliveError::UnsupportedMessage => {write!(f, "unsupported message")}
             ParserRisliveError::IrregularRisLiveFormat => {write!(f, "irregular ris live format")}
+            ParserRisliveError::ElemIncorrectPrefix(msg) => {
+                write!(f, "incorrect prefix string: {}", msg)
+            }
+            ParserRisliveError::ElemUnknownOriginType(msg) => {
+                write!(f, "unknown origin type: {}", msg)
+            }
+            ParserRisliveError::ElemIncorrectAggregator(msg) => {
+                write!(f, "incorrect aggregator string: {}", msg)
+            }
+            ParserRisliveError::ElemIncorrectIp(msg) => {
+                write!(f, "incorrect IP string: {}", msg)
+            }
+            ParserRisliveError::ElemEndOfRibPrefix => {
+                write!(f, "found 'eor' (End of RIB) prefix")
+            }
         }
     }
 }

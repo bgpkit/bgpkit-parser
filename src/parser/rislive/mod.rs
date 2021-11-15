@@ -122,7 +122,9 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                 "igp" | "IGP" => IGP,
                                 "egp" | "EGP" => EGP,
                                 "incomplete" | "INCOMPLETE" => INCOMPLETE,
-                                _ => {return Err(ParserRisliveError::IncorrectJson)}
+                                other => {
+                                    return Err(ParserRisliveError::ElemUnknownOriginType(other.to_string()))
+                                }
                             })
                         }
                     };
@@ -139,7 +141,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                         Some(aggr_str) => {
                             let parts = aggr_str.split(":").collect::<Vec<&str>>();
                             if parts.len()!=2 {
-                                return Err(ParserRisliveError::IncorrectJson)
+                                return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str))
                             }
                             let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>());
                             let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>());
@@ -157,7 +159,15 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                 }
                             };
                             for prefix in &announcement.prefixes {
-                                let p = unwrap_or_return!(prefix.parse::<IpNetwork>());
+                                let p = match prefix.parse::<IpNetwork>(){
+                                    Ok(net) => { net }
+                                    Err(_) => {
+                                        if prefix == "eor" {
+                                            return Err(ParserRisliveError::ElemEndOfRibPrefix)
+                                        }
+                                        return Err(ParserRisliveError::ElemIncorrectPrefix(prefix.to_string()))
+                                    }
+                                };
                                 elems.push(
                                     BgpElem{
                                         timestamp: ris_msg.timestamp.clone(),
