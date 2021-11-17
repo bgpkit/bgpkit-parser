@@ -11,8 +11,7 @@ pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
     let bytes = Cursor::new(
         match path.starts_with("http") {
             true => {
-                reqwest::blocking::get(path)?
-                    .bytes().unwrap().to_vec()
+                reqwest::blocking::get(path)?.bytes()?.to_vec()
             }
             false => {
                 let mut bytes: Vec<u8> = vec![];
