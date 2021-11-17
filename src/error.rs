@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 pub enum ParserError {
     IoError(io::Error, Option<Vec<u8>>),
     EofError(io::Error, Option<Vec<u8>>),
+    RemoteIoError(reqwest::Error),
     EofExpected,
     ParseError(String),
     UnknownAttr(String),
@@ -28,8 +29,15 @@ impl fmt::Display for ParserError {
             ParserError::UnknownAttr(s) => s.to_owned(),
             ParserError::Unsupported(s) => s.to_owned(),
             ParserError::EofExpected => "reach end of file".to_string(),
+            ParserError::RemoteIoError(e) => e.to_string()
         };
         write!(f, "Error: {}", message)
+    }
+}
+
+impl convert::From<reqwest::Error> for ParserError {
+    fn from(error: reqwest::Error) -> Self {
+        ParserError::RemoteIoError(error)
     }
 }
 

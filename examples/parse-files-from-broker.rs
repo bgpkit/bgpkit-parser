@@ -17,7 +17,7 @@ fn main() {
 
     for item in broker.into_iter().take(2) {
         log::info!("downloading updates file: {}", &item.url);
-        let parser = BgpkitParser::new(item.url.as_str());
+        let parser = BgpkitParser::new(item.url.as_str()).unwrap();
 
         log::info!("parsing updates file");
         // iterating through the parser. the iterator returns `BgpElem` one at a time.

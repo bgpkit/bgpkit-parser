@@ -15,14 +15,23 @@ fn main() {
             .expect("Can't connect to RIS Live websocket server");
 
     // subscribe to messages from one collector
-    let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
+    // let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
+    let msg = json!({"type": "ris_subscribe", "data": null}).to_string();
     socket.write_message(Message::Text(msg)).unwrap();
 
     loop {
         let msg = socket.read_message().expect("Error reading message").to_string();
-        if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
-            for elem in elems {
-                println!("{}", elem);
+        if msg.is_empty(){
+            continue
+        }
+        match parse_ris_live_message(msg.as_str()) {
+            Ok(elems) => {
+                for elem in elems {
+                    println!("{}", elem);
+                }
+            }
+            Err(error) => {
+                println!("{:?}", error);
             }
         }
     }
