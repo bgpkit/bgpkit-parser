@@ -23,10 +23,13 @@ pub struct BgpkitParser {
 
 impl BgpkitParser {
     /// Creating a new parser from a object that implements [Read] trait.
-    pub fn new(path: &str) -> BgpkitParser{
-        BgpkitParser{
-            reader: get_reader(path)
-        }
+    pub fn new(path: &str) -> Result<BgpkitParser, ParserError>{
+        let reader = get_reader(path)?;
+        Ok(
+            BgpkitParser{
+                reader
+            }
+        )
     }
 
     /// This is used in for loop `for item in parser{}`

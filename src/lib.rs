@@ -17,7 +17,7 @@ Here is an example that does so.
 ```rust
 use bgpkit_parser::BgpkitParser;
 fn main() {
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2");
+    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap();
     for elem in parser {
         println!("{}", elem)
     }
@@ -32,7 +32,7 @@ For example, counting the number of announcements/withdrawals in that file:
 use bgpkit_parser::BgpkitParser;
 fn main() {
     let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
-    let count = BgpkitParser::new(url).into_iter().count();
+    let count = BgpkitParser::new(url).unwrap().into_iter().count();
     println!("total: {}", count);
 }
 ```
@@ -77,7 +77,7 @@ fn main(){
         // create a parser that takes an URL and automatically determine
         // the file location and file type, and handles data download and
         // decompression streaming intelligently
-        let parser = BgpkitParser::new(item.url.as_str());
+        let parser = BgpkitParser::new(item.url.as_str()).unwrap();
 
         // iterating through the parser. the iterator returns `BgpElem` one at a time.
         let elems = parser.into_elem_iter().map(|elem|{

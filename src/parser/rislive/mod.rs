@@ -55,10 +55,10 @@ pub mod messages;
 
 // simple macro to make the code look a bit nicer
 macro_rules! unwrap_or_return {
-    ( $e:expr ) => {
+    ( $e:expr, $msg_string:expr ) => {
         match $e {
             Ok(x) => x,
-            Err(_) => return Err(ParserRisliveError::IncorrectJson),
+            Err(_) => return Err(ParserRisliveError::IncorrectJson($msg_string)),
         }
     }
 }
@@ -66,10 +66,12 @@ macro_rules! unwrap_or_return {
 /// This function parses one message and returns a result of a vector of [BgpElem]s or an error
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
 
+    let msg_string = msg_str.to_string();
+
     // parse RIS Live message to internal struct using serde.
     let msg: RisLiveMessage = match serde_json::from_str(msg_str) {
         Ok(m) => m,
-        Err(_e) => return Err(ParserRisliveError::IncorrectJson),
+        Err(_e) => return Err(ParserRisliveError::IncorrectJson(msg_string)),
     };
 
     match msg {
@@ -93,8 +95,8 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                 } => {
                     let mut elems: Vec<BgpElem> = vec![];
 
-                    let peer_ip = unwrap_or_return!(ris_msg.peer.parse::<IpAddr>());
-                    let peer_asn = unwrap_or_return!(ris_msg.peer_asn.parse::<u32>());
+                    let peer_ip = unwrap_or_return!(ris_msg.peer.parse::<IpAddr>(), msg_string);
+                    let peer_asn = unwrap_or_return!(ris_msg.peer_asn.parse::<u32>(), msg_string);
 
                     // parse path
                     let as_path = match path{
@@ -143,8 +145,8 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             if parts.len()!=2 {
                                 return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str))
                             }
-                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>());
-                            let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>());
+                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>(), msg_string);
+                            let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>(), msg_string);
                             (Some(asn), Some(ip))
                         }
                     };
@@ -155,7 +157,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             let nexthop = match announcement.next_hop.parse::<IpAddr>(){
                                 Ok(a) => {a}
                                 Err(_) => {
-                                    return Err(ParserRisliveError::IncorrectJson)
+                                    return Err(ParserRisliveError::IncorrectJson(msg_string))
                                 }
                             };
                             for prefix in &announcement.prefixes {

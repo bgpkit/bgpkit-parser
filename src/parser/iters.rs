@@ -72,6 +72,10 @@ impl Iterator for RecordIterator {
                         error!("{}", e.to_string());
                         None
                     }
+                    ParserError::RemoteIoError(_) => {
+                        // this should not happen at this stage
+                        None
+                    }
                 }
             },
         }

@@ -77,7 +77,11 @@ pub trait ReadUtils: io::Read {
         let byte_len: usize = (bit_len as usize + 7) / 8;
         let addr:IpAddr = match afi {
             Afi::Ipv4 => {
+
                 // 4 bytes -- u32
+                if byte_len>4 {
+                    return Err(io::Error::new(io::ErrorKind::Other, "Invalid byte length for IPv4 prefix".to_string()))
+                }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
                     buff[i] = self.read_8b()?
@@ -86,6 +90,9 @@ pub trait ReadUtils: io::Read {
             }
             Afi::Ipv6 => {
                 // 16 bytes
+                if byte_len>16 {
+                    return Err(io::Error::new(io::ErrorKind::Other, "Invalid byte length for IPv6 prefix".to_string()))
+                }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
                     buff[i] = self.read_8b()?
