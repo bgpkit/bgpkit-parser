@@ -3,3 +3,6 @@
 Cargo.lock
 .idea
 .DS_Store
+
+*.bz2
+*.gz

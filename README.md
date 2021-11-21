@@ -241,7 +241,6 @@ information to save at each elem, that consuming more memory.
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 
-
 ## Contribution
 
 Issues and pull requests are welcome!
