@@ -14,7 +14,8 @@ pub(crate) use bgp::attributes::AttributeParser;
 pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, parse_mrt_record, };
 
 pub use crate::error::ParserError;
-pub use mrt::mrt_elem::{BgpElem, Elementor, ElemType};
+pub use mrt::mrt_elem::Elementor;
+pub use bgp_models::prelude::{BgpElem, ElemType};
 use crate::io::get_reader;
 
 pub struct BgpkitParser {

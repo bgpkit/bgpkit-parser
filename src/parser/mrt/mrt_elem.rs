@@ -4,56 +4,16 @@
 //! Each MRT record may contain reachability information for multiple prefixes. This module breaks
 //! down MRT records into corresponding BGP elements, and thus allowing users to more conveniently
 //! process BGP information on a per-prefix basis.
-use bgp_models::bgp::attributes::*;
-use bgp_models::bgp::{BgpMessage, BgpUpdateMessage};
-use bgp_models::mrt::bgp4mp::Bgp4Mp;
-use bgp_models::mrt::tabledump::{Peer, TableDumpV2Message};
-use bgp_models::mrt::{MrtMessage, MrtRecord};
-use bgp_models::network::{Asn, NetworkPrefix, NextHopAddress};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
+use bgp_models::prelude::*;
 use itertools::Itertools;
 use log::warn;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 
-/// Element type.
-///
-/// - ANNOUNCE: announcement/reachable prefix
-/// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug, Clone)]
-pub enum ElemType {
-    ANNOUNCE,
-    WITHDRAW,
-}
-
-/// BgpElem represents per-prefix BGP element.
-///
-/// The information is for per announced/withdrawn prefix.
-///
-/// Note: it consumes more memory to construct BGP elements due to duplicate information
-/// shared between multiple elements of one MRT record.
-#[derive(Debug, Clone)]
-pub struct BgpElem {
-    pub timestamp: f64,
-    pub elem_type: ElemType,
-    pub peer_ip: IpAddr,
-    pub peer_asn: Asn,
-    pub prefix: NetworkPrefix,
-    pub next_hop: Option<IpAddr>,
-    pub as_path: Option<AsPath>,
-    pub origin_asns: Option<Vec<Asn>>,
-    pub origin: Option<Origin>,
-    pub local_pref: Option<u32>,
-    pub med: Option<u32>,
-    pub communities: Option<Vec<Community>>,
-    pub atomic: Option<AtomicAggregate>,
-    pub aggr_asn: Option<Asn>,
-    pub aggr_ip: Option<IpAddr>,
-}
-
 pub struct Elementor {
-    peer_table: Option<HashMap<u32, Peer>>,
+    peer_table: Option<PeerIndexTable>,
 }
 
 // use macro_rules! <name of macro>{<Body>}
@@ -353,7 +313,7 @@ impl Elementor {
             MrtMessage::TableDumpV2Message(msg) => {
                 match msg {
                     TableDumpV2Message::PeerIndexTable(p) => {
-                        self.peer_table = Some(p.peers_map.clone());
+                        self.peer_table = Some(p);
                     }
                     TableDumpV2Message::RibAfiEntries(t) => {
                         let prefix = t.prefix.clone();
@@ -363,6 +323,7 @@ impl Elementor {
                                 .peer_table
                                 .as_ref()
                                 .unwrap()
+                                .peers_map
                                 .get(&(pid as u32))
                                 .unwrap();
                             let (
@@ -480,40 +441,5 @@ where
         v.to_string()
     } else {
         String::new()
-    }
-}
-
-pub fn option_to_string_communities(o: &Option<Vec<Community>>) -> String {
-    if let Some(v) = o {
-        v.iter()
-            .join(" ")
-    } else {
-        String::new()
-    }
-}
-
-impl Display for BgpElem {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let t = match self.elem_type {
-            ElemType::ANNOUNCE => "A",
-            ElemType::WITHDRAW => "W",
-        };
-        let format = format!(
-            "|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
-            t, &self.timestamp,
-            &self.peer_ip,
-            &self.peer_asn,
-            &self.prefix,
-            option_to_string(&self.as_path),
-            option_to_string(&self.origin),
-            option_to_string(&self.next_hop),
-            option_to_string(&self.local_pref),
-            option_to_string(&self.med),
-            option_to_string_communities(&self.communities),
-            option_to_string(&self.atomic),
-            option_to_string(&self.aggr_asn),
-            option_to_string(&self.aggr_ip),
-        );
-        write!(f, "{}", format)
     }
 }
