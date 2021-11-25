@@ -1,40 +1,32 @@
 use std::fs::File;
-use std::io::{BufReader, Cursor, Read};
-use bzip2::bufread::BzDecoder;
-use flate2::bufread::GzDecoder;
+use std::io::{BufReader, Read};
+use bzip2::read::BzDecoder;
+use flate2::read::GzDecoder;
+use isahc::{prelude::*, Request};
 use crate::ParserError;
 
 pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
     let file_type = path.split(".").collect::<Vec<&str>>().last().unwrap().clone();
     assert!(file_type == "gz" || file_type== "bz2");
 
-    let bytes = Cursor::new(
-        match path.starts_with("http") {
-            true => {
-                let client = reqwest::blocking::Client::builder()
-                    .timeout(None)
-                    .build()?;
-                client.get(path).send()?.bytes()?.to_vec()
-            }
-            false => {
-                let mut bytes: Vec<u8> = vec![];
-                let f = File::open(path).unwrap();
-                let mut reader = BufReader::new(f);
-
-                // Read file into vector.
-                reader.read_to_end(&mut bytes).unwrap();
-                bytes
-            }
+    let raw_reader: Box<dyn Read> = match path.starts_with("http") {
+        true => {
+            let response = Request::get(path).body(())?.send()?;
+            Box::new(response.into_body())
         }
-    );
+        false => {
+            Box::new(File::open(path)?)
+        }
+    };
+
     match file_type {
         "gz" => {
-            let reader = Box::new(GzDecoder::new(bytes));
-                Ok(Box::new(BufReader::new(reader)))
+            let reader = Box::new(GzDecoder::new(raw_reader));
+            Ok(Box::new(BufReader::new(reader)))
         }
         "bz2" => {
-            let reader = Box::new(BzDecoder::new(bytes));
-                Ok(Box::new(BufReader::new(reader)))
+            let reader = Box::new(BzDecoder::new(raw_reader));
+            Ok(Box::new(BufReader::new(reader)))
         }
         t => {
             panic!("unknown file type: {}", t)

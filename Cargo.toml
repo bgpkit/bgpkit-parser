@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 readme = "README.md"
@@ -28,6 +28,7 @@ itertools = "0.10.1"
 bzip2="0.4.3"
 flate2="1.0.22"
 reqwest = { version = "0.11", features = ["json", "blocking", "stream"]}
+isahc = "1.6.0"
 
 
 # ris-live parsing
