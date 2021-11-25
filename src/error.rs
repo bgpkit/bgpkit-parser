@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 pub enum ParserError {
     IoError(io::Error, Option<Vec<u8>>),
     EofError(io::Error, Option<Vec<u8>>),
-    RemoteIoError(reqwest::Error),
+    RemoteIoError(String),
     EofExpected,
     ParseError(String),
     UnknownAttr(String),
@@ -35,9 +35,15 @@ impl fmt::Display for ParserError {
     }
 }
 
-impl convert::From<reqwest::Error> for ParserError {
-    fn from(error: reqwest::Error) -> Self {
-        ParserError::RemoteIoError(error)
+impl convert::From<isahc::Error> for ParserError {
+    fn from(error: isahc::Error) -> Self {
+        ParserError::RemoteIoError(error.to_string())
+    }
+}
+
+impl convert::From<isahc::http::Error> for ParserError {
+    fn from(error: isahc::http::Error) -> Self {
+        ParserError::RemoteIoError(error.to_string())
     }
 }
 
