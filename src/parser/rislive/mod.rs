@@ -44,7 +44,7 @@ use crate::parser::rislive::messages::ris_message::path_to_as_path;
 
 use crate::BgpElem;
 use std::net::IpAddr;
-use bgp_models::bgp::attributes::Community;
+use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
 use bgp_models::network::NetworkPrefix;
 use ipnetwork::IpNetwork;
