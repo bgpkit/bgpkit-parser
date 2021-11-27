@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use clap::{Parser, ValueHint};
 use bgpkit_parser::{BgpkitParser, Elementor};
 
-/// This doc string acts as a help message when the user runs '--help'
-/// as do all doc strings on fields
+/// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
 #[derive(Parser)]
 #[clap(version = "0.1.0", author = "Mingwei Zhang <mingwei@bgpkit.com>")]
 struct Opts {
+    /// File path to a MRT file, local or remote.
     #[clap(name="FILE", parse(from_os_str), value_hint = ValueHint::FilePath)]
     file_path: PathBuf,
 
