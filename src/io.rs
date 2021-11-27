@@ -2,7 +2,6 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
-use isahc::{prelude::*, Request};
 use crate::ParserError;
 
 pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
@@ -11,8 +10,8 @@ pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
 
     let raw_reader: Box<dyn Read> = match path.starts_with("http") {
         true => {
-            let response = Request::get(path).body(())?.send()?;
-            Box::new(response.into_body())
+            let response = reqwest::blocking::get(path)?;
+            Box::new(response)
         }
         false => {
             Box::new(File::open(path)?)

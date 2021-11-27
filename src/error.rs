@@ -35,14 +35,8 @@ impl fmt::Display for ParserError {
     }
 }
 
-impl convert::From<isahc::Error> for ParserError {
-    fn from(error: isahc::Error) -> Self {
-        ParserError::RemoteIoError(error.to_string())
-    }
-}
-
-impl convert::From<isahc::http::Error> for ParserError {
-    fn from(error: isahc::http::Error) -> Self {
+impl convert::From<reqwest::Error> for ParserError {
+    fn from(error: reqwest::Error) -> Self {
         ParserError::RemoteIoError(error.to_string())
     }
 }
