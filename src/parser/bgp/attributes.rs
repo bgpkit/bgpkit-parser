@@ -1,5 +1,7 @@
 use std::io::{Read, Take};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use bgp_models::bgp::attributes::*;
+use bgp_models::bgp::community::*;
 use bgp_models::network::*;
 
 use byteorder::{BigEndian, ReadBytesExt};
@@ -93,7 +95,9 @@ impl AttributeParser {
                 AttrType::AS4_PATH => self.parse_as_path(&mut attr_input, &AsnLength::Bits32),
                 AttrType::AS4_AGGREGATOR => self.parse_aggregator(&mut attr_input, &AsnLength::Bits32, &afi),
                 AttrType::LARGE_COMMUNITIES => self.parse_large_communities(&mut attr_input),
-                AttrType::EXTENDED_COMMUNITIES | AttrType::ATTRIBUTES_END | AttrType::UNASSINGED | AttrType::RESERVED | AttrType::CLUSTER_ID => {
+                AttrType::EXTENDED_COMMUNITIES => self.parse_extended_community(&mut attr_input) ,
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => self.parse_ipv6_extended_community(&mut attr_input),
+                _ => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
                     Err(crate::error::ParserError::Unsupported(format!("Unsupported attribute type: {:?}", attr_type)))
@@ -377,6 +381,131 @@ impl AttributeParser {
             communities.push(LargeCommunity::new(global_administrator, local_data));
         }
         Ok(Attribute::LargeCommunities(communities))
+    }
+
+    fn parse_extended_community<T: Read>(
+        &self,
+        input: &mut Take<T>,
+    ) -> Result<Attribute, ParserError> {
+        let mut communities = Vec::new();
+        while input.limit() > 0 {
+            let ec_type_u8 = input.read_8b()?;
+            let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8){
+                Some(t) => t,
+                None => return Err(crate::error::ParserError::ParseError(format!("Failed to parse extended community type: {}", ec_type_u8)))
+            };
+            let ec: ExtendedCommunity = match ec_type {
+                ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_16b()?;
+                    let local = input.read_n_bytes(4)?;
+                    ExtendedCommunity::TransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global as u32,
+                        local_administrator: <[u8; 4]>::try_from(local).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::NonTransitiveTwoOctetAsSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_16b()?;
+                    let local = input.read_n_bytes(4)?;
+                    ExtendedCommunity::NonTransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global as u32,
+                        local_administrator: <[u8; 4]>::try_from(local).unwrap()
+                    } )
+                }
+
+                ExtendedCommunityType::TransitiveIpv4AddressSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = Ipv4Addr::from(input.read_32b()?);
+                    let local = input.read_n_bytes(2)?;
+                    ExtendedCommunity::TransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global,
+                        local_administrator: <[u8; 2]>::try_from(local).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::NonTransitiveIpv4AddressSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = Ipv4Addr::from(input.read_32b()?);
+                    let local = input.read_n_bytes(2)?;
+                    ExtendedCommunity::NonTransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global,
+                        local_administrator: <[u8; 2]>::try_from(local).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::TransitiveFourOctetAsSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_32b()?;
+                    let local = input.read_n_bytes(2)?;
+                    ExtendedCommunity::TransitiveFourOctetAsSpecific( FourOctetAsSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global,
+                        local_administrator: <[u8; 2]>::try_from(local).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::NonTransitiveFourOctetAsSpecific => {
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_32b()?;
+                    let local = input.read_n_bytes(2)?;
+                    ExtendedCommunity::NonTransitiveFourOctetAsSpecific( FourOctetAsSpecific{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        global_administrator: global,
+                        local_administrator: <[u8; 2]>::try_from(local).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::TransitiveOpaque => {
+                    let sub_type = input.read_8b()?;
+                    let value = input.read_n_bytes(6)?;
+                    ExtendedCommunity::TransitiveOpaque( Opaque{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        value: <[u8; 6]>::try_from(value).unwrap()
+                    } )
+                }
+                ExtendedCommunityType::NonTransitiveOpaque => {
+                    let sub_type = input.read_8b()?;
+                    let value = input.read_n_bytes(6)?;
+                    ExtendedCommunity::NonTransitiveOpaque( Opaque{
+                        ec_type: ec_type_u8,
+                        ec_subtype: sub_type,
+                        value: <[u8; 6]>::try_from(value).unwrap()
+                    } )
+                }
+            };
+
+            communities.push(ec);
+        }
+        Ok(Attribute::ExtendedCommunity(communities))
+    }
+
+    fn parse_ipv6_extended_community<T: Read>(
+        &self,
+        input: &mut Take<T>,
+    ) -> Result<Attribute, ParserError> {
+        let mut communities = Vec::new();
+        while input.limit() > 0 {
+            let ec_type_u8 = input.read_8b()?;
+            let sub_type = input.read_8b()?;
+            let global = Ipv6Addr::from(input.read_u128::<BigEndian>()?);
+            let local = input.read_n_bytes(2)?;
+            let ec = Ipv6AddressSpecificExtendedCommunity{
+                ec_type: ec_type_u8,
+                ec_subtype: sub_type,
+                global_administrator: global,
+                local_administrator: <[u8; 2]>::try_from(local).unwrap()
+            };
+            communities.push(ec);
+        }
+        Ok(Attribute::IPv6AddressSpecificExtendedCommunity(communities))
     }
 }
 
