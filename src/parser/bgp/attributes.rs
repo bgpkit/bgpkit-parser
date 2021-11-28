@@ -37,8 +37,8 @@ impl AttributeParser {
         afi: Option<Afi>,
         safi: Option<Safi>,
         prefixes: Option<Vec<NetworkPrefix>>,
-    ) -> Result<Attributes, ParserError> {
-        let mut attributes: Attributes = vec![];
+    ) -> Result<Vec<Attribute>, ParserError> {
+        let mut attributes: Vec<Attribute> = vec![];
 
         while input.limit() > 0 {
             // has content to read
@@ -85,7 +85,6 @@ impl AttributeParser {
                 AttrType::LOCAL_PREFERENCE => self.parse_local_pref(&mut attr_input),
                 AttrType::ATOMIC_AGGREGATE => Ok(Attribute::AtomicAggregate(AtomicAggregate::AG)),
                 AttrType::AGGREGATOR => self.parse_aggregator(&mut attr_input, asn_len, &afi),
-                AttrType::COMMUNITIES => self.parse_communities(&mut attr_input),
                 AttrType::ORIGINATOR_ID => self.parse_originator_id(&mut attr_input, &afi),
                 AttrType::CLUSTER_LIST => self.parse_clusters(&mut attr_input, &afi),
                 AttrType::MP_REACHABLE_NLRI => {
@@ -94,9 +93,13 @@ impl AttributeParser {
                 AttrType::MP_UNREACHABLE_NLRI => self.parse_nlri(&mut attr_input, &afi, &safi, &prefixes, false),
                 AttrType::AS4_PATH => self.parse_as_path(&mut attr_input, &AsnLength::Bits32),
                 AttrType::AS4_AGGREGATOR => self.parse_aggregator(&mut attr_input, &AsnLength::Bits32, &afi),
+
+                // communities
+                AttrType::COMMUNITIES => self.parse_regular_communities(&mut attr_input),
                 AttrType::LARGE_COMMUNITIES => self.parse_large_communities(&mut attr_input),
                 AttrType::EXTENDED_COMMUNITIES => self.parse_extended_community(&mut attr_input) ,
                 AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => self.parse_ipv6_extended_community(&mut attr_input),
+
                 _ => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
@@ -108,7 +111,7 @@ impl AttributeParser {
             };
             let _attr = match attr{
                 Ok(v) => {
-                    attributes.push((attr_type, v));
+                    attributes.push(v);
                 }
                 Err(_e) => {continue}
             };
@@ -187,23 +190,25 @@ impl AttributeParser {
         Ok(Attribute::Aggregator(asn, addr))
     }
 
-    fn parse_communities<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserError> {
+    fn parse_regular_communities<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserError> {
         const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
         const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
         const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
         let mut communities = Vec::with_capacity((input.limit() / 4) as usize);
         while input.limit() > 0 {
-            let community = input.read_u32::<BigEndian>()?;
-            match community {
-                COMMUNITY_NO_EXPORT => communities.push(Community::NoExport),
-                COMMUNITY_NO_ADVERTISE => communities.push(Community::NoAdvertise),
-                COMMUNITY_NO_EXPORT_SUBCONFED => communities.push(Community::NoExportSubConfed),
-                value => {
-                    let asn = (value >> 16) & 0xffff;
-                    let value = (value & 0xffff) as u16;
-                    communities.push(Community::Custom(asn, value));
+            let community_val = input.read_u32::<BigEndian>()?;
+            communities.push(
+                match community_val {
+                    COMMUNITY_NO_EXPORT => Community::NoExport,
+                    COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
+                    COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
+                    value => {
+                        let asn = (value >> 16) & 0xffff;
+                        let value = (value & 0xffff) as u16;
+                        Community::Custom(asn, value)
+                    }
                 }
-            }
+            )
         }
         Ok(Attribute::Communities(communities))
     }
@@ -324,7 +329,10 @@ impl AttributeParser {
         };
 
         // Reserved field, should ignore
-        Ok(Attribute::Nlri(Nlri {afi,safi, next_hop, prefixes}))
+        match reachable {
+            true => Ok(Attribute::MpReachNlri(Nlri {afi,safi, next_hop, prefixes})),
+            false => Ok(Attribute::MpUnreachNlri(Nlri {afi,safi, next_hop, prefixes}))
+        }
     }
 
     fn parse_mp_next_hop<T: Read>(
@@ -484,7 +492,7 @@ impl AttributeParser {
 
             communities.push(ec);
         }
-        Ok(Attribute::ExtendedCommunity(communities))
+        Ok(Attribute::ExtendedCommunities(communities))
     }
 
     fn parse_ipv6_extended_community<T: Read>(
@@ -497,15 +505,17 @@ impl AttributeParser {
             let sub_type = input.read_8b()?;
             let global = Ipv6Addr::from(input.read_u128::<BigEndian>()?);
             let local = input.read_n_bytes(2)?;
-            let ec = Ipv6AddressSpecificExtendedCommunity{
-                ec_type: ec_type_u8,
-                ec_subtype: sub_type,
-                global_administrator: global,
-                local_administrator: <[u8; 2]>::try_from(local).unwrap()
-            };
+            let ec = ExtendedCommunity::Ipv6AddressSpecific(
+                Ipv6AddressSpecific {
+                    ec_type: ec_type_u8,
+                    ec_subtype: sub_type,
+                    global_administrator: global,
+                    local_administrator: <[u8; 2]>::try_from(local).unwrap()
+                }
+            );
             communities.push(ec);
         }
-        Ok(Attribute::IPv6AddressSpecificExtendedCommunity(communities))
+        Ok(Attribute::ExtendedCommunities(communities))
     }
 }
 
