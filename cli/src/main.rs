@@ -1,9 +1,7 @@
 use serde_json::json;
 use std::path::PathBuf;
-// (Full example with detailed comments in examples/01d_quick_example.rs)
-//
-// This example demonstrates clap's full 'custom derive' style of creating arguments which is the
-// simplest method of use, but sacrifices some flexibility.
+use std::io::Write;
+
 use clap::{Parser, ValueHint};
 use bgpkit_parser::{BgpkitParser, Elementor};
 
@@ -53,16 +51,23 @@ fn main() {
             println!("total records: {}", parser.into_elem_iter().count());
         }
         (false, false) => {
+            let mut stdout = std::io::stdout();
             for elem in parser {
-                if opts.json {
+                let output_str = if opts.json {
                     let val = json!(elem);
                     if opts.pretty {
-                        println!("{}", serde_json::to_string_pretty(&val).unwrap())
+                        serde_json::to_string_pretty(&val).unwrap()
                     } else {
-                        println!("{}", val)
+                        val.to_string()
                     }
                 } else {
-                    println!("{}", elem)
+                    elem.to_string()
+                };
+                if let Err(e) = writeln!(stdout, "{}", &output_str) {
+                    if e.kind() != std::io::ErrorKind::BrokenPipe {
+                        eprintln!("{}", e);
+                    }
+                    std::process::exit(1);
                 }
             }
         }
