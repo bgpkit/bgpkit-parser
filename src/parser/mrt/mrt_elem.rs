@@ -28,7 +28,7 @@ macro_rules! get_attr_value {
 }
 
 fn get_relevant_attributes(
-    attributes: Attributes,
+    attributes: Vec<Attribute>,
 ) -> (
     Option<AsPath>,
     Option<AsPath>,
@@ -36,7 +36,7 @@ fn get_relevant_attributes(
     Option<IpAddr>,
     Option<u32>,
     Option<u32>,
-    Option<Vec<Community>>,
+    Option<Vec<MetaCommunity>>,
     Option<AtomicAggregate>,
     Option<(Asn, IpAddr)>,
     Option<Nlri>,
@@ -48,47 +48,36 @@ fn get_relevant_attributes(
     let mut next_hop = None;
     let mut local_pref = Some(0);
     let mut med = Some(0);
-    let mut communities = None;
     let mut atomic = Some(AtomicAggregate::NAG);
     let mut aggregator = None;
     let mut announced = None;
     let mut withdrawn = None;
 
-    for (t, v) in attributes {
-        match t {
-            AttrType::ORIGIN => origin = get_attr_value!(Origin, v),
-            AttrType::AS_PATH => as_path = get_attr_value!(AsPath, v),
-            AttrType::NEXT_HOP => next_hop = get_attr_value!(NextHop, v),
-            AttrType::MULTI_EXIT_DISCRIMINATOR => med = get_attr_value!(MultiExitDiscriminator, v),
-            AttrType::LOCAL_PREFERENCE => local_pref = get_attr_value!(LocalPreference, v),
-            AttrType::ATOMIC_AGGREGATE => {
-                atomic = if let Attribute::AtomicAggregate(x) = v {
-                    Some(x)
-                } else {
-                    Some(AtomicAggregate::NAG)
-                }
-            }
-            AttrType::AGGREGATOR => {
-                aggregator = if let Attribute::Aggregator(asn, ip) = v {
-                    Some((asn, ip))
-                } else {
-                    None
-                }
-            }
-            AttrType::COMMUNITIES => communities = get_attr_value!(Communities, v),
-            AttrType::MP_REACHABLE_NLRI => announced = get_attr_value!(Nlri, v),
-            AttrType::MP_UNREACHABLE_NLRI => withdrawn = get_attr_value!(Nlri, v),
-            AttrType::AS4_PATH => as4_path = get_attr_value!(AsPath, v),
-            AttrType::AS4_AGGREGATOR => {
-                aggregator = if let Attribute::Aggregator(asn, ip) = v {
-                    Some((asn, ip))
-                } else {
-                    None
-                }
-            }
-            _ => {}
+    let mut communities_vec: Vec<MetaCommunity> = vec![];
+
+    for attr in attributes {
+        match attr {
+            Attribute::Origin(v) => {origin = Some(v)}
+            Attribute::AsPath(v) => {as_path = Some(v)}
+            Attribute::As4Path(v) => {as4_path = Some(v)}
+            Attribute::NextHop(v) => {next_hop = Some(v)}
+            Attribute::MultiExitDiscriminator(v) => {med = Some(v)}
+            Attribute::LocalPreference(v) => {local_pref = Some(v)}
+            Attribute::AtomicAggregate(v) => {atomic = Some(v)}
+            Attribute::Communities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::Community(x)).collect::<Vec<MetaCommunity>>())}
+            Attribute::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::ExtendedCommunity(x)).collect::<Vec<MetaCommunity>>())}
+            Attribute::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::LargeCommunity(x)).collect::<Vec<MetaCommunity>>())}
+            Attribute::Aggregator(v, v2) => {aggregator = Some((v,v2))}
+            Attribute::MpReachNlri(nlri) => {announced = Some(nlri)}
+            Attribute::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
+            Attribute::OriginatorId(_) | Attribute::Clusters(_) => {}
         };
     }
+
+    let communities = match communities_vec.len()>0 {
+        true => Some(communities_vec),
+        false => None,
+    };
 
     (
         as_path,
@@ -427,7 +416,6 @@ impl Elementor {
                 }
             }
         }
-
         elems
     }
 }

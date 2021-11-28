@@ -46,6 +46,7 @@ use crate::BgpElem;
 use std::net::IpAddr;
 use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
+use bgp_models::bgp::MetaCommunity;
 use bgp_models::network::NetworkPrefix;
 use ipnetwork::IpNetwork;
 use crate::parser::ElemType;
@@ -108,9 +109,10 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     let communities = match community {
                         None => {None}
                         Some(cs) => {
-                            let mut comms: Vec<Community> = vec![];
+                            let mut comms: Vec<MetaCommunity> = vec![];
                             for c in cs {
-                                comms.push(Community::Custom(c.0,c.1));
+                                comms.push(
+                                    MetaCommunity::Community(Community::Custom(c.0,c.1)));
                             }
                             Some(comms)
                         }
