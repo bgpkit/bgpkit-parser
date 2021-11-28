@@ -46,7 +46,7 @@ pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerInd
 
     let peer_count = input.read_16b()?;
     let mut peers = vec![];
-    for _ in 0..peer_count {
+    for _index in 0..peer_count {
         let peer_type = input.read_8b()?;
         let afi = match peer_type & 1 {
             1 => Afi::Ipv6,
@@ -54,7 +54,7 @@ pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerInd
         };
         let asn_len = match peer_type & 2 {
             2 => AsnLength::Bits32,
-            _ => AsnLength::Bits32,
+            _ => AsnLength::Bits16,
         };
 
         let peer_bgp_id = input.read_32b()?;
