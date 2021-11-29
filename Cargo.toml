@@ -23,7 +23,7 @@ ipnetwork = "0.18"
 enum-primitive-derive = "0.1"
 num-traits = "0.1"
 chrono = "0.4"
-bgp-models = "0.6.0-rc.1"
+bgp-models = "0.6.0-rc.3"
 
 # logging
 log="0.4"

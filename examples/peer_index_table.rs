@@ -1,4 +1,3 @@
-use bgp_models::mrt::MrtRecord;
 use serde_json::{json, to_string_pretty};
 
 /// This example reads from TableDumpV2-formatted RIB dump from RIPE RIS and print out the JSON-formatted

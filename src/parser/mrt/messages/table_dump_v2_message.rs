@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::error::ParserError;
 use std::io::{Read, Take};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;
 use num_traits::FromPrimitive;
@@ -37,7 +37,7 @@ pub fn parse_table_dump_v2_message<T: Read>(
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
 pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerIndexTable, ParserError> {
-    let collector_bgp_id = input.read_32b()?;
+    let collector_bgp_id = Ipv4Addr::from(input.read_32b()?);
     // read and ignore view name
     let view_name_length = input.read_16b()?;
     let mut buffer = Vec::new();
@@ -57,7 +57,7 @@ pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerInd
             _ => AsnLength::Bits16,
         };
 
-        let peer_bgp_id = input.read_32b()?;
+        let peer_bgp_id = Ipv4Addr::from(input.read_32b()?);
         let peer_address: IpAddr = input.read_address(&afi)?;
         let peer_asn = input.read_asn(&asn_len)?;
         peers.push(Peer{
