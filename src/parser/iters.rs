@@ -69,7 +69,7 @@ impl Iterator for RecordIterator {
                     }
                     ParserError::IoError(e, _bytes)| ParserError::EofError(e, _bytes) => {
                         // when reaching IO error, stop iterating
-                        error!("{}", e.to_string());
+                        error!("{:?}", e);
                         None
                     }
                     ParserError::RemoteIoError(_) => {

@@ -3,6 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
+use log::warn;
 
 use byteorder::{BigEndian, ReadBytesExt};
 
@@ -40,7 +41,7 @@ impl AttributeParser {
     ) -> Result<Vec<Attribute>, ParserError> {
         let mut attributes: Vec<Attribute> = vec![];
 
-        while input.limit() > 0 {
+        while input.limit() >= 3 {
             // has content to read
             let flag = input.read_u8()?;
             let attr_type = input.read_u8()?;
@@ -75,6 +76,10 @@ impl AttributeParser {
             };
 
             // if input.limit()==0{break}
+            if input.limit()<length {
+                warn!("not enough bytes: input bytes left - {}, want to read - {}; skipping", input.limit(), length);
+                break
+            }
             let mut attr_input = input.take(length);
 
             let attr = match attr_type {
@@ -119,6 +124,7 @@ impl AttributeParser {
         while input.limit()>0 {
             input.read_8b()?;
         }
+        debug!("parse_attributes ends");
         Ok(attributes)
     }
 
