@@ -124,7 +124,6 @@ impl AttributeParser {
         while input.limit()>0 {
             input.read_8b()?;
         }
-        debug!("parse_attributes ends");
         Ok(attributes)
     }
 
