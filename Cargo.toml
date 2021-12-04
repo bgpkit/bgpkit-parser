@@ -12,15 +12,18 @@ A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
 
+[package.metadata]
+msrv = "1.48.0"
+
 [workspace]
 members = [
     "cli"
 ]
 
 [dependencies]
-byteorder = "1.2"
-ipnetwork = "0.18"
-enum-primitive-derive = "0.1"
+byteorder = "1"
+ipnetwork = {version="0.18", default-features=false}
+enum-primitive-derive = "0.2"
 num-traits = "0.1"
 chrono = "0.4"
 bgp-models = "0.6.0"

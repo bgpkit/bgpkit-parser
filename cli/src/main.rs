@@ -33,6 +33,8 @@ struct Opts {
 fn main() {
     let opts: Opts = Opts::from_args();
 
+    env_logger::init();
+
     let parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
     match (opts.elems_count, opts.records_count) {
         (true, true) => {
