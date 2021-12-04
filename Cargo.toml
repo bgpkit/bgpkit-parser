@@ -2,7 +2,7 @@
 name = "bgpkit-parser"
 version = "0.6.0"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
-edition = "2021"
+edition = "2018"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/bgpkit/bgpkit-parser"
@@ -23,7 +23,7 @@ ipnetwork = "0.18"
 enum-primitive-derive = "0.1"
 num-traits = "0.1"
 chrono = "0.4"
-bgp-models = "0.6.0-rc.3"
+bgp-models = "0.6.0"
 
 # logging
 log="0.4"
