@@ -69,7 +69,7 @@ pub trait ReadUtils: io::Read {
     /// Read announced prefix.
     ///
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
-    fn read_nlri_prefix(&mut self, afi: &Afi, path_id: u32) -> io::Result<NetworkPrefix> {
+    fn read_nlri_prefix(&mut self, afi: &Afi, path_id: u32) -> Result<NetworkPrefix, ParserError> {
         // Length in bits
         let bit_len = self.read_8b()?;
 
@@ -80,7 +80,7 @@ pub trait ReadUtils: io::Read {
 
                 // 4 bytes -- u32
                 if byte_len>4 {
-                    return Err(io::Error::new(io::ErrorKind::Other, "Invalid byte length for IPv4 prefix".to_string()))
+                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
@@ -91,7 +91,7 @@ pub trait ReadUtils: io::Read {
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len>16 {
-                    return Err(io::Error::new(io::ErrorKind::Other, "Invalid byte length for IPv6 prefix".to_string()))
+                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
@@ -103,7 +103,7 @@ pub trait ReadUtils: io::Read {
         let prefix = match IpNetwork::new(addr, bit_len) {
             Ok(p) => {p}
             Err(_) => {
-                return Err(io::Error::new(io::ErrorKind::Other, "Invalid network prefix length".to_string()))
+                return Err(ParserError::ParseError(format!("Invalid network prefix length: {}", bit_len)))
             }
         };
 

@@ -1,5 +1,4 @@
-use std::io::{ErrorKind, Read};
-use log::warn;
+use std::io::Read;
 
 use bgp_models::bgp::*;
 use bgp_models::network::*;
@@ -140,19 +139,7 @@ pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi
     let nlri_length = bgp_msg_length - 4 - withdrawn_length - attribute_length;
     let mut nlri_input = input.take(nlri_length);
     while nlri_input.limit()>0 {
-        match nlri_input.read_nlri_prefix(afi, 0) {
-            Ok(p) => {
-                announced_prefixes.push(p);
-            }
-            Err(err) => {
-                if err.kind() == ErrorKind::UnexpectedEof {
-                    // it reads to the end of the buffer, likely a truncated message.
-                    warn!("truncated message while reading announced prefixes. bgp message length: {}. nlri length: {}", bgp_msg_length, nlri_length);
-                } else {
-                    return Err(ParserError::from(err))
-                }
-            }
-        }
+        announced_prefixes.push(nlri_input.read_nlri_prefix(afi, 0)?);
     }
     Ok(
         BgpUpdateMessage{
