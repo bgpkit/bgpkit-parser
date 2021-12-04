@@ -181,6 +181,32 @@ match bmp_msg {
 [bmp-rfc]: https://datatracker.ietf.org/doc/html/rfc7854
 [openbmp-url]: https://www.openbmp.org/
 
+## Command Line Tool
+
+`bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
+
+```
+bgpkit-parser-cli 0.1.0
+bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
+
+USAGE:
+    bgpkit-parser-cli [FLAGS] <FILE>
+
+FLAGS:
+    -e, --elems-count      Count BGP elems
+    -h, --help             Prints help information
+    -j, --json             Output as JSON objects
+    -p, --pretty           Pretty-print JSON output
+    -r, --records-count    Count MRT records
+    -V, --version          Prints version information
+
+ARGS:
+    <FILE>    File path to a MRT file, local or remote
+```
+
+
+
+
 ## Data Representation
 
 There are two key data structure to understand for the parsing results:`MrtRecord` and `BgpElem`.
@@ -285,6 +311,10 @@ We support normal communities, extended communities, and large communities.
 - [ ] [RFC 9117](https://datatracker.ietf.org/doc/html/rfc9117) Revised Validation Procedure for BGP Flow Specifications Updates 8955
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
+
+## Minimum Supported Rust Version (MSRV)
+
+`1.48.0`
 
 ## Contribution
 

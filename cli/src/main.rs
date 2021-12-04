@@ -2,36 +2,39 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::io::Write;
 
-use clap::{Parser, ValueHint};
+use structopt::StructOpt;
 use bgpkit_parser::{BgpkitParser, Elementor};
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
-#[derive(Parser)]
-#[clap(version = "0.1.0", author = "Mingwei Zhang <mingwei@bgpkit.com>")]
+#[derive(StructOpt, Debug)]
+#[structopt(name="bgpkit-parser-cli")]
 struct Opts {
     /// File path to a MRT file, local or remote.
-    #[clap(name="FILE", parse(from_os_str), value_hint = ValueHint::FilePath)]
+    #[structopt(name="FILE", parse(from_os_str))]
     file_path: PathBuf,
 
     /// Output as JSON objects
-    #[clap(short,long)]
+    #[structopt(short,long)]
     json: bool,
 
     /// Pretty-print JSON output
-    #[clap(short,long)]
+    #[structopt(short,long)]
     pretty: bool,
 
     /// Count BGP elems
-    #[clap(short,long)]
+    #[structopt(short,long)]
     elems_count: bool,
 
     /// Count MRT records
-    #[clap(short,long)]
+    #[structopt(short,long)]
     records_count: bool,
 }
 
 fn main() {
-    let opts: Opts = Opts::parse();
+    let opts: Opts = Opts::from_args();
+
+    env_logger::init();
+
     let parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
     match (opts.elems_count, opts.records_count) {
         (true, true) => {

@@ -1,5 +1,6 @@
 use std::io::{Read, Take};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::convert::TryFrom;
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
