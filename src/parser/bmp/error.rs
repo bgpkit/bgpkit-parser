@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use crate::ParserError;
+use crate::ParserErrorKind;
 
 #[derive(Debug)]
 pub enum ParserBmpError {
@@ -37,8 +37,8 @@ impl std::convert::From<std::io::Error> for ParserBmpError {
     }
 }
 
-impl std::convert::From<ParserError> for ParserBmpError {
-    fn from(_: ParserError) -> Self {
+impl std::convert::From<ParserErrorKind> for ParserBmpError {
+    fn from(_: ParserErrorKind) -> Self {
         ParserBmpError::CorruptedBmpMessage
     }
 }

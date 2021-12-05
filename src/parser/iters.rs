@@ -4,7 +4,7 @@ Provides parser iterator implementation.
 use log::{error, warn};
 use bgp_models::mrt::MrtRecord;
 use crate::{BgpElem, Elementor};
-use crate::error::ParserError;
+use crate::error::ParserErrorKind;
 use crate::parser::BgpkitParser;
 
 /// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
@@ -54,25 +54,37 @@ impl Iterator for RecordIterator {
                 Some(v)
             },
             Err(e) => {
-                match e {
-                    ParserError::TruncatedMsg(_)| ParserError::Unsupported(_)
-                    |ParserError::UnknownAttr(_) | ParserError::Deprecated(_) => {
+                match e.error {
+                    ParserErrorKind::TruncatedMsg(_)| ParserErrorKind::Unsupported(_)
+                    | ParserErrorKind::UnknownAttr(_) | ParserErrorKind::Deprecated(_) => {
                         self.next()
                     }
-                    ParserError::ParseError(e) => {
-                        warn!("Parsing error: {}", e);
-                        self.next()
+                    ParserErrorKind::ParseError(err_str) => {
+                        warn!("Parsing error: {}", err_str);
+                        if self.parser.core_dump {
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                            }
+                            None
+                        } else {
+                            self.next()
+                        }
                     }
-                    ParserError::EofExpected =>{
+                    ParserErrorKind::EofExpected =>{
                         // normal end of file
                         None
                     }
-                    ParserError::IoError(e, _bytes)| ParserError::EofError(e, _bytes) => {
+                    ParserErrorKind::IoError(err)| ParserErrorKind::EofError(err) => {
                         // when reaching IO error, stop iterating
-                        error!("{:?}", e);
+                        error!("{:?}", err);
+                        if self.parser.core_dump {
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
+                            }
+                        }
                         None
                     }
-                    ParserError::RemoteIoError(_) => {
+                    ParserErrorKind::RemoteIoError(_) => {
                         // this should not happen at this stage
                         None
                     }

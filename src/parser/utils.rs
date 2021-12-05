@@ -13,7 +13,7 @@ use std::net::IpAddr;
 use std::io::Read;
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
 
-use crate::error::ParserError;
+use crate::error::ParserErrorKind;
 
 /// Drop n bytes from input
 macro_rules! drop_n{
@@ -69,7 +69,7 @@ pub trait ReadUtils: io::Read {
     /// Read announced prefix.
     ///
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
-    fn read_nlri_prefix(&mut self, afi: &Afi, path_id: u32) -> Result<NetworkPrefix, ParserError> {
+    fn read_nlri_prefix(&mut self, afi: &Afi, path_id: u32) -> Result<NetworkPrefix, ParserErrorKind> {
         // Length in bits
         let bit_len = self.read_8b()?;
 
@@ -80,7 +80,7 @@ pub trait ReadUtils: io::Read {
 
                 // 4 bytes -- u32
                 if byte_len>4 {
-                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                    return Err(ParserErrorKind::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
@@ -91,7 +91,7 @@ pub trait ReadUtils: io::Read {
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len>16 {
-                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                    return Err(ParserErrorKind::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
@@ -103,7 +103,7 @@ pub trait ReadUtils: io::Read {
         let prefix = match IpNetwork::new(addr, bit_len) {
             Ok(p) => {p}
             Err(_) => {
-                return Err(ParserError::ParseError(format!("Invalid network prefix length: {}", bit_len)))
+                return Err(ParserErrorKind::ParseError(format!("Invalid network prefix length: {}", bit_len)))
             }
         };
 
@@ -180,21 +180,21 @@ pub trait ReadUtils: io::Read {
         Ok(path)
     }
 
-    fn read_afi(&mut self) -> Result<Afi, ParserError> {
+    fn read_afi(&mut self) -> Result<Afi, ParserErrorKind> {
         let afi = self.read_u16::<BigEndian>()?;
         match Afi::from_i16(afi as i16) {
             Some(afi) => Ok(afi),
             None => {
-                Err(crate::error::ParserError::Unsupported(format!("Unknown AFI type: {}", afi)))
+                Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown AFI type: {}", afi)))
             },
         }
     }
 
-    fn read_safi(&mut self) -> Result<Safi, ParserError> {
+    fn read_safi(&mut self) -> Result<Safi, ParserErrorKind> {
         let safi = self.read_u8()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
-            None => Err(crate::error::ParserError::Unsupported(format!("Unknown SAFI type: {}", safi)))
+            None => Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown SAFI type: {}", safi)))
         }
     }
 }

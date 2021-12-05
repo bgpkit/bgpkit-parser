@@ -3,10 +3,10 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
-use crate::ParserError;
+use crate::ParserErrorKind;
 
 /// create a [BufReader] on heap from a given path to a file, located locally or remotely.
-pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
+pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserErrorKind> {
     // create reader for reading raw content from local or remote source, bytes can be compressed
     let raw_reader: Box<dyn Read> = match path.starts_with("http") {
         true => {

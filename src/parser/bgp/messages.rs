@@ -4,7 +4,7 @@ use bgp_models::bgp::*;
 use bgp_models::network::*;
 use num_traits::FromPrimitive;
 
-use crate::error::ParserError;
+use crate::error::ParserErrorKind;
 use crate::parser::{AttributeParser, ReadUtils};
 
 /// BGP message
@@ -25,7 +25,7 @@ use crate::parser::{AttributeParser, ReadUtils};
 /// |          Length               |      Type     |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserError> {
+pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserErrorKind> {
     // https://tools.ietf.org/html/rfc4271#section-4
     // 16 (4 x 4 bytes) octets marker
     input.read_32b()?;
@@ -45,7 +45,7 @@ pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_
      */
     let length = input.read_16b()?;
     if !(length >= 19 && length <= 4096) {
-        return Err(ParserError::ParseError(format!("invalid BGP message length {}", length)))
+        return Err(ParserErrorKind::ParseError(format!("invalid BGP message length {}", length)))
     }
 
     let bgp_msg_length =
@@ -59,7 +59,7 @@ pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_
     let msg_type: BgpMessageType = match BgpMessageType::from_u8(input.read_8b()?){
         Some(t) => t,
         None => {
-            return Err(ParserError::ParseError(format!("Unknown BGP Message Type")))
+            return Err(ParserErrorKind::ParseError(format!("Unknown BGP Message Type")))
         }
     };
 
@@ -84,7 +84,7 @@ pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_
     )
 }
 
-pub fn parse_bgp_notification_message<T: Read>(input: &mut T, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserError> {
+pub fn parse_bgp_notification_message<T: Read>(input: &mut T, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserErrorKind> {
     let error_code = input.read_8b()?;
     let error_subcode = input.read_8b()?;
     let mut data = Vec::with_capacity((bgp_msg_length - 2) as usize);
@@ -97,7 +97,7 @@ pub fn parse_bgp_notification_message<T: Read>(input: &mut T, bgp_msg_length: u6
         })
 }
 
-pub fn parse_bgp_open_message<T: Read>(input: &mut T, ) -> Result<BgpOpenMessage, ParserError> {
+pub fn parse_bgp_open_message<T: Read>(input: &mut T, ) -> Result<BgpOpenMessage, ParserErrorKind> {
     let version = input.read_8b()?;
     let asn = input.read_16b()? as Asn;
     let hold_time = input.read_16b()?;
@@ -122,7 +122,7 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T, ) -> Result<BgpOpenMessage
         })
 }
 
-pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserError> {
+pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
     let withdrawn_length = input.read_16b()? as u64;
     let mut withdarwn_input = input.take(withdrawn_length);
     let mut withdrawn_prefixes = vec!();
