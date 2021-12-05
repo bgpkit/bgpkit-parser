@@ -1,13 +1,13 @@
+use log::info;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
 use crate::ParserError;
 
+/// create a [BufReader] on heap from a given path to a file, located locally or remotely.
 pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
-    let file_type = path.split(".").collect::<Vec<&str>>().last().unwrap().clone();
-    assert!(file_type == "gz" || file_type== "bz2");
-
+    // create reader for reading raw content from local or remote source, bytes can be compressed
     let raw_reader: Box<dyn Read> = match path.starts_with("http") {
         true => {
             let response = reqwest::blocking::get(path)?;
@@ -18,6 +18,7 @@ pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
         }
     };
 
+    let file_type = path.split(".").collect::<Vec<&str>>().last().unwrap().clone();
     match file_type {
         "gz" => {
             let reader = Box::new(GzDecoder::new(raw_reader));
@@ -27,8 +28,10 @@ pub(crate) fn get_reader(path: &str) -> Result<Box<dyn Read>, ParserError> {
             let reader = Box::new(BzDecoder::new(raw_reader));
             Ok(Box::new(BufReader::new(reader)))
         }
-        t => {
-            panic!("unknown file type: {}", t)
+        _ => {
+            info!("unknown file type of file {}. try to read as uncompressed file", path);
+            let reader = Box::new(raw_reader);
+            Ok(Box::new(BufReader::new(reader)))
         }
     }
 }
@@ -38,21 +41,26 @@ mod tests {
     use crate::BgpkitParser;
 
     #[test]
-    fn test_open_any() {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-        let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
+    fn test_open_remote_bz2() {
+        let url = "http://archive.routeviews.org/route-views.sydney/bgpdata/2021.12/UPDATES/updates.20211205.0430.bz2";
         let parser = BgpkitParser::new(url).unwrap();
+        let elem_count = parser.into_elem_iter().count();
+        assert_eq!(elem_count, 97770);
+    }
 
-        log::info!("parsing updates file");
-        // iterating through the parser. the iterator returns `BgpElem` one at a time.
-        for elem in parser {
-            // each BGP announcement contains one AS path, which depending on the path segment's type
-            // there could be multiple origin ASNs (e.g. AS-Set as the origin)
-            if let Some(origins) = &elem.origin_asns {
-                if origins.contains(&13335) {
-                    // log::info!("{}", &elem);
-                }
-            }
-        }
+    #[test]
+    fn test_open_remote_gz() {
+        let url = "http://data.ris.ripe.net/rrc23/2021.12/updates.20211205.0450.gz";
+        let parser = BgpkitParser::new(url).unwrap();
+        let elem_count = parser.into_elem_iter().count();
+        assert_eq!(elem_count, 41819);
+    }
+
+    #[test]
+    fn test_remote_uncompressed() {
+        let url = "https://bgpkit-data.sfo3.digitaloceanspaces.com/parser/update-example";
+        let parser = BgpkitParser::new(url).unwrap();
+        let elem_count = parser.into_elem_iter().count();
+        assert_eq!(elem_count, 8160);
     }
 }
