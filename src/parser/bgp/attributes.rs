@@ -105,7 +105,11 @@ impl AttributeParser {
                 AttrType::LARGE_COMMUNITIES => self.parse_large_communities(&mut attr_input),
                 AttrType::EXTENDED_COMMUNITIES => self.parse_extended_community(&mut attr_input) ,
                 AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => self.parse_ipv6_extended_community(&mut attr_input),
-
+                AttrType::DEVELOPMENT => {
+                    let mut buf=Vec::with_capacity(length as usize);
+                    attr_input.read_to_end(&mut buf)?;
+                    Ok(Attribute::Development(buf))
+                },
                 _ => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
