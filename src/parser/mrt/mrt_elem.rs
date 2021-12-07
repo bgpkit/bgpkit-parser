@@ -70,7 +70,7 @@ fn get_relevant_attributes(
             Attribute::Aggregator(v, v2) => {aggregator = Some((v,v2))}
             Attribute::MpReachNlri(nlri) => {announced = Some(nlri)}
             Attribute::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
-            Attribute::OriginatorId(_) | Attribute::Clusters(_) => {}
+            Attribute::OriginatorId(_) | Attribute::Clusters(_)| Attribute::Development(_) => {}
         };
     }
 
