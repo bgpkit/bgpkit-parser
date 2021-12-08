@@ -55,8 +55,9 @@ impl Iterator for RecordIterator {
             },
             Err(e) => {
                 match e.error {
-                    ParserErrorKind::TruncatedMsg(_)| ParserErrorKind::Unsupported(_)
-                    | ParserErrorKind::UnknownAttr(_) | ParserErrorKind::Deprecated(_) => {
+                    ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
+                    | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::Deprecated(e) => {
+                        warn!("Parsing error: {}", e);
                         self.next()
                     }
                     ParserErrorKind::ParseError(err_str) => {
