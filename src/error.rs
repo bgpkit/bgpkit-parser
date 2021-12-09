@@ -13,6 +13,7 @@ pub enum ParserErrorKind {
     TruncatedMsg(String),
     Deprecated(String),
     Unsupported(String),
+    FilterError(String),
 }
 
 impl Error for ParserErrorKind {}
@@ -44,7 +45,8 @@ impl fmt::Display for ParserErrorKind {
             ParserErrorKind::UnknownAttr(s) => s.to_owned(),
             ParserErrorKind::Unsupported(s) => s.to_owned(),
             ParserErrorKind::EofExpected => "reach end of file".to_string(),
-            ParserErrorKind::RemoteIoError(e) => e.to_string()
+            ParserErrorKind::RemoteIoError(e) => e.to_string(),
+            ParserErrorKind::FilterError(e) => e.to_owned(),
         };
         write!(f, "Error: {}", message)
     }

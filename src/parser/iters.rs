@@ -6,6 +6,7 @@ use bgp_models::mrt::MrtRecord;
 use crate::{BgpElem, Elementor};
 use crate::error::ParserErrorKind;
 use crate::parser::BgpkitParser;
+use crate::Filterable;
 
 /// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
 impl IntoIterator for BgpkitParser {
@@ -31,8 +32,8 @@ MrtRecord Iterator
 **********/
 
 pub struct RecordIterator {
-    parser: BgpkitParser,
-    count: u64,
+    pub parser: BgpkitParser,
+    pub count: u64,
 }
 
 impl RecordIterator {
@@ -85,7 +86,7 @@ impl Iterator for RecordIterator {
                         }
                         None
                     }
-                    ParserErrorKind::RemoteIoError(_) => {
+                    ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_)=> {
                         // this should not happen at this stage
                         None
                     }
@@ -142,11 +143,18 @@ impl Iterator for ElemIterator {
             // when reaching here, the `self.cache_elems` has been refilled with some more elems
         }
 
-        // poping cached elems. note that the original elems order is preseved by reversing the
+        // popping cached elems. note that the original elems order is preseved by reversing the
         // vector before putting it on to cache_elems.
-        match self.cache_elems.pop() {
+        let elem = match self.cache_elems.pop() {
             None => {None}
-            Some(i) => {Some(i) }
+            Some(i) => {Some(i)}
+        };
+        match elem {
+            None => None,
+            Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
+                true => {Some(e)}
+                false => {self.next()}
+            }
         }
     }
 }
