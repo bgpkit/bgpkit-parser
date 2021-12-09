@@ -301,7 +301,7 @@ mod io;
 
 pub use parser::BgpkitParser;
 pub use parser::BgpElem;
-pub use parser::ParserError;
+pub use parser::ParserErrorKind;
 pub use parser::Elementor;
 pub use parser::iters::{ElemIterator, RecordIterator};
 pub use parser::bmp::parse_openbmp_msg;

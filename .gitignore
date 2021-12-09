@@ -6,3 +6,4 @@ Cargo.lock
 
 *.bz2
 *.gz
+examples/debug-file.rs

@@ -1,4 +1,4 @@
-use crate::error::ParserError;
+use crate::error::ParserErrorKind;
 use std::io::Read;
 use bgp_models::bgp::BgpMessage;
 use bgp_models::mrt::bgp4mp::{Bgp4Mp, Bgp4MpMessage, Bgp4MpStateChange, Bgp4MpType, BgpState};
@@ -7,10 +7,10 @@ use num_traits::FromPrimitive;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
 
-pub fn parse_bgp4mp<T: Read>(sub_type: u16, input: &mut T, total_size: usize) -> Result<Bgp4Mp, ParserError> {
+pub fn parse_bgp4mp<T: Read>(sub_type: u16, input: &mut T, total_size: usize) -> Result<Bgp4Mp, ParserErrorKind> {
     let bgp4mp_type: Bgp4MpType = match Bgp4MpType::from_u16(sub_type) {
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse bgp4mp subtype: {}", sub_type)))}
+        None => {return Err(ParserErrorKind::ParseError(format!("cannot parse bgp4mp subtype: {}", sub_type)))}
     };
     let msg: Bgp4Mp = match bgp4mp_type {
         Bgp4MpType::Bgp4MpStateChange => {
@@ -62,7 +62,7 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
    |                    BGP Message... (variable)
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: AsnLength, total_size: usize) -> Result<Bgp4MpMessage, ParserError> {
+pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: AsnLength, total_size: usize) -> Result<Bgp4MpMessage, ParserErrorKind> {
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;
@@ -115,7 +115,7 @@ pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: Asn
    |            Old State          |          New State            |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength) -> Result<Bgp4MpStateChange, ParserError> {
+pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength) -> Result<Bgp4MpStateChange, ParserErrorKind> {
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;
@@ -124,11 +124,11 @@ pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength) -> 
     let local_addr = input.read_address(&address_family)?;
     let old_state = match BgpState::from_u16(input.read_16b()?){
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse bgp4mp old_state")))}
+        None => {return Err(ParserErrorKind::ParseError(format!("cannot parse bgp4mp old_state")))}
     };
     let new_state = match BgpState::from_u16(input.read_16b()?){
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse bgp4mp new_state")))}
+        None => {return Err(ParserErrorKind::ParseError(format!("cannot parse bgp4mp new_state")))}
     };
     Ok(
         Bgp4MpStateChange{

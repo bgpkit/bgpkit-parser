@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::error::ParserError;
+use crate::error::ParserErrorKind;
 use std::io::{Read, Take};
 use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
@@ -9,10 +9,10 @@ use crate::parser::{AttributeParser, ReadUtils};
 
 pub fn parse_table_dump_v2_message<T: Read>(
     sub_type: u16,
-    input: &mut Take<T>) -> Result<TableDumpV2Message, ParserError> {
+    input: &mut Take<T>) -> Result<TableDumpV2Message, ParserErrorKind> {
     let v2_type: TableDumpV2Type = match TableDumpV2Type::from_u16(sub_type) {
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse table dump v2 type: {}", sub_type)))}
+        None => {return Err(ParserErrorKind::ParseError(format!("cannot parse table dump v2 type: {}", sub_type)))}
     };
 
     let msg: TableDumpV2Message = match v2_type {
@@ -26,7 +26,7 @@ pub fn parse_table_dump_v2_message<T: Read>(
             TableDumpV2Message::RibAfiEntries(parse_rib_afi_entries(input, v2_type)?)
         },
         TableDumpV2Type::RibGeneric| TableDumpV2Type::RibGenericAddPath| TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserError::Unsupported("TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string()))
+            return Err(ParserErrorKind::Unsupported("TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string()))
         }
     };
 
@@ -36,7 +36,7 @@ pub fn parse_table_dump_v2_message<T: Read>(
 /// Peer index table
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerIndexTable, ParserError> {
+pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerIndexTable, ParserErrorKind> {
     let collector_bgp_id = Ipv4Addr::from(input.read_32b()?);
     // read and ignore view name
     let view_name_length = input.read_16b()?;
@@ -88,7 +88,7 @@ pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerInd
 /// RIB AFI-specific entries
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserError> {
+pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserErrorKind> {
     let afi: Afi;
     let safi: Safi;
     match rib_type {
@@ -109,7 +109,7 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
             safi = Safi::Multicast
         }
         _ => {
-            return Err(ParserError::ParseError(format!("wrong RIB type for parsing: {:?}", rib_type)))
+            return Err(ParserErrorKind::ParseError(format!("wrong RIB type for parsing: {:?}", rib_type)))
         }
     };
 
@@ -123,7 +123,7 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
 
     let sequence_number = input.read_32b()?;
 
-    let prefix = input.read_nlri_prefix(&afi, 0)?;
+    let prefix = input.read_nlri_prefix(&afi, add_path)?;
     let prefixes = vec!(prefix.clone());
 
     let entry_count = input.read_16b()?;
@@ -151,9 +151,9 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
     )
 }
 
-pub fn parse_rib_entry<T: std::io::Read>(input: &mut Take<T>, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserError> {
+pub fn parse_rib_entry<T: std::io::Read>(input: &mut Take<T>, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserErrorKind> {
     if input.limit() < 16 {
-        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
     }
     let peer_index = input.read_16b()?;
     let originated_time = input.read_32b()?;
@@ -163,7 +163,7 @@ pub fn parse_rib_entry<T: std::io::Read>(input: &mut Take<T>, add_path: bool, af
     let attribute_length = input.read_16b()?;
 
     if input.limit() < attribute_length as u64 {
-        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
     }
 
     let attr_parser = AttributeParser::new(add_path);

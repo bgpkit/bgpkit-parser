@@ -11,13 +11,13 @@ use bgp_models::network::{AddrMeta, Afi, AsnLength, NetworkPrefix};
 use crate::parser::bgp::attributes::AttributeParser;
 
 /// TABLE_DUMP v1 only support 2-byte asn
-fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserError> {
+fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserErrorKind> {
     let asn_len = AsnLength::Bits16;
     let afi = match sub_type {
         1 => Afi::Ipv4,
         2 => Afi::Ipv6,
         _ => {
-            return Err(ParserError::ParseError(format!(
+            return Err(ParserErrorKind::ParseError(format!(
                 "Invalid subtype found for TABLE_DUMP (V1) message: {}",
                 sub_type
             )))
@@ -47,7 +47,7 @@ fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserError> {
 pub fn parse_table_dump_message<T: Read>(
     sub_type: u16,
     input: &mut T,
-) -> Result<TableDumpMessage, ParserError> {
+) -> Result<TableDumpMessage, ParserErrorKind> {
     let meta = parse_sub_type(sub_type)?;
 
     let view_number = input.read_u16::<BigEndian>()?;
