@@ -45,7 +45,7 @@ mod tests {
         let url = "http://archive.routeviews.org/route-views.sydney/bgpdata/2021.12/UPDATES/updates.20211205.0430.bz2";
         let parser = BgpkitParser::new(url).unwrap();
         let elem_count = parser.into_elem_iter().count();
-        assert_eq!(elem_count, 97770);
+        assert_eq!(elem_count, 100676);
     }
 
     #[test]
@@ -53,7 +53,7 @@ mod tests {
         let url = "http://data.ris.ripe.net/rrc23/2021.12/updates.20211205.0450.gz";
         let parser = BgpkitParser::new(url).unwrap();
         let elem_count = parser.into_elem_iter().count();
-        assert_eq!(elem_count, 41819);
+        assert_eq!(elem_count, 43532);
     }
 
     #[test]
