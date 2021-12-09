@@ -1,11 +1,13 @@
-use std::io::Read;
+use std::io::{Read, Take};
 
 use bgp_models::bgp::*;
 use bgp_models::network::*;
+use byteorder::ReadBytesExt;
 use num_traits::FromPrimitive;
 
 use crate::error::ParserErrorKind;
-use crate::parser::{AttributeParser, ReadUtils};
+use crate::parser::{AttributeParser, parse_nlri_list, ReadUtils};
+use log::warn;
 
 /// BGP message
 ///
@@ -122,25 +124,46 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T, ) -> Result<BgpOpenMessage
         })
 }
 
-pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
-    let withdrawn_length = input.read_16b()? as u64;
-    let mut withdarwn_input = input.take(withdrawn_length);
-    let mut withdrawn_prefixes = vec!();
-    while withdarwn_input.limit()>0 {
-        withdrawn_prefixes.push(withdarwn_input.read_nlri_prefix(afi, 0)?);
+/// read nlri portion of a bgp update message.
+fn read_nlri<T: Read>(input: &mut Take<T>, length: usize, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+    if length==0{
+        return Ok(vec![])
+    }
+    if length==1 {
+        // 1 byte does not make sense
+        warn!("seeing strange one-byte NLRI field");
+        input.read_u8().unwrap();
+        return Ok(vec![])
     }
 
+    let mut buf=Vec::with_capacity(length);
+    input.read_to_end(&mut buf)?;
+
+    let mut nlri_input = buf.as_slice().take(length as u64);
+
+    let prefixes = parse_nlri_list(&mut nlri_input, add_path, &afi)?;
+
+    Ok(prefixes)
+}
+
+/// read bgp update message.
+pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
+    // parse withdrawn prefixes nlri
+    let withdrawn_length = input.read_16b()? as u64;
+    let mut withdrawn_input = input.take(withdrawn_length);
+    let withdrawn_prefixes = read_nlri(&mut withdrawn_input, withdrawn_length as usize, afi, add_path)?;
+
+    // parse attributes
     let attribute_length = input.read_16b()? as u64;
     let attr_parser = AttributeParser::new(add_path);
     let mut attr_input = input.take(attribute_length);
     let attributes = attr_parser.parse_attributes(&mut attr_input, asn_len, None, None, None)?;
-    let mut announced_prefixes = vec!();
 
+    // parse announced prefixes nlri
     let nlri_length = bgp_msg_length - 4 - withdrawn_length - attribute_length;
     let mut nlri_input = input.take(nlri_length);
-    while nlri_input.limit()>0 {
-        announced_prefixes.push(nlri_input.read_nlri_prefix(afi, 0)?);
-    }
+    let announced_prefixes = read_nlri(&mut nlri_input, nlri_length as usize, afi, add_path)?;
+
     Ok(
         BgpUpdateMessage{
             withdrawn_prefixes,

@@ -123,7 +123,7 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
 
     let sequence_number = input.read_32b()?;
 
-    let prefix = input.read_nlri_prefix(&afi, 0)?;
+    let prefix = input.read_nlri_prefix(&afi, add_path)?;
     let prefixes = vec!(prefix.clone());
 
     let entry_count = input.read_16b()?;

@@ -10,8 +10,9 @@ use std::{
 
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
-use std::io::Read;
+use std::io::{Read, Take};
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
+use log::warn;
 
 use crate::error::ParserErrorKind;
 
@@ -66,10 +67,19 @@ pub trait ReadUtils: io::Read {
         Ok(())
     }
 
-    /// Read announced prefix.
+    /// Read announced/withdrawn prefix.
     ///
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
-    fn read_nlri_prefix(&mut self, afi: &Afi, path_id: u32) -> Result<NetworkPrefix, ParserErrorKind> {
+    /// If the `add_path` is true, it will also first read a 4-byte path id first; otherwise, a path-id of 0
+    /// is automatically set.
+    fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserErrorKind> {
+
+        let path_id = if add_path {
+            self.read_u32::<BigEndian>()?
+        } else {
+            0
+        };
+
         // Length in bits
         let bit_len = self.read_8b()?;
 
@@ -197,6 +207,56 @@ pub trait ReadUtils: io::Read {
             None => Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown SAFI type: {}", safi)))
         }
     }
+}
+
+pub(crate) fn parse_nlri_list(
+    input: &mut Take<&[u8]>,
+    add_path: bool,
+    afi: &Afi,
+) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+
+    let mut bytes_copy = Vec::with_capacity(input.limit() as usize);
+    input.read_to_end(&mut bytes_copy)?;
+
+    let mut is_add_path = add_path;
+    let mut prefixes = Vec::new();
+
+    let mut retry = false;
+    let mut guessed = false;
+
+    let mut new_input = bytes_copy.take(bytes_copy.len() as u64);
+    while new_input.limit() > 0 {
+        if !is_add_path && new_input.get_ref()[0]==0 {
+            // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
+            warn!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
+            is_add_path = true;
+            guessed = true;
+        }
+        let prefix = match new_input.read_nlri_prefix(afi, is_add_path){
+            Ok(p) => {p}
+            Err(e) => {
+                if guessed {
+                    retry = true;
+                    break;
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+        prefixes.push(prefix);
+    }
+
+    if retry {
+        prefixes.clear();
+        // try again without attempt to guess add-path
+        let mut new_input = bytes_copy.take(bytes_copy.len() as u64);
+        while new_input.limit() > 0 {
+            let prefix = new_input.read_nlri_prefix(afi, add_path)?;
+            prefixes.push(prefix);
+        }
+    }
+
+    Ok(prefixes)
 }
 
 // All types that implement Read can now read prefixes

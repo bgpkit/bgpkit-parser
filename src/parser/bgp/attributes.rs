@@ -4,13 +4,13 @@ use std::convert::TryFrom;
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
-use log::warn;
+use log::{warn,debug};
 
 use byteorder::{BigEndian, ReadBytesExt};
 
 use num_traits::FromPrimitive;
 
-use crate::parser::ReadUtils;
+use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::error::ParserErrorKind;
 
 
@@ -257,6 +257,7 @@ impl AttributeParser {
     }
 
     ///
+    /// <https://datatracker.ietf.org/doc/html/rfc4760#section-3>
     /// The attribute is encoded as shown below:
     /// +---------------------------------------------------------+
     /// | Address Family Identifier (2 octets)                    |
@@ -322,9 +323,11 @@ impl AttributeParser {
                 if first_byte_zero {
                     if reachable {
                         // skip reserved byte for reachable NRLI
-                        let _should_be_zero = buf_input.read_u8()?;
+                        if buf_input.read_u8()? !=0 {
+                            warn!("NRLI reserved byte not 0");
+                        }
                     }
-                    self.parse_mp_prefix_list(&mut buf_input, &afi)?
+                    parse_nlri_list(&mut buf_input, self.additional_paths, &afi)?
                 } else {
                     pfxs.to_owned()
                 }
@@ -332,9 +335,11 @@ impl AttributeParser {
             None => {
                 if reachable {
                     // skip reserved byte for reachable NRLI
-                    buf_input.read_u8()?;
+                    if buf_input.read_u8()? !=0 {
+                        warn!("NRLI reserved byte not 0");
+                    }
                 }
-                self.parse_mp_prefix_list(&mut buf_input, &afi)?
+                parse_nlri_list(&mut buf_input, self.additional_paths, &afi)?
             }
         };
 
@@ -364,24 +369,6 @@ impl AttributeParser {
                 ));
             }
         };
-        Ok(output)
-    }
-
-    fn parse_mp_prefix_list<T: Read>(
-        &self,
-        input: &mut Take<T>,
-        afi: &Afi,
-    ) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
-        let mut output = Vec::new();
-        while input.limit() > 0 {
-            let path_id = if self.additional_paths {
-                input.read_u32::<BigEndian>()
-            } else {
-                Ok(0)
-            }?;
-            let prefix = input.read_nlri_prefix(afi, path_id)?;
-            output.push(prefix);
-        }
         Ok(output)
     }
 
