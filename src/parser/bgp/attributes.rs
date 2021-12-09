@@ -51,6 +51,8 @@ impl AttributeParser {
                 _ => input.read_16b()? as u64,
             };
 
+            let mut partial = false;
+
             if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
                 /*
                 https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
@@ -63,9 +65,7 @@ impl AttributeParser {
                 > MUST be set to 0.
 
                 */
-                let mut buf=Vec::with_capacity(length as usize);
-                input.read_to_end(&mut buf)?;
-                continue;
+                partial = true;
             }
 
             let attr_type = match AttrType::from_u8(attr_type) {
@@ -121,9 +121,20 @@ impl AttributeParser {
             };
             let _attr = match attr{
                 Ok(v) => {
+                    debug!("attribute: {:?}", &v);
                     attributes.push(v);
                 }
-                Err(_e) => {continue}
+                Err(e) => {
+                    if partial {
+                        // it's ok to have errors when reading partial bytes
+                        warn!("PARTIAL: {}", e.to_string());
+                    } else {
+                        warn!("{}", e.to_string());
+                    }
+                    let mut buf=Vec::with_capacity(length as usize);
+                    attr_input.read_to_end(&mut buf)?;
+                    continue
+                }
             };
         }
         while input.limit()>0 {
