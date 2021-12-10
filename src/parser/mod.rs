@@ -53,7 +53,7 @@ impl BgpkitParser {
         Ok(
             BgpkitParser {
                 reader: self.reader,
-                core_dump: true,
+                core_dump: self.core_dump,
                 filters
             }
         )
