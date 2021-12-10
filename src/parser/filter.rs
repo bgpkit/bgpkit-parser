@@ -65,7 +65,7 @@ impl Filter {
                     }
                 }
             }
-            "ts_start" => {
+            "start_ts" => {
                 match f64::from_str(filter_value) {
                     Ok(v) => {Ok(Filter::TsStart(v))},
                     Err(_) => {
@@ -73,7 +73,7 @@ impl Filter {
                     }
                 }
             }
-            "ts_end" => {
+            "end_ts" => {
                 match f64::from_str(filter_value) {
                     Ok(v) => {Ok(Filter::TsEnd(v))},
                     Err(_) => {
@@ -81,7 +81,7 @@ impl Filter {
                     }
                 }
             }
-            "path" => {
+            "as_path" => {
                 match Regex::from_str(filter_value) {
                     Ok(v) => {
                         Ok(Filter::Path(v))
