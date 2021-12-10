@@ -198,8 +198,10 @@ mod tests {
     #[test]
     fn test_filter_iter() {
         let url = "https://bgpkit-data.sfo3.digitaloceanspaces.com/parser/update-example";
-        let parser = BgpkitParser::new(url).unwrap().add_filter("type", "w").unwrap();
+        let parser = BgpkitParser::new(url).unwrap()
+            .add_filter("peer_ip", "185.1.8.50").unwrap()
+            .add_filter("type", "w").unwrap();
         let count = parser.into_elem_iter().count();
-        assert_eq!(count, 379);
+        assert_eq!(count, 39);
     }
 }

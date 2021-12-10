@@ -119,41 +119,45 @@ impl Iterator for ElemIterator {
     fn next(&mut self) -> Option<BgpElem> {
         self.count += 1;
 
-        if self.cache_elems.is_empty() {
-            // refill cache elems
-            loop {
-                match self.record_iter.next() {
-                    None => {
-                        // no more records
-                        return None
-                    }
-                    Some(r) => {
-                        let mut elems =  self.elementor.record_to_elems(r);
-                        if elems.len()>0 {
-                            elems.reverse();
-                            self.cache_elems = elems;
-                            break
-                        } else {
-                            // somehow this record does not contain any elems, continue to parse next record
-                            continue
+        loop {
+            if self.cache_elems.is_empty() {
+                // refill cache elems
+                loop {
+                    match self.record_iter.next() {
+                        None => {
+                            // no more records
+                            return None
+                        }
+                        Some(r) => {
+                            let mut elems =  self.elementor.record_to_elems(r);
+                            if elems.len()>0 {
+                                elems.reverse();
+                                self.cache_elems = elems;
+                                break
+                            } else {
+                                // somehow this record does not contain any elems, continue to parse next record
+                                continue
+                            }
                         }
                     }
                 }
+                // when reaching here, the `self.cache_elems` has been refilled with some more elems
             }
-            // when reaching here, the `self.cache_elems` has been refilled with some more elems
-        }
 
-        // popping cached elems. note that the original elems order is preseved by reversing the
-        // vector before putting it on to cache_elems.
-        let elem = match self.cache_elems.pop() {
-            None => {None}
-            Some(i) => {Some(i)}
-        };
-        match elem {
-            None => None,
-            Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
-                true => {Some(e)}
-                false => {self.next()}
+            // popping cached elems. note that the original elems order is preseved by reversing the
+            // vector before putting it on to cache_elems.
+            let elem = match self.cache_elems.pop() {
+                None => {None}
+                Some(i) => {Some(i)}
+            };
+            match elem {
+                None => return None,
+                Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
+                    true => {return Some(e)}
+                    false => {
+                        continue
+                    }
+                }
             }
         }
     }
