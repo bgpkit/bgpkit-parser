@@ -1,10 +1,10 @@
 #!/bin/bash
 
 RIB_LOCAL=/tmp/rib-example.bz2
-RIB_REMOTE=https://bgpkit-data.sfo3.digitaloceanspaces.com/parser/rib-example.bz2
+RIB_REMOTE=https://spaces.bgpkit.org/parser/rib-example.bz2
 
 UPD_LOCAL=/tmp/update-example.gz
-UPD_REMOTE=https://bgpkit-data.sfo3.digitaloceanspaces.com/parser/update-example.gz
+UPD_REMOTE=https://spaces.bgpkit.org/parser/update-example.gz
 
 if test -f "$RIB_LOCAL"; then
     echo "rib file already exist: $RIB_LOCAL"
