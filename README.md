@@ -1,5 +1,11 @@
 # BGPKIT Parser
+
 [![Rust](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml/badge.svg)](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml)
+[![Crates.io](https://img.shields.io/crates/v/bgpkit-parser)](https://crates.io/crates/bgpkit-parser)
+[![Docs.rs](https://docs.rs/bgpkit-parser/badge.svg)](https://docs.rs/bgpkit-parser)
+[![License](https://img.shields.io/crates/l/bgpkit-parser)](https://raw.githubusercontent.com/bgpkit/bgpkit-parser/master/LICENSE)
+![Discord](https://img.shields.io/discord/919618842613927977?label=discord&style=plastic)
+![Crates.io](https://img.shields.io/crates/d/bgpkit-parser)
 
 BGPKIT Parser aims to provides the most ergonomic MRT/BGP/BMP message parsing Rust API.
 
