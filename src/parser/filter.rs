@@ -1,3 +1,54 @@
+/*!
+## Message Filters
+
+The filters package defines a number of available filters that users can utilize, and implements
+the filtering mechanism for [BgpElem].
+
+The available filters are (`filter_type` (`FilterType`) -- definition):
+- `origin_asn` (`OriginAsn(u32)`) -- origin AS number
+- `prefix` (`Prefix(IpNetwork)`) -- network prefix
+- `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
+- `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
+- `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
+- `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
+- `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+
+[Filter::new] function takes a str for filter type and str for filter value and returns a Result
+of a [Filter] or a parsing error.
+
+[BgpkitParser] also implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
+and returns a new parser with specified filter added.
+
+### Example
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+
+/// This example shows how to parse a MRT file and filter by prefix.
+fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    log::info!("downloading updates file");
+
+    // create a parser that takes the buffered reader
+    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+        .add_filter("prefix", "211.98.251.0/24").unwrap();
+
+    log::info!("parsing updates file");
+    // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    for elem in parser {
+        log::info!("{}", &elem);
+    }
+    log::info!("done");
+}
+```
+
+### Note
+
+Currently, only [BgpElem] implements the filtering capability. Support for [MrtRecord] will come in
+later releases.
+
+*/
 use std::net::IpAddr;
 use std::str::FromStr;
 use bgp_models::prelude::*;
@@ -6,15 +57,25 @@ use regex::Regex;
 use crate::ParserErrorKind;
 use crate::ParserErrorKind::FilterError;
 
+/// Filter enum: definition o types of filters
+///
+/// The available filters are (`filter_type` (`FilterType`) -- definition):
+/// - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
+/// - `prefix` (`Prefix(IpNetwork)`) -- network prefix
+/// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
+/// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
+/// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
+/// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
+/// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
 pub enum Filter {
-    OriginAsn(Asn),
+    OriginAsn(u32),
     Prefix(IpNetwork),
     PeerIp(IpAddr),
-    PeerAsn(Asn),
+    PeerAsn(u32),
     Type(ElemType),
     TsStart(f64),
     TsEnd(f64),
-    Path(Regex),
+    AsPath(Regex),
 }
 
 impl Filter {
@@ -84,7 +145,7 @@ impl Filter {
             "as_path" => {
                 match Regex::from_str(filter_value) {
                     Ok(v) => {
-                        Ok(Filter::Path(v))
+                        Ok(Filter::AsPath(v))
                     }
                     Err(_) => {
                         Err(FilterError(format!("cannot parse AS path regex from {}", filter_value)))
@@ -131,7 +192,7 @@ impl Filterable for BgpElem {
             Filter::TsEnd(v) => {
                 self.timestamp <= *v
             }
-            Filter::Path(v) => {
+            Filter::AsPath(v) => {
                 if let Some(path) = &self.as_path {
                     v.is_match(path.to_string().as_str())
                 } else {
@@ -173,7 +234,7 @@ mod tests {
 
         let mut filters = vec![];
         let regex = Regex::new(r" ?174 1916 52888$").unwrap();
-        filters.push(Filter::Path(regex));
+        filters.push(Filter::AsPath(regex));
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 12);
 

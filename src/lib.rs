@@ -96,6 +96,37 @@ fn main(){
 }
 ```
 
+### Filtering BGP Messages
+
+BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [BgpkitParser] instance,
+once can also call `add_filter` function to customize the parser to only show matching messages
+when iterating through [BgpElem]s.
+
+For all types of filters, check out the [Filter] enum documentation.
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+
+/// This example shows how to parse a MRT file and filter by prefix.
+fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    log::info!("downloading updates file");
+
+    // create a parser that takes the buffered reader
+    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+        .add_filter("prefix", "211.98.251.0/24").unwrap();
+
+    log::info!("parsing updates file");
+    // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    for elem in parser {
+        log::info!("{}", &elem);
+    }
+    log::info!("done");
+}
+```
+
+
 ### Parsing Real-time Data Streams
 
 BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
