@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_remote_uncompressed() {
-        let url = "https://bgpkit-data.sfo3.digitaloceanspaces.com/parser/update-example";
+        let url = "https://spaces.bgpkit.org/parser/update-example";
         let parser = BgpkitParser::new(url).unwrap();
         let elem_count = parser.into_elem_iter().count();
         assert_eq!(elem_count, 8160);

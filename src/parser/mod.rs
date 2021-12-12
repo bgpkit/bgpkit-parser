@@ -8,6 +8,7 @@ pub mod bmp;
 pub mod bgp;
 pub mod iters;
 pub mod rislive;
+pub mod filter;
 
 pub(crate) use self::utils::*;
 pub(crate) use bgp::attributes::AttributeParser;
@@ -16,11 +17,13 @@ pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2
 pub use crate::error::{ParserError, ParserErrorKind};
 pub use mrt::mrt_elem::Elementor;
 pub use bgp_models::prelude::{BgpElem, ElemType};
+use crate::Filter;
 use crate::io::get_reader;
 
 pub struct BgpkitParser {
     reader: Box<dyn Read>,
     core_dump: bool,
+    filters: Vec<Filter>
 }
 
 impl BgpkitParser {
@@ -30,7 +33,8 @@ impl BgpkitParser {
         Ok(
             BgpkitParser{
                 reader,
-                core_dump: false
+                core_dump: false,
+                filters: vec![]
             }
         )
     }
@@ -38,8 +42,21 @@ impl BgpkitParser {
     pub fn enable_core_dump(self) -> BgpkitParser {
         BgpkitParser{
             reader: self.reader,
-            core_dump: true
+            core_dump: true,
+            filters: vec![]
         }
+    }
+
+    pub fn add_filter(self, filter_type: &str, filter_value: &str) -> Result<BgpkitParser, ParserError> {
+        let mut filters = self.filters;
+        filters.push(Filter::new(filter_type, filter_value)?);
+        Ok(
+            BgpkitParser {
+                reader: self.reader,
+                core_dump: self.core_dump,
+                filters
+            }
+        )
     }
 
     /// This is used in for loop `for item in parser{}`

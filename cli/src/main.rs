@@ -1,6 +1,8 @@
 use serde_json::json;
 use std::path::PathBuf;
 use std::io::Write;
+use std::net::IpAddr;
+use ipnetwork::IpNetwork;
 
 use structopt::StructOpt;
 use bgpkit_parser::{BgpkitParser, Elementor};
@@ -14,11 +16,11 @@ struct Opts {
     file_path: PathBuf,
 
     /// Output as JSON objects
-    #[structopt(short,long)]
+    #[structopt(long)]
     json: bool,
 
     /// Pretty-print JSON output
-    #[structopt(short,long)]
+    #[structopt(long)]
     pretty: bool,
 
     /// Count BGP elems
@@ -28,6 +30,44 @@ struct Opts {
     /// Count MRT records
     #[structopt(short,long)]
     records_count: bool,
+
+    #[structopt(flatten)]
+    filters: Filters,
+}
+
+#[derive(StructOpt, Debug)]
+struct Filters {
+    /// Filter by origin AS Number
+    #[structopt(short="o", long)]
+    origin_asn: Option<u32>,
+
+    /// Filter by network prefix
+    #[structopt(short="p", long)]
+    prefix: Option<IpNetwork>,
+
+    /// Filter by peer IP address
+    #[structopt(short="j", long)]
+    peer_ip: Option<IpAddr>,
+
+    /// Filter by peer ASN
+    #[structopt(short="J", long)]
+    peer_asn: Option<u32>,
+
+    /// Filter by elem type: announce (a) or withdraw (w)
+    #[structopt(short="m", long)]
+    elem_type: Option<String>,
+
+    /// Filter by start unix timestamp inclusive
+    #[structopt(short="t", long)]
+    start_ts: Option<f64>,
+
+    /// Filter by end unix timestamp inclusive
+    #[structopt(short="T", long)]
+    end_ts: Option<f64>,
+
+    /// Filter by AS path regex string
+    #[structopt(short="a", long)]
+    as_path: Option<String>,
 }
 
 fn main() {
@@ -35,7 +75,33 @@ fn main() {
 
     env_logger::init();
 
-    let parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
+    let mut parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
+
+    if let Some(v) = opts.filters.as_path {
+        parser = parser.add_filter("as_path", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.origin_asn {
+        parser = parser.add_filter("origin_asn", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.prefix {
+        parser = parser.add_filter("prefix", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.peer_ip {
+        parser = parser.add_filter("peer_ip", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.peer_asn {
+        parser = parser.add_filter("peer_asn", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.elem_type {
+        parser = parser.add_filter("type", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.start_ts {
+        parser = parser.add_filter("start_ts", v.to_string().as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.end_ts {
+        parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
+    }
+
     match (opts.elems_count, opts.records_count) {
         (true, true) => {
             let mut elementor = Elementor::new();

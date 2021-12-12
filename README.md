@@ -1,5 +1,11 @@
 # BGPKIT Parser
+
 [![Rust](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml/badge.svg)](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml)
+[![Crates.io](https://img.shields.io/crates/v/bgpkit-parser)](https://crates.io/crates/bgpkit-parser)
+[![Docs.rs](https://docs.rs/bgpkit-parser/badge.svg)](https://docs.rs/bgpkit-parser)
+[![License](https://img.shields.io/crates/l/bgpkit-parser)](https://raw.githubusercontent.com/bgpkit/bgpkit-parser/master/LICENSE)
+![Discord](https://img.shields.io/discord/919618842613927977?label=discord&style=plastic)
+![Crates.io](https://img.shields.io/crates/d/bgpkit-parser)
 
 BGPKIT Parser aims to provides the most ergonomic MRT/BGP/BMP message parsing Rust API.
 
@@ -96,6 +102,36 @@ fn main(){
     }
 }
 ```
+
+
+### Filtering BGP Messages
+
+BGPKIT Parser also has built-in filtering mechanism. When creating a new BgpkitParser instance,
+once can also call `add_filter` function to customize the parser to only show matching messages
+when iterating through BgpElems.
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+
+/// This example shows how to parse a MRT file and filter by prefix.
+fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    log::info!("downloading updates file");
+
+    // create a parser that takes the buffered reader
+    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+        .add_filter("prefix", "211.98.251.0/24").unwrap();
+
+    log::info!("parsing updates file");
+    // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    for elem in parser {
+        log::info!("{}", &elem);
+    }
+    log::info!("done");
+}
+```
+
 ### Parsing Real-time Data Streams
 
 BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
