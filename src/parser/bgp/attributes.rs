@@ -124,7 +124,6 @@ impl AttributeParser {
             };
             let _attr = match attr{
                 Ok(v) => {
-                    debug!("attribute: {:?}", &v);
                     attributes.push(v);
                 }
                 Err(e) => {
