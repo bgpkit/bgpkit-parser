@@ -6,7 +6,7 @@ the filtering mechanism for [BgpElem].
 
 The available filters are (`filter_type` (`FilterType`) -- definition):
 - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
-- `prefix` (`Prefix(IpNetwork)`) -- network prefix
+- `prefix(_super, _sub, _super_sub)` (`Prefix(IpNetwork, PrefixMatchType)`) -- network prefix and match type
 - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
 - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
 - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
@@ -29,19 +29,21 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     log::info!("downloading updates file");
-
-    // create a parser that takes the buffered reader
     let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
         .add_filter("prefix", "211.98.251.0/24").unwrap();
 
-    log::info!("parsing updates file");
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    log::info!("parsing updates file");
     for elem in parser {
         log::info!("{}", &elem);
     }
     log::info!("done");
 }
 ```
+
+Note, by default, the prefix filtering is for the exact prefix. You can include super-prefixes or
+sub-prefixes when fitlering by using `"prefix_super"`, `"prefix_sub"`, or  `"prefix_super_sub"` as
+the filter type string.
 
 ### Note
 
@@ -61,7 +63,7 @@ use crate::ParserErrorKind::FilterError;
 ///
 /// The available filters are (`filter_type` (`FilterType`) -- definition):
 /// - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
-/// - `prefix` (`Prefix(IpNetwork)`) -- network prefix
+/// - `prefix(_super, _sub, _super_sub)` (`Prefix(IpNetwork, PrefixMatchType)`) -- network prefix and match type
 /// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
@@ -69,13 +71,20 @@ use crate::ParserErrorKind::FilterError;
 /// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
 pub enum Filter {
     OriginAsn(u32),
-    Prefix(IpNetwork),
+    Prefix(IpNetwork, PrefixMatchType),
     PeerIp(IpAddr),
     PeerAsn(u32),
     Type(ElemType),
     TsStart(f64),
     TsEnd(f64),
     AsPath(Regex),
+}
+
+pub enum PrefixMatchType {
+    Exact,
+    IncludeSuper,
+    IncludeSub,
+    IncludeSuperSub,
 }
 
 impl Filter {
@@ -91,7 +100,31 @@ impl Filter {
             }
             "prefix" => {
                 match IpNetwork::from_str(filter_value) {
-                    Ok(v) => {Ok(Filter::Prefix(v))}
+                    Ok(v) => {Ok(Filter::Prefix(v,PrefixMatchType::Exact))}
+                    Err(_) => {
+                        Err(FilterError(format!("cannot parse prefix from {}", filter_value)))
+                    }
+                }
+            }
+            "prefix_super" => {
+                match IpNetwork::from_str(filter_value) {
+                    Ok(v) => {Ok(Filter::Prefix(v,PrefixMatchType::IncludeSuper))}
+                    Err(_) => {
+                        Err(FilterError(format!("cannot parse prefix from {}", filter_value)))
+                    }
+                }
+            }
+            "prefix_sub" => {
+                match IpNetwork::from_str(filter_value) {
+                    Ok(v) => {Ok(Filter::Prefix(v,PrefixMatchType::IncludeSub))}
+                    Err(_) => {
+                        Err(FilterError(format!("cannot parse prefix from {}", filter_value)))
+                    }
+                }
+            }
+            "prefix_super_sub" => {
+                match IpNetwork::from_str(filter_value) {
+                    Ok(v) => {Ok(Filter::Prefix(v,PrefixMatchType::IncludeSuperSub))}
                     Err(_) => {
                         Err(FilterError(format!("cannot parse prefix from {}", filter_value)))
                     }
@@ -164,6 +197,59 @@ pub trait Filterable {
     fn match_filters(&self, filters: &Vec<Filter>) -> bool;
 }
 
+fn prefix_match(match_prefix: &IpNetwork, input_prefix: &IpNetwork, t: &PrefixMatchType) -> bool {
+    let exact = input_prefix.eq(match_prefix);
+    match t {
+        PrefixMatchType::Exact => {
+            exact
+        }
+        PrefixMatchType::IncludeSuper => {
+            if exact {
+                return exact
+            } else {
+                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                    // version not match
+                    false
+                } else {
+                    // input_prefix is super prefix of match_prefix
+                    match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()
+                }
+            }
+        }
+        PrefixMatchType::IncludeSub => {
+            if exact {
+                return exact
+            } else {
+                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                    // version not match
+                    false
+                } else {
+                    // input_prefix is sub prefix of match_prefix
+                    match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast()
+                }
+            }
+        }
+        PrefixMatchType::IncludeSuperSub => {
+            if exact {
+                return exact
+            } else {
+                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                    // version not match
+                    false
+                } else {
+                    // input_prefix is super prefix of match_prefix
+                    (match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()) ||
+                        (match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast())
+                }
+            }
+
+        }
+    }
+}
+
 impl Filterable for BgpElem {
     fn match_filter(&self, filter: &Filter) -> bool {
         match filter {
@@ -174,17 +260,17 @@ impl Filterable for BgpElem {
                     false
                 }
             }
-            Filter::Prefix(v) => {
-                self.prefix.to_string() == v.to_string()
+            Filter::Prefix(v, t) => {
+                prefix_match(v, &self.prefix.prefix,  t)
             }
             Filter::PeerIp(v) => {
                 self.peer_ip == *v
             }
             Filter::PeerAsn(v) => {
-                self.peer_asn == *v
+                self.peer_asn.eq(v)
             }
             Filter::Type(v) => {
-                self.elem_type == *v
+                self.elem_type.eq(v)
             }
             Filter::TsStart(v) => {
                 self.timestamp >= *v
@@ -228,9 +314,24 @@ mod tests {
 
         let mut filters = vec![];
         filters.push(Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap()));
-        filters.push(Filter::Prefix(IpNetwork::from_str("190.115.192.0/22").unwrap()));
+        filters.push(Filter::Prefix(IpNetwork::from_str("190.115.192.0/22").unwrap(), PrefixMatchType::Exact));
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 5);
+
+        let mut filters = vec![];
+        filters.push(Filter::Prefix(IpNetwork::from_str("190.115.192.0/24").unwrap(), PrefixMatchType::IncludeSuper));
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 18);
+
+        let mut filters = vec![];
+        filters.push(Filter::Prefix(IpNetwork::from_str("190.115.192.0/22").unwrap(), PrefixMatchType::IncludeSub));
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 42);
+
+        let mut filters = vec![];
+        filters.push(Filter::Prefix(IpNetwork::from_str("190.115.192.0/23").unwrap(), PrefixMatchType::IncludeSuperSub));
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 24);
 
         let mut filters = vec![];
         let regex = Regex::new(r" ?174 1916 52888$").unwrap();
@@ -251,9 +352,10 @@ mod tests {
 
         let mut filters = vec![];
         filters.push(Filter::Type(ElemType::WITHDRAW));
-        filters.push(Filter::Prefix(IpNetwork::from_str("2804:100::/32").unwrap()));
+        filters.push(Filter::Prefix(IpNetwork::from_str("2804:100::/32").unwrap(), PrefixMatchType::Exact));
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 1);
+
     }
 
     #[test]
@@ -264,5 +366,40 @@ mod tests {
             .add_filter("type", "w").unwrap();
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 39);
+    }
+
+    #[test]
+    fn test_prefix_match() {
+        // networks
+        let p1 = IpNetwork::from_str("10.1.1.0/24").unwrap();
+        let p1_exact = IpNetwork::from_str("10.1.1.0/24").unwrap();
+        let p1_super = IpNetwork::from_str("10.1.0.0/16").unwrap();
+        let p1_sub = IpNetwork::from_str("10.1.1.0/25").unwrap();
+
+        let p2 = IpNetwork::from_str("2001:0DB8:0000:000b::/64").unwrap();
+
+        // exact
+        assert_eq!(prefix_match(&p1, &p1_exact, &PrefixMatchType::Exact), true);
+        assert_eq!(prefix_match(&p1, &p1_sub, &PrefixMatchType::Exact), false);
+        assert_eq!(prefix_match(&p1, &p1_super, &PrefixMatchType::Exact), false);
+        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::Exact), false);
+
+        // include super
+        assert_eq!(prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSuper), true);
+        assert_eq!(prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSuper), false);
+        assert_eq!(prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSuper), true);
+        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuper), false);
+
+        // include sub
+        assert_eq!(prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSub), true);
+        assert_eq!(prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSub), true);
+        assert_eq!(prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSub), false);
+        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::IncludeSub), false);
+
+        // include both
+        assert_eq!(prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSuperSub), true);
+        assert_eq!(prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSuperSub), true);
+        assert_eq!(prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSuperSub), true);
+        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuperSub), false);
     }
 }

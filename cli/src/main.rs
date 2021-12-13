@@ -45,6 +45,14 @@ struct Filters {
     #[structopt(short="p", long)]
     prefix: Option<IpNetwork>,
 
+    /// Include super-prefix when filtering
+    #[structopt(short="s", long)]
+    include_super: bool,
+
+    /// Include sub-prefix when filtering
+    #[structopt(short="S", long)]
+    include_sub: bool,
+
     /// Filter by peer IP address
     #[structopt(short="j", long)]
     peer_ip: Option<IpAddr>,
@@ -84,7 +92,13 @@ fn main() {
         parser = parser.add_filter("origin_asn", v.to_string().as_str()).unwrap();
     }
     if let Some(v) = opts.filters.prefix {
-        parser = parser.add_filter("prefix", v.to_string().as_str()).unwrap();
+        let filter_type = match (opts.filters.include_super, opts.filters.include_sub) {
+            (false, false) => "prefix",
+            (true, false) => "prefix_super",
+            (false, true) => "prefix_sub",
+            (true, true) => "prefix_super_sub",
+        };
+        parser = parser.add_filter(filter_type, v.to_string().as_str()).unwrap();
     }
     if let Some(v) = opts.filters.peer_ip {
         parser = parser.add_filter("peer_ip", v.to_string().as_str()).unwrap();
