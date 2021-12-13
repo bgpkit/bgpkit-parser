@@ -411,7 +411,19 @@ impl AttributeParser {
             let ec_type_u8 = input.read_8b()?;
             let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8){
                 Some(t) => t,
-                None => return Err(crate::error::ParserErrorKind::ParseError(format!("Failed to parse extended community type: {}", ec_type_u8)))
+                None => {
+                    let mut buffer: [u8;8] = [0;8];
+                    let mut i = 0;
+                    buffer[i] = ec_type_u8;
+                    for b in input.read_n_bytes(7)? {
+                        i += 1;
+                        buffer[i] = b;
+                    }
+                    let ec = ExtendedCommunity::Raw(buffer);
+                    debug!("unsupported community type, parse as raw bytes: {}", &ec);
+                    communities.push(ec);
+                    continue
+                }
             };
             let ec: ExtendedCommunity = match ec_type {
                 ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {
