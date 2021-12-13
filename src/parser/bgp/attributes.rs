@@ -72,11 +72,17 @@ impl AttributeParser {
                 Some(t) => t,
                 None => {
                     drop_n!(input, length);
-                    return Err(crate::error::ParserErrorKind::UnknownAttr(format!("Failed to parse attribute type: {}", attr_type)))
+                    return match attr_type {
+                        11 | 12 | 13 | 19 | 20 | 21 | 28 | 30 | 31 | 129 | 241..=243 => {
+                            Err(crate::error::ParserErrorKind::UnknownAttr(format!("deprecated attribute type: {}", attr_type)))
+                        }
+                        _ => {
+                            Err(crate::error::ParserErrorKind::UnknownAttr(format!("unknown attribute type: {}", attr_type)))
+                        }
+                    }
                 }
             };
 
-            // if input.limit()==0{break}
             if input.limit()<length {
                 warn!("not enough bytes: input bytes left - {}, want to read - {}; skipping", input.limit(), length);
                 break
@@ -113,15 +119,11 @@ impl AttributeParser {
                 _ => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
-                    Err(crate::error::ParserErrorKind::Unsupported(format!("Unsupported attribute type: {:?}", attr_type)))
-                    // dbg!(attr_type, length, flag);
-                    // dbg!(length, buf);
-                    // break
+                    Err(crate::error::ParserErrorKind::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
             };
             let _attr = match attr{
                 Ok(v) => {
-                    debug!("attribute: {:?}", &v);
                     attributes.push(v);
                 }
                 Err(e) => {
@@ -408,7 +410,19 @@ impl AttributeParser {
             let ec_type_u8 = input.read_8b()?;
             let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8){
                 Some(t) => t,
-                None => return Err(crate::error::ParserErrorKind::ParseError(format!("Failed to parse extended community type: {}", ec_type_u8)))
+                None => {
+                    let mut buffer: [u8;8] = [0;8];
+                    let mut i = 0;
+                    buffer[i] = ec_type_u8;
+                    for b in input.read_n_bytes(7)? {
+                        i += 1;
+                        buffer[i] = b;
+                    }
+                    let ec = ExtendedCommunity::Raw(buffer);
+                    debug!("unsupported community type, parse as raw bytes: {}", &ec);
+                    communities.push(ec);
+                    continue
+                }
             };
             let ec: ExtendedCommunity = match ec_type {
                 ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {

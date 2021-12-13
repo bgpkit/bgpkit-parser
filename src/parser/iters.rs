@@ -58,11 +58,11 @@ impl Iterator for RecordIterator {
                 match e.error {
                     ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
                     | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::Deprecated(e) => {
-                        warn!("Parsing error: {}", e);
+                        warn!("parsing error: {}", e);
                         self.next()
                     }
                     ParserErrorKind::ParseError(err_str) => {
-                        warn!("Parsing error: {}", err_str);
+                        warn!("parsing error: {}", err_str);
                         if self.parser.core_dump {
                             if let Some(bytes) = e.bytes {
                                 std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
