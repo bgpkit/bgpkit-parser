@@ -12,7 +12,7 @@ use num_traits::FromPrimitive;
 use std::net::IpAddr;
 use std::io::{Read, Take};
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
-use log::warn;
+use log::debug;
 
 use crate::error::ParserErrorKind;
 
@@ -228,7 +228,7 @@ pub(crate) fn parse_nlri_list(
     while new_input.limit() > 0 {
         if !is_add_path && new_input.get_ref()[0]==0 {
             // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
-            warn!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
+            debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
             is_add_path = true;
             guessed = true;
         }
