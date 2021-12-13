@@ -83,7 +83,6 @@ impl AttributeParser {
                 }
             };
 
-            // if input.limit()==0{break}
             if input.limit()<length {
                 warn!("not enough bytes: input bytes left - {}, want to read - {}; skipping", input.limit(), length);
                 break
@@ -120,10 +119,7 @@ impl AttributeParser {
                 _ => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
-                    Err(crate::error::ParserErrorKind::Unsupported(format!("Unsupported attribute type: {:?}", attr_type)))
-                    // dbg!(attr_type, length, flag);
-                    // dbg!(length, buf);
-                    // break
+                    Err(crate::error::ParserErrorKind::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
             };
             let _attr = match attr{
