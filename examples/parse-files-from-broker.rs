@@ -23,7 +23,7 @@ fn main() {
         // iterating through the parser. the iterator returns `BgpElem` one at a time.
         let elems = parser.into_elem_iter().map(|elem|{
             if let Some(origins) = &elem.origin_asns {
-                if origins.contains(&13335) {
+                if origins.contains(&13335.into()) {
                     Some(elem)
                 } else {
                     None

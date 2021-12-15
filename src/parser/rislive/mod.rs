@@ -47,7 +47,7 @@ use std::net::IpAddr;
 use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
 use bgp_models::bgp::MetaCommunity;
-use bgp_models::network::NetworkPrefix;
+use bgp_models::network::{Asn, NetworkPrefix};
 use ipnetwork::IpNetwork;
 use crate::parser::ElemType;
 
@@ -97,7 +97,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     let mut elems: Vec<BgpElem> = vec![];
 
                     let peer_ip = unwrap_or_return!(ris_msg.peer.parse::<IpAddr>(), msg_string);
-                    let peer_asn = unwrap_or_return!(ris_msg.peer_asn.parse::<u32>(), msg_string);
+                    let peer_asn: Asn = unwrap_or_return!(ris_msg.peer_asn.parse::<i32>(), msg_string).into();
 
                     // parse path
                     let as_path = match path{
@@ -112,7 +112,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             let mut comms: Vec<MetaCommunity> = vec![];
                             for c in cs {
                                 comms.push(
-                                    MetaCommunity::Community(Community::Custom(c.0,c.1)));
+                                    MetaCommunity::Community(Community::Custom((c.0 as i32).into(),c.1)));
                             }
                             Some(comms)
                         }
@@ -147,7 +147,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             if parts.len()!=2 {
                                 return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str))
                             }
-                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>(), msg_string);
+                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<i32>(), msg_string).into();
                             let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>(), msg_string);
                             (Some(asn), Some(ip))
                         }

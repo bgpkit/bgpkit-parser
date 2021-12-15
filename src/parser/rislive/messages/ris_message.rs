@@ -1,5 +1,6 @@
 use bgp_models::bgp::attributes::AsPath;
 use bgp_models::bgp::attributes::AsPathSegment::{AsSequence, AsSet};
+use bgp_models::network::Asn;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
@@ -61,14 +62,14 @@ pub struct Announcement {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PathSeg {
-    Asn(u32),
-    AsSet(Vec<u32>)
+    Asn(Asn),
+    AsSet(Vec<Asn>)
 }
 
 pub fn path_to_as_path(path: Vec<PathSeg>) -> AsPath {
     let mut as_path = AsPath::new();
     let mut sequence = vec![];
-    let mut set: Option<Vec<u32>> = None;
+    let mut set: Option<Vec<Asn>> = None;
     for node in path {
         match node {
             PathSeg::Asn(asn) => {sequence.push(asn.clone())}

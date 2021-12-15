@@ -46,7 +46,7 @@ mod tests {
             raw: None,
             host: "host1".to_string(),
             msg: Some(RisMessageEnum::UPDATE {
-                path: Some(vec![PathSeg::Asn(1), PathSeg::AsSet(vec![1,2,3])]),
+                path: Some(vec![PathSeg::Asn(1.into()), PathSeg::AsSet(vec![1,2,3].into_iter().map(|v|{v.into()}).collect())]),
                 community: None,
                 origin: None,
                 med: None,
