@@ -95,7 +95,7 @@ impl AttributeParser {
                 AttrType::NEXT_HOP => self.parse_next_hop(&mut attr_input, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => self.parse_med(&mut attr_input),
                 AttrType::LOCAL_PREFERENCE => self.parse_local_pref(&mut attr_input),
-                AttrType::ATOMIC_AGGREGATE => Ok(Attribute::AtomicAggregate(AtomicAggregate::AG)),
+                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG)),
                 AttrType::AGGREGATOR => self.parse_aggregator(&mut attr_input, asn_len, &afi),
                 AttrType::ORIGINATOR_ID => self.parse_originator_id(&mut attr_input, &afi),
                 AttrType::CLUSTER_LIST => self.parse_clusters(&mut attr_input, &afi),
@@ -114,7 +114,7 @@ impl AttributeParser {
                 AttrType::DEVELOPMENT => {
                     let mut buf=Vec::with_capacity(length as usize);
                     attr_input.read_to_end(&mut buf)?;
-                    Ok(Attribute::Development(buf))
+                    Ok(AttributeValue::Development(buf))
                 },
                 _ => {
                     let mut buf=Vec::with_capacity(length as usize);
@@ -122,9 +122,9 @@ impl AttributeParser {
                     Err(crate::error::ParserErrorKind::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
             };
-            let _attr = match attr{
-                Ok(v) => {
-                    attributes.push(v);
+            match attr{
+                Ok(value) => {
+                    attributes.push(Attribute{value, flag });
                 }
                 Err(e) => {
                     if partial {
@@ -145,23 +145,23 @@ impl AttributeParser {
         Ok(attributes)
     }
 
-    fn parse_origin<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_origin<T: Read>(&self, input: &mut Take<T>) -> Result<AttributeValue, ParserErrorKind> {
         let origin = input.read_u8()?;
         match Origin::from_u8(origin) {
-            Some(v) => Ok(Attribute::Origin(v)),
+            Some(v) => Ok(AttributeValue::Origin(v)),
             None => {
                 return Err(crate::error::ParserErrorKind::UnknownAttr(format!("Failed to parse attribute type: origin")))
             }
         }
     }
 
-    fn parse_as_path<T: Read>(&self, input: &mut Take<T>, asn_len: &AsnLength) -> Result<Attribute, ParserErrorKind> {
+    fn parse_as_path<T: Read>(&self, input: &mut Take<T>, asn_len: &AsnLength) -> Result<AttributeValue, ParserErrorKind> {
         let mut output = AsPath::new();
         while input.limit() > 0 {
             let segment = self.parse_as_segment(input, asn_len)?;
             output.add_segment(segment);
         }
-        Ok(Attribute::AsPath(output))
+        Ok(AttributeValue::AsPath(output))
     }
 
     fn parse_as_segment<T: Read>(&self, input: &mut Take<T>, asn_len: &AsnLength) -> Result<AsPathSegment, ParserErrorKind> {
@@ -180,40 +180,40 @@ impl AttributeParser {
         }
     }
 
-    fn parse_next_hop<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_next_hop<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         if let Some(afi) = afi {
             if *afi==Afi::Ipv6{
                 print!("break here");
             }
-            Ok(input.read_address(afi).map(Attribute::NextHop)?)
+            Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
         } else {
-            Ok(input.read_address(&Afi::Ipv4).map(Attribute::NextHop)?)
+            Ok(input.read_address(&Afi::Ipv4).map(AttributeValue::NextHop)?)
         }
     }
 
-    fn parse_med<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_med<T: Read>(&self, input: &mut Take<T>) -> Result<AttributeValue, ParserErrorKind> {
         Ok(input
             .read_u32::<BigEndian>()
-            .map(Attribute::MultiExitDiscriminator)?)
+            .map(AttributeValue::MultiExitDiscriminator)?)
     }
 
-    fn parse_local_pref<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_local_pref<T: Read>(&self, input: &mut Take<T>) -> Result<AttributeValue, ParserErrorKind> {
         Ok(input
             .read_u32::<BigEndian>()
-            .map(Attribute::LocalPreference)?)
+            .map(AttributeValue::LocalPreference)?)
     }
 
-    fn parse_aggregator<T: Read>(&self, input: &mut Take<T>, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_aggregator<T: Read>(&self, input: &mut Take<T>, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         let asn = input.read_asn(asn_len)?;
         let afi = match afi {
             None => { &Afi::Ipv4 }
             Some(a) => {a}
         };
         let addr = input.read_address(afi)?;
-        Ok(Attribute::Aggregator(asn, addr))
+        Ok(AttributeValue::Aggregator(asn, addr))
     }
 
-    fn parse_regular_communities<T: Read>(&self, input: &mut Take<T>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_regular_communities<T: Read>(&self, input: &mut Take<T>) -> Result<AttributeValue, ParserErrorKind> {
         const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
         const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
         const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
@@ -233,29 +233,29 @@ impl AttributeParser {
                 }
             )
         }
-        Ok(Attribute::Communities(communities))
+        Ok(AttributeValue::Communities(communities))
     }
 
-    fn parse_originator_id<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_originator_id<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         let afi = match afi {
             None => { &Afi::Ipv4 }
             Some(a) => {a}
         };
         let addr = input.read_address(afi)?;
-        Ok(Attribute::OriginatorId(addr))
+        Ok(AttributeValue::OriginatorId(addr))
     }
 
     #[allow(unused)]
-    fn parse_cluster_id<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_cluster_id<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         let afi = match afi {
             None => { &Afi::Ipv4 }
             Some(a) => {a}
         };
         let addr = input.read_address(afi)?;
-        Ok(Attribute::Clusters(vec![addr]))
+        Ok(AttributeValue::Clusters(vec![addr]))
     }
 
-    fn parse_clusters<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<Attribute, ParserErrorKind> {
+    fn parse_clusters<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         // FIXME: in https://tools.ietf.org/html/rfc4456, the CLUSTER_LIST is a set of CLUSTER_ID each represented by a 4-byte number
         let mut clusters = Vec::new();
         while input.limit() > 0 {
@@ -266,7 +266,7 @@ impl AttributeParser {
             let addr = input.read_address(afi)?;
             clusters.push(addr);
         }
-        Ok(Attribute::Clusters(clusters))
+        Ok(AttributeValue::Clusters(clusters))
     }
 
     ///
@@ -289,7 +289,7 @@ impl AttributeParser {
                                    afi: &Option<Afi>, safi: &Option<Safi>,
                                    prefixes: &Option<Vec<NetworkPrefix>>,
                                    reachable: bool,
-    ) -> Result<Attribute, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserErrorKind> {
         let mut buf=Vec::with_capacity(input.limit() as usize);
         input.read_to_end(&mut buf)?;
         let first_byte_zero = buf[0]==0;
@@ -358,8 +358,8 @@ impl AttributeParser {
 
         // Reserved field, should ignore
         match reachable {
-            true => Ok(Attribute::MpReachNlri(Nlri {afi,safi, next_hop, prefixes})),
-            false => Ok(Attribute::MpUnreachNlri(Nlri {afi,safi, next_hop, prefixes}))
+            true => Ok(AttributeValue::MpReachNlri(Nlri {afi,safi, next_hop, prefixes})),
+            false => Ok(AttributeValue::MpUnreachNlri(Nlri {afi,safi, next_hop, prefixes}))
         }
     }
 
@@ -388,7 +388,7 @@ impl AttributeParser {
     fn parse_large_communities<T: Read>(
         &self,
         input: &mut Take<T>,
-    ) -> Result<Attribute, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserErrorKind> {
         let mut communities = Vec::new();
         while input.limit() > 0 {
             let global_administrator = input.read_u32::<BigEndian>()?;
@@ -398,13 +398,13 @@ impl AttributeParser {
             ];
             communities.push(LargeCommunity::new(global_administrator, local_data));
         }
-        Ok(Attribute::LargeCommunities(communities))
+        Ok(AttributeValue::LargeCommunities(communities))
     }
 
     fn parse_extended_community<T: Read>(
         &self,
         input: &mut Take<T>,
-    ) -> Result<Attribute, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserErrorKind> {
         let mut communities = Vec::new();
         while input.limit() > 0 {
             let ec_type_u8 = input.read_8b()?;
@@ -514,13 +514,13 @@ impl AttributeParser {
 
             communities.push(ec);
         }
-        Ok(Attribute::ExtendedCommunities(communities))
+        Ok(AttributeValue::ExtendedCommunities(communities))
     }
 
     fn parse_ipv6_extended_community<T: Read>(
         &self,
         input: &mut Take<T>,
-    ) -> Result<Attribute, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserErrorKind> {
         let mut communities = Vec::new();
         while input.limit() > 0 {
             let ec_type_u8 = input.read_8b()?;
@@ -537,7 +537,7 @@ impl AttributeParser {
             );
             communities.push(ec);
         }
-        Ok(Attribute::ExtendedCommunities(communities))
+        Ok(AttributeValue::ExtendedCommunities(communities))
     }
 }
 

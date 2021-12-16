@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::net::IpAddr;
 use std::str::FromStr;
 use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};
-use bgp_models::network::{Afi, Asn, AsnLength};
+use bgp_models::network::{Afi, AsnLength};
 use serde_json::Value;
 use crate::{BgpElem, Elementor};
 use crate::parser::bgp::parse_bgp_message;

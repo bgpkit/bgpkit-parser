@@ -56,21 +56,21 @@ fn get_relevant_attributes(
     let mut communities_vec: Vec<MetaCommunity> = vec![];
 
     for attr in attributes {
-        match attr {
-            Attribute::Origin(v) => {origin = Some(v)}
-            Attribute::AsPath(v) => {as_path = Some(v)}
-            Attribute::As4Path(v) => {as4_path = Some(v)}
-            Attribute::NextHop(v) => {next_hop = Some(v)}
-            Attribute::MultiExitDiscriminator(v) => {med = Some(v)}
-            Attribute::LocalPreference(v) => {local_pref = Some(v)}
-            Attribute::AtomicAggregate(v) => {atomic = Some(v)}
-            Attribute::Communities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::Community(x)).collect::<Vec<MetaCommunity>>())}
-            Attribute::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::ExtendedCommunity(x)).collect::<Vec<MetaCommunity>>())}
-            Attribute::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::LargeCommunity(x)).collect::<Vec<MetaCommunity>>())}
-            Attribute::Aggregator(v, v2) => {aggregator = Some((v,v2))}
-            Attribute::MpReachNlri(nlri) => {announced = Some(nlri)}
-            Attribute::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
-            Attribute::OriginatorId(_) | Attribute::Clusters(_)| Attribute::Development(_) => {}
+        match attr.value {
+            AttributeValue::Origin(v) => {origin = Some(v)}
+            AttributeValue::AsPath(v) => {as_path = Some(v)}
+            AttributeValue::As4Path(v) => {as4_path = Some(v)}
+            AttributeValue::NextHop(v) => {next_hop = Some(v)}
+            AttributeValue::MultiExitDiscriminator(v) => {med = Some(v)}
+            AttributeValue::LocalPreference(v) => {local_pref = Some(v)}
+            AttributeValue::AtomicAggregate(v) => {atomic = Some(v)}
+            AttributeValue::Communities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::Community(x)).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::ExtendedCommunity(x)).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::LargeCommunity(x)).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::Aggregator(v, v2) => {aggregator = Some((v,v2))}
+            AttributeValue::MpReachNlri(nlri) => {announced = Some(nlri)}
+            AttributeValue::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
+            AttributeValue::OriginatorId(_) | AttributeValue::Clusters(_)| AttributeValue::Development(_) => {}
         };
     }
 
