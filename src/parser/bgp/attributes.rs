@@ -182,9 +182,6 @@ impl AttributeParser {
 
     fn parse_next_hop<T: Read>(&self, input: &mut Take<T>, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
         if let Some(afi) = afi {
-            if *afi==Afi::Ipv6{
-                print!("break here");
-            }
             Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
         } else {
             Ok(input.read_address(&Afi::Ipv4).map(AttributeValue::NextHop)?)

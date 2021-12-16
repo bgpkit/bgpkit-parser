@@ -62,8 +62,8 @@ pub struct Announcement {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PathSeg {
-    Asn(Asn),
-    AsSet(Vec<Asn>)
+    Asn(u32),
+    AsSet(Vec<u32>)
 }
 
 pub fn path_to_as_path(path: Vec<PathSeg>) -> AsPath {
@@ -72,8 +72,10 @@ pub fn path_to_as_path(path: Vec<PathSeg>) -> AsPath {
     let mut set: Option<Vec<Asn>> = None;
     for node in path {
         match node {
-            PathSeg::Asn(asn) => {sequence.push(asn.clone())}
-            PathSeg::AsSet(s) => {set = Some(s.clone())}
+            PathSeg::Asn(asn) => {sequence.push(asn.into())}
+            PathSeg::AsSet(s) => {set = Some(
+                s.into_iter().map(|i| i.into()).collect::<Vec<Asn>>()
+            )}
         }
     }
     as_path.segments.push(AsSequence(sequence));
