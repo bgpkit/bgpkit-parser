@@ -2,7 +2,7 @@
 Provides parser iterator implementation.
 */
 use log::{error, warn};
-use bgp_models::mrt::MrtRecord;
+use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::{BgpElem, Elementor};
 use crate::error::ParserErrorKind;
 use crate::parser::BgpkitParser;
@@ -58,6 +58,15 @@ impl Iterator for RecordIterator {
                     if filters.is_empty() {
                         Some(v)
                     } else {
+                        match &v.message {
+                            MrtMessage::TableDumpV2Message(m) => {
+                                match &m {
+                                    TableDumpV2Message::PeerIndexTable(_) => {return Some(v)}
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
                         let elems =  self.elementor.record_to_elems(v.clone());
                         if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
                             Some(v)
