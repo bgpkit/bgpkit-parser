@@ -144,6 +144,7 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
 
     Ok(
         RibAfiEntries{
+            rib_type,
             sequence_number,
             prefix,
             rib_entries

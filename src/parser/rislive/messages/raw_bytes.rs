@@ -1,8 +1,8 @@
 use std::io::Cursor;
 use std::net::IpAddr;
 use std::str::FromStr;
-use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
-use bgp_models::network::{Afi, Asn, AsnLength};
+use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};
+use bgp_models::network::{Afi, AsnLength};
 use serde_json::Value;
 use crate::{BgpElem, Elementor};
 use crate::parser::bgp::parse_bgp_message;
@@ -36,7 +36,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let peer_asn_str =data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
 
-    let peer_asn = peer_asn_str.parse::<u32>().unwrap() as Asn;
+    let peer_asn = peer_asn_str.parse::<i32>().unwrap().into();
 
     let bgp_msg = match parse_bgp_message(&mut cursor, false, &afi, &AsnLength::Bits32, 40960) {
         Ok(m) => {m}
@@ -61,8 +61,9 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let record = MrtRecord{ common_header: header, message: MrtMessage::Bgp4Mp(
         bgp_models::mrt::bgp4mp::Bgp4Mp::Bgp4MpMessage(bgp_models::mrt::bgp4mp::Bgp4MpMessage{
+            msg_type: Bgp4MpType::Bgp4MpMessageAs4,
             peer_asn,
-            local_asn: 0,
+            local_asn: 0.into(),
             interface_index: 0,
             afi,
             peer_ip,

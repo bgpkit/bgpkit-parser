@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.7.0-alpha.1"
+version = "0.7.0-alpha.2"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 readme = "README.md"
@@ -26,8 +26,9 @@ ipnetwork = {version="0.18", default-features=false}
 enum-primitive-derive = "0.2"
 num-traits = "0.1"
 chrono = "0.4"
-bgp-models = "0.6.3"
 regex = "1"
+
+bgp-models = "0.7.0-alpha.1"
 
 # logging
 log="0.4"

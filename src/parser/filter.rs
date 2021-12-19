@@ -254,8 +254,9 @@ impl Filterable for BgpElem {
     fn match_filter(&self, filter: &Filter) -> bool {
         match filter {
             Filter::OriginAsn(v) => {
+                let asn: Asn = (*v).into();
                 if let Some(origins) = &self.origin_asns {
-                    origins.contains(v)
+                    origins.contains(&asn)
                 } else {
                     false
                 }

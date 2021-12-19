@@ -14,22 +14,22 @@ pub fn parse_bgp4mp<T: Read>(sub_type: u16, input: &mut T, total_size: usize) ->
     };
     let msg: Bgp4Mp = match bgp4mp_type {
         Bgp4MpType::Bgp4MpStateChange => {
-            Bgp4Mp::Bgp4MpStateChange(parse_bgp4mp_state_change(input, AsnLength::Bits16)?)
+            Bgp4Mp::Bgp4MpStateChange(parse_bgp4mp_state_change(input, AsnLength::Bits16, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpStateChangeAs4 => {
-            Bgp4Mp::Bgp4MpStateChangeAs4(parse_bgp4mp_state_change(input, AsnLength::Bits32)?)
+            Bgp4Mp::Bgp4MpStateChangeAs4(parse_bgp4mp_state_change(input, AsnLength::Bits32, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessage|Bgp4MpType::Bgp4MpMessageLocal => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits16, total_size)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits16, total_size, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAs4 | Bgp4MpType::Bgp4MpMessageAs4Local => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits32, total_size)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits32, total_size, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAddpath| Bgp4MpType::Bgp4MpMessageLocalAddpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits16, total_size)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits16, total_size, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAs4Addpath | Bgp4MpType::Bgp4MpMessageLocalAs4Addpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits32, total_size)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits32, total_size, &bgp4mp_type)?)
         }
     };
 
@@ -62,7 +62,7 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
    |                    BGP Message... (variable)
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: AsnLength, total_size: usize) -> Result<Bgp4MpMessage, ParserErrorKind> {
+pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: AsnLength, total_size: usize, msg_type: &Bgp4MpType) -> Result<Bgp4MpMessage, ParserErrorKind> {
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;
@@ -74,6 +74,7 @@ pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: Asn
     let bgp_message: BgpMessage = parse_bgp_message(input,add_path, &afi, &asn_len, should_read)?;
 
     Ok(Bgp4MpMessage{
+        msg_type: msg_type.clone(),
         peer_asn,
         local_asn,
         interface_index,
@@ -115,7 +116,7 @@ pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: Asn
    |            Old State          |          New State            |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength) -> Result<Bgp4MpStateChange, ParserErrorKind> {
+pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength, msg_type: &Bgp4MpType) -> Result<Bgp4MpStateChange, ParserErrorKind> {
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;
@@ -132,6 +133,7 @@ pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength) -> 
     };
     Ok(
         Bgp4MpStateChange{
+            msg_type: msg_type.clone(),
             peer_asn,
             local_asn,
             interface_index,

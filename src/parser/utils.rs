@@ -168,8 +168,24 @@ pub trait ReadUtils: io::Read {
 
     fn read_asn(&mut self, as_length: &AsnLength) -> io::Result<Asn> {
         match as_length {
-            AsnLength::Bits16 => Ok(self.read_u16::<BigEndian>()? as u32),
-            AsnLength::Bits32 => self.read_u32::<BigEndian>(),
+            AsnLength::Bits16 => {
+                let asn = self.read_u16::<BigEndian>()? as i32;
+                Ok(
+                    Asn{
+                        asn,
+                        len: AsnLength::Bits16
+                    }
+                )
+            },
+            AsnLength::Bits32 => {
+                let asn = self.read_u32::<BigEndian>()? as i32;
+                Ok(
+                    Asn{
+                        asn,
+                        len: AsnLength::Bits32
+                    }
+                )
+            },
         }
     }
 
@@ -178,12 +194,12 @@ pub trait ReadUtils: io::Read {
         match as_length {
             AsnLength::Bits16 => {
                 for _ in 0..count {
-                    path.push(self.read_u16::<BigEndian>()? as u32);
+                    path.push(Asn{asn: self.read_u16::<BigEndian>()? as i32, len: *as_length});
                 }
             }
             AsnLength::Bits32 => {
                 for _ in 0..count {
-                    path.push(self.read_u32::<BigEndian>()?);
+                    path.push(Asn{asn: self.read_u32::<BigEndian>()? as i32, len: *as_length});
                 }
             }
         };
