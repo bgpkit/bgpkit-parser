@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.7.0-alpha.2"
+version = "0.7.0-alpha.3"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 readme = "README.md"
@@ -28,7 +28,7 @@ num-traits = "0.1"
 chrono = "0.4"
 regex = "1"
 
-bgp-models = "0.7.0-alpha.1"
+bgp-models = "0.7.0-alpha.2"
 
 # logging
 log="0.4"
