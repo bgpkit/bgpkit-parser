@@ -34,12 +34,13 @@ MrtRecord Iterator
 pub struct RecordIterator {
     pub parser: BgpkitParser,
     pub count: u64,
+    elementor: Elementor,
 }
 
 impl RecordIterator {
     fn new(parser: BgpkitParser) -> RecordIterator {
         RecordIterator {
-            parser , count: 0,
+            parser , count: 0, elementor: Elementor::new()
         }
     }
 }
@@ -49,49 +50,61 @@ impl Iterator for RecordIterator {
 
     fn next(&mut self) -> Option<MrtRecord> {
         self.count += 1;
-        match self.parser.next() {
-            Ok(v) => {
-                // if None, the reaches EoF.
-                Some(v)
-            },
-            Err(e) => {
-                match e.error {
-                    ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
-                    | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::Deprecated(e) => {
-                        warn!("parsing error: {}", e);
-                        self.next()
+        loop {
+            return match self.parser.next() {
+                Ok(v) => {
+                    // if None, the reaches EoF.
+                    let filters = &self.parser.filters;
+                    if filters.is_empty() {
+                        Some(v)
+                    } else {
+                        let elems =  self.elementor.record_to_elems(v.clone());
+                        if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
+                            Some(v)
+                        } else {
+                            continue
+                        }
                     }
-                    ParserErrorKind::ParseError(err_str) => {
-                        warn!("parsing error: {}", err_str);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                },
+                Err(e) => {
+                    match e.error {
+                        ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
+                        | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::Deprecated(e) => {
+                            warn!("parsing error: {}", e);
+                            continue
+                        }
+                        ParserErrorKind::ParseError(err_str) => {
+                            warn!("parsing error: {}", err_str);
+                            if self.parser.core_dump {
+                                if let Some(bytes) = e.bytes {
+                                    std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                }
+                                None
+                            } else {
+                                continue
+                            }
+                        }
+                        ParserErrorKind::EofExpected =>{
+                            // normal end of file
+                            None
+                        }
+                        ParserErrorKind::IoError(err)| ParserErrorKind::EofError(err) => {
+                            // when reaching IO error, stop iterating
+                            error!("{:?}", err);
+                            if self.parser.core_dump {
+                                if let Some(bytes) = e.bytes {
+                                    std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                }
                             }
                             None
-                        } else {
-                            self.next()
+                        }
+                        ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_)=> {
+                            // this should not happen at this stage
+                            None
                         }
                     }
-                    ParserErrorKind::EofExpected =>{
-                        // normal end of file
-                        None
-                    }
-                    ParserErrorKind::IoError(err)| ParserErrorKind::EofError(err) => {
-                        // when reaching IO error, stop iterating
-                        error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
-                            }
-                        }
-                        None
-                    }
-                    ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_)=> {
-                        // this should not happen at this stage
-                        None
-                    }
-                }
-            },
+                },
+            }
         }
     }
 }
