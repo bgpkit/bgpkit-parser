@@ -61,7 +61,10 @@ impl Iterator for RecordIterator {
                         match &v.message {
                             MrtMessage::TableDumpV2Message(m) => {
                                 match &m {
-                                    TableDumpV2Message::PeerIndexTable(_) => {return Some(v)}
+                                    TableDumpV2Message::PeerIndexTable(_) => {
+                                        let _ = self.elementor.record_to_elems(v.clone());
+                                        return Some(v)
+                                    }
                                     _ => {}
                                 }
                             }
