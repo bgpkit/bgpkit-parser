@@ -104,14 +104,57 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, 
     let asn = Asn{asn: input.read_16b()? as i32, len: AsnLength::Bits16};
     let hold_time = input.read_16b()?;
     let sender_ip = input.read_ipv4_address()?;
-    let opt_parm_len = input.read_8b()?;
-    let mut opt_bytes = input.take(opt_parm_len as u64);
+    let opt_params_len = input.read_8b()?;
+    let mut opt_bytes = input.take(opt_params_len as u64);
+    let mut extended_length = false;
+    let mut first= true;
+
+    let mut params: Vec<OptParam> = vec![];
     while opt_bytes.limit()>0 {
-        let _parm_type = opt_bytes.read_8b()?;
+        let param_type = opt_bytes.read_8b()?;
+        if first {
+            // first parameter, check if it is extended length message
+            if opt_params_len == 255 && param_type == 255 {
+                extended_length = true;
+                break
+            } else {
+                first = false;
+            }
+        }
+        // reaching here means all the remain params are regular non-extended-length parameters
+
         let parm_length = opt_bytes.read_8b()?;
         // https://tools.ietf.org/html/rfc3392
-        // TODO: process capability
-        drop_n!(opt_bytes, parm_length);
+        // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
+
+        let param_value = match param_type{
+            2 => {
+                // capacity
+                let code = opt_bytes.read_8b()?;
+                let len = opt_bytes.read_8b()?;
+                let value = opt_bytes.read_n_bytes(len as u64)?;
+
+                ParamValue::Capability(
+                    Capability{
+                        code,
+                        len,
+                        value
+                    }
+                )
+            }
+            _ => {
+                // unsupported param, read as raw bytes
+                let bytes = opt_bytes.read_n_bytes(parm_length as u64)?;
+                ParamValue::Raw(bytes)
+            }
+        };
+        params.push(
+            OptParam{
+                param_type,
+                param_len: parm_length as u16,
+                param_value
+            }
+        );
     }
 
     Ok(
@@ -120,7 +163,8 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, 
             asn,
             hold_time,
             sender_ip,
-            opt_params: vec!()
+            extended_length,
+            opt_params: params
         })
 }
 
