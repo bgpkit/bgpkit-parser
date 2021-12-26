@@ -1,9 +1,8 @@
-use std::io::Read;
 use std::net::IpAddr;
 use bgp_models::network::{Afi, AsnLength};
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
-use crate::parser::{DataBytes, ReadUtils};
+use crate::parser::DataBytes;
 
 /// BMP message type enum.
 ///

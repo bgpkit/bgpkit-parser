@@ -1,10 +1,8 @@
 /*!
 Provides parsing for BMP and OpenBMP binary-formatted messages.
 */
-use std::io::Cursor;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;
-use std::io::Read;
 pub use crate::parser::bmp::openbmp::parse_openbmp_header;
 use crate::parser::DataBytes;
 
@@ -123,7 +121,6 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
-    use std::io::Cursor;
     use crate::parser::bmp::openbmp::parse_openbmp_header;
     use super::*;
 

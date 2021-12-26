@@ -10,7 +10,6 @@ use std::convert::TryInto;
 
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
-use std::io::Read;
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
 use log::debug;
 
@@ -329,13 +328,6 @@ impl  DataBytes <'_>{
 // Allow reading IPs from Reads
 pub trait ReadUtils: io::Read {
     #[inline]
-    fn read_64b(&mut self) -> io::Result<u64> {
-        let mut buf = [0; 8];
-        self.read_exact(&mut buf)?;
-        Ok(u64::from_be_bytes(buf))
-    }
-
-    #[inline]
     fn read_32b(&mut self) -> io::Result<u32> {
         let mut buf = [0; 4];
         self.read_exact(&mut buf)?;
@@ -348,61 +340,6 @@ pub trait ReadUtils: io::Read {
         self.read_exact(&mut buf)?;
         Ok(u16::from_be_bytes(buf))
     }
-
-    #[inline]
-    fn read_8b(&mut self) -> io::Result<u8> {
-        let mut buf = [0; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
-    }
-
-    fn read_n_bytes(&mut self, n_bytes: u64) -> io::Result<Vec<u8>>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
-
-    fn read_n_bytes_to_string(&mut self, n_bytes: u64) -> io::Result<String>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
-        Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
-    }
-
-    fn read_and_drop_n_bytes(&mut self, n_bytes: u64) -> io::Result<()>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
-        drop(buffer);
-        Ok(())
-    }
-
-    fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
-        match afi {
-            Afi::Ipv4 => {
-                match self.read_ipv4_address(){
-                    Ok(ip) => Ok(IpAddr::V4(ip)),
-                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv4 address".to_string()))
-                }
-            },
-            Afi::Ipv6 => {
-                match self.read_ipv6_address(){
-                    Ok(ip) => Ok(IpAddr::V6(ip)),
-                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv6 address".to_string()))
-                }
-            },
-        }
-    }
-
-    fn read_ipv4_address(&mut self) -> io::Result<Ipv4Addr> {
-        let addr = self.read_32b()?;
-        Ok(Ipv4Addr::from(addr))
-    }
-
-    fn read_ipv6_address(&mut self) -> io::Result<Ipv6Addr> {
-        let mut buf = [0; 16];
-        self.read_exact(&mut buf)?;
-        Ok(Ipv6Addr::from(buf))
-    }
-
 }
 
 // All types that implement Read can now read prefixes

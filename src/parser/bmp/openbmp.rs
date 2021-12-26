@@ -1,7 +1,6 @@
-use std::io::Cursor;
 use std::net::IpAddr;
 use crate::parser::bmp::error::ParserBmpError;
-use crate::parser::{DataBytes, ReadUtils};
+use crate::parser::DataBytes;
 
 ///
 /// ```text
