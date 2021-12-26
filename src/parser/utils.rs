@@ -216,7 +216,7 @@ impl  DataBytes <'_>{
     pub fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserErrorKind> {
         match as_length {
             AsnLength::Bits16 => {
-                let asn = self.read_16b()? as i32;
+                let asn = self.read_16b()? as u32;
                 Ok(
                     Asn{
                         asn,
@@ -225,7 +225,7 @@ impl  DataBytes <'_>{
                 )
             },
             AsnLength::Bits32 => {
-                let asn = self.read_32b()? as i32;
+                let asn = self.read_32b()? as u32;
                 Ok(
                     Asn{
                         asn,
@@ -242,7 +242,7 @@ impl  DataBytes <'_>{
             match as_length {
                 AsnLength::Bits16 => {
                     for i in 0..count {
-                        path[i] = self.read_16b()? as i32;
+                        path[i] = self.read_16b()? as u32;
                         // path.push();
                     }
                     path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
@@ -250,7 +250,7 @@ impl  DataBytes <'_>{
                 AsnLength::Bits32 => {
                     for i in 0..count {
                         // path.push(Asn{asn: self.read_32b()? as i32, len: *as_length});
-                        path[i] = self.read_32b()? as i32;
+                        path[i] = self.read_32b()? as u32;
                     }
                     path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
                 }

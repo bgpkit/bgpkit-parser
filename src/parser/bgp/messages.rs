@@ -97,7 +97,7 @@ pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64
 
 pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, ParserErrorKind> {
     let version = input.read_8b()?;
-    let asn = Asn{asn: input.read_16b()? as i32, len: AsnLength::Bits16};
+    let asn = Asn{asn: input.read_16b()? as u32, len: AsnLength::Bits16};
     let hold_time = input.read_16b()?;
     let sender_ip = input.read_ipv4_address()?;
     let opt_params_len = input.read_8b()?;

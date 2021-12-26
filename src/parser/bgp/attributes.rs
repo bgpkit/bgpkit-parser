@@ -229,7 +229,7 @@ impl AttributeParser {
                     COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
                     COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
                     value => {
-                        let asn = Asn{asn: ((value >> 16) & 0xffff) as i32, len: AsnLength::Bits16};
+                        let asn = Asn{asn: ((value >> 16) & 0xffff) as u32, len: AsnLength::Bits16};
                         let value = (value & 0xffff) as u16;
                         Community::Custom(asn, value)
                     }
@@ -448,7 +448,7 @@ impl AttributeParser {
                     ExtendedCommunity::TransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as i32, len: AsnLength::Bits16},
+                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits16},
                         local_administrator: <[u8; 4]>::try_from(local).unwrap()
                     } )
                 }
@@ -459,7 +459,7 @@ impl AttributeParser {
                     ExtendedCommunity::NonTransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as i32, len: AsnLength::Bits16},
+                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits16},
                         local_administrator: <[u8; 4]>::try_from(local).unwrap()
                     } )
                 }
@@ -493,7 +493,7 @@ impl AttributeParser {
                     ExtendedCommunity::TransitiveFourOctetAsSpecific( FourOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as i32, len: AsnLength::Bits32},
+                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits32},
                         local_administrator: <[u8; 2]>::try_from(local).unwrap()
                     } )
                 }
@@ -504,7 +504,7 @@ impl AttributeParser {
                     ExtendedCommunity::NonTransitiveFourOctetAsSpecific( FourOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as i32, len: AsnLength::Bits32},
+                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits32},
                         local_administrator: <[u8; 2]>::try_from(local).unwrap()
                     } )
                 }

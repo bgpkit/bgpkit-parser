@@ -147,7 +147,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             if parts.len()!=2 {
                                 return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str))
                             }
-                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<i32>(), msg_string).into();
+                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>(), msg_string).into();
                             let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>(), msg_string);
                             (Some(asn), Some(ip))
                         }
@@ -234,6 +234,16 @@ mod tests {
     fn test_error_message_2() {
         let msg_str = r#"
         {"type": "ris_message","data":{"timestamp":1636339375.83,"peer":"37.49.236.1","peer_asn":"8218","id":"21-594-37970252","host":"rrc21"}}
+        "#;
+        let msg = parse_ris_live_message(&msg_str).unwrap();
+        for elem in msg {
+            println!("{}", elem);
+        }
+    }
+    #[test]
+    fn test_error_message_3() {
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1640553894.84,"peer":"195.66.226.38","peer_asn":"24482","id":"01-2833-11980099","host":"rrc01","type":"UPDATE","path":[24482,30844,328471,328471,328471],"community":[[0,5713],[0,6939],[0,32934],[8714,65010],[8714,65012],[24482,2],[24482,12010],[24482,12011],[24482,65201],[30844,27]],"origin":"igp","aggregator":"4200000002:10.102.100.2","announcements":[{"next_hop":"195.66.224.68","prefixes":["102.66.116.0/24"]}]}}
         "#;
         let msg = parse_ris_live_message(&msg_str).unwrap();
         for elem in msg {
