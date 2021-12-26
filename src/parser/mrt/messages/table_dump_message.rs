@@ -1,9 +1,6 @@
 use crate::error::*;
 use ipnetwork::IpNetwork;
-use std::{
-    io::Read,
-    net::IpAddr,
-};
+use std::net::IpAddr;
 use bgp_models::mrt::tabledump::TableDumpMessage;
 use bgp_models::network::{AddrMeta, Afi, AsnLength, NetworkPrefix};
 use crate::parser::bgp::attributes::AttributeParser;

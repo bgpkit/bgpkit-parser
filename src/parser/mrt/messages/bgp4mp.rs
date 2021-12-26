@@ -1,5 +1,4 @@
 use crate::error::ParserErrorKind;
-use std::io::Read;
 use bgp_models::bgp::BgpMessage;
 use bgp_models::mrt::bgp4mp::{Bgp4Mp, Bgp4MpMessage, Bgp4MpStateChange, Bgp4MpType, BgpState};
 use bgp_models::network::{Afi, Asn, AsnLength};

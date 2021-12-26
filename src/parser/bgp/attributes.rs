@@ -1,4 +1,3 @@
-use std::io::{Read, Take};
 use std::net::{Ipv4Addr};
 use std::convert::TryFrom;
 use bgp_models::bgp::attributes::*;

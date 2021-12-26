@@ -1,5 +1,3 @@
-use std::io::{Read, Take};
-
 use bgp_models::bgp::*;
 use bgp_models::network::*;
 use num_traits::FromPrimitive;
@@ -104,7 +102,7 @@ pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, P
     let sender_ip = input.read_ipv4_address()?;
     let opt_params_len = input.read_8b()?;
 
-    let mut pos_end = input.pos + opt_params_len as usize;
+    let pos_end = input.pos + opt_params_len as usize;
 
     let mut extended_length = false;
     let mut first= true;

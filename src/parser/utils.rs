@@ -10,7 +10,7 @@ use std::convert::TryInto;
 
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
-use std::io::{Read, Take};
+use std::io::Read;
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
 use log::debug;
 

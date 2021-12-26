@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::net::IpAddr;
 use std::str::FromStr;
 use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};

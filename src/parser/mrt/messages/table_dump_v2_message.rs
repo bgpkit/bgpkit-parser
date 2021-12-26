@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use crate::error::ParserErrorKind;
-use std::io::{Read, Take};
 use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;

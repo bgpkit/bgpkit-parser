@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use bgp_models::network::{Afi, AsnLength};
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
-use crate::parser::ReadUtils;
+use crate::parser::{DataBytes, ReadUtils};
 
 /// BMP message type enum.
 ///
@@ -51,7 +51,7 @@ pub struct BmpCommonHeader {
     pub msg_type: BmpMsgType,
 }
 
-pub fn parse_bmp_common_header<T: Read>(reader: &mut T) -> Result<BmpCommonHeader, ParserBmpError>{
+pub fn parse_bmp_common_header(reader: &mut DataBytes) -> Result<BmpCommonHeader, ParserBmpError>{
 
     let version = reader.read_8b()?;
     if version!=3 {
@@ -112,7 +112,7 @@ pub enum PeerType {
     LocalInstancePeer=2,
 }
 
-pub fn parse_per_peer_header<T: Read>(reader: &mut T) -> Result<BmpPerPeerHeader, ParserBmpError>{
+pub fn parse_per_peer_header(reader: &mut DataBytes) -> Result<BmpPerPeerHeader, ParserBmpError>{
     let peer_type = PeerType::from_u8(reader.read_8b()?).unwrap();
 
     let peer_flags = reader.read_8b()?;
