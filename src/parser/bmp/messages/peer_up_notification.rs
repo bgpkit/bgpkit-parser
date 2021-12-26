@@ -38,27 +38,28 @@ pub fn parse_peer_up_notification(reader: &mut Take<&mut Cursor<Vec<u8>>>, afi: 
 
     let local_port = reader.read_16b()?;
     let remote_port = reader.read_16b()?;
-    let sent_open = parse_bgp_open_message(reader)?;
-    let received_open = parse_bgp_open_message(reader)?;
-    let mut tlvs = vec![];
-    while reader.limit()>=4 {
-        let info_type = reader.read_16b()?;
-        let info_len = reader.read_16b()?;
-        let info_value = reader.read_n_bytes_to_string(info_len as u64)?;
-        tlvs.push(PeerUpNotificationTlv{
-            info_type,
-            info_len,
-            info_value
-        })
-    }
-    Ok(
-        PeerUpNotification{
-            local_addr,
-            local_port,
-            remote_port,
-            sent_open,
-            received_open,
-            tlvs
-        }
-    )
+    todo!()
+    // let sent_open = parse_bgp_open_message(reader)?;
+    // let received_open = parse_bgp_open_message(reader)?;
+    // let mut tlvs = vec![];
+    // while reader.limit()>=4 {
+    //     let info_type = reader.read_16b()?;
+    //     let info_len = reader.read_16b()?;
+    //     let info_value = reader.read_n_bytes_to_string(info_len as u64)?;
+    //     tlvs.push(PeerUpNotificationTlv{
+    //         info_type,
+    //         info_len,
+    //         info_value
+    //     })
+    // }
+    // Ok(
+    //     PeerUpNotification{
+    //         local_addr,
+    //         local_port,
+    //         remote_port,
+    //         sent_open,
+    //         received_open,
+    //         tlvs
+    //     }
+    // )
 }

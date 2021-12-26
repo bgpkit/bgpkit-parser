@@ -1,7 +1,7 @@
 use std::io::Read;
 use crate::parser::bmp::error::ParserBmpError;
-use crate::parser::ReadUtils;
 use crate::num_traits::FromPrimitive;
+use crate::parser::ReadUtils;
 
 #[derive(Debug)]
 pub struct TerminationMessage {

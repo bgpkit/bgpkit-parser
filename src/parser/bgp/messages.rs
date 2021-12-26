@@ -2,11 +2,10 @@ use std::io::{Read, Take};
 
 use bgp_models::bgp::*;
 use bgp_models::network::*;
-use byteorder::ReadBytesExt;
 use num_traits::FromPrimitive;
 
 use crate::error::ParserErrorKind;
-use crate::parser::{AttributeParser, parse_nlri_list, ReadUtils};
+use crate::parser::{AttributeParser, DataBytes};
 use log::warn;
 
 /// BGP message
@@ -27,7 +26,7 @@ use log::warn;
 /// |          Length               |      Type     |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserErrorKind> {
+pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserErrorKind> {
     // https://tools.ietf.org/html/rfc4271#section-4
     // 16 (4 x 4 bytes) octets marker
     input.read_32b()?;
@@ -66,15 +65,15 @@ pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_
     };
 
     // make sure we don't read over the bound
-    let mut bgp_msg_input = input.take(bgp_msg_length);
+    // let mut bgp_msg_input = input.take(bgp_msg_length);
 
     Ok(
         match msg_type{
             BgpMessageType::OPEN => {
-                BgpMessage::Open(parse_bgp_open_message(&mut bgp_msg_input)?)
+                BgpMessage::Open(parse_bgp_open_message(input)?)
             }
             BgpMessageType::UPDATE => {
-                BgpMessage::Update(parse_bgp_update_message(&mut bgp_msg_input, add_path, afi, asn_len, bgp_msg_length)?)
+                BgpMessage::Update(parse_bgp_update_message(input, add_path, afi, asn_len, bgp_msg_length)?)
             }
             BgpMessageType::NOTIFICATION => {
                 BgpMessage::Notification(parse_bgp_notification_message(input, bgp_msg_length - 2)?)
@@ -86,11 +85,10 @@ pub fn parse_bgp_message<T: Read>(input: &mut T, add_path: bool, afi: &Afi, asn_
     )
 }
 
-pub fn parse_bgp_notification_message<T: Read>(input: &mut T, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserErrorKind> {
+pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserErrorKind> {
     let error_code = input.read_8b()?;
     let error_subcode = input.read_8b()?;
-    let mut data = Vec::with_capacity((bgp_msg_length - 2) as usize);
-    input.read_to_end(&mut data)?;
+    let data = input.read_n_bytes((bgp_msg_length - 2) as usize)?;
     Ok(
         BgpNotificationMessage{
             error_code,
@@ -99,23 +97,26 @@ pub fn parse_bgp_notification_message<T: Read>(input: &mut T, bgp_msg_length: u6
         })
 }
 
-pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, ParserErrorKind> {
+pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, ParserErrorKind> {
     let version = input.read_8b()?;
     let asn = Asn{asn: input.read_16b()? as i32, len: AsnLength::Bits16};
     let hold_time = input.read_16b()?;
     let sender_ip = input.read_ipv4_address()?;
     let opt_params_len = input.read_8b()?;
-    let mut opt_bytes = input.take(opt_params_len as u64);
+
+    let mut pos_end = input.pos + opt_params_len as usize;
+
     let mut extended_length = false;
     let mut first= true;
 
     let mut params: Vec<OptParam> = vec![];
-    while opt_bytes.limit()>0 {
-        let param_type = opt_bytes.read_8b()?;
+    while input.pos < pos_end {
+        let param_type = input.read_8b()?;
         if first {
             // first parameter, check if it is extended length message
             if opt_params_len == 255 && param_type == 255 {
                 extended_length = true;
+                // todo: handle extended length
                 break
             } else {
                 first = false;
@@ -123,16 +124,16 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, 
         }
         // reaching here means all the remain params are regular non-extended-length parameters
 
-        let parm_length = opt_bytes.read_8b()?;
+        let parm_length = input.read_8b()?;
         // https://tools.ietf.org/html/rfc3392
         // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
 
         let param_value = match param_type{
             2 => {
                 // capacity
-                let code = opt_bytes.read_8b()?;
-                let len = opt_bytes.read_8b()?;
-                let value = opt_bytes.read_n_bytes(len as u64)?;
+                let code = input.read_8b()?;
+                let len = input.read_8b()?;
+                let value = input.read_n_bytes(len as usize)?;
 
                 ParamValue::Capability(
                     Capability{
@@ -144,7 +145,7 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, 
             }
             _ => {
                 // unsupported param, read as raw bytes
-                let bytes = opt_bytes.read_n_bytes(parm_length as u64)?;
+                let bytes = input.read_n_bytes(parm_length as usize)?;
                 ParamValue::Raw(bytes)
             }
         };
@@ -169,44 +170,37 @@ pub fn parse_bgp_open_message<T: Read>(input: &mut T) -> Result<BgpOpenMessage, 
 }
 
 /// read nlri portion of a bgp update message.
-fn read_nlri<T: Read>(input: &mut Take<T>, length: usize, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
     if length==0{
         return Ok(vec![])
     }
     if length==1 {
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
-        input.read_u8().unwrap();
+        input.read_8b().unwrap();
         return Ok(vec![])
     }
 
-    let mut buf=Vec::with_capacity(length);
-    input.read_to_end(&mut buf)?;
-
-    let mut nlri_input = buf.as_slice().take(length as u64);
-
-    let prefixes = parse_nlri_list(&mut nlri_input, add_path, &afi)?;
+    let prefixes = input.parse_nlri_list(add_path, &afi, length)?;
 
     Ok(prefixes)
 }
 
 /// read bgp update message.
-pub fn parse_bgp_update_message<T: Read>(input: &mut T, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
+pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
     // parse withdrawn prefixes nlri
     let withdrawn_length = input.read_16b()? as u64;
-    let mut withdrawn_input = input.take(withdrawn_length);
-    let withdrawn_prefixes = read_nlri(&mut withdrawn_input, withdrawn_length as usize, afi, add_path)?;
+    let withdrawn_prefixes = read_nlri(input, withdrawn_length as usize, afi, add_path)?;
 
     // parse attributes
-    let attribute_length = input.read_16b()? as u64;
+    let attribute_length = input.read_16b()? as usize;
     let attr_parser = AttributeParser::new(add_path);
-    let mut attr_input = input.take(attribute_length);
-    let attributes = attr_parser.parse_attributes(&mut attr_input, asn_len, None, None, None)?;
+
+    let attributes = attr_parser.parse_attributes(input, asn_len, None, None, None, attribute_length)?;
 
     // parse announced prefixes nlri
-    let nlri_length = bgp_msg_length - 4 - withdrawn_length - attribute_length;
-    let mut nlri_input = input.take(nlri_length);
-    let announced_prefixes = read_nlri(&mut nlri_input, nlri_length as usize, afi, add_path)?;
+    let nlri_length = bgp_msg_length - 4 - withdrawn_length - attribute_length as u64;
+    let announced_prefixes = read_nlri(input, nlri_length as usize, afi, add_path)?;
 
     Ok(
         BgpUpdateMessage{

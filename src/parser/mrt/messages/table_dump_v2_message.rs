@@ -5,11 +5,12 @@ use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;
 use num_traits::FromPrimitive;
-use crate::parser::{AttributeParser, ReadUtils};
+use crate::parser::{AttributeParser, DataBytes};
 
-pub fn parse_table_dump_v2_message<T: Read>(
+pub fn parse_table_dump_v2_message(
     sub_type: u16,
-    input: &mut Take<T>) -> Result<TableDumpV2Message, ParserErrorKind> {
+    input: &mut DataBytes) -> Result<TableDumpV2Message, ParserErrorKind> {
+
     let v2_type: TableDumpV2Type = match TableDumpV2Type::from_u16(sub_type) {
         Some(t) => t,
         None => {return Err(ParserErrorKind::ParseError(format!("cannot parse table dump v2 type: {}", sub_type)))}
@@ -36,13 +37,12 @@ pub fn parse_table_dump_v2_message<T: Read>(
 /// Peer index table
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerIndexTable, ParserErrorKind> {
+pub fn parse_peer_index_table(input: &mut DataBytes) -> Result<PeerIndexTable, ParserErrorKind> {
     let collector_bgp_id = Ipv4Addr::from(input.read_32b()?);
     // read and ignore view name
     let view_name_length = input.read_16b()?;
-    let mut buffer = Vec::new();
     // TODO: properly parse view_name
-    input.take(view_name_length as u64).read_to_end(&mut buffer).unwrap();
+    input.read_and_drop_n_bytes(view_name_length as usize)?;
 
     let peer_count = input.read_16b()?;
     let mut peers = vec![];
@@ -88,7 +88,7 @@ pub fn parse_peer_index_table<T: std::io::Read>(input: &mut T) -> Result<PeerInd
 /// RIB AFI-specific entries
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserErrorKind> {
+pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserErrorKind> {
     let afi: Afi;
     let safi: Safi;
     match rib_type {
@@ -127,7 +127,7 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
     let prefixes = vec!(prefix.clone());
 
     let entry_count = input.read_16b()?;
-    let mut rib_entries = vec![];
+    let mut rib_entries = Vec::with_capacity((entry_count*2) as usize);
 
     for _ in 0..entry_count {
         let entry = match parse_rib_entry(input, add_path, &afi, &safi, &prefixes) {
@@ -136,10 +136,6 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
         };
         // dbg!(&entry, &rib_type);
         rib_entries.push(entry);
-    }
-
-    if input.limit()>0{
-        drop_n!(input, input.limit());
     }
 
     Ok(
@@ -152,8 +148,8 @@ pub fn parse_rib_afi_entries<T: std::io::Read>(input: &mut Take<T>, rib_type: Ta
     )
 }
 
-pub fn parse_rib_entry<T: std::io::Read>(input: &mut Take<T>, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserErrorKind> {
-    if input.limit() < 16 {
+pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserErrorKind> {
+    if input.bytes_left() < 16 {
         return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
     }
     let peer_index = input.read_16b()?;
@@ -161,15 +157,16 @@ pub fn parse_rib_entry<T: std::io::Read>(input: &mut Take<T>, add_path: bool, af
     if add_path {
         let _path_id = input.read_32b()?;
     }
-    let attribute_length = input.read_16b()?;
+    let attribute_length = input.read_16b()? as usize;
 
-    if input.limit() < attribute_length as u64 {
+    if input.bytes_left() < attribute_length  {
         return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
     }
 
     let attr_parser = AttributeParser::new(add_path);
-    let mut attr_input = input.take(attribute_length as u64);
-    let attributes = attr_parser.parse_attributes(&mut attr_input, &AsnLength::Bits32, Some(afi.clone()), Some(safi.clone()), Some(prefixes.clone()))?;
+
+    let attributes = attr_parser.parse_attributes(input, &AsnLength::Bits32, Some(afi.clone()), Some(safi.clone()), Some(prefixes.clone()), attribute_length)?;
+
     Ok(
         RibEntry{
             peer_index,

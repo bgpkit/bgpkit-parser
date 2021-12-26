@@ -1,10 +1,9 @@
 use std::io::Read;
 use std::net::IpAddr;
 use bgp_models::network::{Afi, AsnLength};
-use byteorder::{BigEndian, ReadBytesExt};
 use crate::parser::bmp::error::ParserBmpError;
-use crate::parser::ReadUtils;
 use num_traits::FromPrimitive;
+use crate::parser::ReadUtils;
 
 /// BMP message type enum.
 ///
@@ -118,7 +117,7 @@ pub fn parse_per_peer_header<T: Read>(reader: &mut T) -> Result<BmpPerPeerHeader
 
     let peer_flags = reader.read_8b()?;
 
-    let peer_distinguisher = reader.read_u64::<BigEndian>()?;
+    let peer_distinguisher = reader.read_64b()?;
 
     let (is_router_ipv6, is_2byte_asn) = (peer_flags&0x80>0, peer_flags&0x20>0);
 

@@ -21,7 +21,6 @@ members = [
 ]
 
 [dependencies]
-byteorder = "1"
 ipnetwork = {version="0.18", default-features=false}
 enum-primitive-derive = "0.2"
 num-traits = "0.1"
