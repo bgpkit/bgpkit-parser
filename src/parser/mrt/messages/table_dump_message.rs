@@ -1,14 +1,10 @@
 use crate::error::*;
-use byteorder::{BigEndian, ReadBytesExt};
 use ipnetwork::IpNetwork;
-use crate::parser::ReadUtils;
-use std::{
-    io::Read,
-    net::IpAddr,
-};
+use std::net::IpAddr;
 use bgp_models::mrt::tabledump::TableDumpMessage;
 use bgp_models::network::{AddrMeta, Afi, AsnLength, NetworkPrefix};
 use crate::parser::bgp::attributes::AttributeParser;
+use crate::parser::DataBytes;
 
 /// TABLE_DUMP v1 only support 2-byte asn
 fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserErrorKind> {
@@ -44,28 +40,27 @@ fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserErrorKind> {
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |                   BGP Attribute... (variable)
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-pub fn parse_table_dump_message<T: Read>(
+pub fn parse_table_dump_message(
     sub_type: u16,
-    input: &mut T,
+    input: &mut DataBytes,
 ) -> Result<TableDumpMessage, ParserErrorKind> {
     let meta = parse_sub_type(sub_type)?;
 
-    let view_number = input.read_u16::<BigEndian>()?;
-    let sequence_number = input.read_u16::<BigEndian>()?;
+    let view_number = input.read_16b()?;
+    let sequence_number = input.read_16b()?;
     let prefix = match meta.afi {
         Afi::Ipv4 => input.read_ipv4_prefix().map(IpNetwork::V4),
         Afi::Ipv6 => input.read_ipv6_prefix().map(IpNetwork::V6),
     }?;
-    let status = input.read_u8()?;
-    let time = input.read_u32::<BigEndian>()? as u64;
+    let status = input.read_8b()?;
+    let time = input.read_32b()? as u64;
 
     let peer_address: IpAddr = input.read_address(&meta.afi)?;
     let peer_asn = input.read_asn(&meta.asn_len)?;
-    let attribute_length = input.read_u16::<BigEndian>()?;
+    let attribute_length = input.read_16b()? as usize;
     let attr_parser = AttributeParser::new(false);
 
-    let mut attr_input = input.take(attribute_length as u64);
-    let attributes = attr_parser.parse_attributes(&mut attr_input, &meta.asn_len, None, None, None)?;
+    let attributes = attr_parser.parse_attributes(input, &meta.asn_len, None, None, None, attribute_length)?;
 
     Ok(TableDumpMessage {
         view_number,

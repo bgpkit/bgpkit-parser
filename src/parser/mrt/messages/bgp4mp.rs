@@ -1,13 +1,12 @@
 use crate::error::ParserErrorKind;
-use std::io::Read;
 use bgp_models::bgp::BgpMessage;
 use bgp_models::mrt::bgp4mp::{Bgp4Mp, Bgp4MpMessage, Bgp4MpStateChange, Bgp4MpType, BgpState};
 use bgp_models::network::{Afi, Asn, AsnLength};
 use num_traits::FromPrimitive;
 use crate::parser::bgp::messages::parse_bgp_message;
-use crate::parser::ReadUtils;
+use crate::parser::DataBytes;
 
-pub fn parse_bgp4mp<T: Read>(sub_type: u16, input: &mut T, total_size: usize) -> Result<Bgp4Mp, ParserErrorKind> {
+pub fn parse_bgp4mp(sub_type: u16, input: &mut DataBytes) -> Result<Bgp4Mp, ParserErrorKind> {
     let bgp4mp_type: Bgp4MpType = match Bgp4MpType::from_u16(sub_type) {
         Some(t) => t,
         None => {return Err(ParserErrorKind::ParseError(format!("cannot parse bgp4mp subtype: {}", sub_type)))}
@@ -20,16 +19,16 @@ pub fn parse_bgp4mp<T: Read>(sub_type: u16, input: &mut T, total_size: usize) ->
             Bgp4Mp::Bgp4MpStateChangeAs4(parse_bgp4mp_state_change(input, AsnLength::Bits32, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessage|Bgp4MpType::Bgp4MpMessageLocal => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits16, total_size, &bgp4mp_type)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits16, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAs4 | Bgp4MpType::Bgp4MpMessageAs4Local => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits32, total_size, &bgp4mp_type)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, false, AsnLength::Bits32, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAddpath| Bgp4MpType::Bgp4MpMessageLocalAddpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits16, total_size, &bgp4mp_type)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits16, &bgp4mp_type)?)
         }
         Bgp4MpType::Bgp4MpMessageAs4Addpath | Bgp4MpType::Bgp4MpMessageLocalAs4Addpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits32, total_size, &bgp4mp_type)?)
+            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(input, true, AsnLength::Bits32, &bgp4mp_type)?)
         }
     };
 
@@ -62,7 +61,8 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
    |                    BGP Message... (variable)
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: AsnLength, total_size: usize, msg_type: &Bgp4MpType) -> Result<Bgp4MpMessage, ParserErrorKind> {
+pub fn parse_bgp4mp_message(input: &mut DataBytes, add_path: bool, asn_len: AsnLength, msg_type: &Bgp4MpType) -> Result<Bgp4MpMessage, ParserErrorKind> {
+    let total_size = input.total;
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;
@@ -116,7 +116,7 @@ pub fn parse_bgp4mp_message<T: Read>(input: &mut T, add_path: bool, asn_len: Asn
    |            Old State          |          New State            |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-pub fn parse_bgp4mp_state_change<T: Read>(input: &mut T, asn_len: AsnLength, msg_type: &Bgp4MpType) -> Result<Bgp4MpStateChange, ParserErrorKind> {
+pub fn parse_bgp4mp_state_change(input: &mut DataBytes, asn_len: AsnLength, msg_type: &Bgp4MpType) -> Result<Bgp4MpStateChange, ParserErrorKind> {
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
     let interface_index: u16 = input.read_16b()?;

@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::net::IpAddr;
 use std::str::FromStr;
 use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};
@@ -6,6 +5,7 @@ use bgp_models::network::{Afi, AsnLength};
 use serde_json::Value;
 use crate::{BgpElem, Elementor};
 use crate::parser::bgp::parse_bgp_message;
+use crate::parser::DataBytes;
 use crate::parser::rislive::error::ParserRisliveError;
 
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
@@ -23,7 +23,8 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let data = msg.get("data").unwrap().as_object().unwrap();
 
-    let mut cursor = Cursor::new(hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap());
+    let bytes = hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap();
+    let mut data_bytes = DataBytes::new(&bytes);
 
     let timestamp = data.get("timestamp").unwrap().as_f64().unwrap();
     let peer_str =  data.get("peer").unwrap().as_str().unwrap().to_owned();
@@ -38,10 +39,10 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let peer_asn = peer_asn_str.parse::<i32>().unwrap().into();
 
-    let bgp_msg = match parse_bgp_message(&mut cursor, false, &afi, &AsnLength::Bits32, 40960) {
+    let bgp_msg = match parse_bgp_message(&mut data_bytes, false, &afi, &AsnLength::Bits32, 40960) {
         Ok(m) => {m}
         Err(_) => {
-            match parse_bgp_message(&mut cursor, false, &afi, &AsnLength::Bits16, 40960) {
+            match parse_bgp_message(&mut data_bytes, false, &afi, &AsnLength::Bits16, 40960) {
                 Ok(m) => {m}
                 Err(_) => {return Err(ParserRisliveError::IncorrectRawBytes)}
             }

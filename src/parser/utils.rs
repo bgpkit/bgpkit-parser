@@ -1,70 +1,117 @@
 /*!
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
-use byteorder::{BigEndian, ReadBytesExt};
 use ipnetwork::{Ipv4Network, Ipv6Network, IpNetwork};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
 };
+use std::convert::TryInto;
 
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
-use std::io::{Read, Take};
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
 use log::debug;
 
 use crate::error::ParserErrorKind;
 
-/// Drop n bytes from input
-macro_rules! drop_n{
-    ($input:expr, $n:expr)=>{
-        {
-            let mut buffer = Vec::with_capacity($n as usize);
-            $input.read_to_end(&mut buffer)?;
-            drop(buffer);
+pub struct DataBytes<'input> {
+    pub bytes: &'input [u8],
+    pub pos: usize,
+    pub total: usize,
+    pub limits: Vec<usize>,
+}
+
+// Allow reading IPs from Reads
+impl  DataBytes <'_>{
+
+    pub fn new(data: &Vec<u8>) -> DataBytes{
+        DataBytes{
+            bytes: data.as_slice(),
+            pos: 0,
+            total: data.len(),
+            limits: vec![data.len()]
         }
     }
-}
-// Allow reading IPs from Reads
-pub trait ReadUtils: io::Read {
+
     #[inline]
-    fn read_64b(&mut self) -> io::Result<u64> {
-        self.read_u64::<BigEndian>()
+    pub fn bytes_left(&self) -> usize {
+        self.total - self.pos
     }
 
     #[inline]
-    fn read_32b(&mut self) -> io::Result<u32> {
-        self.read_u32::<BigEndian>()
+    pub fn read_128b(&mut self) -> Result<u128, ParserErrorKind> {
+        let len = 16;
+        if self.total - self.pos < len {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += len;
+        Ok( u128::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    fn read_16b(&mut self) -> io::Result<u16> {
-        self.read_u16::<BigEndian>()
+    pub fn read_64b(&mut self) -> Result<u64, ParserErrorKind> {
+        let len = 8;
+        if self.total - self.pos < len {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += len;
+        Ok( u64::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    fn read_8b(&mut self) -> io::Result<u8> {
-        self.read_u8()
+    pub fn read_32b(&mut self) -> Result<u32, ParserErrorKind> {
+        let len = 4;
+        if self.total - self.pos < len {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += len;
+        Ok( u32::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
-    fn read_n_bytes(&mut self, n_bytes: u64) -> io::Result<Vec<u8>>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
-        Ok(buffer)
+    #[inline]
+    pub fn read_16b(&mut self) -> Result<u16, ParserErrorKind> {
+        let len = 2;
+        if self.total - self.pos < len {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += len;
+        Ok( u16::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
-    fn read_n_bytes_to_string(&mut self, n_bytes: u64) -> io::Result<String>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
+    #[inline]
+    pub fn read_8b(&mut self) -> Result<u8, ParserErrorKind> {
+        let len = 1;
+        if self.total - self.pos < len {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += len;
+        Ok( self.bytes[self.pos-len] )
+    }
+
+    pub fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserErrorKind>{
+        if self.total - self.pos < n_bytes {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos += n_bytes;
+        Ok(self.bytes[self.pos-n_bytes..self.pos].to_vec())
+    }
+
+    pub fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserErrorKind>{
+        let buffer = self.read_n_bytes(n_bytes)?;
         Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
     }
 
-    fn read_and_drop_n_bytes(&mut self, n_bytes: u64) -> io::Result<()>{
-        let mut buffer = Vec::with_capacity(n_bytes as usize);
-        self.take(n_bytes).read_to_end(&mut buffer)?;
-        drop(buffer);
+    pub fn read_and_drop_n_bytes(&mut self, n_bytes: usize) -> Result<(), ParserErrorKind>{
+        if self.total - self.pos < n_bytes {
+            return Err(ParserErrorKind::IoNotEnoughBytes())
+        }
+        self.pos+=n_bytes;
         Ok(())
+    }
+
+    pub fn fast_forward(&mut self, to: usize) {
+        self.pos = to;
     }
 
     /// Read announced/withdrawn prefix.
@@ -72,10 +119,10 @@ pub trait ReadUtils: io::Read {
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
     /// If the `add_path` is true, it will also first read a 4-byte path id first; otherwise, a path-id of 0
     /// is automatically set.
-    fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserErrorKind> {
+    pub fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserErrorKind> {
 
         let path_id = if add_path {
-            self.read_u32::<BigEndian>()?
+            self.read_32b()?
         } else {
             0
         };
@@ -120,7 +167,7 @@ pub trait ReadUtils: io::Read {
         Ok(NetworkPrefix::new(prefix, path_id))
     }
 
-    fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
+    pub fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
         match afi {
             Afi::Ipv4 => {
                 match self.read_ipv4_address(){
@@ -137,39 +184,38 @@ pub trait ReadUtils: io::Read {
         }
     }
 
-    fn read_ipv4_address(&mut self) -> io::Result<Ipv4Addr> {
-        let addr = self.read_u32::<BigEndian>()?;
+    pub fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserErrorKind> {
+        let addr = self.read_32b()?;
         Ok(Ipv4Addr::from(addr))
     }
 
-    fn read_ipv6_address(&mut self) -> io::Result<Ipv6Addr> {
-        let mut buf = [0; 16];
-        self.read_exact(&mut buf)?;
+    pub fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserErrorKind> {
+        let buf = self.read_128b()?;
         Ok(Ipv6Addr::from(buf))
     }
 
-    fn read_ipv4_prefix(&mut self) -> io::Result<Ipv4Network> {
+    pub fn read_ipv4_prefix(&mut self) -> Result<Ipv4Network, ParserErrorKind> {
         let addr = self.read_ipv4_address()?;
-        let mask = self.read_u8()?;
+        let mask = self.read_8b()?;
         match Ipv4Network::new(addr, mask) {
             Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask")),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
         }
     }
 
-    fn read_ipv6_prefix(&mut self) -> io::Result<Ipv6Network> {
+    pub fn read_ipv6_prefix(&mut self) -> Result<Ipv6Network, ParserErrorKind> {
         let addr = self.read_ipv6_address()?;
-        let mask = self.read_u8()?;
+        let mask = self.read_8b()?;
         match Ipv6Network::new(addr, mask) {
             Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask")),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
         }
     }
 
-    fn read_asn(&mut self, as_length: &AsnLength) -> io::Result<Asn> {
+    pub fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserErrorKind> {
         match as_length {
             AsnLength::Bits16 => {
-                let asn = self.read_u16::<BigEndian>()? as i32;
+                let asn = self.read_16b()? as u32;
                 Ok(
                     Asn{
                         asn,
@@ -178,7 +224,7 @@ pub trait ReadUtils: io::Read {
                 )
             },
             AsnLength::Bits32 => {
-                let asn = self.read_u32::<BigEndian>()? as i32;
+                let asn = self.read_32b()? as u32;
                 Ok(
                     Asn{
                         asn,
@@ -189,25 +235,30 @@ pub trait ReadUtils: io::Read {
         }
     }
 
-    fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> io::Result<Vec<Asn>> {
-        let mut path = Vec::with_capacity(count);
-        match as_length {
-            AsnLength::Bits16 => {
-                for _ in 0..count {
-                    path.push(Asn{asn: self.read_u16::<BigEndian>()? as i32, len: *as_length});
+    pub fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserErrorKind> {
+        let mut path  = [0;255];
+        Ok(
+            match as_length {
+                AsnLength::Bits16 => {
+                    for i in 0..count {
+                        path[i] = self.read_16b()? as u32;
+                        // path.push();
+                    }
+                    path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
+                }
+                AsnLength::Bits32 => {
+                    for i in 0..count {
+                        // path.push(Asn{asn: self.read_32b()? as i32, len: *as_length});
+                        path[i] = self.read_32b()? as u32;
+                    }
+                    path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
                 }
             }
-            AsnLength::Bits32 => {
-                for _ in 0..count {
-                    path.push(Asn{asn: self.read_u32::<BigEndian>()? as i32, len: *as_length});
-                }
-            }
-        };
-        Ok(path)
+        )
     }
 
-    fn read_afi(&mut self) -> Result<Afi, ParserErrorKind> {
-        let afi = self.read_u16::<BigEndian>()?;
+    pub fn read_afi(&mut self) -> Result<Afi, ParserErrorKind> {
+        let afi = self.read_16b()?;
         match Afi::from_i16(afi as i16) {
             Some(afi) => Ok(afi),
             None => {
@@ -216,63 +267,79 @@ pub trait ReadUtils: io::Read {
         }
     }
 
-    fn read_safi(&mut self) -> Result<Safi, ParserErrorKind> {
-        let safi = self.read_u8()?;
+    pub fn read_safi(&mut self) -> Result<Safi, ParserErrorKind> {
+        let safi = self.read_8b()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
             None => Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown SAFI type: {}", safi)))
         }
     }
-}
 
-pub(crate) fn parse_nlri_list(
-    input: &mut Take<&[u8]>,
-    add_path: bool,
-    afi: &Afi,
-) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+    pub fn parse_nlri_list(
+        &mut self,
+        add_path: bool,
+        afi: &Afi,
+        total_bytes: usize,
+    ) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+        let pos_end = self.pos + total_bytes;
 
-    let mut bytes_copy = Vec::with_capacity(input.limit() as usize);
-    input.read_to_end(&mut bytes_copy)?;
+        let mut is_add_path = add_path;
+        let mut prefixes = vec![];
 
-    let mut is_add_path = add_path;
-    let mut prefixes = Vec::new();
+        let mut retry = false;
+        let mut guessed = false;
 
-    let mut retry = false;
-    let mut guessed = false;
+        let pos_save = self.pos.clone();
 
-    let mut new_input = bytes_copy.take(bytes_copy.len() as u64);
-    while new_input.limit() > 0 {
-        if !is_add_path && new_input.get_ref()[0]==0 {
-            // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
-            debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
-            is_add_path = true;
-            guessed = true;
-        }
-        let prefix = match new_input.read_nlri_prefix(afi, is_add_path){
-            Ok(p) => {p}
-            Err(e) => {
-                if guessed {
-                    retry = true;
-                    break;
-                } else {
-                    return Err(e);
-                }
+        while self.pos < pos_end {
+            if !is_add_path && self.bytes[self.pos]==0 {
+                // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
+                debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
+                is_add_path = true;
+                guessed = true;
             }
-        };
-        prefixes.push(prefix);
-    }
-
-    if retry {
-        prefixes.clear();
-        // try again without attempt to guess add-path
-        let mut new_input = bytes_copy.take(bytes_copy.len() as u64);
-        while new_input.limit() > 0 {
-            let prefix = new_input.read_nlri_prefix(afi, add_path)?;
+            let prefix = match self.read_nlri_prefix(afi, is_add_path){
+                Ok(p) => {p}
+                Err(e) => {
+                    if guessed {
+                        retry = true;
+                        break;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
             prefixes.push(prefix);
         }
+
+        if retry {
+            prefixes.clear();
+            // try again without attempt to guess add-path
+            self.pos = pos_save;
+            while self.pos < pos_end {
+                let prefix = self.read_nlri_prefix(afi, add_path)?;
+                prefixes.push(prefix);
+            }
+        }
+
+        Ok(prefixes)
+    }
+}
+// Allow reading IPs from Reads
+pub trait ReadUtils: io::Read {
+    #[inline]
+    fn read_32b(&mut self) -> io::Result<u32> {
+        let mut buf = [0; 4];
+        self.read_exact(&mut buf)?;
+        Ok(u32::from_be_bytes(buf))
     }
 
-    Ok(prefixes)
+    #[inline]
+    fn read_16b(&mut self) -> io::Result<u16> {
+        let mut buf = [0; 2];
+        self.read_exact(&mut buf)?;
+        Ok(u16::from_be_bytes(buf))
+    }
 }
 
 // All types that implement Read can now read prefixes

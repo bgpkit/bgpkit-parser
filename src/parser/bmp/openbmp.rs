@@ -1,7 +1,6 @@
-use std::io::Cursor;
 use std::net::IpAddr;
 use crate::parser::bmp::error::ParserBmpError;
-use crate::parser::ReadUtils;
+use crate::parser::DataBytes;
 
 ///
 /// ```text
@@ -57,7 +56,7 @@ pub struct OpenBmpHeader {
     pub router_group: Option<String>,
 }
 
-pub fn parse_openbmp_header(reader: &mut Cursor<Vec<u8>>) -> Result<OpenBmpHeader, ParserBmpError>{
+pub fn parse_openbmp_header(reader: &mut DataBytes) -> Result<OpenBmpHeader, ParserBmpError>{
     // read magic number
     let magic_number = reader.read_n_bytes_to_string(4).unwrap();
     if magic_number != "OBMP" {
@@ -99,7 +98,7 @@ pub fn parse_openbmp_header(reader: &mut Cursor<Vec<u8>>) -> Result<OpenBmpHeade
     if name_len >255{
         name_len =255;
     }
-    let admin_id = reader.read_n_bytes_to_string(name_len as u64)?;
+    let admin_id = reader.read_n_bytes_to_string(name_len as usize)?;
 
     // read router IP
     reader.read_and_drop_n_bytes(16)?;
@@ -114,7 +113,7 @@ pub fn parse_openbmp_header(reader: &mut Cursor<Vec<u8>>) -> Result<OpenBmpHeade
     // read router group
     let group = match reader.read_16b()? {
         0 => "".to_string(),
-        n => reader.read_n_bytes_to_string(n as u64)?
+        n => reader.read_n_bytes_to_string(n as usize)?
     };
 
     // read msg count
@@ -146,7 +145,7 @@ mod tests {
     fn test_open_bmp_header() {
         let input = "4f424d500107006400000033800c6184b9c2000c602cbf4f072f3ae149d23486024bc3dadfc4000a69732d63632d626d7031c677060bdd020a9e92be000200de2e3180df3369000000000000000000000000000c726f7574652d76696577733500000001030000003302000000000000000000000000000000000000000000003fda060e00000da30000000061523c36000c0e1c0200000a";
         let decoded = hex::decode(input).unwrap();
-        let mut reader = Cursor::new(decoded);
+        let mut reader = DataBytes::new(&decoded);
 
         let header = parse_openbmp_header(&mut reader).unwrap();
         dbg!(header);

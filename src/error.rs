@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 #[derive(Debug)]
 pub enum ParserErrorKind {
     IoError(io::Error),
+    IoNotEnoughBytes(),
     EofError(io::Error),
     RemoteIoError(String),
     EofExpected,
@@ -47,6 +48,7 @@ impl fmt::Display for ParserErrorKind {
             ParserErrorKind::EofExpected => "reach end of file".to_string(),
             ParserErrorKind::RemoteIoError(e) => e.to_string(),
             ParserErrorKind::FilterError(e) => e.to_owned(),
+            ParserErrorKind::IoNotEnoughBytes() => "Not enough bytes to read".to_string(),
         };
         write!(f, "Error: {}", message)
     }

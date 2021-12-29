@@ -1,10 +1,9 @@
-use std::io::{Cursor, Take};
 use std::net::IpAddr;
 use bgp_models::bgp::BgpOpenMessage;
 use bgp_models::network::Afi;
 use crate::parser::bgp::messages::parse_bgp_open_message;
 use crate::parser::bmp::error::ParserBmpError;
-use crate::parser::ReadUtils;
+use crate::parser::DataBytes;
 
 #[derive(Debug)]
 pub struct PeerUpNotification {
@@ -23,9 +22,8 @@ pub struct PeerUpNotificationTlv {
     pub info_value: String,
 }
 
-pub fn parse_peer_up_notification(reader: &mut Take<&mut Cursor<Vec<u8>>>, afi: &Afi) -> Result<PeerUpNotification, ParserBmpError> {
-    let local_addr: IpAddr =
-    match afi {
+pub fn parse_peer_up_notification(reader: &mut DataBytes, afi: &Afi) -> Result<PeerUpNotification, ParserBmpError> {
+    let local_addr: IpAddr = match afi {
         Afi::Ipv4 => {
             reader.read_and_drop_n_bytes(12)?;
             let ip= reader.read_ipv4_address()?;
@@ -41,10 +39,10 @@ pub fn parse_peer_up_notification(reader: &mut Take<&mut Cursor<Vec<u8>>>, afi: 
     let sent_open = parse_bgp_open_message(reader)?;
     let received_open = parse_bgp_open_message(reader)?;
     let mut tlvs = vec![];
-    while reader.limit()>=4 {
+    while reader.bytes_left()>=4 {
         let info_type = reader.read_16b()?;
         let info_len = reader.read_16b()?;
-        let info_value = reader.read_n_bytes_to_string(info_len as u64)?;
+        let info_value = reader.read_n_bytes_to_string(info_len as usize)?;
         tlvs.push(PeerUpNotificationTlv{
             info_type,
             info_len,

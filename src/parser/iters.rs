@@ -110,7 +110,7 @@ impl Iterator for RecordIterator {
                             }
                             None
                         }
-                        ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_)=> {
+                        ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_) | ParserErrorKind::IoNotEnoughBytes()=> {
                             // this should not happen at this stage
                             None
                         }

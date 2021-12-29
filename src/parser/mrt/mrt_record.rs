@@ -1,9 +1,7 @@
 use std::io::{ErrorKind, Read};
 use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
-use byteorder::{BigEndian, ReadBytesExt};
-use crate::parser::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserError};
+use crate::parser::{DataBytes, parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserError, ReadUtils};
 use crate::error::ParserErrorKind;
-use crate::parser::ReadUtils;
 use crate::num_traits::FromPrimitive;
 
 /// MRT common header
@@ -62,12 +60,12 @@ pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, 
             format!("Failed to parse entry type: {}", entry_type_raw),
         )),
     }?;
-    let entry_subtype = input.read_u16::<BigEndian>()?;
-    let mut length = input.read_u32::<BigEndian>()?;
+    let entry_subtype = input.read_16b()?;
+    let mut length = input.read_32b()?;
     let microsecond_timestamp = match &entry_type {
         EntryType::BGP4MP_ET => {
             length -= 4;
-            Some(input.read_u32::<BigEndian>()?)
+            Some(input.read_32b()?)
 
         },
         _ => None,
@@ -103,7 +101,9 @@ pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError
         Err(e) => return Err(ParserError{error: ParserErrorKind::IoError(e), bytes: None})
     }
 
-    match parse_raw_bytes(&common_header, &buffer) {
+    let mut data = DataBytes::new(&buffer);
+
+    match parse_raw_bytes(&common_header, &mut data) {
         Ok(message) => {
             Ok(MrtRecord {
                 common_header,
@@ -119,11 +119,10 @@ pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError
     }
 }
 
-fn parse_raw_bytes(common_header: &CommonHeader, data: &Vec<u8>) -> Result<MrtMessage, ParserErrorKind>{
-    let total_len = data.len();
+fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result<MrtMessage, ParserErrorKind>{
     let message: MrtMessage = match &common_header.entry_type {
         EntryType::TABLE_DUMP => {
-            let msg = parse_table_dump_message(common_header.entry_subtype,&mut data.as_slice());
+            let msg = parse_table_dump_message(common_header.entry_subtype,data);
             match msg {
                 Ok(msg) => MrtMessage::TableDumpMessage(msg),
                 Err(e) => {
@@ -133,7 +132,7 @@ fn parse_raw_bytes(common_header: &CommonHeader, data: &Vec<u8>) -> Result<MrtMe
             }
         }
         EntryType::TABLE_DUMP_V2 => {
-            let msg = parse_table_dump_v2_message(common_header.entry_subtype, &mut data.as_slice().take(total_len as u64));
+            let msg = parse_table_dump_v2_message(common_header.entry_subtype, data);
             match msg {
                 Ok(msg) => MrtMessage::TableDumpV2Message(msg),
                 Err(e) => {
@@ -142,7 +141,7 @@ fn parse_raw_bytes(common_header: &CommonHeader, data: &Vec<u8>) -> Result<MrtMe
             }
         }
         EntryType::BGP4MP|EntryType::BGP4MP_ET => {
-            let msg = parse_bgp4mp(common_header.entry_subtype, &mut data.as_slice(), total_len);
+            let msg = parse_bgp4mp(common_header.entry_subtype, data);
             match msg {
                 Ok(msg) => MrtMessage::Bgp4Mp(msg),
                 Err(e) => {

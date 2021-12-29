@@ -319,7 +319,6 @@ We support normal communities, extended communities, and large communities.
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 */
-extern crate byteorder;
 extern crate chrono;
 extern crate ipnetwork;
 extern crate num_traits;
@@ -343,4 +342,3 @@ pub use parser::bmp::parse_openbmp_header;
 pub use parser::rislive::parse_ris_live_message;
 pub use parser::mrt::parse_mrt_record;
 pub use parser::filter::*;
-pub use parser::utils::ReadUtils;
