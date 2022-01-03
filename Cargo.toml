@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.7.0-alpha.4"
+version = "0.7.0"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 readme = "README.md"
@@ -11,6 +11,7 @@ description = """
 A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
+rust-version = "1.48.0"
 
 [package.metadata]
 msrv = "1.48.0"
