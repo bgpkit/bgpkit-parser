@@ -1,4 +1,3 @@
-use std::io::Cursor;
 use std::thread::sleep;
 use std::time::Duration;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
