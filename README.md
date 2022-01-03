@@ -221,22 +221,32 @@ match bmp_msg {
 `bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
 
 ```
-bgpkit-parser-cli 0.1.0
+➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
+
+Mingwei Zhang <mingwei@bgpkit.com>
+
 bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
 
 USAGE:
-    bgpkit-parser-cli [FLAGS] <FILE>
+    bgpkit-parser-cli [FLAGS] [OPTIONS] <FILE>
 
 FLAGS:
     -e, --elems-count      Count BGP elems
     -h, --help             Prints help information
-    -j, --json             Output as JSON objects
-    -p, --pretty           Pretty-print JSON output
+        --json             Output as JSON objects
+        --pretty           Pretty-print JSON output
     -r, --records-count    Count MRT records
     -V, --version          Prints version information
 
-ARGS:
-    <FILE>    File path to a MRT file, local or remote
+OPTIONS:
+    -a, --as-path <as-path>          Filter by AS path regex string
+    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
+    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
+    -o, --origin-asn <origin-asn>    Filter by origin AS Number
+    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
+    -j, --peer-ip <peer-ip>          Filter by peer IP address
+    -p, --prefix <prefix>            Filter by network prefix
+    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
 ```
 
 
