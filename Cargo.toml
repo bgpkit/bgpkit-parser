@@ -15,11 +15,6 @@ keywords = ["bgp", "bgpkit", "mrt"]
 [package.metadata]
 msrv = "1.48.0"
 
-[workspace]
-members = [
-    "cli"
-]
-
 [dependencies]
 ipnetwork = {version="0.18", default-features=false}
 enum-primitive-derive = "0.2"
@@ -43,10 +38,10 @@ reqwest = {version="0.11", features=["blocking"]}
 serde={version="1.0.130", features=["derive"]}
 serde_json = "1.0.69"
 
-# openssl = { version = "0.10", features = ["vendored"] }
-
 # bmp/openbmp parsing
 hex="0.4.3"
+
+structopt = {version="0.3", optional=true}
 
 [dev-dependencies]
 bgpkit-broker = "0.3.2"
@@ -58,7 +53,15 @@ url = "2.1.0"
 
 criterion = {version="0.3", features=["html_reports"]}
 
+[features]
+default = ["build-binary"]
+build-binary = ["structopt"]
+
 [[bench]]
 name = "bench_main"
 harness = false
 
+[[bin]]
+name = "bgpkit-parser-cli"
+path = "src/bin/main.rs"
+required-features = ["build-binary"]
