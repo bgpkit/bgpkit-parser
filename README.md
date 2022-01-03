@@ -220,6 +220,15 @@ match bmp_msg {
 
 `bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
 
+You can install the tool by running 
+```bash
+cargo install bgpkit-parser
+```
+or checkout this repository and run
+```bash
+cargo install --path .
+```
+
 ```
 ➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
 
