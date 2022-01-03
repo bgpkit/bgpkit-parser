@@ -74,7 +74,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_l
                 BgpMessage::Update(parse_bgp_update_message(input, add_path, afi, asn_len, bgp_msg_length)?)
             }
             BgpMessageType::NOTIFICATION => {
-                BgpMessage::Notification(parse_bgp_notification_message(input, bgp_msg_length - 2)?)
+                BgpMessage::Notification(parse_bgp_notification_message(input, bgp_msg_length)?)
             }
             BgpMessageType::KEEPALIVE => {
                 BgpMessage::KeepAlive(BgpKeepAliveMessage{})
