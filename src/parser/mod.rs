@@ -26,6 +26,8 @@ pub struct BgpkitParser {
     filters: Vec<Filter>
 }
 
+unsafe impl Send for BgpkitParser {}
+
 impl BgpkitParser {
     /// Creating a new parser from a object that implements [Read] trait.
     pub fn new(path: &str) -> Result<BgpkitParser, ParserError>{
