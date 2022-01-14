@@ -54,6 +54,8 @@ url = "2.1.0"
 
 criterion = {version="0.3", features=["html_reports"]}
 
+rayon = "1.5.1"
+
 [features]
 default = ["build-binary"]
 build-binary = ["structopt"]
