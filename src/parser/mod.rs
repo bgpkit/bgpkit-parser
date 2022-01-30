@@ -16,7 +16,7 @@ pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2
 
 pub use crate::error::{ParserError, ParserErrorKind};
 pub use mrt::mrt_elem::Elementor;
-pub use bgp_models::prelude::{BgpElem, ElemType};
+use bgp_models::prelude::ElemType;
 use crate::Filter;
 use crate::io::get_reader;
 
