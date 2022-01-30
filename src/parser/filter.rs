@@ -4,20 +4,21 @@
 The filters package defines a number of available filters that users can utilize, and implements
 the filtering mechanism for [BgpElem].
 
-The available filters are (`filter_type` (`FilterType`) -- definition):
-- `origin_asn` (`OriginAsn(u32)`) -- origin AS number
-- `prefix(_super, _sub, _super_sub)` (`Prefix(IpNetwork, PrefixMatchType)`) -- network prefix and match type
-- `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
-- `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
-- `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
-- `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
-- `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+The available filters are:
+- `origin_asn` -- origin AS number
+- `prefix` -- network prefix and match type
+- `peer_ip` -- peer's IP address
+- `peer_ips` -- peers' IP addresses
+- `peer_asn` -- peer's IP address
+- `type` -- message type (`withdraw` or `announce`)
+- `ts_start` -- start and end unix timestamp
+- `as_path` -- regular expression for AS path string
 
-[Filter::new] function takes a str for filter type and str for filter value and returns a Result
+[Filter::new] function takes a `str` for filter type and `str` for filter value and returns a Result
 of a [Filter] or a parsing error.
 
-[BgpkitParser] also implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
-and returns a new parser with specified filter added.
+[BgpkitParser] implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
+and returns a new parser with specified filter added. See the example below.
 
 ### Example
 
@@ -30,7 +31,8 @@ fn main() {
 
     log::info!("downloading updates file");
     let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-        .add_filter("prefix", "211.98.251.0/24").unwrap();
+        .add_filter("prefix", "211.98.251.0/24").unwrap()
+        .add_filter("type", "a").unwrap();
 
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
     log::info!("parsing updates file");
@@ -65,6 +67,7 @@ use crate::ParserErrorKind::FilterError;
 /// - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
 /// - `prefix(_super, _sub, _super_sub)` (`Prefix(IpNetwork, PrefixMatchType)`) -- network prefix and match type
 /// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
+/// - `peer_ips` (`Vec<PeerIp(IpAddr)>`) -- peers' IP addresses
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
@@ -73,6 +76,7 @@ pub enum Filter {
     OriginAsn(u32),
     Prefix(IpNetwork, PrefixMatchType),
     PeerIp(IpAddr),
+    PeerIps(Vec<IpAddr>),
     PeerAsn(u32),
     Type(ElemType),
     TsStart(f64),
@@ -137,6 +141,18 @@ impl Filter {
                         Err(FilterError(format!("cannot parse peer IP from {}", filter_value)))
                     }
                 }
+            }
+            "peer_ips" => {
+                let mut ips = vec![];
+                for ip_str in filter_value.replace(" ","").split(",") {
+                    match IpAddr::from_str(ip_str) {
+                        Ok(v) => {ips.push(v)}
+                        Err(_) => {
+                            return Err(FilterError(format!("cannot parse peer IP from {}", ip_str)))
+                        }
+                    }
+                }
+                Ok(Filter::PeerIps(ips))
             }
             "peer_asn" => {
                 match u32::from_str(filter_value) {
@@ -267,6 +283,9 @@ impl Filterable for BgpElem {
             Filter::PeerIp(v) => {
                 self.peer_ip == *v
             }
+            Filter::PeerIps(v) => {
+                v.contains(&self.peer_ip)
+            }
             Filter::PeerAsn(v) => {
                 self.peer_asn.eq(v)
             }
@@ -357,6 +376,25 @@ mod tests {
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 1);
 
+
+        // test filtering by multiple peers
+        /*
+        1167 185.1.8.3
+        1563 185.1.8.50
+        3393 185.1.8.65
+          51 185.1.8.89
+         834 2001:7f8:73:0:3:fa4:0:1
+          94 2001:7f8:73::c2a8:0:1
+        1058 2001:7f8:73::edfc:0:2
+         */
+        let mut filters = vec![];
+        let peers = vec![
+            IpAddr::from_str("185.1.8.65").unwrap(),
+            IpAddr::from_str("2001:7f8:73:0:3:fa4:0:1").unwrap()
+        ];
+        filters.push(Filter::PeerIps(peers));
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 3393+834);
     }
 
     #[test]
@@ -367,6 +405,15 @@ mod tests {
             .add_filter("type", "w").unwrap();
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 39);
+    }
+
+    #[test]
+    fn test_filter_iter_multi_peers() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+        let parser = BgpkitParser::new(url).unwrap()
+            .add_filter("peer_ips", "185.1.8.65, 2001:7f8:73:0:3:fa4:0:1").unwrap();
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 3393+834);
     }
 
     #[test]
