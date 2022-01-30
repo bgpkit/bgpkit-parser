@@ -332,7 +332,6 @@ pub mod parser;
 mod io;
 
 pub use parser::BgpkitParser;
-pub use parser::BgpElem;
 pub use parser::ParserErrorKind;
 pub use parser::Elementor;
 pub use parser::iters::{ElemIterator, RecordIterator};
@@ -343,3 +342,4 @@ pub use parser::rislive::parse_ris_live_message;
 pub use parser::mrt::parse_mrt_record;
 pub use parser::utils::ReadUtils;
 pub use parser::filter::*;
+pub use bgp_models::prelude::*;

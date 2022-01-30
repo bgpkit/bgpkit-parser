@@ -1,5 +1,5 @@
-use bgp_models::prelude::MetaCommunity;
 use bgpkit_parser::BgpkitParser;
+use bgpkit_parser::MetaCommunity;
 
 /// This example shows how to printout BGP messages with extended or large communities;
 fn main() {
