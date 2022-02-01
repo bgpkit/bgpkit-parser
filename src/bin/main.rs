@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::io::Write;
 use std::net::IpAddr;
 use ipnetwork::IpNetwork;
+use itertools::Itertools;
 
 use structopt::StructOpt;
 use bgpkit_parser::{BgpkitParser, Elementor};
@@ -55,7 +56,7 @@ struct Filters {
 
     /// Filter by peer IP address
     #[structopt(short="j", long)]
-    peer_ip: Option<IpAddr>,
+    peer_ip: Vec<IpAddr>,
 
     /// Filter by peer ASN
     #[structopt(short="J", long)]
@@ -100,8 +101,9 @@ fn main() {
         };
         parser = parser.add_filter(filter_type, v.to_string().as_str()).unwrap();
     }
-    if let Some(v) = opts.filters.peer_ip {
-        parser = parser.add_filter("peer_ip", v.to_string().as_str()).unwrap();
+    if !opts.filters.peer_ip.is_empty(){
+        let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",").to_string();
+        parser = parser.add_filter("peer_ips", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.peer_asn {
         parser = parser.add_filter("peer_asn", v.to_string().as_str()).unwrap();
