@@ -133,7 +133,6 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
             Ok(entry) => entry,
             Err(e) => return Err(e)
         };
-        // dbg!(&entry, &rib_type);
         rib_entries.push(entry);
     }
 
