@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.7.2"
+version = "0.7.3"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 readme = "README.md"
