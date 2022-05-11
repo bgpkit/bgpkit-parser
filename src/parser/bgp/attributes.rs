@@ -331,8 +331,6 @@ impl AttributeParser {
             next_hop = match self.parse_mp_next_hop(next_hop_length, input) {
                 Ok(x) => x,
                 Err(e) => {
-                    dbg!(&e);
-                    dbg!(&afi);
                     return Err(e)
                 }
             };

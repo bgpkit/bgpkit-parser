@@ -126,7 +126,6 @@ fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result
             match msg {
                 Ok(msg) => MrtMessage::TableDumpMessage(msg),
                 Err(e) => {
-                    dbg!(&e);
                     return Err(e);
                 }
             }
@@ -151,7 +150,6 @@ fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result
         }
         v => {
             // deprecated
-            dbg!(common_header);
             return Err(ParserErrorKind::Unsupported(format!("unsupported MRT type: {:?}", v)))
         }
     };
