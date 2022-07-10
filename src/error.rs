@@ -11,8 +11,8 @@ pub enum ParserErrorKind {
     EofExpected,
     ParseError(String),
     UnknownAttr(String),
+    DeprecatedAttr(String),
     TruncatedMsg(String),
-    Deprecated(String),
     Unsupported(String),
     FilterError(String),
 }
@@ -42,7 +42,7 @@ impl fmt::Display for ParserErrorKind {
             ParserErrorKind::EofError(e) => e.to_string(),
             ParserErrorKind::ParseError(s) => s.to_owned(),
             ParserErrorKind::TruncatedMsg(s) => s.to_owned(),
-            ParserErrorKind::Deprecated(s) => s.to_owned(),
+            ParserErrorKind::DeprecatedAttr(s) => s.to_owned(),
             ParserErrorKind::UnknownAttr(s) => s.to_owned(),
             ParserErrorKind::Unsupported(s) => s.to_owned(),
             ParserErrorKind::EofExpected => "reach end of file".to_string(),

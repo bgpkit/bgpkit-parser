@@ -23,7 +23,19 @@ use crate::io::get_reader;
 pub struct BgpkitParser {
     reader: Box<dyn Read>,
     core_dump: bool,
-    filters: Vec<Filter>
+    filters: Vec<Filter>,
+    options: ParserOptions
+}
+
+pub(crate) struct ParserOptions {
+    show_warnings: bool
+}
+impl Default for ParserOptions {
+    fn default() -> Self {
+        ParserOptions{
+            show_warnings: true
+        }
+    }
 }
 
 unsafe impl Send for BgpkitParser {}
@@ -36,7 +48,8 @@ impl BgpkitParser {
             BgpkitParser{
                 reader,
                 core_dump: false,
-                filters: vec![]
+                filters: vec![],
+                options: ParserOptions::default()
             }
         )
     }
@@ -45,7 +58,19 @@ impl BgpkitParser {
         BgpkitParser{
             reader: self.reader,
             core_dump: true,
-            filters: vec![]
+            filters: self.filters,
+            options: self.options
+        }
+    }
+
+    pub fn disable_warnings(self) -> BgpkitParser {
+        let mut options = self.options;
+        options.show_warnings = false;
+        BgpkitParser{
+            reader: self.reader,
+            core_dump: self.core_dump,
+            filters: self.filters,
+            options
         }
     }
 
@@ -56,7 +81,8 @@ impl BgpkitParser {
             BgpkitParser {
                 reader: self.reader,
                 core_dump: self.core_dump,
-                filters
+                filters,
+                options: ParserOptions::default()
             }
         )
     }
