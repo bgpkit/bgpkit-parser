@@ -31,6 +31,7 @@ impl BgpkitParser {
 MrtRecord Iterator
 **********/
 
+
 pub struct RecordIterator {
     pub parser: BgpkitParser,
     pub count: u64,
@@ -81,12 +82,14 @@ impl Iterator for RecordIterator {
                 Err(e) => {
                     match e.error {
                         ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
-                        | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::Deprecated(e) => {
-                            warn!("parsing error: {}", e);
+                        | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::DeprecatedAttr(e) => {
+                            if self.parser.options.show_warnings {
+                                warn!("parser warn: {}", e);
+                            }
                             continue
                         }
                         ParserErrorKind::ParseError(err_str) => {
-                            warn!("parsing error: {}", err_str);
+                            error!("parser error: {}", err_str);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
                                     std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");

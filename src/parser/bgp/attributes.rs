@@ -73,7 +73,7 @@ impl AttributeParser {
                     input.read_and_drop_n_bytes(length)?;
                     return match attr_type {
                         11 | 12 | 13 | 19 | 20 | 21 | 28 | 30 | 31 | 129 | 241..=243 => {
-                            Err(crate::error::ParserErrorKind::UnknownAttr(format!("deprecated attribute type: {}", attr_type)))
+                            Err(crate::error::ParserErrorKind::DeprecatedAttr(format!("deprecated attribute type: {}", attr_type)))
                         }
                         _ => {
                             Err(crate::error::ParserErrorKind::UnknownAttr(format!("unknown attribute type: {}", attr_type)))
