@@ -1,22 +1,13 @@
-# BGPKIT Parser
+/*!
+BGPKIT Parser aims to provides the most ergonomic MRT/BGP message parsing Rust API.
 
-[![Rust](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml/badge.svg)](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml)
-[![Crates.io](https://img.shields.io/crates/v/bgpkit-parser)](https://crates.io/crates/bgpkit-parser)
-[![Docs.rs](https://docs.rs/bgpkit-parser/badge.svg)](https://docs.rs/bgpkit-parser)
-[![License](https://img.shields.io/crates/l/bgpkit-parser)](https://raw.githubusercontent.com/bgpkit/bgpkit-parser/master/LICENSE)
-[![Discord](https://img.shields.io/discord/919618842613927977?label=Discord&style=plastic)](https://discord.gg/XDaAtZsz6b)
-
-BGPKIT Parser aims to provide the most ergonomic MRT/BGP/BMP message parsing Rust API.
-
-BGPKIT Parser has the following features:
+Features:
 - **performant**: comparable to C-based implementations like `bgpdump` or `bgpreader`.
 - **actively maintained**: we consistently introduce feature updates and bug fixes, and support most of the relevant BGP RFCs.
 - **ergonomic API**: a three-line for loop can already get you started.
 - **battery-included**: ready to handle remote or local, bzip2 or gz data files out of the box
 
 ## Examples
-
-For complete examples, check out the [examples folder](bgpkit-parser/examples).
 
 ### Parsing single MRT file
 
@@ -25,11 +16,9 @@ Here is an example that does so.
 
 ```rust
 use bgpkit_parser::BgpkitParser;
-fn main() {
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2");
-    for elem in parser {
-        println!("{}", elem)
-    }
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap();
+for elem in parser {
+    println!("{}", elem)
 }
 ```
 
@@ -39,24 +28,22 @@ You can even do some more interesting iterator operations that are event shorter
 For example, counting the number of announcements/withdrawals in that file:
 ```rust
 use bgpkit_parser::BgpkitParser;
-fn main() {
-    let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
-    let count = BgpkitParser::new(url).into_iter().count();
-    println!("total: {}", count);
-}
+let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
+let count = BgpkitParser::new(url).unwrap().into_iter().count();
+println!("total: {}", count);
 ```
 
 and it prints out
-```
+```text
 total: 255849
 ```
 
 ### Parsing multiple MRT files with BGPKIT Broker
 
-[BGPKIT Broker][broker-repo] library provides search API for all RouteViews and RIPE RIS MRT data files. Using the 
+[BGPKIT Broker][broker-repo] library provides search API for all RouteViews and RIPE RIS MRT data files. Using the
 broker's Rust API ([`bgpkit-broker`][broker-crates-io]), we can easily compile a list of MRT files that we are interested
 in for any time period and any data type (`update` or `rib`). This allows users to gather information without needing to
-know about locations of specific data files. 
+know about locations of specific data files.
 
 [broker-repo]: https://github.com/bgpkit/bgpkit-broker
 [broker-crates-io]: https://crates.io/crates/bgpkit-broker
@@ -67,69 +54,71 @@ The example below shows a relatively more interesting example that does the foll
 - find all announcements originated from AS13335
 - print out the total count of the announcements
 
-```rust
-fn main(){
-    // set broker query parameters
-    let mut params = bgpkit_broker::QueryParams::new();
-    params = params.start_ts(1634693400);
-    params = params.end_ts(1634693400);
-    params = params.data_type("update");
-    let mut broker = bgpkit_broker::BgpkitBroker::new("https://api.broker.bgpkit.com/v1");
-    broker.set_params(&params);
+```no_run
+use bgpkit_parser::{BgpkitParser, BgpElem};
 
-    // loop through data files found by broker
-    for item in broker {
-        
-        // create a parser that takes an URL and automatically determine
-        // the file location and file type, and handles data download and
-        // decompression streaming intelligently
-        let parser = BgpkitParser::new(item.url.as_str());
+// set broker query parameters
+let broker = bgpkit_broker::BgpkitBroker::new_with_params(
+   "https://api.broker.bgpkit.com/v1",
+   bgpkit_broker::QueryParams{
+       start_ts: Some(1634693400),
+       end_ts: Some(1634693400),
+       page: 1,
+       ..Default::default()
+});
 
-        // iterating through the parser. the iterator returns `BgpElem` one at a time.
-        let elems = parser.into_elem_iter().map(|elem|{
-            if let Some(origins) = &elem.origin_asns {
-                if origins.contains(&13335) {
-                    Some(elem)
-                } else {
-                    None
-                }
+// loop through data files found by broker
+for item in broker {
+
+    // create a parser that takes an URL and automatically determine
+    // the file location and file type, and handles data download and
+    // decompression streaming intelligently
+    let parser = BgpkitParser::new(item.url.as_str()).unwrap();
+
+    // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    let elems = parser.into_elem_iter().map(|elem|{
+        if let Some(origins) = &elem.origin_asns {
+            if origins.contains(&13335.into()) {
+                Some(elem)
             } else {
                 None
             }
-        }).filter_map(|x|x).collect::<Vec<BgpElem>>();
-        log::info!("{} elems matches", elems.len());
-    }
+        } else {
+            None
+        }
+    }).filter_map(|x|x).collect::<Vec<BgpElem>>();
+    log::info!("{} elems matches", elems.len());
 }
 ```
 
-
 ### Filtering BGP Messages
 
-BGPKIT Parser also has built-in filtering mechanism. When creating a new BgpkitParser instance,
+BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [BgpkitParser] instance,
 once can also call `add_filter` function to customize the parser to only show matching messages
-when iterating through BgpElems.
+when iterating through [BgpElem]s.
+
+For all types of filters, check out the [Filter] enum documentation.
 
 ```no_run
 use bgpkit_parser::BgpkitParser;
 
 /// This example shows how to parse a MRT file and filter by prefix.
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("downloading updates file");
+log::info!("downloading updates file");
 
-    // create a parser that takes the buffered reader
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-        .add_filter("prefix", "211.98.251.0/24").unwrap();
+// create a parser that takes the buffered reader
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("prefix", "211.98.251.0/24").unwrap();
 
-    log::info!("parsing updates file");
-    // iterating through the parser. the iterator returns `BgpElem` one at a time.
-    for elem in parser {
-        log::info!("{}", &elem);
-    }
-    log::info!("done");
+log::info!("parsing updates file");
+// iterating through the parser. the iterator returns `BgpElem` one at a time.
+for elem in parser {
+    log::info!("{}", &elem);
 }
+log::info!("done");
 ```
+
 
 ### Parsing Real-time Data Streams
 
@@ -142,7 +131,7 @@ Here is an example of handling RIS-Live message streams. After connecting to the
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
 from on collector (`rrc21`). We can then loop and read messages from the websocket.
 
-```rust
+```no_run
 use bgpkit_parser::parse_ris_live_message;
 use serde_json::json;
 use tungstenite::{connect, Message};
@@ -180,7 +169,7 @@ fn main() {
 data received from their collectors. Below is an partial example of how we handle the raw bytes
 received from the Kafka stream. For full examples, check out the [examples folder on GitHub](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
 
-```rust
+```ignore
 let bytes = m.value;
 let mut reader = Cursor::new(Vec::from(bytes));
 let header = parse_openbmp_header(&mut reader).unwrap();
@@ -216,58 +205,16 @@ match bmp_msg {
 [bmp-rfc]: https://datatracker.ietf.org/doc/html/rfc7854
 [openbmp-url]: https://www.openbmp.org/
 
-## Command Line Tool
-
-`bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
-
-You can install the tool by running 
-```bash
-cargo install bgpkit-parser
-```
-or checkout this repository and run
-```bash
-cargo install --path ./bgpkit-parser
-```
-
-```
-➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
-
-Mingwei Zhang <mingwei@bgpkit.com>
-
-bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
-
-USAGE:
-    bgpkit-parser-cli [FLAGS] [OPTIONS] <FILE>
-
-FLAGS:
-    -e, --elems-count      Count BGP elems
-    -h, --help             Prints help information
-        --json             Output as JSON objects
-        --pretty           Pretty-print JSON output
-    -r, --records-count    Count MRT records
-    -V, --version          Prints version information
-
-OPTIONS:
-    -a, --as-path <as-path>          Filter by AS path regex string
-    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
-    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
-    -o, --origin-asn <origin-asn>    Filter by origin AS Number
-    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
-    -j, --peer-ip <peer-ip>          Filter by peer IP address
-    -p, --prefix <prefix>            Filter by network prefix
-    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
-```
-
 ## Data Representation
 
-There are two key data structure to understand for the parsing results:`MrtRecord` and `BgpElem`.
+There are two key data structure to understand for the parsing results: [MrtRecord][bgp_models::mrt::MrtRecord] and [BgpElem].
 
 ### `MrtRecord`: unmodified MRT information representation
 
-The `MrtRecord` is the data structure that holds the unmodified, complete information parsed
+The MrtRecord is the data structrue that holds the unmodified, complete information parsed
 from the MRT data file. The code definition of the `MrtRecord` is defined in the crate `bgp-models` ([documentation][mrt-record-doc]).
 
-```rust
+```ignore
 pub struct MrtRecord {
     pub common_header: CommonHeader,
     pub message: MrtMessage,
@@ -280,19 +227,19 @@ pub enum MrtMessage {
 }
 ```
 
-`MrtRecord` record representation is concise, storage efficient, but often less convenient to use. For example, when
+MrtRecord record representation is concise, storage efficient, but often less convenient to use. For example, when
 trying to find out specific BGP announcements for certain IP prefix, we often needs to go through nested layers of
 internal data structure (NLRI, announced, prefix, or even looking up peer index table for Table Dump V2 format), which
 could be irrelevant to what users really want to do.
 
-### `BgpElem`: per-prefix BGP information, MRT-format-agnostic
+### [BgpElem]: per-prefix BGP information, MRT-format-agnostic
 
-To facilitate simpler data analysis of BGP data, we defined a new data structure called `BgpElem` in this crate. Each
-`BgpElem` contains a piece of self-containing BGP information about one single IP prefix.
+To facilitate simpler data analysis of BGP data, we defined a new data structure called [BgpElem] in this crate. Each
+[BgpElem] contains a piece of self-containing BGP information about one single IP prefix.
 For example, when a bundled announcement of three prefixes P1, P2, P3 that shares the same AS path is processed, we break
-the single record into three different `BgpElem` objects, each presenting a prefix.
+the single record into three different [BgpElem] objects, each presenting a prefix.
 
-```rust
+```ignore
 pub struct BgpElem {
     pub timestamp: f64,
     pub elem_type: ElemType,
@@ -312,7 +259,7 @@ pub struct BgpElem {
 }
 ```
 
-The main benefit of using `BgpElem` is that the analysis can be executed on a per-prefix basis, generic to what the
+The main benefit of using [BgpElem] is that the analysis can be executed on a per-prefix basis, generic to what the
 backend MRT data format (bgp4mp, tabledumpv1, tabledumpv2, etc.). The obvious drawback is that we will have to duplicate
 information to save at each elem, that consuming more memory.
 
@@ -333,7 +280,6 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)
 - [ ] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
-- [ ] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
 ### MRT
 
@@ -365,15 +311,23 @@ We support normal communities, extended communities, and large communities.
 - [ ] [RFC 9117](https://datatracker.ietf.org/doc/html/rfc9117) Revised Validation Procedure for BGP Flow Specifications Updates 8955
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
+*/
 
-## Minimum Supported Rust Version (MSRV)
+#[macro_use]
+extern crate enum_primitive_derive;
 
-`1.48.0`
+pub mod error;
+pub mod parser;
 
-## Contribution
-
-Issues and pull requests are welcome!
-
-## Built with ❤️ by BGPKIT Team
-
-<a href="https://bgpkit.com"><img src="https://bgpkit.com/Original%20Logo%20Cropped.png" alt="https://bgpkit.com/favicon.ico" width="200"/></a>
+pub use parser::BgpkitParser;
+pub use parser::ParserError;
+pub use parser::Elementor;
+pub use parser::iters::{ElemIterator, RecordIterator};
+pub use parser::bmp::parse_openbmp_msg;
+pub use parser::bmp::parse_bmp_msg;
+pub use parser::bmp::parse_openbmp_header;
+pub use parser::rislive::parse_ris_live_message;
+pub use parser::mrt::parse_mrt_record;
+pub use parser::utils::ReadUtils;
+pub use parser::filter::*;
+pub use bgp_models::prelude::*;

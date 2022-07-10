@@ -1,0 +1,24 @@
+[package]
+name = "pybgpkit-parser"
+description = "BGPKIT Parser Python Binding"
+keywords = ["bgp", "mrt", "parser"]
+repository = "https://github.com/bgpkit/bgpkit-parser-py"
+documentation = "https://docs.rs/bgpkit-parser-py"
+version = "0.3.0"
+authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+
+[lib]
+name = "pybgpkit_parser"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bgpkit-parser = {path="../bgpkit-parser"}
+pyo3 = { version = "0.17.3", features = ["extension-module"] }
+dict_derive = "0.4.0"
+openssl = { version = "0.10", features = ["vendored"] }
+
+[build-dependencies]
+pyo3-build-config = "0.17.3"
