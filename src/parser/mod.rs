@@ -82,7 +82,7 @@ impl BgpkitParser {
                 reader: self.reader,
                 core_dump: self.core_dump,
                 filters,
-                options: ParserOptions::default()
+                options: self.options
             }
         )
     }
