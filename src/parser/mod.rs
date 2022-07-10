@@ -63,9 +63,9 @@ impl BgpkitParser {
         }
     }
 
-    pub fn disable_unknown_attr_warning(self) -> BgpkitParser {
+    pub fn disable_warnings(self) -> BgpkitParser {
         let mut options = self.options;
-        options.disable_warning = true;
+        options.show_warnings = false;
         BgpkitParser{
             reader: self.reader,
             core_dump: self.core_dump,
