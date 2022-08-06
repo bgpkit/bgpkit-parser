@@ -4,7 +4,7 @@ Provides parser iterator implementation.
 use log::{error, warn};
 use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::{BgpElem, Elementor};
-use crate::error::ParserErrorKind;
+use crate::error::ParserError;
 use crate::parser::BgpkitParser;
 use crate::Filterable;
 
@@ -81,14 +81,14 @@ impl Iterator for RecordIterator {
                 },
                 Err(e) => {
                     match e.error {
-                        ParserErrorKind::TruncatedMsg(e)| ParserErrorKind::Unsupported(e)
-                        | ParserErrorKind::UnknownAttr(e) | ParserErrorKind::DeprecatedAttr(e) => {
+                        ParserError::TruncatedMsg(e)| ParserError::Unsupported(e)
+                        | ParserError::UnknownAttr(e) | ParserError::DeprecatedAttr(e) => {
                             if self.parser.options.show_warnings {
                                 warn!("parser warn: {}", e);
                             }
                             continue
                         }
-                        ParserErrorKind::ParseError(err_str) => {
+                        ParserError::ParseError(err_str) => {
                             error!("parser error: {}", err_str);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
@@ -99,11 +99,11 @@ impl Iterator for RecordIterator {
                                 continue
                             }
                         }
-                        ParserErrorKind::EofExpected =>{
+                        ParserError::EofExpected =>{
                             // normal end of file
                             None
                         }
-                        ParserErrorKind::IoError(err)| ParserErrorKind::EofError(err) => {
+                        ParserError::IoError(err)| ParserError::EofError(err) => {
                             // when reaching IO error, stop iterating
                             error!("{:?}", err);
                             if self.parser.core_dump {
@@ -113,7 +113,7 @@ impl Iterator for RecordIterator {
                             }
                             None
                         }
-                        ParserErrorKind::RemoteIoError(_) | ParserErrorKind::FilterError(_) | ParserErrorKind::IoNotEnoughBytes()=> {
+                        ParserError::OneIoError(_) | ParserError::FilterError(_) | ParserError::IoNotEnoughBytes()=> {
                             // this should not happen at this stage
                             None
                         }

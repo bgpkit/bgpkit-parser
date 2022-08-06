@@ -8,7 +8,7 @@ use log::{warn,debug};
 
 use num_traits::FromPrimitive;
 
-use crate::error::ParserErrorKind;
+use crate::error::ParserError;
 use crate::parser::DataBytes;
 
 
@@ -37,7 +37,7 @@ impl AttributeParser {
         safi: Option<Safi>,
         prefixes: Option<Vec<NetworkPrefix>>,
         total_bytes: usize,
-    ) -> Result<Vec<Attribute>, ParserErrorKind> {
+    ) -> Result<Vec<Attribute>, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
         let attrs_end_pos = input.pos + total_bytes;
 
@@ -73,10 +73,10 @@ impl AttributeParser {
                     input.read_and_drop_n_bytes(length)?;
                     return match attr_type {
                         11 | 12 | 13 | 19 | 20 | 21 | 28 | 30 | 31 | 129 | 241..=243 => {
-                            Err(crate::error::ParserErrorKind::DeprecatedAttr(format!("deprecated attribute type: {}", attr_type)))
+                            Err(crate::error::ParserError::DeprecatedAttr(format!("deprecated attribute type: {}", attr_type)))
                         }
                         _ => {
-                            Err(crate::error::ParserErrorKind::UnknownAttr(format!("unknown attribute type: {}", attr_type)))
+                            Err(crate::error::ParserError::UnknownAttr(format!("unknown attribute type: {}", attr_type)))
                         }
                     }
                 }
@@ -116,7 +116,7 @@ impl AttributeParser {
                     Ok(AttributeValue::Development(buf))
                 },
                 _ => {
-                    Err(crate::error::ParserErrorKind::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
+                    Err(crate::error::ParserError::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
             };
 
@@ -148,17 +148,17 @@ impl AttributeParser {
         Ok(attributes)
     }
 
-    fn parse_origin(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_origin(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
         let origin = input.read_8b()?;
         match Origin::from_u8(origin) {
             Some(v) => Ok(AttributeValue::Origin(v)),
             None => {
-                return Err(crate::error::ParserErrorKind::UnknownAttr(format!("Failed to parse attribute type: origin")))
+                return Err(crate::error::ParserError::UnknownAttr(format!("Failed to parse attribute type: origin")))
             }
         }
     }
 
-    fn parse_as_path(&self, input: &mut DataBytes, asn_len: &AsnLength, total_bytes: usize) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_as_path(&self, input: &mut DataBytes, asn_len: &AsnLength, total_bytes: usize) -> Result<AttributeValue, ParserError> {
         let mut output = AsPath{ segments: Vec::with_capacity(5) };
         let pos_end = input.pos + total_bytes;
         while input.pos < pos_end {
@@ -168,7 +168,7 @@ impl AttributeParser {
         Ok(AttributeValue::AsPath(output))
     }
 
-    fn parse_as_segment(&self, input: &mut DataBytes, asn_len: &AsnLength) -> Result<AsPathSegment, ParserErrorKind> {
+    fn parse_as_segment(&self, input: &mut DataBytes, asn_len: &AsnLength) -> Result<AsPathSegment, ParserError> {
         let segment_type = input.read_8b()?;
         let count = input.read_8b()?;
         let path = input.read_asns(asn_len, count as usize)?;
@@ -177,13 +177,13 @@ impl AttributeParser {
             AttributeParser::AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
             AttributeParser::AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
             AttributeParser::AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
-            _ => Err(ParserErrorKind::ParseError(
+            _ => Err(ParserError::ParseError(
                 format!("Invalid AS path segment type: {}", segment_type),
             )),
         }
     }
 
-    fn parse_next_hop(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_next_hop(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
         if let Some(afi) = afi {
             Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
         } else {
@@ -191,19 +191,19 @@ impl AttributeParser {
         }
     }
 
-    fn parse_med(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_med(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
         Ok(input
             .read_32b()
             .map(AttributeValue::MultiExitDiscriminator)?)
     }
 
-    fn parse_local_pref(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_local_pref(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
         Ok(input
             .read_32b()
             .map(AttributeValue::LocalPreference)?)
     }
 
-    fn parse_aggregator(&self, input: &mut DataBytes, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_aggregator(&self, input: &mut DataBytes, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
         let asn = input.read_asn(asn_len)?;
         let afi = match afi {
             None => { &Afi::Ipv4 }
@@ -213,7 +213,7 @@ impl AttributeParser {
         Ok(AttributeValue::Aggregator(asn, addr))
     }
 
-    fn parse_regular_communities(&self, input: &mut DataBytes, total_bytes: usize) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_regular_communities(&self, input: &mut DataBytes, total_bytes: usize) -> Result<AttributeValue, ParserError> {
         const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
         const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
         const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
@@ -240,7 +240,7 @@ impl AttributeParser {
         Ok(AttributeValue::Communities(communities))
     }
 
-    fn parse_originator_id(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_originator_id(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
         let afi = match afi {
             None => { &Afi::Ipv4 }
             Some(a) => {a}
@@ -250,7 +250,7 @@ impl AttributeParser {
     }
 
     #[allow(unused)]
-    fn parse_cluster_id(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_cluster_id(&self, input: &mut DataBytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
         let afi = match afi {
             None => { &Afi::Ipv4 }
             Some(a) => {a}
@@ -259,7 +259,7 @@ impl AttributeParser {
         Ok(AttributeValue::Clusters(vec![addr]))
     }
 
-    fn parse_clusters(&self, input: &mut DataBytes, afi: &Option<Afi>, total_bytes: usize) -> Result<AttributeValue, ParserErrorKind> {
+    fn parse_clusters(&self, input: &mut DataBytes, afi: &Option<Afi>, total_bytes: usize) -> Result<AttributeValue, ParserError> {
         // FIXME: in https://tools.ietf.org/html/rfc4456, the CLUSTER_LIST is a set of CLUSTER_ID each represented by a 4-byte number
         let mut clusters = Vec::new();
         let mut read = 0;
@@ -299,7 +299,7 @@ impl AttributeParser {
                                    prefixes: &Option<Vec<NetworkPrefix>>,
                                    reachable: bool,
         total_bytes: usize,
-    ) -> Result<AttributeValue, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserError> {
         let first_byte_zero = input.bytes[input.pos]==0;
         let pos_end = input.pos + total_bytes;
 
@@ -377,7 +377,7 @@ impl AttributeParser {
         &self,
         next_hop_length: u8,
         input: &mut DataBytes,
-    ) -> Result<Option<NextHopAddress>, ParserErrorKind> {
+    ) -> Result<Option<NextHopAddress>, ParserError> {
         let output = match next_hop_length {
             0 => None,
             4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
@@ -387,7 +387,7 @@ impl AttributeParser {
                 input.read_ipv6_address()?,
             )),
             v => {
-                return Err(ParserErrorKind::ParseError(
+                return Err(ParserError::ParseError(
                     format!("Invalid next hop length found: {}",v),
                 ));
             }
@@ -399,7 +399,7 @@ impl AttributeParser {
         &self,
         input: &mut DataBytes,
         total_bytes: usize,
-    ) -> Result<AttributeValue, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserError> {
         let mut communities = Vec::new();
         let pos_end = input.pos + total_bytes;
         while input.pos < pos_end {
@@ -417,7 +417,7 @@ impl AttributeParser {
         &self,
         input: &mut DataBytes,
         total_bytes: usize,
-    ) -> Result<AttributeValue, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserError> {
         let mut communities = Vec::new();
         let pos_end = input.pos + total_bytes;
         while input.pos < pos_end {
@@ -535,7 +535,7 @@ impl AttributeParser {
         &self,
         input: &mut DataBytes,
         total_bytes: usize
-    ) -> Result<AttributeValue, ParserErrorKind> {
+    ) -> Result<AttributeValue, ParserError> {
         let mut communities = Vec::new();
         let pos_end = input.pos + total_bytes;
         while input.pos < pos_end {

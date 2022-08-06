@@ -2,7 +2,7 @@ use bgp_models::bgp::*;
 use bgp_models::network::*;
 use num_traits::FromPrimitive;
 
-use crate::error::ParserErrorKind;
+use crate::error::ParserError;
 use crate::parser::{AttributeParser, DataBytes};
 use log::warn;
 
@@ -24,7 +24,7 @@ use log::warn;
 /// |          Length               |      Type     |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserErrorKind> {
+pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserError> {
     // https://tools.ietf.org/html/rfc4271#section-4
     // 16 (4 x 4 bytes) octets marker
     input.read_32b()?;
@@ -44,7 +44,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_l
      */
     let length = input.read_16b()?;
     if !(length >= 19 && length <= 4096) {
-        return Err(ParserErrorKind::ParseError(format!("invalid BGP message length {}", length)))
+        return Err(ParserError::ParseError(format!("invalid BGP message length {}", length)))
     }
 
     let bgp_msg_length =
@@ -58,7 +58,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_l
     let msg_type: BgpMessageType = match BgpMessageType::from_u8(input.read_8b()?){
         Some(t) => t,
         None => {
-            return Err(ParserErrorKind::ParseError(format!("Unknown BGP Message Type")))
+            return Err(ParserError::ParseError(format!("Unknown BGP Message Type")))
         }
     };
 
@@ -83,7 +83,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_l
     )
 }
 
-pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserErrorKind> {
+pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserError> {
     let error_code = input.read_8b()?;
     let error_subcode = input.read_8b()?;
     let data = input.read_n_bytes((bgp_msg_length - 2) as usize)?;
@@ -95,7 +95,7 @@ pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64
         })
 }
 
-pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, ParserErrorKind> {
+pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, ParserError> {
     let version = input.read_8b()?;
     let asn = Asn{asn: input.read_16b()? as u32, len: AsnLength::Bits16};
     let hold_time = input.read_16b()?;
@@ -168,7 +168,7 @@ pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, P
 }
 
 /// read nlri portion of a bgp update message.
-fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserError> {
     if length==0{
         return Ok(vec![])
     }
@@ -185,7 +185,7 @@ fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) ->
 }
 
 /// read bgp update message.
-pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserErrorKind> {
+pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserError> {
     // parse withdrawn prefixes nlri
     let withdrawn_length = input.read_16b()? as u64;
     let withdrawn_prefixes = read_nlri(input, withdrawn_length as usize, afi, add_path)?;

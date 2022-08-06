@@ -58,8 +58,8 @@ use std::str::FromStr;
 use bgp_models::prelude::*;
 use ipnetwork::IpNetwork;
 use regex::Regex;
-use crate::ParserErrorKind;
-use crate::ParserErrorKind::FilterError;
+use crate::ParserError;
+use crate::ParserError::FilterError;
 
 /// Filter enum: definition o types of filters
 ///
@@ -92,7 +92,7 @@ pub enum PrefixMatchType {
 }
 
 impl Filter {
-    pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserErrorKind> {
+    pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         match filter_type {
             "origin_asn" => {
                 match u32::from_str(filter_value) {
