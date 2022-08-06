@@ -122,7 +122,9 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
 
     let sequence_number = input.read_32b()?;
 
-    let prefix = input.read_nlri_prefix(&afi, add_path)?;
+    // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
+    //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
+    let prefix = input.read_nlri_prefix(&afi, false)?;
     let prefixes = vec!(prefix.clone());
 
     let entry_count = input.read_16b()?;
