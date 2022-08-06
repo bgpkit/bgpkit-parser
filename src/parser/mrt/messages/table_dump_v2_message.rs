@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::error::ParserErrorKind;
+use crate::error::ParserError;
 use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;
@@ -8,11 +8,11 @@ use crate::parser::{AttributeParser, DataBytes};
 
 pub fn parse_table_dump_v2_message(
     sub_type: u16,
-    input: &mut DataBytes) -> Result<TableDumpV2Message, ParserErrorKind> {
+    input: &mut DataBytes) -> Result<TableDumpV2Message, ParserError> {
 
     let v2_type: TableDumpV2Type = match TableDumpV2Type::from_u16(sub_type) {
         Some(t) => t,
-        None => {return Err(ParserErrorKind::ParseError(format!("cannot parse table dump v2 type: {}", sub_type)))}
+        None => {return Err(ParserError::ParseError(format!("cannot parse table dump v2 type: {}", sub_type)))}
     };
 
     let msg: TableDumpV2Message = match v2_type {
@@ -26,7 +26,7 @@ pub fn parse_table_dump_v2_message(
             TableDumpV2Message::RibAfiEntries(parse_rib_afi_entries(input, v2_type)?)
         },
         TableDumpV2Type::RibGeneric| TableDumpV2Type::RibGenericAddPath| TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserErrorKind::Unsupported("TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string()))
+            return Err(ParserError::Unsupported("TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string()))
         }
     };
 
@@ -36,7 +36,7 @@ pub fn parse_table_dump_v2_message(
 /// Peer index table
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_peer_index_table(input: &mut DataBytes) -> Result<PeerIndexTable, ParserErrorKind> {
+pub fn parse_peer_index_table(input: &mut DataBytes) -> Result<PeerIndexTable, ParserError> {
     let collector_bgp_id = Ipv4Addr::from(input.read_32b()?);
     // read and ignore view name
     let view_name_length = input.read_16b()?;
@@ -87,7 +87,7 @@ pub fn parse_peer_index_table(input: &mut DataBytes) -> Result<PeerIndexTable, P
 /// RIB AFI-specific entries
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserErrorKind> {
+pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -> Result<RibAfiEntries, ParserError> {
     let afi: Afi;
     let safi: Safi;
     match rib_type {
@@ -108,7 +108,7 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
             safi = Safi::Multicast
         }
         _ => {
-            return Err(ParserErrorKind::ParseError(format!("wrong RIB type for parsing: {:?}", rib_type)))
+            return Err(ParserError::ParseError(format!("wrong RIB type for parsing: {:?}", rib_type)))
         }
     };
 
@@ -148,9 +148,9 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
     )
 }
 
-pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserErrorKind> {
+pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserError> {
     if input.bytes_left() < 16 {
-        return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
     }
     let peer_index = input.read_16b()?;
     let originated_time = input.read_32b()?;
@@ -160,7 +160,7 @@ pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &
     let attribute_length = input.read_16b()? as usize;
 
     if input.bytes_left() < attribute_length  {
-        return Err(ParserErrorKind::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
     }
 
     let attr_parser = AttributeParser::new(add_path);

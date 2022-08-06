@@ -7,13 +7,13 @@ use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::DataBytes;
 
 /// TABLE_DUMP v1 only support 2-byte asn
-fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserErrorKind> {
+fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserError> {
     let asn_len = AsnLength::Bits16;
     let afi = match sub_type {
         1 => Afi::Ipv4,
         2 => Afi::Ipv6,
         _ => {
-            return Err(ParserErrorKind::ParseError(format!(
+            return Err(ParserError::ParseError(format!(
                 "Invalid subtype found for TABLE_DUMP (V1) message: {}",
                 sub_type
             )))
@@ -43,7 +43,7 @@ fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserErrorKind> {
 pub fn parse_table_dump_message(
     sub_type: u16,
     input: &mut DataBytes,
-) -> Result<TableDumpMessage, ParserErrorKind> {
+) -> Result<TableDumpMessage, ParserError> {
     let meta = parse_sub_type(sub_type)?;
 
     let view_number = input.read_16b()?;

@@ -13,7 +13,7 @@ use std::net::IpAddr;
 use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
 use log::debug;
 
-use crate::error::ParserErrorKind;
+use crate::error::ParserError;
 
 pub struct DataBytes<'input> {
     pub bytes: &'input [u8],
@@ -40,71 +40,71 @@ impl  DataBytes <'_>{
     }
 
     #[inline]
-    pub fn read_128b(&mut self) -> Result<u128, ParserErrorKind> {
+    pub fn read_128b(&mut self) -> Result<u128, ParserError> {
         let len = 16;
         if self.total - self.pos < len {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += len;
         Ok( u128::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    pub fn read_64b(&mut self) -> Result<u64, ParserErrorKind> {
+    pub fn read_64b(&mut self) -> Result<u64, ParserError> {
         let len = 8;
         if self.total - self.pos < len {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += len;
         Ok( u64::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    pub fn read_32b(&mut self) -> Result<u32, ParserErrorKind> {
+    pub fn read_32b(&mut self) -> Result<u32, ParserError> {
         let len = 4;
         if self.total - self.pos < len {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += len;
         Ok( u32::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    pub fn read_16b(&mut self) -> Result<u16, ParserErrorKind> {
+    pub fn read_16b(&mut self) -> Result<u16, ParserError> {
         let len = 2;
         if self.total - self.pos < len {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += len;
         Ok( u16::from_be_bytes(self.bytes[self.pos-len..self.pos].try_into().unwrap()) )
     }
 
     #[inline]
-    pub fn read_8b(&mut self) -> Result<u8, ParserErrorKind> {
+    pub fn read_8b(&mut self) -> Result<u8, ParserError> {
         let len = 1;
         if self.total - self.pos < len {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += len;
         Ok( self.bytes[self.pos-len] )
     }
 
-    pub fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserErrorKind>{
+    pub fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError>{
         if self.total - self.pos < n_bytes {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos += n_bytes;
         Ok(self.bytes[self.pos-n_bytes..self.pos].to_vec())
     }
 
-    pub fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserErrorKind>{
+    pub fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError>{
         let buffer = self.read_n_bytes(n_bytes)?;
         Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
     }
 
-    pub fn read_and_drop_n_bytes(&mut self, n_bytes: usize) -> Result<(), ParserErrorKind>{
+    pub fn read_and_drop_n_bytes(&mut self, n_bytes: usize) -> Result<(), ParserError>{
         if self.total - self.pos < n_bytes {
-            return Err(ParserErrorKind::IoNotEnoughBytes())
+            return Err(ParserError::IoNotEnoughBytes())
         }
         self.pos+=n_bytes;
         Ok(())
@@ -119,7 +119,7 @@ impl  DataBytes <'_>{
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
     /// If the `add_path` is true, it will also first read a 4-byte path id first; otherwise, a path-id of 0
     /// is automatically set.
-    pub fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserErrorKind> {
+    pub fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserError> {
 
         let path_id = if add_path {
             self.read_32b()?
@@ -137,7 +137,7 @@ impl  DataBytes <'_>{
 
                 // 4 bytes -- u32
                 if byte_len>4 {
-                    return Err(ParserErrorKind::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
@@ -148,7 +148,7 @@ impl  DataBytes <'_>{
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len>16 {
-                    return Err(ParserErrorKind::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
                 }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
@@ -160,7 +160,7 @@ impl  DataBytes <'_>{
         let prefix = match IpNetwork::new(addr, bit_len) {
             Ok(p) => {p}
             Err(_) => {
-                return Err(ParserErrorKind::ParseError(format!("Invalid network prefix length: {}", bit_len)))
+                return Err(ParserError::ParseError(format!("Invalid network prefix length: {}", bit_len)))
             }
         };
 
@@ -184,17 +184,17 @@ impl  DataBytes <'_>{
         }
     }
 
-    pub fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserErrorKind> {
+    pub fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserError> {
         let addr = self.read_32b()?;
         Ok(Ipv4Addr::from(addr))
     }
 
-    pub fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserErrorKind> {
+    pub fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserError> {
         let buf = self.read_128b()?;
         Ok(Ipv6Addr::from(buf))
     }
 
-    pub fn read_ipv4_prefix(&mut self) -> Result<Ipv4Network, ParserErrorKind> {
+    pub fn read_ipv4_prefix(&mut self) -> Result<Ipv4Network, ParserError> {
         let addr = self.read_ipv4_address()?;
         let mask = self.read_8b()?;
         match Ipv4Network::new(addr, mask) {
@@ -203,7 +203,7 @@ impl  DataBytes <'_>{
         }
     }
 
-    pub fn read_ipv6_prefix(&mut self) -> Result<Ipv6Network, ParserErrorKind> {
+    pub fn read_ipv6_prefix(&mut self) -> Result<Ipv6Network, ParserError> {
         let addr = self.read_ipv6_address()?;
         let mask = self.read_8b()?;
         match Ipv6Network::new(addr, mask) {
@@ -212,7 +212,7 @@ impl  DataBytes <'_>{
         }
     }
 
-    pub fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserErrorKind> {
+    pub fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserError> {
         match as_length {
             AsnLength::Bits16 => {
                 let asn = self.read_16b()? as u32;
@@ -235,7 +235,7 @@ impl  DataBytes <'_>{
         }
     }
 
-    pub fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserErrorKind> {
+    pub fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
         let mut path  = [0;255];
         Ok(
             match as_length {
@@ -257,21 +257,21 @@ impl  DataBytes <'_>{
         )
     }
 
-    pub fn read_afi(&mut self) -> Result<Afi, ParserErrorKind> {
+    pub fn read_afi(&mut self) -> Result<Afi, ParserError> {
         let afi = self.read_16b()?;
         match Afi::from_i16(afi as i16) {
             Some(afi) => Ok(afi),
             None => {
-                Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown AFI type: {}", afi)))
+                Err(crate::error::ParserError::Unsupported(format!("Unknown AFI type: {}", afi)))
             },
         }
     }
 
-    pub fn read_safi(&mut self) -> Result<Safi, ParserErrorKind> {
+    pub fn read_safi(&mut self) -> Result<Safi, ParserError> {
         let safi = self.read_8b()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
-            None => Err(crate::error::ParserErrorKind::Unsupported(format!("Unknown SAFI type: {}", safi)))
+            None => Err(crate::error::ParserError::Unsupported(format!("Unknown SAFI type: {}", safi)))
         }
     }
 
@@ -280,7 +280,7 @@ impl  DataBytes <'_>{
         add_path: bool,
         afi: &Afi,
         total_bytes: usize,
-    ) -> Result<Vec<NetworkPrefix>, ParserErrorKind> {
+    ) -> Result<Vec<NetworkPrefix>, ParserError> {
         let pos_end = self.pos + total_bytes;
 
         let mut is_add_path = add_path;

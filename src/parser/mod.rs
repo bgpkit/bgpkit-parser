@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::BufRead;
 use bgp_models::mrt::MrtRecord;
 
 #[macro_use]
@@ -14,14 +14,14 @@ pub(crate) use self::utils::*;
 pub(crate) use bgp::attributes::AttributeParser;
 pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, parse_mrt_record, };
 
-pub use crate::error::{ParserError, ParserErrorKind};
+pub use crate::error::{ParserErrorWithBytes, ParserError};
 pub use mrt::mrt_elem::Elementor;
 use bgp_models::prelude::ElemType;
+use oneio::get_reader;
 use crate::Filter;
-use crate::io::get_reader;
 
 pub struct BgpkitParser {
-    reader: Box<dyn Read>,
+    reader: Box<dyn BufRead>,
     core_dump: bool,
     filters: Vec<Filter>,
     options: ParserOptions
@@ -42,7 +42,7 @@ unsafe impl Send for BgpkitParser {}
 
 impl BgpkitParser {
     /// Creating a new parser from a object that implements [Read] trait.
-    pub fn new(path: &str) -> Result<BgpkitParser, ParserError>{
+    pub fn new(path: &str) -> Result<BgpkitParser, ParserErrorWithBytes>{
         let reader = get_reader(path)?;
         Ok(
             BgpkitParser{
@@ -74,7 +74,7 @@ impl BgpkitParser {
         }
     }
 
-    pub fn add_filter(self, filter_type: &str, filter_value: &str) -> Result<BgpkitParser, ParserError> {
+    pub fn add_filter(self, filter_type: &str, filter_value: &str) -> Result<BgpkitParser, ParserErrorWithBytes> {
         let mut filters = self.filters;
         filters.push(Filter::new(filter_type, filter_value)?);
         Ok(
@@ -88,7 +88,7 @@ impl BgpkitParser {
     }
 
     /// This is used in for loop `for item in parser{}`
-    pub fn next(&mut self) -> Result<MrtRecord, ParserError> {
+    pub fn next(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
         parse_mrt_record(&mut self.reader)
     }
 }

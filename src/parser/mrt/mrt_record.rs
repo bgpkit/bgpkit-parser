@@ -1,7 +1,7 @@
 use std::io::{ErrorKind, Read};
 use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
-use crate::parser::{DataBytes, parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserError, ReadUtils};
-use crate::error::ParserErrorKind;
+use crate::parser::{DataBytes, parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes, ReadUtils};
+use crate::error::ParserError;
 use crate::num_traits::FromPrimitive;
 
 /// MRT common header
@@ -38,16 +38,16 @@ use crate::num_traits::FromPrimitive;
 /// |                      Message... (variable)
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, CommonHeader), ParserErrorKind> {
+pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, CommonHeader), ParserError> {
     let timestamp = match input.read_32b() {
         Ok(t) => {t}
         Err(e) => {
             return match e.kind() {
                 ErrorKind::UnexpectedEof => {
-                    Err(ParserErrorKind::EofExpected)
+                    Err(ParserError::EofExpected)
                 }
                 _ => {
-                    Err(ParserErrorKind::from(e))
+                    Err(ParserError::from(e))
                 }
             }
         }
@@ -56,7 +56,7 @@ pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, 
     let entry_type_raw = input.read_16b()?;
     let entry_type = match EntryType::from_u16(entry_type_raw) {
         Some(t) => Ok(t),
-        None => Err(ParserErrorKind::ParseError(
+        None => Err(ParserError::ParseError(
             format!("Failed to parse entry type: {}", entry_type_raw),
         )),
     }?;
@@ -87,18 +87,18 @@ pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, 
     }))
 }
 
-pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError> {
+pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserErrorWithBytes> {
     // parse common header
     let (header_bytes, common_header) = match parse_common_header(input){
         Ok(v) => v,
-        Err(e) => return Err(ParserError{error: e, bytes: None})
+        Err(e) => return Err(ParserErrorWithBytes {error: e, bytes: None})
     };
 
     // read the whole message bytes to buffer
     let mut buffer = Vec::with_capacity(common_header.length as usize);
     match input.take(common_header.length as u64).read_to_end(&mut buffer) {
         Ok(_) => {}
-        Err(e) => return Err(ParserError{error: ParserErrorKind::IoError(e), bytes: None})
+        Err(e) => return Err(ParserErrorWithBytes {error: ParserError::IoError(e), bytes: None})
     }
 
     let mut data = DataBytes::new(&buffer);
@@ -114,12 +114,12 @@ pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError
             let mut total_bytes = vec![];
             total_bytes.extend(header_bytes);
             total_bytes.extend(buffer);
-            Err(ParserError{ error: e, bytes: Some(total_bytes) })
+            Err(ParserErrorWithBytes { error: e, bytes: Some(total_bytes) })
         }
     }
 }
 
-fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result<MrtMessage, ParserErrorKind>{
+fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result<MrtMessage, ParserError>{
     let message: MrtMessage = match &common_header.entry_type {
         EntryType::TABLE_DUMP => {
             let msg = parse_table_dump_message(common_header.entry_subtype,data);
@@ -150,7 +150,7 @@ fn parse_raw_bytes(common_header: &CommonHeader, data: &mut DataBytes) -> Result
         }
         v => {
             // deprecated
-            return Err(ParserErrorKind::Unsupported(format!("unsupported MRT type: {:?}", v)))
+            return Err(ParserError::Unsupported(format!("unsupported MRT type: {:?}", v)))
         }
     };
     Ok(message)
