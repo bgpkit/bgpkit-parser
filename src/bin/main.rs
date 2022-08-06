@@ -5,82 +5,82 @@ use std::net::IpAddr;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
-use structopt::StructOpt;
+use clap::Parser;
 use bgpkit_parser::{BgpkitParser, Elementor};
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
-#[derive(StructOpt, Debug)]
-#[structopt(name="bgpkit-parser-cli")]
+#[derive(Parser, Debug)]
+#[clap(name="bgpkit-parser-cli")]
 struct Opts {
     /// File path to a MRT file, local or remote.
-    #[structopt(name="FILE", parse(from_os_str))]
+    #[clap(name="FILE", parse(from_os_str))]
     file_path: PathBuf,
 
     /// Output as JSON objects
-    #[structopt(long)]
+    #[clap(long)]
     json: bool,
 
     /// Pretty-print JSON output
-    #[structopt(long)]
+    #[clap(long)]
     pretty: bool,
 
     /// Count BGP elems
-    #[structopt(short,long)]
+    #[clap(short,long)]
     elems_count: bool,
 
     /// Count MRT records
-    #[structopt(short,long)]
+    #[clap(short,long)]
     records_count: bool,
 
-    #[structopt(flatten)]
+    #[clap(flatten)]
     filters: Filters,
 }
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 struct Filters {
     /// Filter by origin AS Number
-    #[structopt(short="o", long)]
+    #[clap(short='o', long)]
     origin_asn: Option<u32>,
 
     /// Filter by network prefix
-    #[structopt(short="p", long)]
+    #[clap(short='p', long)]
     prefix: Option<IpNetwork>,
 
     /// Include super-prefix when filtering
-    #[structopt(short="s", long)]
+    #[clap(short='s', long)]
     include_super: bool,
 
     /// Include sub-prefix when filtering
-    #[structopt(short="S", long)]
+    #[clap(short='S', long)]
     include_sub: bool,
 
     /// Filter by peer IP address
-    #[structopt(short="j", long)]
+    #[clap(short='j', long)]
     peer_ip: Vec<IpAddr>,
 
     /// Filter by peer ASN
-    #[structopt(short="J", long)]
+    #[clap(short='J', long)]
     peer_asn: Option<u32>,
 
     /// Filter by elem type: announce (a) or withdraw (w)
-    #[structopt(short="m", long)]
+    #[clap(short='m', long)]
     elem_type: Option<String>,
 
     /// Filter by start unix timestamp inclusive
-    #[structopt(short="t", long)]
+    #[clap(short='t', long)]
     start_ts: Option<f64>,
 
     /// Filter by end unix timestamp inclusive
-    #[structopt(short="T", long)]
+    #[clap(short='T', long)]
     end_ts: Option<f64>,
 
     /// Filter by AS path regex string
-    #[structopt(short="a", long)]
+    #[clap(short='a', long)]
     as_path: Option<String>,
 }
 
 fn main() {
-    let opts: Opts = Opts::from_args();
+    let opts: Opts = Opts::parse();
 
     env_logger::init();
 
