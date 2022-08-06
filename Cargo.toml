@@ -42,7 +42,7 @@ serde_json = "1.0.69"
 # bmp/openbmp parsing
 hex="0.4.3"
 
-structopt = {version="0.3", optional=true}
+clap = {version="3.2", features=["derive"], optional=true}
 
 [dev-dependencies]
 bgpkit-broker = "0.3.2"
@@ -58,13 +58,13 @@ rayon = "1.5.1"
 
 [features]
 default = ["build-binary"]
-build-binary = ["structopt"]
+build-binary = ["clap"]
 
 [[bench]]
 name = "bench_main"
 harness = false
 
 [[bin]]
-name = "bgpkit-parser-cli"
+name = "bgpkit-parser"
 path = "src/bin/main.rs"
 required-features = ["build-binary"]
