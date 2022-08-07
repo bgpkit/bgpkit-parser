@@ -23,7 +23,7 @@ num-traits = "0.1"
 chrono = "0.4"
 regex = "1"
 
-bgp-models = "0.7.0"
+bgp-models = "0.8.0"
 # bgp-models = {git="https://github.com/bgpkit/bgp-models.git", branch="main"}
 
 # logging

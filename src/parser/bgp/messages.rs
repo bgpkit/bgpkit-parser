@@ -91,6 +91,7 @@ pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64
         BgpNotificationMessage{
             error_code,
             error_subcode,
+            error_type: None,
             data
         })
 }
@@ -137,7 +138,8 @@ pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, P
                     Capability{
                         code,
                         len,
-                        value
+                        value,
+                        capability_type: None
                     }
                 )
             }
