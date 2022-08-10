@@ -40,7 +40,7 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
         BmpMsgType::RouteMonitoring => {
             let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
             let msg = parse_route_monitoring(&mut data_bytes,
-                                             &per_peer_header.afi, &per_peer_header.asn_len)?;
+                                             &per_peer_header.asn_len)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -51,8 +51,7 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
         }
         BmpMsgType::RouteMirroringMessage => {
             let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_route_mirroring(&mut data_bytes,
-                                            &per_peer_header.afi, &per_peer_header.asn_len)?;
+            let msg = parse_route_mirroring(&mut data_bytes, &per_peer_header.asn_len)?;
             Ok(
                 BmpMessage{
                     common_header,

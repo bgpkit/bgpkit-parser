@@ -71,7 +71,7 @@ pub fn parse_bgp4mp_message(input: &mut DataBytes, add_path: bool, asn_len: AsnL
     let local_ip = input.read_address(&afi)?;
 
     let should_read = total_should_read(&afi, &asn_len, total_size);
-    let bgp_message: BgpMessage = parse_bgp_message(input,add_path, &afi, &asn_len, should_read)?;
+    let bgp_message: BgpMessage = parse_bgp_message(input,add_path, &asn_len, should_read)?;
 
     Ok(Bgp4MpMessage{
         msg_type: msg_type.clone(),
