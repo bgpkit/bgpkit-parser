@@ -1,5 +1,5 @@
 use bgp_models::bgp::BgpUpdateMessage;
-use bgp_models::network::{Afi, AsnLength};
+use bgp_models::network::AsnLength;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::num_traits::FromPrimitive;
@@ -28,7 +28,7 @@ pub enum RouteMirroringInfo {
     MessageLost=1,
 }
 
-pub fn parse_route_mirroring(reader: &mut DataBytes, afi: &Afi, asn_len: &AsnLength) -> Result<RouteMirroring, ParserBmpError> {
+pub fn parse_route_mirroring(reader: &mut DataBytes, asn_len: &AsnLength) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
     while reader.bytes_left() > 4 {
         match reader.read_16b()? {
@@ -36,7 +36,7 @@ pub fn parse_route_mirroring(reader: &mut DataBytes, afi: &Afi, asn_len: &AsnLen
                 let info_len = reader.read_16b()?;
                 let bytes = reader.read_n_bytes(info_len as usize)?;
                 let mut data = DataBytes::new(&bytes);
-                let value = parse_bgp_update_message(&mut data, false, afi, asn_len, info_len as u64)?;
+                let value = parse_bgp_update_message(&mut data, false, asn_len, info_len as u64)?;
                 tlvs.push(RouteMirroringTlv{ info_len, value: RouteMirroringValue::BgpMessage(value)});
             }
             1 => {

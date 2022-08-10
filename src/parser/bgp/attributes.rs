@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
-use log::{warn,debug};
+use log::warn;
 
 
 use num_traits::FromPrimitive;
@@ -433,7 +433,6 @@ impl AttributeParser {
                         buffer[i] = b;
                     }
                     let ec = ExtendedCommunity::Raw(buffer);
-                    debug!("unsupported community type, parse as raw bytes: {}", &ec);
                     communities.push(ec);
                     continue
                 }

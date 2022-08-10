@@ -24,7 +24,7 @@ use log::warn;
 /// |          Length               |      Type     |
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserError> {
+pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, asn_len: &AsnLength, total_size: usize) -> Result<BgpMessage, ParserError> {
     // https://tools.ietf.org/html/rfc4271#section-4
     // 16 (4 x 4 bytes) octets marker
     input.read_32b()?;
@@ -71,7 +71,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, afi: &Afi, asn_l
                 BgpMessage::Open(parse_bgp_open_message(input)?)
             }
             BgpMessageType::UPDATE => {
-                BgpMessage::Update(parse_bgp_update_message(input, add_path, afi, asn_len, bgp_msg_length)?)
+                BgpMessage::Update(parse_bgp_update_message(input, add_path, asn_len, bgp_msg_length)?)
             }
             BgpMessageType::NOTIFICATION => {
                 BgpMessage::Notification(parse_bgp_notification_message(input, bgp_msg_length)?)
@@ -187,10 +187,13 @@ fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) ->
 }
 
 /// read bgp update message.
-pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, afi: &Afi, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserError> {
+pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, asn_len: &AsnLength, bgp_msg_length: u64) -> Result<BgpUpdateMessage, ParserError> {
+    // AFI for routes out side attributes are IPv4 ONLY.
+    let afi = Afi::Ipv4;
+
     // parse withdrawn prefixes nlri
     let withdrawn_length = input.read_16b()? as u64;
-    let withdrawn_prefixes = read_nlri(input, withdrawn_length as usize, afi, add_path)?;
+    let withdrawn_prefixes = read_nlri(input, withdrawn_length as usize, &afi, add_path)?;
 
     // parse attributes
     let attribute_length = input.read_16b()? as usize;
@@ -200,7 +203,7 @@ pub fn parse_bgp_update_message(input: &mut DataBytes, add_path:bool, afi: &Afi,
 
     // parse announced prefixes nlri
     let nlri_length = bgp_msg_length - 4 - withdrawn_length - attribute_length as u64;
-    let announced_prefixes = read_nlri(input, nlri_length as usize, afi, add_path)?;
+    let announced_prefixes = read_nlri(input, nlri_length as usize, &afi, add_path)?;
 
     Ok(
         BgpUpdateMessage{
