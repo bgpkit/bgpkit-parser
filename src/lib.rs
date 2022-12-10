@@ -16,11 +16,9 @@ Here is an example that does so.
 
 ```rust
 use bgpkit_parser::BgpkitParser;
-fn main() {
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap();
-    for elem in parser {
-        println!("{}", elem)
-    }
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap();
+for elem in parser {
+    println!("{}", elem)
 }
 ```
 
@@ -30,11 +28,9 @@ You can even do some more interesting iterator operations that are event shorter
 For example, counting the number of announcements/withdrawals in that file:
 ```rust
 use bgpkit_parser::BgpkitParser;
-fn main() {
-    let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
-    let count = BgpkitParser::new(url).unwrap().into_iter().count();
-    println!("total: {}", count);
-}
+let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
+let count = BgpkitParser::new(url).unwrap().into_iter().count();
+println!("total: {}", count);
 ```
 
 and it prints out
@@ -60,39 +56,38 @@ The example below shows a relatively more interesting example that does the foll
 
 ```no_run
 use bgpkit_parser::{BgpkitParser, BgpElem};
-fn main(){
-    // set broker query parameters
-    let broker = bgpkit_broker::BgpkitBroker::new_with_params(
-       "https://api.broker.bgpkit.com/v1",
-       bgpkit_broker::QueryParams{
-           start_ts: Some(1634693400),
-           end_ts: Some(1634693400),
-           page: 1,
-           ..Default::default()
-    });
 
-    // loop through data files found by broker
-    for item in broker {
+// set broker query parameters
+let broker = bgpkit_broker::BgpkitBroker::new_with_params(
+   "https://api.broker.bgpkit.com/v1",
+   bgpkit_broker::QueryParams{
+       start_ts: Some(1634693400),
+       end_ts: Some(1634693400),
+       page: 1,
+       ..Default::default()
+});
 
-        // create a parser that takes an URL and automatically determine
-        // the file location and file type, and handles data download and
-        // decompression streaming intelligently
-        let parser = BgpkitParser::new(item.url.as_str()).unwrap();
+// loop through data files found by broker
+for item in broker {
 
-        // iterating through the parser. the iterator returns `BgpElem` one at a time.
-        let elems = parser.into_elem_iter().map(|elem|{
-            if let Some(origins) = &elem.origin_asns {
-                if origins.contains(&13335.into()) {
-                    Some(elem)
-                } else {
-                    None
-                }
+    // create a parser that takes an URL and automatically determine
+    // the file location and file type, and handles data download and
+    // decompression streaming intelligently
+    let parser = BgpkitParser::new(item.url.as_str()).unwrap();
+
+    // iterating through the parser. the iterator returns `BgpElem` one at a time.
+    let elems = parser.into_elem_iter().map(|elem|{
+        if let Some(origins) = &elem.origin_asns {
+            if origins.contains(&13335.into()) {
+                Some(elem)
             } else {
                 None
             }
-        }).filter_map(|x|x).collect::<Vec<BgpElem>>();
-        log::info!("{} elems matches", elems.len());
-    }
+        } else {
+            None
+        }
+    }).filter_map(|x|x).collect::<Vec<BgpElem>>();
+    log::info!("{} elems matches", elems.len());
 }
 ```
 
@@ -108,22 +103,20 @@ For all types of filters, check out the [Filter] enum documentation.
 use bgpkit_parser::BgpkitParser;
 
 /// This example shows how to parse a MRT file and filter by prefix.
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("downloading updates file");
+log::info!("downloading updates file");
 
-    // create a parser that takes the buffered reader
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-        .add_filter("prefix", "211.98.251.0/24").unwrap();
+// create a parser that takes the buffered reader
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("prefix", "211.98.251.0/24").unwrap();
 
-    log::info!("parsing updates file");
-    // iterating through the parser. the iterator returns `BgpElem` one at a time.
-    for elem in parser {
-        log::info!("{}", &elem);
-    }
-    log::info!("done");
+log::info!("parsing updates file");
+// iterating through the parser. the iterator returns `BgpElem` one at a time.
+for elem in parser {
+    log::info!("{}", &elem);
 }
+log::info!("done");
 ```
 
 

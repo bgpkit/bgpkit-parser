@@ -74,7 +74,7 @@ pub fn parse_bgp4mp_message(input: &mut DataBytes, add_path: bool, asn_len: AsnL
     let bgp_message: BgpMessage = parse_bgp_message(input,add_path, &asn_len, should_read)?;
 
     Ok(Bgp4MpMessage{
-        msg_type: msg_type.clone(),
+        msg_type: *msg_type,
         peer_asn,
         local_asn,
         interface_index,
@@ -125,15 +125,15 @@ pub fn parse_bgp4mp_state_change(input: &mut DataBytes, asn_len: AsnLength, msg_
     let local_addr = input.read_address(&address_family)?;
     let old_state = match BgpState::from_u16(input.read_16b()?){
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse bgp4mp old_state")))}
+        None => {return Err(ParserError::ParseError("cannot parse bgp4mp old_state".to_string()))}
     };
     let new_state = match BgpState::from_u16(input.read_16b()?){
         Some(t) => t,
-        None => {return Err(ParserError::ParseError(format!("cannot parse bgp4mp new_state")))}
+        None => {return Err(ParserError::ParseError("cannot parse bgp4mp new_state".to_string()))}
     };
     Ok(
         Bgp4MpStateChange{
-            msg_type: msg_type.clone(),
+            msg_type: *msg_type,
             peer_asn,
             local_asn,
             interface_index,

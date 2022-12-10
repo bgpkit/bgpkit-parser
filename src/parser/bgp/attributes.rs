@@ -35,7 +35,7 @@ impl AttributeParser {
         asn_len: &AsnLength,
         afi: Option<Afi>,
         safi: Option<Safi>,
-        prefixes: Option<Vec<NetworkPrefix>>,
+        prefixes: Option<&[NetworkPrefix]>,
         total_bytes: usize,
     ) -> Result<Vec<Attribute>, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
@@ -153,7 +153,7 @@ impl AttributeParser {
         match Origin::from_u8(origin) {
             Some(v) => Ok(AttributeValue::Origin(v)),
             None => {
-                return Err(crate::error::ParserError::UnknownAttr(format!("Failed to parse attribute type: origin")))
+                Err(crate::error::ParserError::UnknownAttr("Failed to parse attribute type: origin".to_string()))
             }
         }
     }
@@ -192,15 +192,15 @@ impl AttributeParser {
     }
 
     fn parse_med(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
-        Ok(input
+        input
             .read_32b()
-            .map(AttributeValue::MultiExitDiscriminator)?)
+            .map(AttributeValue::MultiExitDiscriminator)
     }
 
     fn parse_local_pref(&self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
-        Ok(input
+        input
             .read_32b()
-            .map(AttributeValue::LocalPreference)?)
+            .map(AttributeValue::LocalPreference)
     }
 
     fn parse_aggregator(&self, input: &mut DataBytes, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
@@ -296,7 +296,7 @@ impl AttributeParser {
     /// +---------------------------------------------------------+
     fn parse_nlri(&self, input: &mut DataBytes,
                                    afi: &Option<Afi>, safi: &Option<Safi>,
-                                   prefixes: &Option<Vec<NetworkPrefix>>,
+                                   prefixes: &Option<&[NetworkPrefix]>,
                                    reachable: bool,
         total_bytes: usize,
     ) -> Result<AttributeValue, ParserError> {
@@ -351,7 +351,7 @@ impl AttributeParser {
                     }
                     input.parse_nlri_list( self.additional_paths, &afi, bytes_left)?
                 } else {
-                    pfxs.to_owned()
+                    pfxs.to_vec()
                 }
             },
             None => {

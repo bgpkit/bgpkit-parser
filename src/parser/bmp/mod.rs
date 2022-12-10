@@ -34,12 +34,12 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
     //     return Err(ParserBmpError::CorruptedBmpMessage)
     // };
     // reader.read_exact(&mut buffer)?;
-    let mut data_bytes = reader;
+    let data_bytes = reader;
 
     match &common_header.msg_type{
         BmpMsgType::RouteMonitoring => {
-            let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_route_monitoring(&mut data_bytes,
+            let per_peer_header = parse_per_peer_header(data_bytes)?;
+            let msg = parse_route_monitoring(data_bytes,
                                              &per_peer_header.asn_len)?;
             Ok(
                 BmpMessage{
@@ -50,8 +50,8 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::RouteMirroringMessage => {
-            let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_route_mirroring(&mut data_bytes, &per_peer_header.asn_len)?;
+            let per_peer_header = parse_per_peer_header(data_bytes)?;
+            let msg = parse_route_mirroring(data_bytes, &per_peer_header.asn_len)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -61,8 +61,8 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::StatisticsReport => {
-            let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_stats_report(&mut data_bytes)?;
+            let per_peer_header = parse_per_peer_header(data_bytes)?;
+            let msg = parse_stats_report(data_bytes)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -72,8 +72,8 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::PeerDownNotification => {
-            let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_peer_down_notification(&mut data_bytes)?;
+            let per_peer_header = parse_per_peer_header(data_bytes)?;
+            let msg = parse_peer_down_notification(data_bytes)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -84,8 +84,8 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::PeerUpNotification => {
-            let per_peer_header = parse_per_peer_header(&mut data_bytes)?;
-            let msg = parse_peer_up_notification(&mut data_bytes, &per_peer_header.afi)?;
+            let per_peer_header = parse_per_peer_header(data_bytes)?;
+            let msg = parse_peer_up_notification(data_bytes, &per_peer_header.afi)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -95,7 +95,7 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::InitiationMessage => {
-            let msg = parse_initiation_message(&mut data_bytes)?;
+            let msg = parse_initiation_message(data_bytes)?;
             Ok(
                 BmpMessage{
                     common_header,
@@ -105,7 +105,7 @@ pub fn parse_bmp_msg(reader: &mut DataBytes) -> Result<BmpMessage, ParserBmpErro
             )
         }
         BmpMsgType::TerminationMessage => {
-            let msg = parse_termination_message(&mut data_bytes)?;
+            let msg = parse_termination_message(data_bytes)?;
             Ok(
                 BmpMessage{
                     common_header,

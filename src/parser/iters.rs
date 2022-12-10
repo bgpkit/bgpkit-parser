@@ -52,7 +52,7 @@ impl Iterator for RecordIterator {
     fn next(&mut self) -> Option<MrtRecord> {
         self.count += 1;
         loop {
-            return match self.parser.next() {
+            return match self.parser.next_record() {
                 Ok(v) => {
                     // if None, the reaches EoF.
                     let filters = &self.parser.filters;
@@ -153,13 +153,13 @@ impl Iterator for ElemIterator {
                         }
                         Some(r) => {
                             let mut elems =  self.elementor.record_to_elems(r);
-                            if elems.len()>0 {
+                            if elems.is_empty() {
+                                // somehow this record does not contain any elems, continue to parse next record
+                                continue
+                            } else {
                                 elems.reverse();
                                 self.cache_elems = elems;
                                 break
-                            } else {
-                                // somehow this record does not contain any elems, continue to parse next record
-                                continue
                             }
                         }
                     }
@@ -169,10 +169,7 @@ impl Iterator for ElemIterator {
 
             // popping cached elems. note that the original elems order is preseved by reversing the
             // vector before putting it on to cache_elems.
-            let elem = match self.cache_elems.pop() {
-                None => {None}
-                Some(i) => {Some(i)}
-            };
+            let elem = self.cache_elems.pop();
             match elem {
                 None => return None,
                 Some(e) => match e.match_filters(&self.record_iter.parser.filters) {

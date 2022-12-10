@@ -77,7 +77,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 }
 
 fn get_micro_seconds(sec: f64) -> u32 {
-    format!("{:.6}", sec).split(".").collect::<Vec<&str>>()[1].to_owned().parse::<u32>().unwrap()
+    format!("{:.6}", sec).split('.').collect::<Vec<&str>>()[1].to_owned().parse::<u32>().unwrap()
 }
 
 #[cfg(test)]

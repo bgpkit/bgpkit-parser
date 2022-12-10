@@ -90,7 +90,7 @@ pub fn parse_openbmp_header(reader: &mut DataBytes) -> Result<OpenBmpHeader, Par
     // read_timestamp
     let t_sec = reader.read_32b()?;
     let t_usec = reader.read_32b()?;
-    let timestamp = t_sec as f64 + (t_usec as f64)/1000_000.0;
+    let timestamp = t_sec as f64 + (t_usec as f64)/1_000_000.0;
 
     // read admin-id
     reader.read_and_drop_n_bytes(16)?;

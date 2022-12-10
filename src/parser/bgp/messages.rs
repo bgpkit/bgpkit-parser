@@ -43,7 +43,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, asn_len: &AsnLen
      message.
      */
     let length = input.read_16b()?;
-    if !(length >= 19 && length <= 4096) {
+    if !(19..=4096).contains(&length) {
         return Err(ParserError::ParseError(format!("invalid BGP message length {}", length)))
     }
 
@@ -58,7 +58,7 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, asn_len: &AsnLen
     let msg_type: BgpMessageType = match BgpMessageType::from_u8(input.read_8b()?){
         Some(t) => t,
         None => {
-            return Err(ParserError::ParseError(format!("Unknown BGP Message Type")))
+            return Err(ParserError::ParseError("Unknown BGP Message Type".to_string()))
         }
     };
 
@@ -181,7 +181,7 @@ fn read_nlri(input: &mut DataBytes, length: usize, afi: &Afi, add_path: bool) ->
         return Ok(vec![])
     }
 
-    let prefixes = input.parse_nlri_list(add_path, &afi, length)?;
+    let prefixes = input.parse_nlri_list(add_path, afi, length)?;
 
     Ok(prefixes)
 }
