@@ -3,6 +3,7 @@ use crate::error::ParserError;
 use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;
+use log::warn;
 use num_traits::FromPrimitive;
 use crate::parser::{AttributeParser, DataBytes};
 
@@ -125,10 +126,13 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
     let entry_count = input.read_16b()?;
     let mut rib_entries = Vec::with_capacity((entry_count*2) as usize);
 
-    for _ in 0..entry_count {
+    for _i in 0..entry_count {
         let entry = match parse_rib_entry(input, add_path, &afi, &safi, &prefixes) {
             Ok(entry) => entry,
-            Err(e) => return Err(e)
+            Err(e) => {
+                warn!("early break due to error {}", e.to_string());
+                break;
+            }
         };
         rib_entries.push(entry);
     }
