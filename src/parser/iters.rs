@@ -59,17 +59,9 @@ impl Iterator for RecordIterator {
                     if filters.is_empty() {
                         Some(v)
                     } else {
-                        match &v.message {
-                            MrtMessage::TableDumpV2Message(m) => {
-                                match &m {
-                                    TableDumpV2Message::PeerIndexTable(_) => {
-                                        let _ = self.elementor.record_to_elems(v.clone());
-                                        return Some(v)
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
+                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) = &v.message {
+                            let _ = self.elementor.record_to_elems(v.clone());
+                            return Some(v)
                         }
                         let elems =  self.elementor.record_to_elems(v.clone());
                         if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
@@ -81,10 +73,13 @@ impl Iterator for RecordIterator {
                 },
                 Err(e) => {
                     match e.error {
-                        ParserError::TruncatedMsg(e)| ParserError::Unsupported(e)
-                        | ParserError::UnknownAttr(e) | ParserError::DeprecatedAttr(e) => {
+                        ParserError::TruncatedMsg(err_str)| ParserError::Unsupported(err_str)
+                        | ParserError::UnknownAttr(err_str) | ParserError::DeprecatedAttr(err_str) => {
                             if self.parser.options.show_warnings {
-                                warn!("parser warn: {}", e);
+                                warn!("parser warn: {}", err_str);
+                            }
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
                             }
                             continue
                         }
@@ -92,7 +87,7 @@ impl Iterator for RecordIterator {
                             error!("parser error: {}", err_str);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                    std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
                                 }
                                 None
                             } else {
