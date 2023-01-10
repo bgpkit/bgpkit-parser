@@ -44,11 +44,11 @@ use crate::parser::rislive::messages::ris_message::path_to_as_path;
 
 use crate::BgpElem;
 use std::net::IpAddr;
+use ipnet::IpNet;
 use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
 use bgp_models::bgp::MetaCommunity;
 use bgp_models::network::{Asn, NetworkPrefix};
-use ipnetwork::IpNetwork;
 use crate::parser::ElemType;
 
 pub mod error;
@@ -157,7 +157,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                 }
                             };
                             for prefix in &announcement.prefixes {
-                                let p = match prefix.parse::<IpNetwork>(){
+                                let p = match prefix.parse::<IpNet>(){
                                     Ok(net) => { net }
                                     Err(_) => {
                                         if prefix == "eor" {

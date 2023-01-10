@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use ipnetwork::IpNetworkError;
+use ipnet::AddrParseError;
 
 #[derive(Debug)]
 pub enum BgpModelsError {
@@ -19,8 +19,8 @@ impl Display for BgpModelsError {
 
 impl Error for BgpModelsError{}
 
-impl From<IpNetworkError> for BgpModelsError {
-    fn from(err: IpNetworkError) -> Self {
+impl From<AddrParseError> for BgpModelsError {
+    fn from(err: AddrParseError) -> Self {
         BgpModelsError::PrefixParsingError(err.to_string())
     }
 }
