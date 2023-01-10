@@ -1,7 +1,7 @@
 # bgp-models
 
 `bgp-models` is a library that defines the basic BGP and MRT message data structures.
-This library aims to provide building blocks for downstreams libraries working with BGP and MRT
+This library aims to provide building blocks for downstream libraries working with BGP and MRT
 messages such as MRT parser or BGP table constructor.
 
 ## Minimum Supported Rust Version
@@ -31,8 +31,6 @@ RFCs. Here is a list of them:
 
 ### Communities
 
-#### Communities
-
 - [X] [RFC 1977](https://datatracker.ietf.org/doc/html/rfc1977): BGP Communities Attribute
 - [X] [RFC 4360](https://datatracker.ietf.org/doc/html/rfc4360): BGP Extended Communities Attribute
 - [X] [RFC 5668](https://datatracker.ietf.org/doc/html/rfc5668): 4-Octet AS Specific BGP Extended Community
@@ -45,3 +43,7 @@ RFCs. Here is a list of them:
 
 - [bgpkit-parser](https://github.com/bgpkit/bgpkit-parser)
 - [ris-live-rs](https://github.com/bgpkit/ris-live-rs)
+
+## Built with ❤️ by BGPKIT Team
+
+<a href="https://bgpkit.com"><img src="https://bgpkit.com/Original%20Logo%20Cropped.png" alt="https://bgpkit.com/favicon.ico" width="200"/></a>

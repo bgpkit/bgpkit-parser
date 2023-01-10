@@ -1,6 +1,6 @@
 /*!
 `bgp-models` is a library that defines the basic BGP and MRT message data structures.
-This library aims to provide building blocks for downstreams libraries working with BGP and MRT
+This library aims to provide building blocks for downstream libraries working with BGP and MRT
 messages such as MRT bgpkit-parser or BGP table constructor.
 
 ## Supported RFCs
