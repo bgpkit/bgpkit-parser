@@ -1,5 +1,5 @@
 use crate::parser::bmp::error::ParserBmpError;
-use crate::num_traits::FromPrimitive;
+use num_traits::FromPrimitive;
 use crate::parser::DataBytes;
 
 #[derive(Debug)]

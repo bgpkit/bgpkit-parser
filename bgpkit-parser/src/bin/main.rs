@@ -2,10 +2,10 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::io::Write;
 use std::net::IpAddr;
-use ipnetwork::IpNetwork;
 use itertools::Itertools;
 
 use clap::Parser;
+use ipnet::IpNet;
 use bgpkit_parser::{BgpkitParser, Elementor};
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
@@ -44,7 +44,7 @@ struct Filters {
 
     /// Filter by network prefix
     #[clap(short='p', long)]
-    prefix: Option<IpNetwork>,
+    prefix: Option<IpNet>,
 
     /// Include super-prefix when filtering
     #[clap(short='s', long)]

@@ -3,7 +3,7 @@
 use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
-use ipnetwork::IpNetwork;
+use ipnet::IpNet;
 use serde::{Serialize, Serializer, Deserialize};
 use crate::err::BgpModelsError;
 
@@ -115,7 +115,7 @@ pub enum NextHopAddress {
 /// A representation of a IP prefix with optional path ID.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct NetworkPrefix {
-    pub prefix: IpNetwork,
+    pub prefix: IpNet,
     pub path_id: u32,
 }
 
@@ -129,7 +129,7 @@ impl FromStr for NetworkPrefix {
     type Err = BgpModelsError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let prefix = IpNetwork::from_str(s)?;
+        let prefix = IpNet::from_str(s)?;
         Ok(
             NetworkPrefix{
                 prefix,
@@ -140,7 +140,7 @@ impl FromStr for NetworkPrefix {
 }
 
 impl NetworkPrefix {
-    pub fn new(prefix: IpNetwork, path_id: u32) -> NetworkPrefix {
+    pub fn new(prefix: IpNet, path_id: u32) -> NetworkPrefix {
         NetworkPrefix { prefix, path_id }
     }
 }

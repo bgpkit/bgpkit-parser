@@ -1,5 +1,4 @@
 use crate::error::*;
-use ipnetwork::IpNetwork;
 use std::net::IpAddr;
 use bgp_models::mrt::tabledump::TableDumpMessage;
 use bgp_models::network::{AddrMeta, Afi, AsnLength, NetworkPrefix};
@@ -49,8 +48,8 @@ pub fn parse_table_dump_message(
     let view_number = input.read_16b()?;
     let sequence_number = input.read_16b()?;
     let prefix = match meta.afi {
-        Afi::Ipv4 => input.read_ipv4_prefix().map(IpNetwork::V4),
-        Afi::Ipv6 => input.read_ipv6_prefix().map(IpNetwork::V6),
+        Afi::Ipv4 => input.read_ipv4_prefix().map(ipnet::IpNet::V4),
+        Afi::Ipv6 => input.read_ipv6_prefix().map(ipnet::IpNet::V6),
     }?;
     let status = input.read_8b()?;
     let time = input.read_32b()? as u64;

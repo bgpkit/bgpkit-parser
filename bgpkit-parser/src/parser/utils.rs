@@ -1,7 +1,7 @@
 /*!
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
-use ipnetwork::{Ipv4Network, Ipv6Network, IpNetwork};
+use ipnet::{Ipv4Net, Ipv6Net, IpNet};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
@@ -157,7 +157,7 @@ impl  DataBytes <'_>{
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
-        let prefix = match IpNetwork::new(addr, bit_len) {
+        let prefix = match IpNet::new(addr, bit_len) {
             Ok(p) => {p}
             Err(_) => {
                 return Err(ParserError::ParseError(format!("Invalid network prefix length: {}", bit_len)))
@@ -194,19 +194,19 @@ impl  DataBytes <'_>{
         Ok(Ipv6Addr::from(buf))
     }
 
-    pub fn read_ipv4_prefix(&mut self) -> Result<Ipv4Network, ParserError> {
+    pub fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
         let addr = self.read_ipv4_address()?;
         let mask = self.read_8b()?;
-        match Ipv4Network::new(addr, mask) {
+        match Ipv4Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
         }
     }
 
-    pub fn read_ipv6_prefix(&mut self) -> Result<Ipv6Network, ParserError> {
+    pub fn read_ipv6_prefix(&mut self) -> Result<Ipv6Net, ParserError> {
         let addr = self.read_ipv6_address()?;
         let mask = self.read_8b()?;
-        match Ipv6Network::new(addr, mask) {
+        match Ipv6Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
         }

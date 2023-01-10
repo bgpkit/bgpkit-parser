@@ -21,7 +21,7 @@ msrv = "1.46.0"
 enum-primitive-derive = "0.2"
 num-traits = "0.2"
 log = "0.4"
-ipnetwork = {version="0.18", default-features=false}
+ipnet = "2.7"
 itertools = "0.10.1"
 serde={version="1", features=["derive"]}
 
