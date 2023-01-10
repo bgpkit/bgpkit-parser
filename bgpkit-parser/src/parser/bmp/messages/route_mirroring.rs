@@ -2,7 +2,7 @@ use bgp_models::bgp::BgpUpdateMessage;
 use bgp_models::network::AsnLength;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
-use crate::num_traits::FromPrimitive;
+use num_traits::FromPrimitive;
 use crate::parser::DataBytes;
 
 #[derive(Debug)]

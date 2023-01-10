@@ -312,8 +312,6 @@ We support normal communities, extended communities, and large communities.
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 */
-extern crate chrono;
-extern crate num_traits;
 
 #[macro_use]
 extern crate enum_primitive_derive;

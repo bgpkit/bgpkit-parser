@@ -3,7 +3,7 @@ use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
 use log::warn;
 use crate::parser::{DataBytes, parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes, ReadUtils};
 use crate::error::ParserError;
-use crate::num_traits::FromPrimitive;
+use num_traits::FromPrimitive;
 
 /// MRT common header
 ///
