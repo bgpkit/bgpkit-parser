@@ -244,6 +244,25 @@ impl AsPath {
             None
         }
     }
+
+    pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
+        if !self.segments.iter().all(|seg| matches!(seg, AsPathSegment::AsSequence(_v))) {
+            // as path contains AS set or confederated sequence/set
+            return None
+        }
+        let mut path = vec![];
+        for s in &self.segments {
+            if let AsPathSegment::AsSequence(seg) = s {
+                for asn in seg {
+                    path.push(asn.asn);
+                }
+            } else {
+                // this won't happen
+                return None
+            }
+        }
+        Some(path)
+    }
 }
 
 //////////
@@ -422,5 +441,30 @@ mod tests {
         let origins = aspath.get_origin();
         assert!(origins.is_some());
         assert_eq!(origins.unwrap(), vec![7,8]);
+    }
+
+    #[test]
+    fn test_aspath_to_vec() {
+        let as4path = AsPath{
+            segments: vec![
+                AsPathSegment::AsSequence([2,3,4].map(|i|{i.into()}).to_vec())
+            ]
+        };
+        assert_eq!(as4path.to_u32_vec(), Some(vec![2,3,4]));
+
+        let as4path = AsPath{
+            segments: vec![
+                AsPathSegment::AsSequence([2,3,4].map(|i|{i.into()}).to_vec()),
+                AsPathSegment::AsSequence([5,6,7].map(|i|{i.into()}).to_vec())
+            ]
+        };
+        assert_eq!(as4path.to_u32_vec(), Some(vec![2,3,4,5,6,7]));
+
+        let as4path = AsPath{
+            segments: vec![
+                AsPathSegment::AsSet([2,3,4].map(|i|{i.into()}).to_vec())
+            ]
+        };
+        assert_eq!(as4path.to_u32_vec(), None);
     }
 }

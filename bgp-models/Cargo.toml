@@ -1,11 +1,11 @@
 [package]
 name = "bgp-models"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2018"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 readme = "README.md"
 license = "MIT"
-repository = "https://github.com/bgpkit/bgp-models"
+repository = "https://github.com/bgpkit/bgpkit-parser/bgp-models"
 documentation = "https://docs.rs/bgp-models"
 description = """
 Structs and other building blocks for BGP and MRT related Rust projects.
