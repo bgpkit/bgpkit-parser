@@ -88,7 +88,7 @@ impl BgpkitParser {
     }
 
     /// This is used in for loop `for item in parser{}`
-    pub fn next(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
+    pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
         parse_mrt_record(&mut self.reader)
     }
 }

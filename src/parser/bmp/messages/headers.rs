@@ -149,7 +149,7 @@ pub fn parse_per_peer_header(reader: &mut DataBytes) -> Result<BmpPerPeerHeader,
 
     let t_sec = reader.read_32b()?;
     let t_usec = reader.read_32b()?;
-    let timestamp = t_sec as f64 + (t_usec as f64)/1000_000.0;
+    let timestamp = t_sec as f64 + (t_usec as f64)/1_000_000.0;
 
     Ok(BmpPerPeerHeader{
         peer_type,

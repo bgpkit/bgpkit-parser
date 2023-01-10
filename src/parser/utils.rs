@@ -172,13 +172,13 @@ impl  DataBytes <'_>{
             Afi::Ipv4 => {
                 match self.read_ipv4_address(){
                     Ok(ip) => Ok(IpAddr::V4(ip)),
-                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv4 address".to_string()))
+                    _ => Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv4 address".to_string()))
                 }
             },
             Afi::Ipv6 => {
                 match self.read_ipv6_address(){
                     Ok(ip) => Ok(IpAddr::V6(ip)),
-                    _ => return Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv6 address".to_string()))
+                    _ => Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv6 address".to_string()))
                 }
             },
         }
@@ -289,7 +289,7 @@ impl  DataBytes <'_>{
         let mut retry = false;
         let mut guessed = false;
 
-        let pos_save = self.pos.clone();
+        let pos_save = self.pos;
 
         while self.pos < pos_end {
             if !is_add_path && self.bytes[self.pos]==0 {

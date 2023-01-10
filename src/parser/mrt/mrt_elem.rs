@@ -64,9 +64,9 @@ fn get_relevant_attributes(
             AttributeValue::MultiExitDiscriminator(v) => {med = Some(v)}
             AttributeValue::LocalPreference(v) => {local_pref = Some(v)}
             AttributeValue::AtomicAggregate(v) => {atomic = Some(v)}
-            AttributeValue::Communities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::Community(x)).collect::<Vec<MetaCommunity>>())}
-            AttributeValue::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::ExtendedCommunity(x)).collect::<Vec<MetaCommunity>>())}
-            AttributeValue::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(|x| MetaCommunity::LargeCommunity(x)).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::Communities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::Community).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::ExtendedCommunity).collect::<Vec<MetaCommunity>>())}
+            AttributeValue::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::LargeCommunity).collect::<Vec<MetaCommunity>>())}
             AttributeValue::Aggregator(v, v2) => {aggregator = Some((v,v2))}
             AttributeValue::MpReachNlri(nlri) => {announced = Some(nlri)}
             AttributeValue::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
@@ -74,7 +74,7 @@ fn get_relevant_attributes(
         };
     }
 
-    let communities = match communities_vec.len()>0 {
+    let communities = match !communities_vec.is_empty() {
         true => Some(communities_vec),
         false => None,
     };
@@ -147,64 +147,48 @@ impl Elementor {
         };
 
         elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
-            timestamp: timestamp.clone(),
+            timestamp,
             elem_type: ElemType::ANNOUNCE,
-            peer_ip: peer_ip.clone(),
-            peer_asn: peer_asn.clone(),
+            peer_ip: *peer_ip,
+            peer_asn: *peer_asn,
             prefix: p,
-            next_hop: next_hop.clone(),
+            next_hop,
             as_path: path.clone(),
             origin_asns: origin_asns.clone(),
-            origin: origin.clone(),
-            local_pref: local_pref.clone(),
-            med: med.clone(),
+            origin,
+            local_pref,
+            med,
             communities: communities.clone(),
-            atomic: atomic.clone(),
-            aggr_asn: if let Some(v) = &aggregator {
-                Some(v.0.clone())
-            } else {
-                None
-            },
-            aggr_ip: if let Some(v) = &aggregator {
-                Some(v.1.clone())
-            } else {
-                None
-            },
+            atomic,
+            aggr_asn: aggregator.as_ref().map(|v| v.0),
+            aggr_ip: aggregator.as_ref().map(|v| v.1),
         }));
 
         if let Some(nlri) = announced {
             elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp: timestamp.clone(),
+                timestamp,
                 elem_type: ElemType::ANNOUNCE,
-                peer_ip: peer_ip.clone(),
-                peer_asn: peer_asn.clone(),
+                peer_ip: *peer_ip,
+                peer_asn: *peer_asn,
                 prefix: p,
-                next_hop: next_hop.clone(),
+                next_hop,
                 as_path: path.clone(),
-                origin: origin.clone(),
+                origin,
                 origin_asns: origin_asns.clone(),
-                local_pref: local_pref.clone(),
-                med: med.clone(),
+                local_pref,
+                med,
                 communities: communities.clone(),
-                atomic: atomic.clone(),
-                aggr_asn: if let Some(v) = &aggregator {
-                    Some(v.0.clone())
-                } else {
-                    None
-                },
-                aggr_ip: if let Some(v) = &aggregator {
-                    Some(v.1.clone())
-                } else {
-                    None
-                },
+                atomic,
+                aggr_asn: aggregator.as_ref().map(|v| v.0),
+                aggr_ip: aggregator.as_ref().map(|v| v.1),
             }));
         }
 
         elems.extend(msg.withdrawn_prefixes.into_iter().map(|p| BgpElem {
-            timestamp: timestamp.clone(),
+            timestamp,
             elem_type: ElemType::WITHDRAW,
-            peer_ip: peer_ip.clone(),
-            peer_asn: peer_asn.clone(),
+            peer_ip: *peer_ip,
+            peer_asn: *peer_asn,
             prefix: p,
             next_hop: None,
             as_path: None,
@@ -219,10 +203,10 @@ impl Elementor {
         }));
         if let Some(nlri) = withdrawn {
             elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp: timestamp.clone(),
+                timestamp,
                 elem_type: ElemType::WITHDRAW,
-                peer_ip: peer_ip.clone(),
-                peer_asn: peer_asn.clone(),
+                peer_ip: *peer_ip,
+                peer_asn: *peer_asn,
                 prefix: p,
                 next_hop: None,
                 as_path: None,
@@ -243,9 +227,9 @@ impl Elementor {
     /// Convert a [MrtRecord] to a vector of [BgpElem]s.
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
         let mut elems = vec![];
-        let t = record.common_header.timestamp.clone();
+        let t = record.common_header.timestamp;
         let timestamp :f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
-            let m = (micro.clone() as f64)/1000000.0;
+            let m = (*micro as f64)/1000000.0;
             t as f64 + m
         } else {
             f64::from(t)
@@ -273,7 +257,7 @@ impl Elementor {
                 };
 
                 elems.push(BgpElem {
-                    timestamp: timestamp.clone(),
+                    timestamp,
                     elem_type: ElemType::ANNOUNCE,
                     peer_ip: msg.peer_address,
                     peer_asn: msg.peer_asn,
@@ -286,16 +270,8 @@ impl Elementor {
                     med,
                     communities,
                     atomic,
-                    aggr_asn: if let Some(v) = aggregator {
-                        Some(v.0)
-                    } else {
-                        None
-                    },
-                    aggr_ip: if let Some(v) = aggregator {
-                        Some(v.1)
-                    } else {
-                        None
-                    },
+                    aggr_asn: aggregator.map(|v| v.0),
+                    aggr_ip: aggregator.map(|v| v.1),
                 });
             }
 
@@ -305,7 +281,7 @@ impl Elementor {
                         self.peer_table = Some(p);
                     }
                     TableDumpV2Message::RibAfiEntries(t) => {
-                        let prefix = t.prefix.clone();
+                        let prefix = t.prefix;
                         for e in t.rib_entries {
                             let pid = e.peer_index;
                             let peer = self
@@ -344,13 +320,13 @@ impl Elementor {
                                         if let Some(h) = v.next_hop {
                                             match h {
                                                 NextHopAddress::Ipv4(v) => {
-                                                    Some(IpAddr::from(v.clone()))
+                                                    Some(IpAddr::from(v))
                                                 }
                                                 NextHopAddress::Ipv6(v) => {
-                                                    Some(IpAddr::from(v.clone()))
+                                                    Some(IpAddr::from(v))
                                                 }
                                                 NextHopAddress::Ipv6LinkLocal(v, _) => {
-                                                    Some(IpAddr::from(v.clone()))
+                                                    Some(IpAddr::from(v))
                                                 }
                                             }
                                         } else {
@@ -370,11 +346,11 @@ impl Elementor {
                             };
 
                             elems.push(BgpElem {
-                                timestamp: timestamp.clone(),
+                                timestamp,
                                 elem_type: ElemType::ANNOUNCE,
                                 peer_ip: peer.peer_address,
                                 peer_asn: peer.peer_asn,
-                                prefix: prefix.clone(),
+                                prefix,
                                 next_hop: next,
                                 as_path: path,
                                 origin,
@@ -383,16 +359,8 @@ impl Elementor {
                                 med,
                                 communities,
                                 atomic,
-                                aggr_asn: if let Some(v) = aggregator {
-                                    Some(v.0)
-                                } else {
-                                    None
-                                },
-                                aggr_ip: if let Some(v) = aggregator {
-                                    Some(v.1)
-                                } else {
-                                    None
-                                },
+                                aggr_asn: aggregator.map(|v| v.0),
+                                aggr_ip: aggregator.map(|v| v.1),
                             });
                         }
                     }

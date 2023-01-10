@@ -3,6 +3,7 @@ use crate::error::ParserError;
 use std::net::{IpAddr, Ipv4Addr};
 use bgp_models::mrt::tabledump::{Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type};
 use bgp_models::network::*;
+use log::warn;
 use num_traits::FromPrimitive;
 use crate::parser::{AttributeParser, DataBytes};
 
@@ -112,28 +113,26 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
         }
     };
 
-    let add_path = match rib_type {
-        TableDumpV2Type::RibIpv4UnicastAddPath | TableDumpV2Type::RibIpv4MulticastAddPath |
-        TableDumpV2Type::RibIpv6UnicastAddPath | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            true
-        }
-        _ => {false}
-    };
+    let add_path = matches!(rib_type, TableDumpV2Type::RibIpv4UnicastAddPath | TableDumpV2Type::RibIpv4MulticastAddPath |
+        TableDumpV2Type::RibIpv6UnicastAddPath | TableDumpV2Type::RibIpv6MulticastAddPath);
 
     let sequence_number = input.read_32b()?;
 
     // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
     //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
     let prefix = input.read_nlri_prefix(&afi, false)?;
-    let prefixes = vec!(prefix.clone());
+    let prefixes = vec!(prefix);
 
     let entry_count = input.read_16b()?;
     let mut rib_entries = Vec::with_capacity((entry_count*2) as usize);
 
-    for _ in 0..entry_count {
+    for _i in 0..entry_count {
         let entry = match parse_rib_entry(input, add_path, &afi, &safi, &prefixes) {
             Ok(entry) => entry,
-            Err(e) => return Err(e)
+            Err(e) => {
+                warn!("early break due to error {}", e.to_string());
+                break;
+            }
         };
         rib_entries.push(entry);
     }
@@ -148,9 +147,9 @@ pub fn parse_rib_afi_entries(input: &mut DataBytes, rib_type: TableDumpV2Type) -
     )
 }
 
-pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &Vec<NetworkPrefix>) -> Result<RibEntry, ParserError> {
+pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &Safi, prefixes: &[NetworkPrefix]) -> Result<RibEntry, ParserError> {
     if input.bytes_left() < 16 {
-        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserError::TruncatedMsg("truncated msg".to_string()))
     }
     let peer_index = input.read_16b()?;
     let originated_time = input.read_32b()?;
@@ -160,12 +159,12 @@ pub fn parse_rib_entry(input: &mut DataBytes, add_path: bool, afi: &Afi, safi: &
     let attribute_length = input.read_16b()? as usize;
 
     if input.bytes_left() < attribute_length  {
-        return Err(ParserError::TruncatedMsg(format!("truncated msg")))
+        return Err(ParserError::TruncatedMsg("truncated msg".to_string()))
     }
 
     let attr_parser = AttributeParser::new(add_path);
 
-    let attributes = attr_parser.parse_attributes(input, &AsnLength::Bits32, Some(afi.clone()), Some(safi.clone()), Some(prefixes.clone()), attribute_length)?;
+    let attributes = attr_parser.parse_attributes(input, &AsnLength::Bits32, Some(*afi), Some(*safi), Some(prefixes), attribute_length)?;
 
     Ok(
         RibEntry{

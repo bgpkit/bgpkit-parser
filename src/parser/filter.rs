@@ -26,21 +26,19 @@ and returns a new parser with specified filter added. See the example below.
 use bgpkit_parser::BgpkitParser;
 
 /// This example shows how to parse a MRT file and filter by prefix.
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("downloading updates file");
-    let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-        .add_filter("prefix", "211.98.251.0/24").unwrap()
-        .add_filter("type", "a").unwrap();
+log::info!("downloading updates file");
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("prefix", "211.98.251.0/24").unwrap()
+    .add_filter("type", "a").unwrap();
 
-    // iterating through the parser. the iterator returns `BgpElem` one at a time.
-    log::info!("parsing updates file");
-    for elem in parser {
-        log::info!("{}", &elem);
-    }
-    log::info!("done");
+// iterating through the parser. the iterator returns `BgpElem` one at a time.
+log::info!("parsing updates file");
+for elem in parser {
+    log::info!("{}", &elem);
 }
+log::info!("done");
 ```
 
 Note, by default, the prefix filtering is for the exact prefix. You can include super-prefixes or
@@ -144,7 +142,7 @@ impl Filter {
             }
             "peer_ips" => {
                 let mut ips = vec![];
-                for ip_str in filter_value.replace(" ","").split(",") {
+                for ip_str in filter_value.replace(' ',"").split(',') {
                     match IpAddr::from_str(ip_str) {
                         Ok(v) => {ips.push(v)}
                         Err(_) => {
@@ -210,7 +208,7 @@ impl Filter {
 
 pub trait Filterable {
     fn match_filter(&self, filter: &Filter) -> bool;
-    fn match_filters(&self, filters: &Vec<Filter>) -> bool;
+    fn match_filters(&self, filters: &[Filter]) -> bool;
 }
 
 fn prefix_match(match_prefix: &IpNetwork, input_prefix: &IpNetwork, t: &PrefixMatchType) -> bool {
@@ -221,45 +219,39 @@ fn prefix_match(match_prefix: &IpNetwork, input_prefix: &IpNetwork, t: &PrefixMa
         }
         PrefixMatchType::IncludeSuper => {
             if exact {
-                return exact
+                exact
+            } else if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                // version not match
+                false
             } else {
-                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
-                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
-                    // version not match
-                    false
-                } else {
-                    // input_prefix is super prefix of match_prefix
-                    match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()
-                }
+                // input_prefix is super prefix of match_prefix
+                match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()
             }
         }
         PrefixMatchType::IncludeSub => {
             if exact {
-                return exact
+                exact
+            } else if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                // version not match
+                false
             } else {
-                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
-                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
-                    // version not match
-                    false
-                } else {
-                    // input_prefix is sub prefix of match_prefix
-                    match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast()
-                }
+                // input_prefix is sub prefix of match_prefix
+                match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast()
             }
         }
         PrefixMatchType::IncludeSuperSub => {
             if exact {
-                return exact
+                exact
+            } else if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
+                (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
+                // version not match
+                false
             } else {
-                if (input_prefix.is_ipv4() && match_prefix.is_ipv6()) ||
-                    (input_prefix.is_ipv6() && match_prefix.is_ipv4()) {
-                    // version not match
-                    false
-                } else {
-                    // input_prefix is super prefix of match_prefix
-                    (match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()) ||
-                        (match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast())
-                }
+                // input_prefix is super prefix of match_prefix
+                (match_prefix.ip() >= input_prefix.ip() && match_prefix.broadcast() <= input_prefix.broadcast()) ||
+                    (match_prefix.ip() <= input_prefix.ip() && match_prefix.broadcast() >= input_prefix.broadcast())
             }
 
         }
@@ -308,7 +300,7 @@ impl Filterable for BgpElem {
         }
     }
 
-    fn match_filters(&self, filters: &Vec<Filter>) -> bool {
+    fn match_filters(&self, filters: &[Filter]) -> bool {
         filters.iter().all(|f| {
             self.match_filter(f)
         })

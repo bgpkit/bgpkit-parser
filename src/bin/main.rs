@@ -87,7 +87,7 @@ fn main() {
     let mut parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
 
     if let Some(v) = opts.filters.as_path {
-        parser = parser.add_filter("as_path", v.to_string().as_str()).unwrap();
+        parser = parser.add_filter("as_path", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.origin_asn {
         parser = parser.add_filter("origin_asn", v.to_string().as_str()).unwrap();
@@ -102,14 +102,14 @@ fn main() {
         parser = parser.add_filter(filter_type, v.to_string().as_str()).unwrap();
     }
     if !opts.filters.peer_ip.is_empty(){
-        let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",").to_string();
+        let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",");
         parser = parser.add_filter("peer_ips", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.peer_asn {
         parser = parser.add_filter("peer_asn", v.to_string().as_str()).unwrap();
     }
     if let Some(v) = opts.filters.elem_type {
-        parser = parser.add_filter("type", v.to_string().as_str()).unwrap();
+        parser = parser.add_filter("type", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.start_ts {
         parser = parser.add_filter("start_ts", v.to_string().as_str()).unwrap();
@@ -124,7 +124,7 @@ fn main() {
             let (mut records_count, mut elems_count) = (0, 0);
             for record in parser.into_record_iter() {
                 records_count += 1;
-                elems_count += elementor.record_to_elems(record).iter().count();
+                elems_count += elementor.record_to_elems(record).len();
             }
             println!("total records: {}", records_count);
             println!("total elems:   {}", elems_count);

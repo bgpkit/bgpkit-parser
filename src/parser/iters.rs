@@ -52,24 +52,16 @@ impl Iterator for RecordIterator {
     fn next(&mut self) -> Option<MrtRecord> {
         self.count += 1;
         loop {
-            return match self.parser.next() {
+            return match self.parser.next_record() {
                 Ok(v) => {
                     // if None, the reaches EoF.
                     let filters = &self.parser.filters;
                     if filters.is_empty() {
                         Some(v)
                     } else {
-                        match &v.message {
-                            MrtMessage::TableDumpV2Message(m) => {
-                                match &m {
-                                    TableDumpV2Message::PeerIndexTable(_) => {
-                                        let _ = self.elementor.record_to_elems(v.clone());
-                                        return Some(v)
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
+                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) = &v.message {
+                            let _ = self.elementor.record_to_elems(v.clone());
+                            return Some(v)
                         }
                         let elems =  self.elementor.record_to_elems(v.clone());
                         if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
@@ -81,10 +73,13 @@ impl Iterator for RecordIterator {
                 },
                 Err(e) => {
                     match e.error {
-                        ParserError::TruncatedMsg(e)| ParserError::Unsupported(e)
-                        | ParserError::UnknownAttr(e) | ParserError::DeprecatedAttr(e) => {
+                        ParserError::TruncatedMsg(err_str)| ParserError::Unsupported(err_str)
+                        | ParserError::UnknownAttr(err_str) | ParserError::DeprecatedAttr(err_str) => {
                             if self.parser.options.show_warnings {
-                                warn!("parser warn: {}", e);
+                                warn!("parser warn: {}", err_str);
+                            }
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
                             }
                             continue
                         }
@@ -92,7 +87,7 @@ impl Iterator for RecordIterator {
                             error!("parser error: {}", err_str);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                    std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
                                 }
                                 None
                             } else {
@@ -158,13 +153,13 @@ impl Iterator for ElemIterator {
                         }
                         Some(r) => {
                             let mut elems =  self.elementor.record_to_elems(r);
-                            if elems.len()>0 {
+                            if elems.is_empty() {
+                                // somehow this record does not contain any elems, continue to parse next record
+                                continue
+                            } else {
                                 elems.reverse();
                                 self.cache_elems = elems;
                                 break
-                            } else {
-                                // somehow this record does not contain any elems, continue to parse next record
-                                continue
                             }
                         }
                     }
@@ -174,10 +169,7 @@ impl Iterator for ElemIterator {
 
             // popping cached elems. note that the original elems order is preseved by reversing the
             // vector before putting it on to cache_elems.
-            let elem = match self.cache_elems.pop() {
-                None => {None}
-                Some(i) => {Some(i)}
-            };
+            let elem = self.cache_elems.pop();
             match elem {
                 None => return None,
                 Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
