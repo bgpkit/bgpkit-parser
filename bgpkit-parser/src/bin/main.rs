@@ -13,7 +13,7 @@ use bgpkit_parser::{BgpkitParser, Elementor};
 #[clap(name="bgpkit-parser-cli")]
 struct Opts {
     /// File path to a MRT file, local or remote.
-    #[clap(name="FILE", parse(from_os_str))]
+    #[clap(name="FILE")]
     file_path: PathBuf,
 
     /// Output as JSON objects

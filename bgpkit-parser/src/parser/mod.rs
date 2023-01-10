@@ -1,5 +1,4 @@
 use std::io::BufRead;
-use bgp_models::mrt::MrtRecord;
 
 #[macro_use]
 pub mod utils;
@@ -12,11 +11,11 @@ pub mod filter;
 
 pub(crate) use self::utils::*;
 pub(crate) use bgp::attributes::AttributeParser;
-pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, parse_mrt_record, };
+pub(crate) use mrt::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, parse_mrt_record};
 
 pub use crate::error::{ParserErrorWithBytes, ParserError};
 pub use mrt::mrt_elem::Elementor;
-use bgp_models::prelude::ElemType;
+use bgp_models::prelude::{ElemType, MrtRecord};
 use oneio::get_reader;
 use crate::Filter;
 

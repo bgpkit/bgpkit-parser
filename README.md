@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/crates/l/bgpkit-parser)](https://raw.githubusercontent.com/bgpkit/bgpkit-parser/master/LICENSE)
 [![Discord](https://img.shields.io/discord/919618842613927977?label=Discord&style=plastic)](https://discord.gg/XDaAtZsz6b)
 
-BGPKIT Parser aims to provides the most ergonomic MRT/BGP/BMP message parsing Rust API.
+BGPKIT Parser aims to provide the most ergonomic MRT/BGP/BMP message parsing Rust API.
 
 BGPKIT Parser has the following features:
 - **performant**: comparable to C-based implementations like `bgpdump` or `bgpreader`.
@@ -16,7 +16,7 @@ BGPKIT Parser has the following features:
 
 ## Examples
 
-For complete examples, check out the [examples folder](examples).
+For complete examples, check out the [examples folder](bgpkit-parser/examples).
 
 ### Parsing single MRT file
 
@@ -226,7 +226,7 @@ cargo install bgpkit-parser
 ```
 or checkout this repository and run
 ```bash
-cargo install --path .
+cargo install --path ./bgpkit-parser
 ```
 
 ```
@@ -258,16 +258,13 @@ OPTIONS:
     -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
 ```
 
-
-
-
 ## Data Representation
 
 There are two key data structure to understand for the parsing results:`MrtRecord` and `BgpElem`.
 
 ### `MrtRecord`: unmodified MRT information representation
 
-The `MrtRecord` is the data strcutrue that holds the unmodified, complete information parsed
+The `MrtRecord` is the data structure that holds the unmodified, complete information parsed
 from the MRT data file. The code definition of the `MrtRecord` is defined in the crate `bgp-models` ([documentation][mrt-record-doc]).
 
 ```rust
@@ -336,6 +333,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)
 - [ ] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
+- [ ] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
 ### MRT
 
@@ -377,9 +375,5 @@ We support normal communities, extended communities, and large communities.
 Issues and pull requests are welcome!
 
 ## Built with ❤️ by BGPKIT Team
-
-BGPKIT is a small-team start-up that focus on building the best tooling for BGP data in Rust. We have 10 years of
-experience working with BGP data and believe that our work can enable more companies to start keeping tracks of BGP data
-on their own turf. Learn more about what services we provide at https://bgpkit.com.
 
 <a href="https://bgpkit.com"><img src="https://bgpkit.com/Original%20Logo%20Cropped.png" alt="https://bgpkit.com/favicon.ico" width="200"/></a>

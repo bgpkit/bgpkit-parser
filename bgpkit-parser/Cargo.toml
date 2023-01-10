@@ -1,0 +1,64 @@
+[package]
+name = "bgpkit-parser"
+version = "0.9.0-alpha-1"
+authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/bgpkit/bgpkit-parser"
+documentation = "https://docs.rs/bgpkit-parser"
+description = """
+A library to parse MRT/BGP/BMP binary data.
+"""
+keywords = ["bgp", "bgpkit", "mrt"]
+rust-version = "1.48.0"
+
+[package.metadata]
+msrv = "1.48.0"
+
+[dependencies]
+ipnetwork = {version="0.18", default-features=false}
+enum-primitive-derive = "0.2"
+num-traits = "0.2"
+chrono = "0.4"
+regex = "1"
+
+bgp-models = {path="../bgp-models"}
+
+# logging
+log="0.4"
+itertools = "0.10.1"
+
+# ris-live parsing
+serde={version="1.0.130", features=["derive"]}
+serde_json = "1.0.69"
+
+# bmp/openbmp parsing
+hex="0.4.3"
+
+oneio = {version= "0.5.0", features=["lib_only"]}
+
+env_logger = {version="0.10", optional=true}
+clap = {version= "4.0", features=["derive"], optional=true}
+
+[dev-dependencies]
+bgpkit-broker = "0.3.2"
+kafka = "0.9.0"
+# websocket
+tungstenite= "0.18.0"
+url = "2.1.0"
+criterion = {version= "0.4.0", features=["html_reports"]}
+rayon = "1.5.1"
+
+[features]
+default = ["build-binary"]
+build-binary = ["clap", "env_logger"]
+
+[[bench]]
+name = "bench_main"
+harness = false
+
+[[bin]]
+name = "bgpkit-parser"
+path = "src/bin/main.rs"
+required-features = ["build-binary"]
