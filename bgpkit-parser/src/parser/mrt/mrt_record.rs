@@ -1,6 +1,5 @@
 use std::io::{ErrorKind, Read};
 use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
-use log::warn;
 use crate::parser::{DataBytes, parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes, ReadUtils};
 use crate::error::ParserError;
 use num_traits::FromPrimitive;
@@ -45,7 +44,6 @@ pub fn parse_common_header<T: std::io::Read>(input: &mut T) -> Result<(Vec<u8>, 
         Err(e) => {
             return match e.kind() {
                 ErrorKind::UnexpectedEof => {
-                    warn!("unexpected eof");
                     Err(ParserError::EofExpected)
                 }
                 _ => {
