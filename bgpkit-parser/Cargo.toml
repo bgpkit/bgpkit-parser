@@ -35,7 +35,7 @@ serde_json = "1.0.69"
 # bmp/openbmp parsing
 hex="0.4.3"
 
-oneio = {version= "0.5.0", features=["lib_only"]}
+oneio = {version= "0.7.0", features=["lib_only"]}
 
 env_logger = {version="0.10", optional=true}
 clap = {version= "4.0", features=["derive"], optional=true}
@@ -48,6 +48,8 @@ tungstenite= "0.18.0"
 url = "2.1.0"
 criterion = {version= "0.4.0", features=["html_reports"]}
 rayon = "1.5.1"
+ureq = "2.6.2"
+bzip2 = "0.4"
 
 [features]
 default = ["build-binary"]

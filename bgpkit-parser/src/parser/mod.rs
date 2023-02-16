@@ -1,4 +1,4 @@
-use std::io::BufRead;
+use std::io::Read;
 
 #[macro_use]
 pub mod utils;
@@ -20,7 +20,7 @@ use oneio::get_reader;
 use crate::Filter;
 
 pub struct BgpkitParser {
-    reader: Box<dyn BufRead>,
+    reader: Box<dyn Read>,
     core_dump: bool,
     filters: Vec<Filter>,
     options: ParserOptions
@@ -46,6 +46,18 @@ impl BgpkitParser {
         Ok(
             BgpkitParser{
                 reader,
+                core_dump: false,
+                filters: vec![],
+                options: ParserOptions::default()
+            }
+        )
+    }
+
+    /// Creating a new parser from a object that implements [Read] trait.
+    pub fn new_with_reader(reader: Box<dyn Read>) -> Result<BgpkitParser, ParserErrorWithBytes>{
+        Ok(
+            BgpkitParser{
+                reader: Box::new(reader),
                 core_dump: false,
                 filters: vec![],
                 options: ParserOptions::default()
@@ -92,4 +104,25 @@ impl BgpkitParser {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_with_reader() {
+        // bzip2 reader for compressed file
+        let http_stream = ureq::get("http://archive.routeviews.org/route-views.ny/bgpdata/2023.02/UPDATES/updates.20230215.0630.bz2")
+            .call().unwrap().into_reader();
+        let reader = Box::new(
+            bzip2::read::BzDecoder::new(http_stream)
+        );
+        assert_eq!(12683, BgpkitParser::new_with_reader(reader).unwrap().into_elem_iter().count());
+
+        // remote reader for uncompressed updates file
+        let reader = ureq::get("https://spaces.bgpkit.org/parser/update-example")
+            .call().unwrap().into_reader();
+        assert_eq!(8160, BgpkitParser::new_with_reader(reader).unwrap().into_elem_iter().count());
+    }
+}
 
