@@ -19,7 +19,6 @@ pub struct DataBytes<'input> {
     pub bytes: &'input [u8],
     pub pos: usize,
     pub total: usize,
-    pub limits: Vec<usize>,
 }
 
 // Allow reading IPs from Reads
@@ -30,7 +29,6 @@ impl  DataBytes <'_>{
             bytes: data.as_slice(),
             pos: 0,
             total: data.len(),
-            limits: vec![data.len()]
         }
     }
 
