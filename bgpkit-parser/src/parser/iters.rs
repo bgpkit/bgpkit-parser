@@ -79,7 +79,7 @@ impl Iterator for RecordIterator {
                                 warn!("parser warn: {}", err_str);
                             }
                             if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
                             }
                             continue
                         }

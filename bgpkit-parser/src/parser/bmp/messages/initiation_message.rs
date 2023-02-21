@@ -1,6 +1,7 @@
+use std::io::Cursor;
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
-use crate::parser::DataBytes;
+use crate::parser::ReadUtils;
 
 #[derive(Debug)]
 pub struct InitiationMessage {
@@ -24,13 +25,14 @@ pub enum InitiationTlvType {
     SysName=2,
 }
 
-pub fn parse_initiation_message(reader: &mut DataBytes) -> Result<InitiationMessage, ParserBmpError> {
+pub fn parse_initiation_message(reader: &mut Cursor::<&[u8]>) -> Result<InitiationMessage, ParserBmpError> {
     let mut tlvs = vec![];
+    let total = reader.get_ref().len() as u64;
 
-    while reader.bytes_left() > 4 {
+    while total - reader.position() > 4 {
         let info_type: InitiationTlvType = InitiationTlvType::from_u16(reader.read_16b()?).unwrap();
         let info_len = reader.read_16b()?;
-        if reader.bytes_left() < info_len as usize {
+        if total - reader.position() < info_len as u64 {
             // not enough bytes to read
             break
         }

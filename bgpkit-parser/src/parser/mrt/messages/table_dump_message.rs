@@ -1,27 +1,23 @@
+use std::io::Cursor;
 use crate::error::*;
 use std::net::IpAddr;
+use byteorder::{BE, ReadBytesExt};
 use bgp_models::mrt::tabledump::TableDumpMessage;
-use bgp_models::network::{AddrMeta, Afi, AsnLength, NetworkPrefix};
+use bgp_models::network::{Afi, AsnLength, NetworkPrefix};
 use crate::parser::bgp::attributes::AttributeParser;
-use crate::parser::DataBytes;
+use crate::parser::ReadUtils;
 
-/// TABLE_DUMP v1 only support 2-byte asn
-fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserError> {
-    let asn_len = AsnLength::Bits16;
-    let afi = match sub_type {
-        1 => Afi::Ipv4,
-        2 => Afi::Ipv6,
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
-            )))
-        }
-    };
-    Ok(AddrMeta { afi, asn_len })
-}
-
+/// Parse MRT TABLE_DUMP type message.
 ///
+/// https://www.rfc-editor.org/rfc/rfc6396#section-4.2
+///
+/// ```text
+/// The TABLE_DUMP Type does not permit 4-byte Peer AS numbers, nor does
+//  it allow the AFI of the peer IP to differ from the AFI of the Prefix
+//  field.  The TABLE_DUMP_V2 Type MUST be used in these situations.
+/// ```
+///
+/// ```text
 ///  0                   1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -39,27 +35,70 @@ fn parse_sub_type(sub_type: u16) -> Result<AddrMeta, ParserError> {
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |                   BGP Attribute... (variable)
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
 pub fn parse_table_dump_message(
     sub_type: u16,
-    input: &mut DataBytes,
+    data: &[u8],
 ) -> Result<TableDumpMessage, ParserError> {
-    let meta = parse_sub_type(sub_type)?;
+    // ####
+    // Step 0. prepare
+    //   - define AS number length
+    //   - determine address family
+    //   - create data slice reader cursor
 
-    let view_number = input.read_16b()?;
-    let sequence_number = input.read_16b()?;
-    let prefix = match meta.afi {
+    // for TABLE_DUMP type, the AS number length is always 2-byte.
+    let asn_len = AsnLength::Bits16;
+    // determine address family based on the sub_type value defined in the MRT [CommonHeader].
+    let afi = match sub_type {
+        1 => Afi::Ipv4,
+        2 => Afi::Ipv6,
+        _ => {
+            return Err(ParserError::ParseError(format!(
+                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
+                sub_type
+            )))
+        }
+    };
+
+    // create a reader for the passed in data slice.
+    let mut input = Cursor::new(data);
+
+    // ####
+    // Step 1. read simple fields
+    //   - view number
+    //   - sequence number
+    //   - prefix
+    //   - prefix-length
+    //   - status
+    //   - originated time
+    //   - peer IP address
+    //   - peer ASN
+    //   - attribute length
+
+    let view_number = input.read_u16::<BE>()?;
+    let sequence_number = input.read_u16::<BE>()?;
+    let prefix = match &afi {
         Afi::Ipv4 => input.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => input.read_ipv6_prefix().map(ipnet::IpNet::V6),
     }?;
-    let status = input.read_8b()?;
-    let time = input.read_32b()? as u64;
+    let status = input.read_u8()?;
+    let time = input.read_u32::<BE>()? as u64;
 
-    let peer_address: IpAddr = input.read_address(&meta.afi)?;
-    let peer_asn = input.read_asn(&meta.asn_len)?;
-    let attribute_length = input.read_16b()? as usize;
+    let peer_address: IpAddr = input.read_address(&afi)?;
+    let peer_asn = input.read_asn(&asn_len)?;
+    let attribute_length = input.read_u16::<BE>()? as usize;
+
+    // ####
+    // Step 2. read the attributes
+    //   - create subslice based on the cursor's current position
+    //   - pass the data into the parser function
+
     let attr_parser = AttributeParser::new(false);
-
-    let attributes = attr_parser.parse_attributes(input, &meta.asn_len, None, None, None, attribute_length)?;
+    let current_position = input.position() as usize;
+    let attr_data_slice = &input.into_inner()[current_position..];
+    // TODO: relax this assertion with error matching later
+    assert_eq!(attr_data_slice.len(), attribute_length);
+    let attributes = attr_parser.parse_attributes(attr_data_slice, &asn_len, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,

@@ -315,6 +315,7 @@ We support normal communities, extended communities, and large communities.
 
 #[macro_use]
 extern crate enum_primitive_derive;
+extern crate core;
 
 pub mod error;
 pub mod parser;
@@ -328,6 +329,5 @@ pub use parser::bmp::parse_bmp_msg;
 pub use parser::bmp::parse_openbmp_header;
 pub use parser::rislive::parse_ris_live_message;
 pub use parser::mrt::parse_mrt_record;
-pub use parser::utils::ReadUtils;
 pub use parser::filter::*;
 pub use bgp_models::prelude::*;

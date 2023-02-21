@@ -1,8 +1,10 @@
+use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
+use byteorder::{BE, ReadBytesExt};
 use bgp_models::network::{Afi, AsnLength};
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
-use crate::parser::DataBytes;
+use crate::parser::ReadUtils;
 
 /// BMP message type enum.
 ///
@@ -50,17 +52,17 @@ pub struct BmpCommonHeader {
     pub msg_type: BmpMsgType,
 }
 
-pub fn parse_bmp_common_header(reader: &mut DataBytes) -> Result<BmpCommonHeader, ParserBmpError>{
+pub fn parse_bmp_common_header(reader: &mut Cursor<&[u8]>) -> Result<BmpCommonHeader, ParserBmpError>{
 
-    let version = reader.read_8b()?;
+    let version = reader.read_u8()?;
     if version!=3 {
         // has to be 3 per rfc7854
         return Err(ParserBmpError::CorruptedBmpMessage)
     }
 
-    let msg_len = reader.read_32b()?;
+    let msg_len = reader.read_u32::<BE>()?;
 
-    let msg_type = BmpMsgType::from_u8(reader.read_8b()?).unwrap();
+    let msg_type = BmpMsgType::from_u8(reader.read_u8()?).unwrap();
     Ok(BmpCommonHeader{
         version,
         msg_len,
@@ -111,7 +113,7 @@ pub enum PeerType {
     LocalInstancePeer=2,
 }
 
-pub fn parse_per_peer_header(reader: &mut DataBytes) -> Result<BmpPerPeerHeader, ParserBmpError>{
+pub fn parse_per_peer_header(reader: &mut Cursor<&[u8]>) -> Result<BmpPerPeerHeader, ParserBmpError>{
     let peer_type = PeerType::from_u8(reader.read_8b()?).unwrap();
 
     let peer_flags = reader.read_8b()?;
@@ -133,13 +135,13 @@ pub fn parse_per_peer_header(reader: &mut DataBytes) -> Result<BmpPerPeerHeader,
     let peer_ip: IpAddr = if is_router_ipv6 {
         reader.read_ipv6_address()?.into()
     } else {
-        reader.read_and_drop_n_bytes(12)?;
+        reader.seek(SeekFrom::Current(12))?;
         let ip= reader.read_ipv4_address()?;
         ip.into()
     };
 
     let peer_asn: u32 = if is_2byte_asn {
-        reader.read_and_drop_n_bytes(2)?;
+        reader.seek(SeekFrom::Current(2))?;
         reader.read_16b()? as u32
     } else {
         reader.read_32b()?
