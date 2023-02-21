@@ -37,31 +37,31 @@ pub fn validate_role_pairs(local_role: &BgpRole, remote_role: &BgpRole) -> bool 
             if let BgpRole::Customer =  remote_role {
                 return true
             }
-            return false
+            false
         }
         BgpRole::RouteServer => {
             if let BgpRole::RouteServerClient =  remote_role {
                 return true
             }
-            return false
+            false
         }
         BgpRole::RouteServerClient => {
             if let BgpRole::RouteServer =  remote_role {
                 return true
             }
-            return false
+            false
         }
         BgpRole::Customer => {
             if let BgpRole::Provider =  remote_role {
                 return true
             }
-            return false
+            false
         }
         BgpRole::Peer => {
             if let BgpRole::Peer =  remote_role {
                 return true
             }
-            return false
+            false
         }
     }
 }

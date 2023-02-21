@@ -1,6 +1,6 @@
 use std::io::{ErrorKind, Read};
 use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
-use crate::parser::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes};
+use crate::parser::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes, ReadUtils};
 use crate::error::ParserError;
 use num_traits::FromPrimitive;
 use byteorder::{BE, ReadBytesExt};
@@ -40,7 +40,7 @@ use byteorder::{BE, ReadBytesExt};
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 pub fn parse_common_header<T: Read>(input: &mut T) -> Result<(Vec<u8>, CommonHeader), ParserError> {
-    let timestamp = match input.read_u32::<BE>()  {
+    let timestamp = match input.read_32b()  {
         Ok(t) => {t}
         Err(e) => {
             return match e.kind() {
@@ -62,11 +62,11 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<(Vec<u8>, CommonHea
         )),
     }?;
     let entry_subtype = input.read_u16::<BE>()?;
-    let mut length = input.read_u32::<BE>()?;
+    let mut length = input.read_32b()?;
     let microsecond_timestamp = match &entry_type {
         EntryType::BGP4MP_ET => {
             length -= 4;
-            Some(input.read_u32::<BE>()?)
+            Some(input.read_32b()?)
 
         },
         _ => None,

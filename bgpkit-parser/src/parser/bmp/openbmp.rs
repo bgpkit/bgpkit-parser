@@ -1,6 +1,5 @@
 use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
-use byteorder::{BE, ReadBytesExt};
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 
@@ -66,8 +65,8 @@ pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader,
     }
 
     // read version numbers
-    let version_major = reader.read_u8()?;
-    let version_minor = reader.read_u8()?;
+    let version_major = reader.read_8b()?;
+    let version_minor = reader.read_8b()?;
     if (version_major, version_minor) != (1,7) {
         return Err(ParserBmpError::InvalidOpenBmpHeader)
     }
@@ -77,21 +76,21 @@ pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader,
     let msg_len = reader.read_32b()?;
 
     // read flags
-    let flags = reader.read_u8()?;
+    let flags = reader.read_8b()?;
     let (is_router_msg, is_router_ipv6) = (flags&0x80!=0, flags&0x40!=0);
     if !is_router_msg {
         return Err(ParserBmpError::UnsupportedOpenBmpMessage)
     }
 
     // read object type
-    let object_type = reader.read_u8()?;
+    let object_type = reader.read_8b()?;
     if object_type != 12 {
         return Err(ParserBmpError::UnsupportedOpenBmpMessage)
     }
 
     // read_timestamp
-    let t_sec = reader.read_u32::<BE>()?;
-    let t_usec = reader.read_u32::<BE>()?;
+    let t_sec = reader.read_32b()?;
+    let t_usec = reader.read_32b()?;
     let timestamp = t_sec as f64 + (t_usec as f64)/1_000_000.0;
 
     // read admin-id

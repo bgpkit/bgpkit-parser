@@ -81,8 +81,8 @@ pub fn parse_table_dump_message(
         Afi::Ipv4 => input.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => input.read_ipv6_prefix().map(ipnet::IpNet::V6),
     }?;
-    let status = input.read_u8()?;
-    let time = input.read_u32::<BE>()? as u64;
+    let status = input.read_8b()?;
+    let time = input.read_32b()? as u64;
 
     let peer_address: IpAddr = input.read_address(&afi)?;
     let peer_asn = input.read_asn(&asn_len)?;

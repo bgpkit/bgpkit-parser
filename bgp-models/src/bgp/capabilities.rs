@@ -58,7 +58,7 @@ pub enum BgpCapabilityType {
 pub fn parse_capability(capability_code: &u8) -> Result<BgpCapabilityType, BgpCapabilityParsingError> {
     match BgpCapabilityType::from_u8(*capability_code) {
         Some(v) => {
-            return Ok(v)
+            Ok(v)
         }
         None => {
             if [4, 66, 128, 129, 130, 131, 184, 185].contains(capability_code) {

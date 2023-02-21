@@ -65,21 +65,21 @@ impl From<i32> for Asn {
     }
 }
 
-impl Into<i32> for Asn {
-    fn into(self) -> i32 {
-        self.asn as i32
+impl From<Asn> for i32 {
+    fn from(val: Asn) -> Self {
+        val.asn as i32
     }
 }
 
-impl Into<u32> for Asn {
-    fn into(self) -> u32 {
-        self.asn
+impl From<Asn> for u32 {
+    fn from(value: Asn) -> Self {
+        value.asn
     }
 }
 
 impl Serialize for Asn {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        Ok( serializer.serialize_u32(self.asn)?)
+        serializer.serialize_u32(self.asn)
     }
 }
 

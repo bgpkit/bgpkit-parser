@@ -40,7 +40,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
     let bgp_msg = match parse_bgp_message(bytes.as_slice(), false, &AsnLength::Bits32) {
         Ok(m) => {m}
         Err(_) => {
-            match parse_bgp_message(&bytes.as_slice(), false, &AsnLength::Bits16) {
+            match parse_bgp_message(bytes.as_slice(), false, &AsnLength::Bits16) {
                 Ok(m) => {m}
                 Err(_) => {return Err(ParserRisliveError::IncorrectRawBytes)}
             }

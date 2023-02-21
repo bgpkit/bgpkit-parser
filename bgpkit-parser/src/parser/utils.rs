@@ -57,7 +57,7 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserError> {
-        let addr = self.read_u32::<BE>()?;
+        let addr = self.read_32b()?;
         Ok(Ipv4Addr::from(addr))
     }
 
@@ -68,7 +68,7 @@ pub trait ReadUtils: io::Read {
 
     fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
         let addr = self.read_ipv4_address()?;
-        let mask = self.read_u8()?;
+        let mask = self.read_8b()?;
         match Ipv4Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
@@ -77,7 +77,7 @@ pub trait ReadUtils: io::Read {
 
     fn read_ipv6_prefix(&mut self) -> Result<Ipv6Net, ParserError> {
         let addr = self.read_ipv6_address()?;
-        let mask = self.read_u8()?;
+        let mask = self.read_8b()?;
         match Ipv6Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
@@ -96,7 +96,7 @@ pub trait ReadUtils: io::Read {
                 )
             },
             AsnLength::Bits32 => {
-                let asn = self.read_u32::<BE>()? as u32;
+                let asn = self.read_32b()?;
                 Ok(
                     Asn{
                         asn,
@@ -119,7 +119,7 @@ pub trait ReadUtils: io::Read {
                 }
                 AsnLength::Bits32 => {
                     for i in 0..count {
-                        path[i] = self.read_u32::<BE>()? as u32;
+                        path[i] = self.read_32b()?;
                     }
                     path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
                 }
@@ -138,7 +138,7 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_safi(&mut self) -> Result<Safi, ParserError> {
-        let safi = self.read_u8()?;
+        let safi = self.read_8b()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
             None => Err(crate::error::ParserError::Unsupported(format!("Unknown SAFI type: {}", safi)))
@@ -153,13 +153,13 @@ pub trait ReadUtils: io::Read {
     fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserError> {
 
         let path_id = if add_path {
-            self.read_u32::<BE>()?
+            self.read_32b()?
         } else {
             0
         };
 
         // Length in bits
-        let bit_len = self.read_u8()?;
+        let bit_len = self.read_8b()?;
 
         // Convert to bytes
         let byte_len: usize = (bit_len as usize + 7) / 8;
@@ -172,7 +172,7 @@ pub trait ReadUtils: io::Read {
                 }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
-                    buff[i] = self.read_u8()?
+                    buff[i] = self.read_8b()?
                 }
                 IpAddr::V4(Ipv4Addr::from(buff))
             }
@@ -183,7 +183,7 @@ pub trait ReadUtils: io::Read {
                 }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
-                    buff[i] = self.read_u8()?
+                    buff[i] = self.read_8b()?
                 }
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
@@ -205,7 +205,7 @@ pub trait ReadUtils: io::Read {
         // }
         let mut bytes = vec![];
         for _ in 0..n_bytes {
-            bytes.push(self.read_u8()?);
+            bytes.push(self.read_8b()?);
         }
         Ok(bytes)
     }

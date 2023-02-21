@@ -1,6 +1,5 @@
 use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
-use byteorder::{BE, ReadBytesExt};
 use bgp_models::network::{Afi, AsnLength};
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
@@ -54,15 +53,15 @@ pub struct BmpCommonHeader {
 
 pub fn parse_bmp_common_header(reader: &mut Cursor<&[u8]>) -> Result<BmpCommonHeader, ParserBmpError>{
 
-    let version = reader.read_u8()?;
+    let version = reader.read_8b()?;
     if version!=3 {
         // has to be 3 per rfc7854
         return Err(ParserBmpError::CorruptedBmpMessage)
     }
 
-    let msg_len = reader.read_u32::<BE>()?;
+    let msg_len = reader.read_32b()?;
 
-    let msg_type = BmpMsgType::from_u8(reader.read_u8()?).unwrap();
+    let msg_type = BmpMsgType::from_u8(reader.read_8b()?).unwrap();
     Ok(BmpCommonHeader{
         version,
         msg_len,
@@ -106,6 +105,7 @@ pub struct BmpPerPeerHeader {
     pub asn_len: AsnLength,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Primitive)]
 pub enum PeerType {
     GlobalInstancePeer=0,

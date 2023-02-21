@@ -56,7 +56,7 @@ pub fn parse_table_dump_v2_message(
 pub fn parse_peer_index_table(data: &[u8]) -> Result<PeerIndexTable, ParserError> {
     let mut input = Cursor::new(data);
 
-    let collector_bgp_id = Ipv4Addr::from(input.read_u32::<BE>()?);
+    let collector_bgp_id = Ipv4Addr::from(input.read_32b()?);
     // read and ignore view name
     let view_name_length = input.read_u16::<BE>()?;
     // TODO: properly parse view_name
@@ -65,7 +65,7 @@ pub fn parse_peer_index_table(data: &[u8]) -> Result<PeerIndexTable, ParserError
     let peer_count = input.read_u16::<BE>()?;
     let mut peers = vec![];
     for _index in 0..peer_count {
-        let peer_type = input.read_u8()?;
+        let peer_type = input.read_8b()?;
         let afi = match peer_type & 1 {
             1 => Afi::Ipv6,
             _ => Afi::Ipv4,
@@ -75,7 +75,7 @@ pub fn parse_peer_index_table(data: &[u8]) -> Result<PeerIndexTable, ParserError
             _ => AsnLength::Bits16,
         };
 
-        let peer_bgp_id = Ipv4Addr::from(input.read_u32::<BE>()?);
+        let peer_bgp_id = Ipv4Addr::from(input.read_32b()?);
         let peer_address: IpAddr = input.read_address(&afi)?;
         let peer_asn = input.read_asn(&asn_len)?;
         peers.push(Peer{
@@ -136,7 +136,7 @@ pub fn parse_rib_afi_entries(data: &[u8], rib_type: TableDumpV2Type) -> Result<R
     let add_path = matches!(rib_type, TableDumpV2Type::RibIpv4UnicastAddPath | TableDumpV2Type::RibIpv4MulticastAddPath |
         TableDumpV2Type::RibIpv6UnicastAddPath | TableDumpV2Type::RibIpv6MulticastAddPath);
 
-    let sequence_number = input.read_u32::<BE>()?;
+    let sequence_number = input.read_32b()?;
 
     // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
     //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
@@ -180,10 +180,10 @@ pub fn parse_rib_entry(input: &mut Cursor<&[u8]>, add_path: bool, afi: &Afi, saf
     }
 
     let peer_index = input.read_u16::<BE>()?;
-    let originated_time = input.read_u32::<BE>()?;
+    let originated_time = input.read_32b()?;
     total_bytes_left -= 6;
     if add_path {
-        let _path_id = input.read_u32::<BE>()?;
+        let _path_id = input.read_32b()?;
         total_bytes_left -= 4;
     }
     let attribute_length = input.read_u16::<BE>()? as usize;

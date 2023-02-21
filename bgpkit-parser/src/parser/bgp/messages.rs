@@ -31,10 +31,10 @@ pub fn parse_bgp_message(data: &[u8], add_path: bool, asn_len: &AsnLength) -> Re
     let mut input = Cursor::new(data);
     // https://tools.ietf.org/html/rfc4271#section-4
     // 16 (4 x 4 bytes) octets marker
-    input.read_u32::<BE>()?;
-    input.read_u32::<BE>()?;
-    input.read_u32::<BE>()?;
-    input.read_u32::<BE>()?;
+    input.read_32b()?;
+    input.read_32b()?;
+    input.read_32b()?;
+    input.read_32b()?;
     /*
      This 2-octet unsigned integer indicates the total length of the
      message, including the header in octets.  Thus, it allows one
@@ -59,7 +59,7 @@ pub fn parse_bgp_message(data: &[u8], add_path: bool, asn_len: &AsnLength) -> Re
             (length - 19) as u64
         };
 
-    let msg_type: BgpMessageType = match BgpMessageType::from_u8(input.read_u8()?){
+    let msg_type: BgpMessageType = match BgpMessageType::from_u8(input.read_8b()?){
         Some(t) => t,
         None => {
             return Err(ParserError::ParseError("Unknown BGP Message Type".to_string()))
@@ -87,8 +87,8 @@ pub fn parse_bgp_message(data: &[u8], add_path: bool, asn_len: &AsnLength) -> Re
 }
 
 pub fn parse_bgp_notification_message(input: &mut Cursor<&[u8]>, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserError> {
-    let error_code = input.read_u8()?;
-    let error_subcode = input.read_u8()?;
+    let error_code = input.read_8b()?;
+    let error_subcode = input.read_8b()?;
     let data = input.read_bytes_vec((bgp_msg_length - 2) as usize)?;
     Ok(
         BgpNotificationMessage{
@@ -100,11 +100,11 @@ pub fn parse_bgp_notification_message(input: &mut Cursor<&[u8]>, bgp_msg_length:
 }
 
 pub fn parse_bgp_open_message(input: &mut Cursor<&[u8]>) -> Result<BgpOpenMessage, ParserError> {
-    let version = input.read_u8()?;
+    let version = input.read_8b()?;
     let asn = Asn{asn: input.read_u16::<BE>()? as u32, len: AsnLength::Bits16};
     let hold_time = input.read_u16::<BE>()?;
     let sender_ip = input.read_ipv4_address()?;
-    let opt_params_len = input.read_u8()?;
+    let opt_params_len = input.read_8b()?;
 
     let pos_end = input.position() + opt_params_len as u64;
 
@@ -113,7 +113,7 @@ pub fn parse_bgp_open_message(input: &mut Cursor<&[u8]>) -> Result<BgpOpenMessag
 
     let mut params: Vec<OptParam> = vec![];
     while input.position() < pos_end {
-        let param_type = input.read_u8()?;
+        let param_type = input.read_8b()?;
         if first {
             // first parameter, check if it is extended length message
             if opt_params_len == 255 && param_type == 255 {
@@ -126,15 +126,15 @@ pub fn parse_bgp_open_message(input: &mut Cursor<&[u8]>) -> Result<BgpOpenMessag
         }
         // reaching here means all the remain params are regular non-extended-length parameters
 
-        let parm_length = input.read_u8()?;
+        let parm_length = input.read_8b()?;
         // https://tools.ietf.org/html/rfc3392
         // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
 
         let param_value = match param_type{
             2 => {
                 // capacity
-                let code = input.read_u8()?;
-                let len = input.read_u8()?;
+                let code = input.read_8b()?;
+                let len = input.read_8b()?;
                 let value = input.read_bytes_vec(len as usize)?;
 
                 ParamValue::Capability(
@@ -180,11 +180,11 @@ fn read_nlri(input: &mut Cursor<&[u8]>, length: usize, afi: &Afi, add_path: bool
     if length==1 {
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
-        input.read_u8().unwrap();
+        input.read_8b().unwrap();
         return Ok(vec![])
     }
 
-    Ok(parse_nlri_list(input, add_path, afi, length as u64)?)
+    parse_nlri_list(input, add_path, afi, length as u64)
 }
 
 /// read bgp update message.

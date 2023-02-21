@@ -51,10 +51,10 @@ impl AttributeParser {
             // thus the while loop condition is set to be at least 3 bytes to read.
 
             // has content to read
-            let flag = input.read_u8()?;
-            let attr_type = input.read_u8()?;
+            let flag = input.read_8b()?;
+            let attr_type = input.read_8b()?;
             let length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-                0 => input.read_u8()? as usize,
+                0 => input.read_8b()? as usize,
                 _ => input.read_u16::<BE>()? as usize,
             };
 
@@ -125,7 +125,7 @@ impl AttributeParser {
                 AttrType::DEVELOPMENT => {
                     let mut value = vec![];
                     for _i in 0..length {
-                        value.push(input.read_u8()?);
+                        value.push(input.read_8b()?);
                     }
                     Ok(AttributeValue::Development(value))
                 },
@@ -158,7 +158,7 @@ impl AttributeParser {
     }
 
     fn parse_origin(&self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-        let origin = input.read_u8()?;
+        let origin = input.read_8b()?;
         match Origin::from_u8(origin) {
             Some(v) => Ok(AttributeValue::Origin(v)),
             None => {
@@ -178,8 +178,8 @@ impl AttributeParser {
     }
 
     fn parse_as_segment(&self, input: &mut Cursor<&[u8]>, asn_len: &AsnLength) -> Result<AsPathSegment, ParserError> {
-        let segment_type = input.read_u8()?;
-        let count = input.read_u8()?;
+        let segment_type = input.read_8b()?;
+        let count = input.read_8b()?;
         let path = input.read_asns(asn_len, count as usize)?;
         match segment_type {
             AttributeParser::AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
@@ -201,14 +201,14 @@ impl AttributeParser {
     }
 
     fn parse_med(&self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-        match input.read_u32::<BE>(){
+        match input.read_32b(){
             Ok(v) => {Ok(AttributeValue::MultiExitDiscriminator(v))}
             Err(err) => {Err(ParserError::from(err))}
         }
     }
 
     fn parse_local_pref(&self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-        match input.read_u32::<BE>(){
+        match input.read_32b(){
             Ok(v) => {Ok(AttributeValue::LocalPreference(v))}
             Err(err) => {Err(ParserError::from(err))}
         }
@@ -235,7 +235,7 @@ impl AttributeParser {
         let mut read = 0;
 
         while read < total_bytes {
-            let community_val = input.read_u32::<BE>()?;
+            let community_val = input.read_32b()?;
             communities.push(
                 match community_val {
                     COMMUNITY_NO_EXPORT => Community::NoExport,
@@ -340,7 +340,7 @@ impl AttributeParser {
 
         let mut next_hop = None;
         if reachable {
-            let next_hop_length = input.read_u8()?;
+            let next_hop_length = input.read_8b()?;
             next_hop = match self.parse_mp_next_hop(next_hop_length, input) {
                 Ok(x) => x,
                 Err(e) => {
@@ -357,7 +357,7 @@ impl AttributeParser {
                 if first_byte_zero {
                     if reachable {
                         // skip reserved byte for reachable NRLI
-                        if input.read_u8()? !=0 {
+                        if input.read_8b()? !=0 {
                             warn!("NRLI reserved byte not 0");
                         }
                         bytes_left-=1;
@@ -370,7 +370,7 @@ impl AttributeParser {
             None => {
                 if reachable {
                     // skip reserved byte for reachable NRLI
-                    if input.read_u8()? !=0 {
+                    if input.read_8b()? !=0 {
                         warn!("NRLI reserved byte not 0");
                     }
                     bytes_left-=1;
@@ -416,10 +416,10 @@ impl AttributeParser {
         let mut communities = Vec::new();
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
-            let global_administrator = input.read_u32::<BE>()?;
+            let global_administrator = input.read_32b()?;
             let local_data = [
-                input.read_u32::<BE>()?,
-                input.read_u32::<BE>()?,
+                input.read_32b()?,
+                input.read_32b()?,
             ];
             communities.push(LargeCommunity::new(global_administrator, local_data));
         }
@@ -434,7 +434,7 @@ impl AttributeParser {
         let mut communities = Vec::new();
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
-            let ec_type_u8 = input.read_u8()?;
+            let ec_type_u8 = input.read_8b()?;
             let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8){
                 Some(t) => t,
                 None => {
@@ -443,7 +443,7 @@ impl AttributeParser {
                     buffer[i] = ec_type_u8;
                     for _b in 0..7 {
                         i += 1;
-                        buffer[i] = input.read_u8()?;
+                        buffer[i] = input.read_8b()?;
                     }
                     let ec = ExtendedCommunity::Raw(buffer);
                     communities.push(ec);
@@ -452,11 +452,11 @@ impl AttributeParser {
             };
             let ec: ExtendedCommunity = match ec_type {
                 ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {
-                    let sub_type = input.read_u8()?;
+                    let sub_type = input.read_8b()?;
                     let global = input.read_u16::<BE>()?;
                     let mut local: [u8;4] = [0;4];
                     for i in 0..4 {
-                        local[i] = input.read_u8()?;
+                        local[i] = input.read_8b()?;
                     }
                     ExtendedCommunity::TransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
                         ec_type: ec_type_u8,
@@ -466,11 +466,11 @@ impl AttributeParser {
                     } )
                 }
                 ExtendedCommunityType::NonTransitiveTwoOctetAsSpecific => {
-                    let sub_type = input.read_u8()?;
+                    let sub_type = input.read_8b()?;
                     let global = input.read_u16::<BE>()?;
                     let mut local: [u8;4] = [0;4];
                     for i in 0..4 {
-                        local[i] = input.read_u8()?;
+                        local[i] = input.read_8b()?;
                     }
                     ExtendedCommunity::NonTransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
                         ec_type: ec_type_u8,
@@ -481,11 +481,11 @@ impl AttributeParser {
                 }
 
                 ExtendedCommunityType::TransitiveIpv4AddressSpecific => {
-                    let sub_type = input.read_u8()?;
-                    let global = Ipv4Addr::from(input.read_u32::<BE>()?);
+                    let sub_type = input.read_8b()?;
+                    let global = Ipv4Addr::from(input.read_32b()?);
                     let mut local: [u8;2] = [0;2];
-                    local[0] = input.read_u8()?;
-                    local[1] = input.read_u8()?;
+                    local[0] = input.read_8b()?;
+                    local[1] = input.read_8b()?;
                     ExtendedCommunity::TransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
@@ -494,11 +494,11 @@ impl AttributeParser {
                     } )
                 }
                 ExtendedCommunityType::NonTransitiveIpv4AddressSpecific => {
-                    let sub_type = input.read_u8()?;
-                    let global = Ipv4Addr::from(input.read_u32::<BE>()?);
+                    let sub_type = input.read_8b()?;
+                    let global = Ipv4Addr::from(input.read_32b()?);
                     let mut local: [u8;2] = [0;2];
-                    local[0] = input.read_u8()?;
-                    local[1] = input.read_u8()?;
+                    local[0] = input.read_8b()?;
+                    local[1] = input.read_8b()?;
                     ExtendedCommunity::NonTransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
@@ -507,36 +507,36 @@ impl AttributeParser {
                     } )
                 }
                 ExtendedCommunityType::TransitiveFourOctetAsSpecific => {
-                    let sub_type = input.read_u8()?;
-                    let global = input.read_u32::<BE>()?;
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_32b()?;
                     let mut local: [u8;2] = [0;2];
-                    local[0] = input.read_u8()?;
-                    local[1] = input.read_u8()?;
+                    local[0] = input.read_8b()?;
+                    local[1] = input.read_8b()?;
                     ExtendedCommunity::TransitiveFourOctetAsSpecific( FourOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits32},
+                        global_administrator: Asn{asn:global, len: AsnLength::Bits32},
                         local_administrator: local
                     } )
                 }
                 ExtendedCommunityType::NonTransitiveFourOctetAsSpecific => {
-                    let sub_type = input.read_u8()?;
-                    let global = input.read_u32::<BE>()?;
+                    let sub_type = input.read_8b()?;
+                    let global = input.read_32b()?;
                     let mut local: [u8;2] = [0;2];
-                    local[0] = input.read_u8()?;
-                    local[1] = input.read_u8()?;
+                    local[0] = input.read_8b()?;
+                    local[1] = input.read_8b()?;
                     ExtendedCommunity::NonTransitiveFourOctetAsSpecific( FourOctetAsSpecific{
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits32},
+                        global_administrator: Asn{asn:global, len: AsnLength::Bits32},
                         local_administrator: local
                     } )
                 }
                 ExtendedCommunityType::TransitiveOpaque => {
-                    let sub_type = input.read_u8()?;
+                    let sub_type = input.read_8b()?;
                     let mut value: [u8;6] = [0;6];
                     for i in 0..6 {
-                        value[i] = input.read_u8()?;
+                        value[i] = input.read_8b()?;
                     }
                     ExtendedCommunity::TransitiveOpaque( Opaque{
                         ec_type: ec_type_u8,
@@ -545,10 +545,10 @@ impl AttributeParser {
                     } )
                 }
                 ExtendedCommunityType::NonTransitiveOpaque => {
-                    let sub_type = input.read_u8()?;
+                    let sub_type = input.read_8b()?;
                     let mut value: [u8;6] = [0;6];
                     for i in 0..6 {
-                        value[i] = input.read_u8()?;
+                        value[i] = input.read_8b()?;
                     }
                     ExtendedCommunity::NonTransitiveOpaque( Opaque{
                         ec_type: ec_type_u8,
@@ -571,12 +571,12 @@ impl AttributeParser {
         let mut communities = Vec::new();
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
-            let ec_type_u8 = input.read_u8()?;
-            let sub_type = input.read_u8()?;
+            let ec_type_u8 = input.read_8b()?;
+            let sub_type = input.read_8b()?;
             let global = input.read_ipv6_address()?;
             let mut local: [u8;2] = [0;2];
-            local[0] = input.read_u8()?;
-            local[1] = input.read_u8()?;
+            local[0] = input.read_8b()?;
+            local[1] = input.read_8b()?;
             let ec = ExtendedCommunity::Ipv6AddressSpecific(
                 Ipv6AddressSpecific {
                     ec_type: ec_type_u8,
