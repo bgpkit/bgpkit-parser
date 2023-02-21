@@ -36,7 +36,7 @@ serde_json = "1.0.69"
 # bmp/openbmp parsing
 hex="0.4.3"
 
-oneio = {version= "0.7.0", features=["lib_only"]}
+oneio = {version= "0.7.2", features=["lib_only"]}
 
 env_logger = {version="0.10", optional=true}
 clap = {version= "4.0", features=["derive"], optional=true}
