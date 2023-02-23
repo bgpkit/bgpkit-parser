@@ -198,7 +198,7 @@ pub trait ReadUtils: io::Read {
         Ok(NetworkPrefix::new(prefix, path_id))
     }
 
-    fn read_bytes_vec(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError>{
+    fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError>{
         // TODO: fix the checking
         // if self.total - self.pos < n_bytes {
         //     return Err(ParserError::IoNotEnoughBytes())
@@ -211,7 +211,7 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError>{
-        let buffer = self.read_bytes_vec(n_bytes)?;
+        let buffer = self.read_n_bytes(n_bytes)?;
         Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
     }
 }

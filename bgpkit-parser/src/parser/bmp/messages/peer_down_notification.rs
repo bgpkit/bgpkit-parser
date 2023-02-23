@@ -18,7 +18,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             Reason is a BGP PDU containing a BGP NOTIFICATION message that
             would have been sent to the peer.
             */
-            Some(reader.read_bytes_vec(bytes_left)?)
+            Some(reader.read_n_bytes(bytes_left)?)
         },
         2 => {
             /*
@@ -29,7 +29,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             Section 8.1 of [RFC4271]).  Two bytes both set to 0 are used to
             indicate that no relevant Event code is defined.
              */
-            Some(reader.read_bytes_vec(bytes_left)?)
+            Some(reader.read_n_bytes(bytes_left)?)
         },
         3 => {
             /*
@@ -37,7 +37,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             message.  Following the Reason is a BGP PDU containing the BGP
             NOTIFICATION message as received from the peer.
              */
-            Some(reader.read_bytes_vec(bytes_left)?)
+            Some(reader.read_n_bytes(bytes_left)?)
         },
         4 => {
             /*

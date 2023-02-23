@@ -35,7 +35,7 @@ pub fn parse_route_mirroring(reader: &mut Cursor<&[u8]>, asn_len: &AsnLength) ->
         match reader.read_16b()? {
             0 => {
                 let info_len = reader.read_16b()?;
-                let bytes = reader.read_bytes_vec(info_len as usize)?;
+                let bytes = reader.read_n_bytes(info_len as usize)?;
                 let mut reader = Cursor::new(bytes.as_slice());
                 let value = parse_bgp_update_message(&mut reader, false, asn_len, info_len as u64)?;
                 tlvs.push(RouteMirroringTlv{ info_len, value: RouteMirroringValue::BgpMessage(value)});

@@ -104,7 +104,7 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
         },
         Err(e) => {
             let mut total_bytes = vec![];
-            if let Err(_) = common_header.write_header(&mut total_bytes) {
+            if common_header.write_header(&mut total_bytes).is_err() {
                 unreachable!("Vec<u8> will never produce errors when used as a std::io::Write")
             }
 

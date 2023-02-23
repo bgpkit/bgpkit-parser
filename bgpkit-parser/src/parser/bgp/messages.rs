@@ -154,7 +154,7 @@ pub fn parse_bgp_open_message(input: &mut Cursor<&[u8]>) -> Result<BgpOpenMessag
                 // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
                 let code = input.read_8b()?;
                 let len = input.read_8b()?;
-                let value = input.read_bytes_vec(len as usize)?;
+                let value = input.read_n_bytes(len as usize)?;
 
                 let capability_type = match parse_capability(&code){
                     Ok(t) => Some(t),
@@ -175,7 +175,7 @@ pub fn parse_bgp_open_message(input: &mut Cursor<&[u8]>) -> Result<BgpOpenMessag
             }
             _ => {
                 // unsupported param, read as raw bytes
-                let bytes = input.read_bytes_vec(parm_length as usize)?;
+                let bytes = input.read_n_bytes(parm_length as usize)?;
                 ParamValue::Raw(bytes)
             }
         };
