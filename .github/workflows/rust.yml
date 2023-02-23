@@ -16,7 +16,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
     - name: Build
       run: cargo build
+
     - name: Run tests
       run: cargo test
+
+    - name: Run format check
+      run: cargo fmt --check
