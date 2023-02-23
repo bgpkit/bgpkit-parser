@@ -1,9 +1,10 @@
+use std::io::Cursor;
 use bgp_models::bgp::BgpUpdateMessage;
 use bgp_models::network::AsnLength;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use num_traits::FromPrimitive;
-use crate::parser::DataBytes;
+use crate::parser::ReadUtils;
 
 #[derive(Debug)]
 pub struct RouteMirroring {
@@ -28,15 +29,15 @@ pub enum RouteMirroringInfo {
     MessageLost=1,
 }
 
-pub fn parse_route_mirroring(reader: &mut DataBytes, asn_len: &AsnLength) -> Result<RouteMirroring, ParserBmpError> {
+pub fn parse_route_mirroring(reader: &mut Cursor<&[u8]>, asn_len: &AsnLength) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
-    while reader.bytes_left() > 4 {
+    while reader.get_ref().len() - (reader.position() as usize) > 4 {
         match reader.read_16b()? {
             0 => {
                 let info_len = reader.read_16b()?;
                 let bytes = reader.read_n_bytes(info_len as usize)?;
-                let mut data = DataBytes::new(&bytes);
-                let value = parse_bgp_update_message(&mut data, false, asn_len, info_len as u64)?;
+                let mut reader = Cursor::new(bytes.as_slice());
+                let value = parse_bgp_update_message(&mut reader, false, asn_len, info_len as u64)?;
                 tlvs.push(RouteMirroringTlv{ info_len, value: RouteMirroringValue::BgpMessage(value)});
             }
             1 => {

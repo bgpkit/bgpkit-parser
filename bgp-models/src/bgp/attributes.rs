@@ -160,6 +160,12 @@ pub struct AsPath {
     pub segments: Vec<AsPathSegment>,
 }
 
+impl Default for AsPath {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AsPath {
     pub fn new() -> AsPath {
         AsPath { segments: vec![] }
@@ -233,11 +239,7 @@ impl AsPath {
         if let Some(seg) = self.segments.last() {
             match seg {
                 AsPathSegment::AsSequence(v) => {
-                    if let Some(n) = v.last() {
-                        Some(vec![n.clone()])
-                    } else {
-                        None
-                    }
+                    v.last().map(|n| vec![*n])
                 }
                 AsPathSegment::AsSet(v) => { Some(v.clone()) }
                 AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => { None }

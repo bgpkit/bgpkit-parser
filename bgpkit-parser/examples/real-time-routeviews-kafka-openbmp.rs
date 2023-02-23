@@ -1,3 +1,6 @@
+extern crate core;
+
+use std::io::Cursor;
 use std::thread::sleep;
 use std::time::Duration;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
@@ -6,7 +9,6 @@ pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
 use log::{info, error};
 use bgpkit_parser::Elementor;
 use bgpkit_parser::parser::bmp::messages::MessageBody;
-use bgpkit_parser::parser::utils::DataBytes;
 
 fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Result<(), KafkaError>{
 
@@ -30,7 +32,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
         for ms in mss.iter() {
             for m in ms.messages() {
                 let bytes = m.value.to_vec();
-                let mut reader = DataBytes::new(&bytes);
+                let mut reader = Cursor::new(bytes.as_slice());
                 let header = parse_openbmp_header(&mut reader).unwrap();
                 let bmp_msg = parse_bmp_msg(&mut reader);
                 match bmp_msg {
