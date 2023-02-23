@@ -1,4 +1,4 @@
-use std::{convert, error::Error, fmt, io};
+use std::{error::Error, fmt, io};
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;
 use oneio::OneIoError;
@@ -8,7 +8,7 @@ pub enum ParserError {
     IoError(io::Error),
     IoNotEnoughBytes(),
     EofError(io::Error),
-    OneIoError(oneio::OneIoError),
+    OneIoError(OneIoError),
     EofExpected,
     ParseError(String),
     UnknownAttr(String),
@@ -73,7 +73,7 @@ impl From<ParserError> for ParserErrorWithBytes {
     }
 }
 
-impl convert::From<io::Error> for ParserError {
+impl From<io::Error> for ParserError {
     fn from(io_error: io::Error) -> Self {
         match io_error.kind() {
             ErrorKind::UnexpectedEof => { ParserError::EofError(io_error)}

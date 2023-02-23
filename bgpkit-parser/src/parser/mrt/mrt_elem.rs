@@ -27,6 +27,7 @@ macro_rules! get_attr_value {
     };
 }
 
+#[allow(clippy::type_complexity)]
 fn get_relevant_attributes(
     attributes: Vec<Attribute>,
 ) -> (

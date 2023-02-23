@@ -1,6 +1,7 @@
 /*!
 Provides parser iterator implementation.
 */
+use std::io::Read;
 use log::{error, warn};
 use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::{BgpElem, Elementor};
@@ -9,20 +10,20 @@ use crate::parser::BgpkitParser;
 use crate::Filterable;
 
 /// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
-impl IntoIterator for BgpkitParser {
+impl<R: Read> IntoIterator for BgpkitParser<R> {
     type Item = BgpElem;
-    type IntoIter = ElemIterator;
+    type IntoIter = ElemIterator<R>;
 
     fn into_iter(self) -> Self::IntoIter {
         ElemIterator::new(self)
     }
 }
 
-impl BgpkitParser {
-    pub fn into_record_iter(self) -> RecordIterator {
+impl<R> BgpkitParser<R> {
+    pub fn into_record_iter(self) -> RecordIterator<R> {
         RecordIterator::new(self)
     }
-    pub fn into_elem_iter(self) -> ElemIterator {
+    pub fn into_elem_iter(self) -> ElemIterator<R> {
         ElemIterator::new(self)
     }
 }
@@ -32,21 +33,21 @@ MrtRecord Iterator
 **********/
 
 
-pub struct RecordIterator {
-    pub parser: BgpkitParser,
+pub struct RecordIterator<R> {
+    pub parser: BgpkitParser<R>,
     pub count: u64,
     elementor: Elementor,
 }
 
-impl RecordIterator {
-    fn new(parser: BgpkitParser) -> RecordIterator {
+impl<R> RecordIterator<R> {
+    fn new(parser: BgpkitParser<R>) -> Self {
         RecordIterator {
             parser , count: 0, elementor: Elementor::new()
         }
     }
 }
 
-impl Iterator for RecordIterator {
+impl<R: Read> Iterator for RecordIterator<R> {
     type Item = MrtRecord;
 
     fn next(&mut self) -> Option<MrtRecord> {
@@ -79,7 +80,7 @@ impl Iterator for RecordIterator {
                                 warn!("parser warn: {}", err_str);
                             }
                             if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_cord_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
                             }
                             continue
                         }
@@ -123,20 +124,20 @@ impl Iterator for RecordIterator {
 BgpElem Iterator
 **********/
 
-pub struct ElemIterator {
+pub struct ElemIterator<R> {
     cache_elems: Vec<BgpElem>,
-    record_iter: RecordIterator,
+    record_iter: RecordIterator<R>,
     elementor: Elementor,
     count: u64,
 }
 
-impl ElemIterator {
-    fn new(parser: BgpkitParser) -> ElemIterator {
+impl<R> ElemIterator<R> {
+    fn new(parser: BgpkitParser<R>) -> Self {
         ElemIterator { record_iter: RecordIterator::new(parser) , count: 0 , cache_elems: vec![], elementor: Elementor::new()}
     }
 }
 
-impl Iterator for ElemIterator {
+impl<R: Read> Iterator for ElemIterator<R> {
     type Item = BgpElem;
 
     fn next(&mut self) -> Option<BgpElem> {

@@ -20,10 +20,10 @@ pub enum ElemType {
 
 impl Serialize for ElemType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        Ok(serializer.serialize_str(match self {
+        serializer.serialize_str(match self {
             ElemType::ANNOUNCE => {"announce"}
             ElemType::WITHDRAW => {"withdraw"}
-        })?)
+        })
     }
 }
 

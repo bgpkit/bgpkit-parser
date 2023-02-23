@@ -47,9 +47,8 @@ use std::net::IpAddr;
 use ipnet::IpNet;
 use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
-use bgp_models::bgp::MetaCommunity;
+use bgp_models::bgp::{ElemType, MetaCommunity};
 use bgp_models::network::{Asn, NetworkPrefix};
-use crate::parser::ElemType;
 
 pub mod error;
 pub mod messages;

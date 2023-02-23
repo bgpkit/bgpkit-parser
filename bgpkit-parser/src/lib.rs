@@ -313,8 +313,12 @@ We support normal communities, extended communities, and large communities.
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 */
 
+#![allow(clippy::new_without_default)]
+#![allow(clippy::needless_range_loop)]
+
 #[macro_use]
 extern crate enum_primitive_derive;
+extern crate core;
 
 pub mod error;
 pub mod parser;
@@ -328,6 +332,5 @@ pub use parser::bmp::parse_bmp_msg;
 pub use parser::bmp::parse_openbmp_header;
 pub use parser::rislive::parse_ris_live_message;
 pub use parser::mrt::parse_mrt_record;
-pub use parser::utils::ReadUtils;
 pub use parser::filter::*;
 pub use bgp_models::prelude::*;
