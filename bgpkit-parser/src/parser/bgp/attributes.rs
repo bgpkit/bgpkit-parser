@@ -1,17 +1,15 @@
-use std::net::{Ipv4Addr};
-use std::io::{Cursor, Seek, SeekFrom};
-use byteorder::{BE, ReadBytesExt};
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
+use byteorder::{ReadBytesExt, BE};
 use log::{debug, warn};
-
+use std::io::{Cursor, Seek, SeekFrom};
+use std::net::Ipv4Addr;
 
 use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
 use crate::parser::{parse_nlri_list, ReadUtils};
-
 
 pub struct AttributeParser {
     additional_paths: bool,
@@ -46,7 +44,7 @@ impl AttributeParser {
         let total_slices_bytes = data.len() as u64;
         let mut input = Cursor::new(data);
 
-        while input.position() + 3 <= total_slices_bytes  {
+        while input.position() + 3 <= total_slices_bytes {
             // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
             // thus the while loop condition is set to be at least 3 bytes to read.
 
@@ -75,7 +73,10 @@ impl AttributeParser {
                 partial = true;
             }
 
-            debug!("reading attribute: type -- {:?}, length -- {}", &attr_type, length);
+            debug!(
+                "reading attribute: type -- {:?}, length -- {}",
+                &attr_type, length
+            );
             let attr_type = match AttrType::from_u8(attr_type) {
                 Some(t) => t,
                 None => {
@@ -83,12 +84,16 @@ impl AttributeParser {
                     input.seek(SeekFrom::Current(length as i64))?;
                     return match attr_type {
                         11 | 12 | 13 | 19 | 20 | 21 | 28 | 30 | 31 | 129 | 241..=243 => {
-                            Err(ParserError::DeprecatedAttr(format!("deprecated attribute type: {}", attr_type)))
+                            Err(ParserError::DeprecatedAttr(format!(
+                                "deprecated attribute type: {}",
+                                attr_type
+                            )))
                         }
-                        _ => {
-                            Err(ParserError::UnknownAttr(format!("unknown attribute type: {}", attr_type)))
-                        }
-                    }
+                        _ => Err(ParserError::UnknownAttr(format!(
+                            "unknown attribute type: {}",
+                            attr_type
+                        ))),
+                    };
                 }
             };
 
@@ -96,8 +101,11 @@ impl AttributeParser {
             let attr_end_pos = input.position() + length as u64;
 
             if bytes_left < length as u64 {
-                warn!("not enough bytes: input bytes left - {}, want to read - {}; skipping", bytes_left, length);
-                break
+                warn!(
+                    "not enough bytes: input bytes left - {}, want to read - {}; skipping",
+                    bytes_left, length
+                );
+                break;
             }
 
             let attr = match attr_type {
@@ -106,42 +114,59 @@ impl AttributeParser {
                 AttrType::NEXT_HOP => self.parse_next_hop(&mut input, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => self.parse_med(&mut input),
                 AttrType::LOCAL_PREFERENCE => self.parse_local_pref(&mut input),
-                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG)),
+                AttrType::ATOMIC_AGGREGATE => {
+                    Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
+                }
                 AttrType::AGGREGATOR => self.parse_aggregator(&mut input, asn_len, &afi),
                 AttrType::ORIGINATOR_ID => self.parse_originator_id(&mut input, &afi),
                 AttrType::CLUSTER_LIST => self.parse_clusters(&mut input, &afi, length),
                 AttrType::MP_REACHABLE_NLRI => {
-                        self.parse_nlri(&mut input, &afi, &safi, &prefixes, true, length)
+                    self.parse_nlri(&mut input, &afi, &safi, &prefixes, true, length)
                 }
-                AttrType::MP_UNREACHABLE_NLRI => self.parse_nlri(&mut input, &afi, &safi, &prefixes, false, length),
+                AttrType::MP_UNREACHABLE_NLRI => {
+                    self.parse_nlri(&mut input, &afi, &safi, &prefixes, false, length)
+                }
                 AttrType::AS4_PATH => self.parse_as_path(&mut input, &AsnLength::Bits32, length),
-                AttrType::AS4_AGGREGATOR => self.parse_aggregator(&mut input, &AsnLength::Bits32, &afi),
+                AttrType::AS4_AGGREGATOR => {
+                    self.parse_aggregator(&mut input, &AsnLength::Bits32, &afi)
+                }
 
                 // communities
                 AttrType::COMMUNITIES => self.parse_regular_communities(&mut input, length),
                 AttrType::LARGE_COMMUNITIES => self.parse_large_communities(&mut input, length),
-                AttrType::EXTENDED_COMMUNITIES => self.parse_extended_community(&mut input, length) ,
-                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => self.parse_ipv6_extended_community(&mut input, length),
+                AttrType::EXTENDED_COMMUNITIES => self.parse_extended_community(&mut input, length),
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                    self.parse_ipv6_extended_community(&mut input, length)
+                }
                 AttrType::DEVELOPMENT => {
                     let mut value = vec![];
                     for _i in 0..length {
                         value.push(input.read_8b()?);
                     }
                     Ok(AttributeValue::Development(value))
-                },
-                AttrType::ONLY_TO_CUSTOMER => self.parse_only_to_customer_attr(&mut input),
-                _ => {
-                    Err(crate::error::ParserError::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
+                AttrType::ONLY_TO_CUSTOMER => self.parse_only_to_customer_attr(&mut input),
+                _ => Err(crate::error::ParserError::Unsupported(format!(
+                    "unsupported attribute type: {:?}",
+                    attr_type
+                ))),
             };
 
-            debug!("seeking position tp {}/{}", attr_end_pos, input.get_ref().len());
+            debug!(
+                "seeking position tp {}/{}",
+                attr_end_pos,
+                input.get_ref().len()
+            );
             // always fast forward to the attribute end position.
             input.seek(SeekFrom::Start(attr_end_pos))?;
 
-            match attr{
+            match attr {
                 Ok(value) => {
-                    attributes.push(Attribute{value, flag, attr_type});
+                    attributes.push(Attribute {
+                        value,
+                        flag,
+                        attr_type,
+                    });
                 }
                 Err(e) => {
                     if partial {
@@ -150,7 +175,7 @@ impl AttributeParser {
                     } else {
                         warn!("{}", e.to_string());
                     }
-                    continue
+                    continue;
                 }
             };
         }
@@ -162,14 +187,21 @@ impl AttributeParser {
         let origin = input.read_8b()?;
         match Origin::from_u8(origin) {
             Some(v) => Ok(AttributeValue::Origin(v)),
-            None => {
-                Err(crate::error::ParserError::UnknownAttr("Failed to parse attribute type: origin".to_string()))
-            }
+            None => Err(crate::error::ParserError::UnknownAttr(
+                "Failed to parse attribute type: origin".to_string(),
+            )),
         }
     }
 
-    fn parse_as_path(&self, input: &mut Cursor<&[u8]>, asn_len: &AsnLength, total_bytes: usize) -> Result<AttributeValue, ParserError> {
-        let mut output = AsPath{ segments: Vec::with_capacity(5) };
+    fn parse_as_path(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        asn_len: &AsnLength,
+        total_bytes: usize,
+    ) -> Result<AttributeValue, ParserError> {
+        let mut output = AsPath {
+            segments: Vec::with_capacity(5),
+        };
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
             let segment = self.parse_as_segment(input, asn_len)?;
@@ -178,7 +210,11 @@ impl AttributeParser {
         Ok(AttributeValue::AsPath(output))
     }
 
-    fn parse_as_segment(&self, input: &mut Cursor<&[u8]>, asn_len: &AsnLength) -> Result<AsPathSegment, ParserError> {
+    fn parse_as_segment(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        asn_len: &AsnLength,
+    ) -> Result<AsPathSegment, ParserError> {
         let segment_type = input.read_8b()?;
         let count = input.read_8b()?;
         let path = input.read_asns(asn_len, count as usize)?;
@@ -187,102 +223,142 @@ impl AttributeParser {
             AttributeParser::AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
             AttributeParser::AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
             AttributeParser::AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
-            _ => Err(ParserError::ParseError(
-                format!("Invalid AS path segment type: {}", segment_type),
-            )),
+            _ => Err(ParserError::ParseError(format!(
+                "Invalid AS path segment type: {}",
+                segment_type
+            ))),
         }
     }
 
-    fn parse_next_hop(&self, input: &mut Cursor<&[u8]>, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+    fn parse_next_hop(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        afi: &Option<Afi>,
+    ) -> Result<AttributeValue, ParserError> {
         if let Some(afi) = afi {
             Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
         } else {
-            Ok(input.read_address(&Afi::Ipv4).map(AttributeValue::NextHop)?)
+            Ok(input
+                .read_address(&Afi::Ipv4)
+                .map(AttributeValue::NextHop)?)
         }
     }
 
     fn parse_med(&self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-        match input.read_32b(){
-            Ok(v) => {Ok(AttributeValue::MultiExitDiscriminator(v))}
-            Err(err) => {Err(ParserError::from(err))}
+        match input.read_32b() {
+            Ok(v) => Ok(AttributeValue::MultiExitDiscriminator(v)),
+            Err(err) => Err(ParserError::from(err)),
         }
     }
 
     fn parse_local_pref(&self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-        match input.read_32b(){
-            Ok(v) => {Ok(AttributeValue::LocalPreference(v))}
-            Err(err) => {Err(ParserError::from(err))}
+        match input.read_32b() {
+            Ok(v) => Ok(AttributeValue::LocalPreference(v)),
+            Err(err) => Err(ParserError::from(err)),
         }
     }
 
-    fn parse_aggregator(&self, input: &mut Cursor<&[u8]>, asn_len: &AsnLength, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+    fn parse_aggregator(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        asn_len: &AsnLength,
+        afi: &Option<Afi>,
+    ) -> Result<AttributeValue, ParserError> {
         let asn = input.read_asn(asn_len)?;
         let afi = match afi {
-            None => { &Afi::Ipv4 }
-            Some(a) => {a}
+            None => &Afi::Ipv4,
+            Some(a) => a,
         };
         let addr = input.read_address(afi)?;
         Ok(AttributeValue::Aggregator(asn, addr))
     }
 
-    fn parse_regular_communities(&self, input: &mut Cursor<&[u8]>, total_bytes: usize) -> Result<AttributeValue, ParserError> {
+    fn parse_regular_communities(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        total_bytes: usize,
+    ) -> Result<AttributeValue, ParserError> {
         const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
         const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
         const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
 
-        debug!("reading communities. cursor_pos: {}/{}; total to read: {}", input.position(), input.get_ref().len(), total_bytes);
+        debug!(
+            "reading communities. cursor_pos: {}/{}; total to read: {}",
+            input.position(),
+            input.get_ref().len(),
+            total_bytes
+        );
 
         let mut communities = vec![];
         let mut read = 0;
 
         while read < total_bytes {
             let community_val = input.read_32b()?;
-            communities.push(
-                match community_val {
-                    COMMUNITY_NO_EXPORT => Community::NoExport,
-                    COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
-                    COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
-                    value => {
-                        let asn = Asn{asn: ((value >> 16) & 0xffff), len: AsnLength::Bits16};
-                        let value = (value & 0xffff) as u16;
-                        Community::Custom(asn, value)
-                    }
+            communities.push(match community_val {
+                COMMUNITY_NO_EXPORT => Community::NoExport,
+                COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
+                COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
+                value => {
+                    let asn = Asn {
+                        asn: ((value >> 16) & 0xffff),
+                        len: AsnLength::Bits16,
+                    };
+                    let value = (value & 0xffff) as u16;
+                    Community::Custom(asn, value)
                 }
-            );
+            });
             read += 4;
         }
 
-        debug!("finished reading communities. cursor_pos: {}/{}; {:?}", input.position(), input.get_ref().len(), &communities);
+        debug!(
+            "finished reading communities. cursor_pos: {}/{}; {:?}",
+            input.position(),
+            input.get_ref().len(),
+            &communities
+        );
         Ok(AttributeValue::Communities(communities))
     }
 
-    fn parse_originator_id(&self, input: &mut Cursor<&[u8]>, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+    fn parse_originator_id(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        afi: &Option<Afi>,
+    ) -> Result<AttributeValue, ParserError> {
         let afi = match afi {
-            None => { &Afi::Ipv4 }
-            Some(a) => {a}
+            None => &Afi::Ipv4,
+            Some(a) => a,
         };
         let addr = input.read_address(afi)?;
         Ok(AttributeValue::OriginatorId(addr))
     }
 
     #[allow(unused)]
-    fn parse_cluster_id(&self, input: &mut Cursor<&[u8]>, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+    fn parse_cluster_id(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        afi: &Option<Afi>,
+    ) -> Result<AttributeValue, ParserError> {
         let afi = match afi {
-            None => { &Afi::Ipv4 }
-            Some(a) => {a}
+            None => &Afi::Ipv4,
+            Some(a) => a,
         };
         let addr = input.read_address(afi)?;
         Ok(AttributeValue::Clusters(vec![addr]))
     }
 
-    fn parse_clusters(&self, input: &mut Cursor<&[u8]>, afi: &Option<Afi>, total_bytes: usize) -> Result<AttributeValue, ParserError> {
+    fn parse_clusters(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        afi: &Option<Afi>,
+        total_bytes: usize,
+    ) -> Result<AttributeValue, ParserError> {
         // FIXME: in https://tools.ietf.org/html/rfc4456, the CLUSTER_LIST is a set of CLUSTER_ID each represented by a 4-byte number
         let mut clusters = Vec::new();
         let initial_pos = input.position();
         while input.position() - initial_pos < total_bytes as u64 {
             let afi = match afi {
-                None => { &Afi::Ipv4 }
-                Some(a) => {a}
+                None => &Afi::Ipv4,
+                Some(a) => a,
             };
 
             let addr = input.read_address(afi)?;
@@ -308,13 +384,16 @@ impl AttributeParser {
     /// +---------------------------------------------------------+
     /// | Network Layer Reachability Information (variable)       |
     /// +---------------------------------------------------------+
-    fn parse_nlri(&self, input: &mut Cursor<&[u8]>,
-                                   afi: &Option<Afi>, safi: &Option<Safi>,
-                                   prefixes: &Option<&[NetworkPrefix]>,
-                                   reachable: bool,
+    fn parse_nlri(
+        &self,
+        input: &mut Cursor<&[u8]>,
+        afi: &Option<Afi>,
+        safi: &Option<Safi>,
+        prefixes: &Option<&[NetworkPrefix]>,
+        reachable: bool,
         total_bytes: usize,
     ) -> Result<AttributeValue, ParserError> {
-        let first_byte_zero = input.get_ref()[input.position() as usize]==0;
+        let first_byte_zero = input.get_ref()[input.position() as usize] == 0;
         let pos_end = input.position() + total_bytes as u64;
 
         // read address family
@@ -325,8 +404,8 @@ impl AttributeParser {
                 } else {
                     afi.to_owned()
                 }
-            },
-            None => input.read_afi()?
+            }
+            None => input.read_afi()?,
         };
         let safi = match safi {
             Some(safi) => {
@@ -344,9 +423,7 @@ impl AttributeParser {
             let next_hop_length = input.read_8b()?;
             next_hop = match self.parse_mp_next_hop(next_hop_length, input) {
                 Ok(x) => x,
-                Err(e) => {
-                    return Err(e)
-                }
+                Err(e) => return Err(e),
             };
         }
 
@@ -358,23 +435,23 @@ impl AttributeParser {
                 if first_byte_zero {
                     if reachable {
                         // skip reserved byte for reachable NRLI
-                        if input.read_8b()? !=0 {
+                        if input.read_8b()? != 0 {
                             warn!("NRLI reserved byte not 0");
                         }
-                        bytes_left-=1;
+                        bytes_left -= 1;
                     }
-                    parse_nlri_list( input, self.additional_paths, &afi, bytes_left)?
+                    parse_nlri_list(input, self.additional_paths, &afi, bytes_left)?
                 } else {
                     pfxs.to_vec()
                 }
-            },
+            }
             None => {
                 if reachable {
                     // skip reserved byte for reachable NRLI
-                    if input.read_8b()? !=0 {
+                    if input.read_8b()? != 0 {
                         warn!("NRLI reserved byte not 0");
                     }
-                    bytes_left-=1;
+                    bytes_left -= 1;
                 }
                 parse_nlri_list(input, self.additional_paths, &afi, bytes_left)?
             }
@@ -382,8 +459,18 @@ impl AttributeParser {
 
         // Reserved field, should ignore
         match reachable {
-            true => Ok(AttributeValue::MpReachNlri(Nlri {afi,safi, next_hop, prefixes})),
-            false => Ok(AttributeValue::MpUnreachNlri(Nlri {afi,safi, next_hop, prefixes}))
+            true => Ok(AttributeValue::MpReachNlri(Nlri {
+                afi,
+                safi,
+                next_hop,
+                prefixes,
+            })),
+            false => Ok(AttributeValue::MpUnreachNlri(Nlri {
+                afi,
+                safi,
+                next_hop,
+                prefixes,
+            })),
         }
     }
 
@@ -401,9 +488,10 @@ impl AttributeParser {
                 input.read_ipv6_address()?,
             )),
             v => {
-                return Err(ParserError::ParseError(
-                    format!("Invalid next hop length found: {}",v),
-                ));
+                return Err(ParserError::ParseError(format!(
+                    "Invalid next hop length found: {}",
+                    v
+                )));
             }
         };
         Ok(output)
@@ -418,10 +506,7 @@ impl AttributeParser {
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
             let global_administrator = input.read_32b()?;
-            let local_data = [
-                input.read_32b()?,
-                input.read_32b()?,
-            ];
+            let local_data = [input.read_32b()?, input.read_32b()?];
             communities.push(LargeCommunity::new(global_administrator, local_data));
         }
         Ok(AttributeValue::LargeCommunities(communities))
@@ -436,10 +521,10 @@ impl AttributeParser {
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
             let ec_type_u8 = input.read_8b()?;
-            let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8){
+            let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8) {
                 Some(t) => t,
                 None => {
-                    let mut buffer: [u8;8] = [0;8];
+                    let mut buffer: [u8; 8] = [0; 8];
                     let mut i = 0;
                     buffer[i] = ec_type_u8;
                     for _b in 0..7 {
@@ -448,114 +533,126 @@ impl AttributeParser {
                     }
                     let ec = ExtendedCommunity::Raw(buffer);
                     communities.push(ec);
-                    continue
+                    continue;
                 }
             };
             let ec: ExtendedCommunity = match ec_type {
                 ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = input.read_u16::<BE>()?;
-                    let mut local: [u8;4] = [0;4];
+                    let mut local: [u8; 4] = [0; 4];
                     for i in 0..4 {
                         local[i] = input.read_8b()?;
                     }
-                    ExtendedCommunity::TransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
+                    ExtendedCommunity::TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits16},
-                        local_administrator: local
-                    } )
+                        global_administrator: Asn {
+                            asn: global as u32,
+                            len: AsnLength::Bits16,
+                        },
+                        local_administrator: local,
+                    })
                 }
                 ExtendedCommunityType::NonTransitiveTwoOctetAsSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = input.read_u16::<BE>()?;
-                    let mut local: [u8;4] = [0;4];
+                    let mut local: [u8; 4] = [0; 4];
                     for i in 0..4 {
                         local[i] = input.read_8b()?;
                     }
-                    ExtendedCommunity::NonTransitiveTwoOctetAsSpecific( TwoOctetAsSpecific{
+                    ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global as u32, len: AsnLength::Bits16},
-                        local_administrator: local
-                    } )
+                        global_administrator: Asn {
+                            asn: global as u32,
+                            len: AsnLength::Bits16,
+                        },
+                        local_administrator: local,
+                    })
                 }
 
                 ExtendedCommunityType::TransitiveIpv4AddressSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = Ipv4Addr::from(input.read_32b()?);
-                    let mut local: [u8;2] = [0;2];
+                    let mut local: [u8; 2] = [0; 2];
                     local[0] = input.read_8b()?;
                     local[1] = input.read_8b()?;
-                    ExtendedCommunity::TransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
+                    ExtendedCommunity::TransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
                         global_administrator: global,
-                        local_administrator: local
-                    } )
+                        local_administrator: local,
+                    })
                 }
                 ExtendedCommunityType::NonTransitiveIpv4AddressSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = Ipv4Addr::from(input.read_32b()?);
-                    let mut local: [u8;2] = [0;2];
+                    let mut local: [u8; 2] = [0; 2];
                     local[0] = input.read_8b()?;
                     local[1] = input.read_8b()?;
-                    ExtendedCommunity::NonTransitiveIpv4AddressSpecific( Ipv4AddressSpecific{
+                    ExtendedCommunity::NonTransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
                         global_administrator: global,
-                        local_administrator: local
-                    } )
+                        local_administrator: local,
+                    })
                 }
                 ExtendedCommunityType::TransitiveFourOctetAsSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = input.read_32b()?;
-                    let mut local: [u8;2] = [0;2];
+                    let mut local: [u8; 2] = [0; 2];
                     local[0] = input.read_8b()?;
                     local[1] = input.read_8b()?;
-                    ExtendedCommunity::TransitiveFourOctetAsSpecific( FourOctetAsSpecific{
+                    ExtendedCommunity::TransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global, len: AsnLength::Bits32},
-                        local_administrator: local
-                    } )
+                        global_administrator: Asn {
+                            asn: global,
+                            len: AsnLength::Bits32,
+                        },
+                        local_administrator: local,
+                    })
                 }
                 ExtendedCommunityType::NonTransitiveFourOctetAsSpecific => {
                     let sub_type = input.read_8b()?;
                     let global = input.read_32b()?;
-                    let mut local: [u8;2] = [0;2];
+                    let mut local: [u8; 2] = [0; 2];
                     local[0] = input.read_8b()?;
                     local[1] = input.read_8b()?;
-                    ExtendedCommunity::NonTransitiveFourOctetAsSpecific( FourOctetAsSpecific{
+                    ExtendedCommunity::NonTransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        global_administrator: Asn{asn:global, len: AsnLength::Bits32},
-                        local_administrator: local
-                    } )
+                        global_administrator: Asn {
+                            asn: global,
+                            len: AsnLength::Bits32,
+                        },
+                        local_administrator: local,
+                    })
                 }
                 ExtendedCommunityType::TransitiveOpaque => {
                     let sub_type = input.read_8b()?;
-                    let mut value: [u8;6] = [0;6];
+                    let mut value: [u8; 6] = [0; 6];
                     for i in 0..6 {
                         value[i] = input.read_8b()?;
                     }
-                    ExtendedCommunity::TransitiveOpaque( Opaque{
+                    ExtendedCommunity::TransitiveOpaque(Opaque {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        value
-                    } )
+                        value,
+                    })
                 }
                 ExtendedCommunityType::NonTransitiveOpaque => {
                     let sub_type = input.read_8b()?;
-                    let mut value: [u8;6] = [0;6];
+                    let mut value: [u8; 6] = [0; 6];
                     for i in 0..6 {
                         value[i] = input.read_8b()?;
                     }
-                    ExtendedCommunity::NonTransitiveOpaque( Opaque{
+                    ExtendedCommunity::NonTransitiveOpaque(Opaque {
                         ec_type: ec_type_u8,
                         ec_subtype: sub_type,
-                        value
-                    } )
+                        value,
+                    })
                 }
             };
 
@@ -567,7 +664,7 @@ impl AttributeParser {
     fn parse_ipv6_extended_community(
         &self,
         input: &mut Cursor<&[u8]>,
-        total_bytes: usize
+        total_bytes: usize,
     ) -> Result<AttributeValue, ParserError> {
         let mut communities = Vec::new();
         let pos_end = input.position() + total_bytes as u64;
@@ -575,17 +672,15 @@ impl AttributeParser {
             let ec_type_u8 = input.read_8b()?;
             let sub_type = input.read_8b()?;
             let global = input.read_ipv6_address()?;
-            let mut local: [u8;2] = [0;2];
+            let mut local: [u8; 2] = [0; 2];
             local[0] = input.read_8b()?;
             local[1] = input.read_8b()?;
-            let ec = ExtendedCommunity::Ipv6AddressSpecific(
-                Ipv6AddressSpecific {
-                    ec_type: ec_type_u8,
-                    ec_subtype: sub_type,
-                    global_administrator: global,
-                    local_administrator: local
-                }
-            );
+            let ec = ExtendedCommunity::Ipv6AddressSpecific(Ipv6AddressSpecific {
+                ec_type: ec_type_u8,
+                ec_subtype: sub_type,
+                global_administrator: global,
+                local_administrator: local,
+            });
             communities.push(ec);
         }
         Ok(AttributeValue::ExtendedCommunities(communities))
@@ -607,9 +702,11 @@ impl AttributeParser {
     /// 1. If a route is to be advertised to a Customer, a Peer, or an RS-Client (when the sender is an RS), and the OTC Attribute is not present, then when advertising the route, an OTC Attribute MUST be added with a value equal to the AS number of the local AS.
     /// 2. If a route already contains the OTC Attribute, it MUST NOT be propagated to Providers, Peers, or RSes.
     /// ```
-    fn parse_only_to_customer_attr( &self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
+    fn parse_only_to_customer_attr(
+        &self,
+        input: &mut Cursor<&[u8]>,
+    ) -> Result<AttributeValue, ParserError> {
         let remote_asn = input.read_32b()?;
         Ok(AttributeValue::OnlyToCustomer(remote_asn))
     }
 }
-

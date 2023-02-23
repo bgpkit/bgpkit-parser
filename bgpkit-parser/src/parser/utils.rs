@@ -1,24 +1,23 @@
 /*!
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
-use ipnet::{Ipv4Net, Ipv6Net, IpNet};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use std::io::{Cursor, Seek, SeekFrom};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
 };
-use std::io::{Cursor, Seek, SeekFrom};
 
+use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
+use byteorder::{ReadBytesExt, BE};
+use log::debug;
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
-use byteorder::{BE, ReadBytesExt};
-use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
-use log::debug;
 
 use crate::error::ParserError;
 
 // Allow reading IPs from Reads
 pub trait ReadUtils: io::Read {
-
     fn read_8b(&mut self) -> io::Result<u8> {
         self.read_u8()
     }
@@ -41,17 +40,19 @@ pub trait ReadUtils: io::Read {
 
     fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
         match afi {
-            Afi::Ipv4 => {
-                match self.read_ipv4_address(){
-                    Ok(ip) => Ok(IpAddr::V4(ip)),
-                    _ => Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv4 address".to_string()))
-                }
+            Afi::Ipv4 => match self.read_ipv4_address() {
+                Ok(ip) => Ok(IpAddr::V4(ip)),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Cannot parse IPv4 address".to_string(),
+                )),
             },
-            Afi::Ipv6 => {
-                match self.read_ipv6_address(){
-                    Ok(ip) => Ok(IpAddr::V6(ip)),
-                    _ => Err(io::Error::new(io::ErrorKind::Other, "Cannot parse IPv6 address".to_string()))
-                }
+            Afi::Ipv6 => match self.read_ipv6_address() {
+                Ok(ip) => Ok(IpAddr::V6(ip)),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Cannot parse IPv6 address".to_string(),
+                )),
             },
         }
     }
@@ -88,52 +89,59 @@ pub trait ReadUtils: io::Read {
         match as_length {
             AsnLength::Bits16 => {
                 let asn = self.read_u16::<BE>()? as u32;
-                Ok(
-                    Asn{
-                        asn,
-                        len: AsnLength::Bits16
-                    }
-                )
-            },
+                Ok(Asn {
+                    asn,
+                    len: AsnLength::Bits16,
+                })
+            }
             AsnLength::Bits32 => {
                 let asn = self.read_32b()?;
-                Ok(
-                    Asn{
-                        asn,
-                        len: AsnLength::Bits32
-                    }
-                )
-            },
+                Ok(Asn {
+                    asn,
+                    len: AsnLength::Bits32,
+                })
+            }
         }
     }
 
     fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
-        let mut path  = [0;255];
-        Ok(
-            match as_length {
-                AsnLength::Bits16 => {
-                    for i in 0..count {
-                        path[i] = self.read_u16::<BE>()? as u32;
-                    }
-                    path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
+        let mut path = [0; 255];
+        Ok(match as_length {
+            AsnLength::Bits16 => {
+                for i in 0..count {
+                    path[i] = self.read_u16::<BE>()? as u32;
                 }
-                AsnLength::Bits32 => {
-                    for i in 0..count {
-                        path[i] = self.read_32b()?;
-                    }
-                    path[..count].iter().map(|asn| Asn{asn:*asn, len: *as_length}).collect::<Vec<Asn>>()
-                }
+                path[..count]
+                    .iter()
+                    .map(|asn| Asn {
+                        asn: *asn,
+                        len: *as_length,
+                    })
+                    .collect::<Vec<Asn>>()
             }
-        )
+            AsnLength::Bits32 => {
+                for i in 0..count {
+                    path[i] = self.read_32b()?;
+                }
+                path[..count]
+                    .iter()
+                    .map(|asn| Asn {
+                        asn: *asn,
+                        len: *as_length,
+                    })
+                    .collect::<Vec<Asn>>()
+            }
+        })
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
         let afi = self.read_u16::<BE>()?;
         match Afi::from_i16(afi as i16) {
             Some(afi) => Ok(afi),
-            None => {
-                Err(crate::error::ParserError::Unsupported(format!("Unknown AFI type: {}", afi)))
-            },
+            None => Err(crate::error::ParserError::Unsupported(format!(
+                "Unknown AFI type: {}",
+                afi
+            ))),
         }
     }
 
@@ -141,7 +149,10 @@ pub trait ReadUtils: io::Read {
         let safi = self.read_8b()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
-            None => Err(crate::error::ParserError::Unsupported(format!("Unknown SAFI type: {}", safi)))
+            None => Err(crate::error::ParserError::Unsupported(format!(
+                "Unknown SAFI type: {}",
+                safi
+            ))),
         }
     }
 
@@ -150,25 +161,26 @@ pub trait ReadUtils: io::Read {
     /// The length in bits is 1 byte, and then based on the IP version it reads different number of bytes.
     /// If the `add_path` is true, it will also first read a 4-byte path id first; otherwise, a path-id of 0
     /// is automatically set.
-    fn read_nlri_prefix(&mut self, afi: &Afi, add_path: bool) -> Result<NetworkPrefix, ParserError> {
-
-        let path_id = if add_path {
-            self.read_32b()?
-        } else {
-            0
-        };
+    fn read_nlri_prefix(
+        &mut self,
+        afi: &Afi,
+        add_path: bool,
+    ) -> Result<NetworkPrefix, ParserError> {
+        let path_id = if add_path { self.read_32b()? } else { 0 };
 
         // Length in bits
         let bit_len = self.read_8b()?;
 
         // Convert to bytes
         let byte_len: usize = (bit_len as usize + 7) / 8;
-        let addr:IpAddr = match afi {
+        let addr: IpAddr = match afi {
             Afi::Ipv4 => {
-
                 // 4 bytes -- u32
-                if byte_len>4 {
-                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                if byte_len > 4 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}",
+                        byte_len, bit_len
+                    )));
                 }
                 let mut buff = [0; 4];
                 for i in 0..byte_len {
@@ -178,8 +190,11 @@ pub trait ReadUtils: io::Read {
             }
             Afi::Ipv6 => {
                 // 16 bytes
-                if byte_len>16 {
-                    return Err(ParserError::ParseError(format!("Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}", byte_len, bit_len)))
+                if byte_len > 16 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}",
+                        byte_len, bit_len
+                    )));
                 }
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
@@ -189,16 +204,19 @@ pub trait ReadUtils: io::Read {
             }
         };
         let prefix = match IpNet::new(addr, bit_len) {
-            Ok(p) => {p}
+            Ok(p) => p,
             Err(_) => {
-                return Err(ParserError::ParseError(format!("Invalid network prefix length: {}", bit_len)))
+                return Err(ParserError::ParseError(format!(
+                    "Invalid network prefix length: {}",
+                    bit_len
+                )))
             }
         };
 
         Ok(NetworkPrefix::new(prefix, path_id))
     }
 
-    fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError>{
+    fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
         // TODO: fix the checking
         // if self.total - self.pos < n_bytes {
         //     return Err(ParserError::IoNotEnoughBytes())
@@ -210,9 +228,12 @@ pub trait ReadUtils: io::Read {
         Ok(bytes)
     }
 
-    fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError>{
+    fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError> {
         let buffer = self.read_n_bytes(n_bytes)?;
-        Ok(buffer.into_iter().map(|x:u8| x as char).collect::<String>())
+        Ok(buffer
+            .into_iter()
+            .map(|x: u8| x as char)
+            .collect::<String>())
     }
 }
 
@@ -233,14 +254,14 @@ pub fn parse_nlri_list(
     let pos_save = input.position();
 
     while input.position() < pos_end {
-        if !is_add_path && input.get_ref()[input.position() as usize]==0 {
+        if !is_add_path && input.get_ref()[input.position() as usize] == 0 {
             // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
             debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
             is_add_path = true;
             guessed = true;
         }
-        let prefix = match input.read_nlri_prefix(afi, is_add_path){
-            Ok(p) => {p}
+        let prefix = match input.read_nlri_prefix(afi, is_add_path) {
+            Ok(p) => p,
             Err(e) => {
                 if guessed {
                     retry = true;

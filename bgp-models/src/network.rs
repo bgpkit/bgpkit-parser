@@ -1,11 +1,11 @@
 //! Common network-related structs.
 
+use crate::err::BgpModelsError;
+use ipnet::IpNet;
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
-use ipnet::IpNet;
-use serde::{Serialize, Serializer, Deserialize};
-use crate::err::BgpModelsError;
 
 /// Meta information for an address/prefix.
 ///
@@ -37,31 +37,37 @@ pub struct Asn {
 
 impl PartialEq for Asn {
     fn eq(&self, other: &Self) -> bool {
-        self.asn==other.asn
+        self.asn == other.asn
     }
 }
 
 impl PartialEq<i32> for Asn {
     fn eq(&self, other: &i32) -> bool {
-        self.asn as i32==*other
+        self.asn as i32 == *other
     }
 }
 
 impl PartialEq<u32> for Asn {
     fn eq(&self, other: &u32) -> bool {
-        self.asn==*other
+        self.asn == *other
     }
 }
 
 impl From<u32> for Asn {
     fn from(v: u32) -> Self {
-        Asn{asn:v, len: AsnLength::Bits32}
+        Asn {
+            asn: v,
+            len: AsnLength::Bits32,
+        }
     }
 }
 
 impl From<i32> for Asn {
     fn from(v: i32) -> Self {
-        Asn{asn:v as u32, len: AsnLength::Bits32}
+        Asn {
+            asn: v as u32,
+            len: AsnLength::Bits32,
+        }
     }
 }
 
@@ -78,7 +84,10 @@ impl From<Asn> for u32 {
 }
 
 impl Serialize for Asn {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_u32(self.asn)
     }
 }
@@ -120,7 +129,10 @@ pub struct NetworkPrefix {
 }
 
 impl Serialize for NetworkPrefix {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
@@ -130,12 +142,7 @@ impl FromStr for NetworkPrefix {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let prefix = IpNet::from_str(s)?;
-        Ok(
-            NetworkPrefix{
-                prefix,
-                path_id: 0,
-            }
-        )
+        Ok(NetworkPrefix { prefix, path_id: 0 })
     }
 }
 
@@ -156,4 +163,3 @@ impl Display for Asn {
         write!(f, "{}", self.asn)
     }
 }
-

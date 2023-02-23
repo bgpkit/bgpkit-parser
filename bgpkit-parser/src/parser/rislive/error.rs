@@ -18,10 +18,18 @@ pub enum ParserRisliveError {
 impl Display for ParserRisliveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParserRisliveError::IncorrectJson(msg) => {write!(f, "incorrect json message: {}", msg)}
-            ParserRisliveError::IncorrectRawBytes => {write!(f, "incorrect raw bytes")}
-            ParserRisliveError::UnsupportedMessage => {write!(f, "unsupported message")}
-            ParserRisliveError::IrregularRisLiveFormat => {write!(f, "irregular ris live format")}
+            ParserRisliveError::IncorrectJson(msg) => {
+                write!(f, "incorrect json message: {}", msg)
+            }
+            ParserRisliveError::IncorrectRawBytes => {
+                write!(f, "incorrect raw bytes")
+            }
+            ParserRisliveError::UnsupportedMessage => {
+                write!(f, "unsupported message")
+            }
+            ParserRisliveError::IrregularRisLiveFormat => {
+                write!(f, "irregular ris live format")
+            }
             ParserRisliveError::ElemIncorrectPrefix(msg) => {
                 write!(f, "incorrect prefix string: {}", msg)
             }
@@ -47,5 +55,4 @@ impl convert::From<serde_json::Error> for ParserRisliveError {
     }
 }
 
-impl Error for ParserRisliveError{}
-
+impl Error for ParserRisliveError {}

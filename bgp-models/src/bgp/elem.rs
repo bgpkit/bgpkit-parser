@@ -1,12 +1,12 @@
+use crate::bgp::attributes::{AsPath, AtomicAggregate, Origin};
+use crate::bgp::community::*;
+use crate::network::{Asn, NetworkPrefix};
+use itertools::Itertools;
+use serde::{Serialize, Serializer};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use std::str::FromStr;
-use itertools::Itertools;
-use crate::bgp::attributes::{AsPath, AtomicAggregate, Origin};
-use crate::bgp::community::*;
-use crate::network::{Asn, NetworkPrefix};
-use serde::{Serialize, Serializer};
 
 /// Element type.
 ///
@@ -19,10 +19,13 @@ pub enum ElemType {
 }
 
 impl Serialize for ElemType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(match self {
-            ElemType::ANNOUNCE => {"announce"}
-            ElemType::WITHDRAW => {"withdraw"}
+            ElemType::ANNOUNCE => "announce",
+            ElemType::WITHDRAW => "withdraw",
         })
     }
 }
@@ -36,7 +39,7 @@ impl Serialize for ElemType {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct BgpElem {
     pub timestamp: f64,
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub elem_type: ElemType,
     pub peer_ip: IpAddr,
     pub peer_asn: Asn,
@@ -63,7 +66,10 @@ impl PartialOrd<Self> for BgpElem {
 
 impl Ord for BgpElem {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.timestamp.partial_cmp(&other.timestamp).unwrap().then_with(||self.peer_ip.cmp(&other.peer_ip))
+        self.timestamp
+            .partial_cmp(&other.timestamp)
+            .unwrap()
+            .then_with(|| self.peer_ip.cmp(&other.peer_ip))
     }
 }
 
@@ -104,26 +110,25 @@ impl Default for BgpElem {
             communities: None,
             atomic: None,
             aggr_asn: None,
-            aggr_ip: None
+            aggr_ip: None,
         }
     }
 }
 
-macro_rules! option_to_string{
+macro_rules! option_to_string {
     ($a:expr) => {
         if let Some(v) = $a {
             v.to_string()
         } else {
             String::new()
         }
-    }
+    };
 }
 
 #[inline(always)]
 pub fn option_to_string_communities(o: &Option<Vec<MetaCommunity>>) -> String {
     if let Some(v) = o {
-        v.iter()
-            .join(" ")
+        v.iter().join(" ")
     } else {
         String::new()
     }
@@ -137,7 +142,8 @@ impl Display for BgpElem {
         };
         let format = format!(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-            t, &self.timestamp,
+            t,
+            &self.timestamp,
             &self.peer_ip,
             &self.peer_asn,
             &self.prefix,
@@ -157,13 +163,13 @@ impl Display for BgpElem {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-    use std::default::Default;
     use super::*;
+    use std::default::Default;
+    use std::str::FromStr;
 
     #[test]
     fn test_default() {
-        let elem = BgpElem{
+        let elem = BgpElem {
             timestamp: 0.0,
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
@@ -171,12 +177,12 @@ mod tests {
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
             ..Default::default()
         };
-        println!("{}",serde_json::json!(elem).to_string());
+        println!("{}", serde_json::json!(elem).to_string());
     }
 
     #[test]
     fn test_sorting() {
-        let elem1 = BgpElem{
+        let elem1 = BgpElem {
             timestamp: 1.1,
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
@@ -184,7 +190,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
             ..Default::default()
         };
-        let elem2 = BgpElem{
+        let elem2 = BgpElem {
             timestamp: 1.2,
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
@@ -192,7 +198,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
             ..Default::default()
         };
-        let elem3 = BgpElem{
+        let elem3 = BgpElem {
             timestamp: 1.2,
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("192.168.1.2").unwrap(),
@@ -201,7 +207,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(elem1<elem2, true);
-        assert_eq!(elem2<elem3, true);
+        assert_eq!(elem1 < elem2, true);
+        assert_eq!(elem2 < elem3, true);
     }
 }

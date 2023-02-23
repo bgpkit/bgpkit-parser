@@ -1,6 +1,6 @@
-use std::io::Cursor;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct PeerDownNotification {
@@ -8,7 +8,9 @@ pub struct PeerDownNotification {
     pub data: Option<Vec<u8>>,
 }
 
-pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDownNotification, ParserBmpError> {
+pub fn parse_peer_down_notification(
+    reader: &mut Cursor<&[u8]>,
+) -> Result<PeerDownNotification, ParserBmpError> {
     let reason = reader.read_8b()?;
     let bytes_left = reader.get_ref().len() - (reader.position() as usize);
     let data: Option<Vec<u8>> = match reason {
@@ -19,7 +21,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             would have been sent to the peer.
             */
             Some(reader.read_n_bytes(bytes_left)?)
-        },
+        }
         2 => {
             /*
             The local system closed the session.  No notification
@@ -30,7 +32,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             indicate that no relevant Event code is defined.
              */
             Some(reader.read_n_bytes(bytes_left)?)
-        },
+        }
         3 => {
             /*
             The remote system closed the session with a notification
@@ -38,7 +40,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             NOTIFICATION message as received from the peer.
              */
             Some(reader.read_n_bytes(bytes_left)?)
-        },
+        }
         4 => {
             /*
             The remote system closed the session without a
@@ -47,7 +49,7 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             systems might consider this to apply.
              */
             None
-        },
+        }
         5 => {
             /*
             Information for this peer will no longer be sent to the
@@ -57,13 +59,8 @@ pub fn parse_peer_down_notification(reader: &mut Cursor<&[u8]>) -> Result<PeerDo
             for the peer.
              */
             None
-        },
-        _ => {
-            return Err(ParserBmpError::CorruptedBmpMessage)
         }
+        _ => return Err(ParserBmpError::CorruptedBmpMessage),
     };
-    Ok(PeerDownNotification{
-        reason,
-        data
-    })
+    Ok(PeerDownNotification { reason, data })
 }

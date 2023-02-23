@@ -10,20 +10,24 @@ fn main() {
     // retrieve 10 files from broker within the time period.
     let broker = BgpkitBroker::new_with_params(
         "https://api.broker.bgpkit.com/v1",
-        QueryParams{
+        QueryParams {
             start_ts: Some(1634693400),
             end_ts: Some(1634693400),
             page: 1,
             ..Default::default()
-        });
+        },
+    );
 
     let file_urls: Vec<String> = broker.into_iter().take(10).map(|x| x.url).collect();
 
-    let total_elems_count: i32 = file_urls.par_iter().map(|url|{
-        let parser = BgpkitParser::new(url.as_str()).unwrap();
-        log::info!("parsing {} ...", url.as_str());
-        parser.into_elem_iter().count() as i32
-    }).sum();
+    let total_elems_count: i32 = file_urls
+        .par_iter()
+        .map(|url| {
+            let parser = BgpkitParser::new(url.as_str()).unwrap();
+            log::info!("parsing {} ...", url.as_str());
+            parser.into_elem_iter().count() as i32
+        })
+        .sum();
 
     log::info!("total of {} BGP messages parsed", total_elems_count);
 }

@@ -1,9 +1,9 @@
 //! MRT table dump version 1 and 2 structs
-use std::net::{IpAddr, Ipv4Addr};
-use std::collections::HashMap;
+use crate::bgp::Attribute;
 use crate::network::{Afi, Asn, NetworkPrefix, Safi};
 use serde::Serialize;
-use crate::bgp::Attribute;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
 
 /// TableDump message version 1
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub enum TableDumpV2Message {
 ///
 /// <https://www.iana.org/assignments/mrt/mrt.xhtml#subtype-codes>
 #[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
-pub enum TableDumpV2Type{
+pub enum TableDumpV2Type {
     PeerIndexTable = 1,
     RibIpv4Unicast = 2,
     RibIpv4Multicast = 3,
@@ -44,7 +44,6 @@ pub enum TableDumpV2Type{
     RibIpv6MulticastAddPath = 11,
     RibGenericAddPath = 12,
 }
-
 
 /// AFI/SAFI-Specific RIB Subtypes.
 ///
@@ -75,7 +74,7 @@ pub enum TableDumpV2Type{
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct RibAfiEntries{
+pub struct RibAfiEntries {
     pub rib_type: TableDumpV2Type,
     pub sequence_number: u32,
     pub prefix: NetworkPrefix,
@@ -104,7 +103,7 @@ pub struct RibAfiEntries{
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct RibGenericEntries{
+pub struct RibGenericEntries {
     pub sequence_number: u32,
     pub afi: Afi,
     pub safi: Safi,
@@ -137,7 +136,7 @@ pub struct RibGenericEntries{
 pub struct RibEntry {
     pub peer_index: u16,
     pub originated_time: u32,
-    pub attributes: Vec<Attribute>
+    pub attributes: Vec<Attribute>,
 }
 
 /// peer index table.
@@ -152,12 +151,12 @@ pub struct RibEntry {
 ///    records MUST immediately follow the PEER_INDEX_TABLE MRT record.
 /// ```
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PeerIndexTable{
+pub struct PeerIndexTable {
     pub collector_bgp_id: Ipv4Addr,
     pub view_name_length: u16,
     pub view_name: String,
     pub peer_count: u16,
-    pub peers_map: HashMap<u32, Peer>
+    pub peers_map: HashMap<u32, Peer>,
 }
 
 /// Peer struct.

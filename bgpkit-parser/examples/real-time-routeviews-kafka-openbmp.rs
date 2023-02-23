@@ -1,17 +1,16 @@
 extern crate core;
 
+use bgpkit_parser::parser::bmp::messages::MessageBody;
+use bgpkit_parser::Elementor;
+pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
+use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
+use kafka::error::Error as KafkaError;
+use log::{error, info};
 use std::io::Cursor;
 use std::thread::sleep;
 use std::time::Duration;
-use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
-use kafka::error::Error as KafkaError;
-pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
-use log::{info, error};
-use bgpkit_parser::Elementor;
-use bgpkit_parser::parser::bmp::messages::MessageBody;
 
-fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Result<(), KafkaError>{
-
+fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Result<(), KafkaError> {
     let mut con = Consumer::from_hosts(brokers)
         .with_topic(topic)
         .with_group(group)
@@ -26,7 +25,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
         if mss.is_empty() {
             println!("No messages available right now, wait for 5 seconds.");
             sleep(Duration::from_secs(5));
-            continue
+            continue;
         }
 
         for ms in mss.iter() {
@@ -44,9 +43,8 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                                     m.bgp_message,
                                     header.timestamp,
                                     &per_peer_header.peer_ip,
-                                    &per_peer_header.peer_asn.into()
-                                )
-                                {
+                                    &per_peer_header.peer_asn.into(),
+                                ) {
                                     info!("{}", elem);
                                 }
                             }
@@ -56,7 +54,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                     Err(_e) => {
                         let hex = hex::encode(bytes);
                         error!("{}", hex);
-                        break
+                        break;
                     }
                 }
             }
@@ -66,7 +64,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
     }
 }
 
-pub fn main(){
+pub fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let broker = "stream.routeviews.org:9092".to_owned();

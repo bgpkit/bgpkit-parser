@@ -1,6 +1,6 @@
+use ipnet::AddrParseError;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use ipnet::AddrParseError;
 
 #[derive(Debug)]
 pub enum BgpModelsError {
@@ -9,7 +9,7 @@ pub enum BgpModelsError {
 
 impl Display for BgpModelsError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self{
+        match self {
             BgpModelsError::PrefixParsingError(msg) => {
                 write!(f, "cannot convert str to IP prefix: {}", msg)
             }
@@ -17,7 +17,7 @@ impl Display for BgpModelsError {
     }
 }
 
-impl Error for BgpModelsError{}
+impl Error for BgpModelsError {}
 
 impl From<AddrParseError> for BgpModelsError {
     fn from(err: AddrParseError) -> Self {

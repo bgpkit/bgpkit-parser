@@ -1,8 +1,8 @@
 //! MRT BGP4MP structs
-use std::net::IpAddr;
-use serde::Serialize;
 use crate::bgp::BgpMessage;
 use crate::network::{Afi, Asn};
+use serde::Serialize;
+use std::net::IpAddr;
 
 /// BGP states enum.
 #[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
@@ -65,6 +65,5 @@ pub struct Bgp4MpMessage {
     pub afi: Afi,
     pub peer_ip: IpAddr,
     pub local_ip: IpAddr,
-    pub bgp_message: BgpMessage
+    pub bgp_message: BgpMessage,
 }
-

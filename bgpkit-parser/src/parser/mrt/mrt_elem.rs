@@ -4,13 +4,13 @@
 //! Each MRT record may contain reachability information for multiple prefixes. This module breaks
 //! down MRT records into corresponding BGP elements, and thus allowing users to more conveniently
 //! process BGP information on a per-prefix basis.
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::net::IpAddr;
+use crate::parser::bgp::messages::parse_bgp_update_message;
 use bgp_models::prelude::*;
 use itertools::Itertools;
 use log::warn;
-use crate::parser::bgp::messages::parse_bgp_update_message;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::net::IpAddr;
 
 pub struct Elementor {
     peer_table: Option<PeerIndexTable>,
@@ -58,25 +58,36 @@ fn get_relevant_attributes(
 
     for attr in attributes {
         match attr.value {
-            AttributeValue::Origin(v) => {origin = Some(v)}
-            AttributeValue::AsPath(v) => {as_path = Some(v)}
-            AttributeValue::As4Path(v) => {as4_path = Some(v)}
-            AttributeValue::NextHop(v) => {next_hop = Some(v)}
-            AttributeValue::MultiExitDiscriminator(v) => {med = Some(v)}
-            AttributeValue::LocalPreference(v) => {local_pref = Some(v)}
-            AttributeValue::AtomicAggregate(v) => {atomic = Some(v)}
-            AttributeValue::Communities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::Community).collect::<Vec<MetaCommunity>>())}
-            AttributeValue::ExtendedCommunities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::ExtendedCommunity).collect::<Vec<MetaCommunity>>())}
-            AttributeValue::LargeCommunities(v) => {communities_vec.extend(v.into_iter().map(MetaCommunity::LargeCommunity).collect::<Vec<MetaCommunity>>())}
-            AttributeValue::Aggregator(v, v2) => {aggregator = Some((v,v2))}
-            AttributeValue::MpReachNlri(nlri) => {announced = Some(nlri)}
-            AttributeValue::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
+            AttributeValue::Origin(v) => origin = Some(v),
+            AttributeValue::AsPath(v) => as_path = Some(v),
+            AttributeValue::As4Path(v) => as4_path = Some(v),
+            AttributeValue::NextHop(v) => next_hop = Some(v),
+            AttributeValue::MultiExitDiscriminator(v) => med = Some(v),
+            AttributeValue::LocalPreference(v) => local_pref = Some(v),
+            AttributeValue::AtomicAggregate(v) => atomic = Some(v),
+            AttributeValue::Communities(v) => communities_vec.extend(
+                v.into_iter()
+                    .map(MetaCommunity::Community)
+                    .collect::<Vec<MetaCommunity>>(),
+            ),
+            AttributeValue::ExtendedCommunities(v) => communities_vec.extend(
+                v.into_iter()
+                    .map(MetaCommunity::ExtendedCommunity)
+                    .collect::<Vec<MetaCommunity>>(),
+            ),
+            AttributeValue::LargeCommunities(v) => communities_vec.extend(
+                v.into_iter()
+                    .map(MetaCommunity::LargeCommunity)
+                    .collect::<Vec<MetaCommunity>>(),
+            ),
+            AttributeValue::Aggregator(v, v2) => aggregator = Some((v, v2)),
+            AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
+            AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
 
-            AttributeValue::OriginatorId(_) |
-            AttributeValue::Clusters(_)|
-            AttributeValue::Development(_) |
-            AttributeValue::OnlyToCustomer(_)
-            => {}
+            AttributeValue::OriginatorId(_)
+            | AttributeValue::Clusters(_)
+            | AttributeValue::Development(_)
+            | AttributeValue::OnlyToCustomer(_) => {}
         };
     }
 
@@ -109,7 +120,12 @@ impl Elementor {
     ///
     /// A [BgpMessage] may include `Update`, `Open`, `Notification` or `KeepAlive` messages,
     /// and only `Update` message contains [BgpElem]s.
-    pub fn bgp_to_elems(msg: BgpMessage, timestamp: f64, peer_ip: &IpAddr, peer_asn: &Asn) -> Vec<BgpElem> {
+    pub fn bgp_to_elems(
+        msg: BgpMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> Vec<BgpElem> {
         match msg {
             BgpMessage::Update(msg) => {
                 Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
@@ -121,7 +137,12 @@ impl Elementor {
     }
 
     /// Convert a [BgpUpdateMessage] to a vector of [BgpElem]s.
-    pub fn bgp_update_to_elems(msg: BgpUpdateMessage, timestamp: f64, peer_ip: &IpAddr, peer_asn: &Asn) -> Vec<BgpElem> {
+    pub fn bgp_update_to_elems(
+        msg: BgpUpdateMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> Vec<BgpElem> {
         let mut elems = vec![];
 
         let (
@@ -142,14 +163,12 @@ impl Elementor {
             (None, None) => None,
             (Some(v), None) => Some(v),
             (None, Some(v)) => Some(v),
-            (Some(v1), Some(v2)) => {
-                Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap())
-            }
+            (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap()),
         };
 
         let origin_asns = match &path {
             None => None,
-            Some(p) => p.get_origin()
+            Some(p) => p.get_origin(),
         };
 
         elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
@@ -229,13 +248,12 @@ impl Elementor {
         elems
     }
 
-
     /// Convert a [MrtRecord] to a vector of [BgpElem]s.
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
         let mut elems = vec![];
         let t = record.common_header.timestamp;
-        let timestamp :f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
-            let m = (*micro as f64)/1000000.0;
+        let timestamp: f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
+            let m = (*micro as f64) / 1000000.0;
             t as f64 + m
         } else {
             f64::from(t)
@@ -259,7 +277,7 @@ impl Elementor {
 
                 let origin_asns = match &as_path {
                     None => None,
-                    Some(p) => p.get_origin()
+                    Some(p) => p.get_origin(),
                 };
 
                 elems.push(BgpElem {
@@ -325,12 +343,8 @@ impl Elementor {
                                     if let Some(v) = announced {
                                         if let Some(h) = v.next_hop {
                                             match h {
-                                                NextHopAddress::Ipv4(v) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                                NextHopAddress::Ipv6(v) => {
-                                                    Some(IpAddr::from(v))
-                                                }
+                                                NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
+                                                NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
                                                 NextHopAddress::Ipv6LinkLocal(v, _) => {
                                                     Some(IpAddr::from(v))
                                                 }
@@ -345,10 +359,9 @@ impl Elementor {
                                 Some(v) => Some(v),
                             };
 
-
                             let origin_asns = match &path {
                                 None => None,
-                                Some(p) => p.get_origin()
+                                Some(p) => p.get_origin(),
                             };
 
                             elems.push(BgpElem {
@@ -371,24 +384,27 @@ impl Elementor {
                         }
                     }
                     TableDumpV2Message::RibGenericEntries(_t) => {
-                        warn!("to_elem for TableDumpV2Message::RibGenericEntries not yet implemented");
-                    }
-                }
-            }
-            MrtMessage::Bgp4Mp(msg) => {
-                match msg {
-                    Bgp4Mp::Bgp4MpStateChange(_v) | Bgp4Mp::Bgp4MpStateChangeAs4(_v) => {}
-
-                    Bgp4Mp::Bgp4MpMessage(v)
-                    | Bgp4Mp::Bgp4MpMessageLocal(v)
-                    | Bgp4Mp::Bgp4MpMessageAs4(v)
-                    | Bgp4Mp::Bgp4MpMessageAs4Local(v) => {
-                        elems.extend(
-                            Elementor::bgp_to_elems(v.bgp_message, timestamp, &v.peer_ip, &v.peer_asn)
+                        warn!(
+                            "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
                         );
                     }
                 }
             }
+            MrtMessage::Bgp4Mp(msg) => match msg {
+                Bgp4Mp::Bgp4MpStateChange(_v) | Bgp4Mp::Bgp4MpStateChangeAs4(_v) => {}
+
+                Bgp4Mp::Bgp4MpMessage(v)
+                | Bgp4Mp::Bgp4MpMessageLocal(v)
+                | Bgp4Mp::Bgp4MpMessageAs4(v)
+                | Bgp4Mp::Bgp4MpMessageAs4Local(v) => {
+                    elems.extend(Elementor::bgp_to_elems(
+                        v.bgp_message,
+                        timestamp,
+                        &v.peer_ip,
+                        &v.peer_asn,
+                    ));
+                }
+            },
         }
         elems
     }
