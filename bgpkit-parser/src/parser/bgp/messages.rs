@@ -83,19 +83,35 @@ pub fn parse_bgp_message(input: &mut DataBytes, add_path: bool, asn_len: &AsnLen
     )
 }
 
+/// Parse BGP NOTIFICATION messages.
+///
+/// The BGP NOTIFICATION messages contains BGP error codes received from a connected BGP router. The
+/// error code is parsed into [BgpError] data structure and any unknown codes will produce warning
+/// messages, but not critical errors.
 pub fn parse_bgp_notification_message(input: &mut DataBytes, bgp_msg_length: u64) -> Result<BgpNotificationMessage, ParserError> {
     let error_code = input.read_8b()?;
     let error_subcode = input.read_8b()?;
+    let error_type = match parse_error_codes(&error_code, &error_subcode) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            warn!("error parsing BGP notification error code: {}", e);
+            None
+        }
+    };
+
     let data = input.read_n_bytes((bgp_msg_length - 2) as usize)?;
     Ok(
         BgpNotificationMessage{
             error_code,
             error_subcode,
-            error_type: None,
+            error_type,
             data
         })
 }
 
+/// Parse BGP OPEN messages.
+///
+/// The parsing of BGP OPEN messages also includes decoding the BGP capabilities.
 pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, ParserError> {
     let version = input.read_8b()?;
     let asn = Asn{asn: input.read_16b()? as u32, len: AsnLength::Bits16};
@@ -129,17 +145,26 @@ pub fn parse_bgp_open_message(input: &mut DataBytes) -> Result<BgpOpenMessage, P
 
         let param_value = match param_type{
             2 => {
-                // capacity
+                // capability codes:
+                // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
                 let code = input.read_8b()?;
                 let len = input.read_8b()?;
                 let value = input.read_n_bytes(len as usize)?;
+
+                let capability_type = match parse_capability(&code){
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        warn!("error parsing BGP capability code: {}", e.to_string());
+                        None
+                    }
+                };
 
                 ParamValue::Capability(
                     Capability{
                         code,
                         len,
                         value,
-                        capability_type: None
+                        capability_type,
                     }
                 )
             }
