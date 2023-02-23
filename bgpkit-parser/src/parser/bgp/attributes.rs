@@ -146,7 +146,7 @@ impl AttributeParser {
                     Ok(AttributeValue::Development(value))
                 }
                 AttrType::ONLY_TO_CUSTOMER => self.parse_only_to_customer_attr(&mut input),
-                _ => Err(crate::error::ParserError::Unsupported(format!(
+                _ => Err(ParserError::Unsupported(format!(
                     "unsupported attribute type: {:?}",
                     attr_type
                 ))),
@@ -187,7 +187,7 @@ impl AttributeParser {
         let origin = input.read_8b()?;
         match Origin::from_u8(origin) {
             Some(v) => Ok(AttributeValue::Origin(v)),
-            None => Err(crate::error::ParserError::UnknownAttr(
+            None => Err(ParserError::UnknownAttr(
                 "Failed to parse attribute type: origin".to_string(),
             )),
         }
