@@ -71,7 +71,12 @@ fn get_relevant_attributes(
             AttributeValue::Aggregator(v, v2) => {aggregator = Some((v,v2))}
             AttributeValue::MpReachNlri(nlri) => {announced = Some(nlri)}
             AttributeValue::MpUnreachNlri(nlri) => {withdrawn = Some(nlri)}
-            AttributeValue::OriginatorId(_) | AttributeValue::Clusters(_)| AttributeValue::Development(_) => {}
+
+            AttributeValue::OriginatorId(_) |
+            AttributeValue::Clusters(_)|
+            AttributeValue::Development(_) |
+            AttributeValue::OnlyToCustomer(_)
+            => {}
         };
     }
 
