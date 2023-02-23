@@ -333,7 +333,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)
 - [ ] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
-- [ ] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
+- [X] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
 ### MRT
 
