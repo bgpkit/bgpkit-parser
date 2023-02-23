@@ -129,7 +129,7 @@ impl AttributeParser {
                     }
                     Ok(AttributeValue::Development(value))
                 },
-                AttrType::ONLY_TO_CUSTOMER => self.parse_only_to_customer_attr(input),
+                AttrType::ONLY_TO_CUSTOMER => self.parse_only_to_customer_attr(&mut input),
                 _ => {
                     Err(crate::error::ParserError::Unsupported(format!("unsupported attribute type: {:?}", attr_type)))
                 }
@@ -607,7 +607,7 @@ impl AttributeParser {
     /// 1. If a route is to be advertised to a Customer, a Peer, or an RS-Client (when the sender is an RS), and the OTC Attribute is not present, then when advertising the route, an OTC Attribute MUST be added with a value equal to the AS number of the local AS.
     /// 2. If a route already contains the OTC Attribute, it MUST NOT be propagated to Providers, Peers, or RSes.
     /// ```
-    fn parse_only_to_customer_attr( &self, input: &mut DataBytes) -> Result<AttributeValue, ParserError> {
+    fn parse_only_to_customer_attr( &self, input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
         let remote_asn = input.read_32b()?;
         Ok(AttributeValue::OnlyToCustomer(remote_asn))
     }
