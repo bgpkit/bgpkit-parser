@@ -19,8 +19,8 @@ use bgp_models::prelude::MrtRecord;
 use oneio::get_reader;
 use crate::Filter;
 
-pub struct BgpkitParser {
-    reader: Box<dyn Read + Send>,
+pub struct BgpkitParser<R> {
+    reader: R,
     core_dump: bool,
     filters: Vec<Filter>,
     options: ParserOptions
@@ -37,9 +37,9 @@ impl Default for ParserOptions {
     }
 }
 
-impl BgpkitParser {
+impl BgpkitParser<Box<dyn Read + Send>> {
     /// Creating a new parser from a object that implements [Read] trait.
-    pub fn new(path: &str) -> Result<BgpkitParser, ParserErrorWithBytes>{
+    pub fn new(path: &str) -> Result<Self, ParserErrorWithBytes> {
         let reader = get_reader(path)?;
         Ok(
             BgpkitParser{
@@ -50,18 +50,27 @@ impl BgpkitParser {
             }
         )
     }
+}
 
+impl<R: Read> BgpkitParser<R> {
     /// Creating a new parser from a object that implements [Read] trait.
-    pub fn from_reader(reader: Box<dyn Read + Send>) -> Self {
-        BgpkitParser{
-            reader: Box::new(reader),
+    pub fn from_reader(reader: R) -> Self {
+        BgpkitParser {
+            reader,
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default()
         }
     }
 
-    pub fn enable_core_dump(self) -> BgpkitParser {
+    /// This is used in for loop `for item in parser{}`
+    pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
+        parse_mrt_record(&mut self.reader)
+    }
+}
+
+impl<R> BgpkitParser<R> {
+    pub fn enable_core_dump(self) -> Self {
         BgpkitParser{
             reader: self.reader,
             core_dump: true,
@@ -70,7 +79,7 @@ impl BgpkitParser {
         }
     }
 
-    pub fn disable_warnings(self) -> BgpkitParser {
+    pub fn disable_warnings(self) -> Self {
         let mut options = self.options;
         options.show_warnings = false;
         BgpkitParser{
@@ -81,7 +90,7 @@ impl BgpkitParser {
         }
     }
 
-    pub fn add_filter(self, filter_type: &str, filter_value: &str) -> Result<BgpkitParser, ParserErrorWithBytes> {
+    pub fn add_filter(self, filter_type: &str, filter_value: &str) -> Result<Self, ParserErrorWithBytes> {
         let mut filters = self.filters;
         filters.push(Filter::new(filter_type, filter_value)?);
         Ok(
@@ -92,11 +101,6 @@ impl BgpkitParser {
                 options: self.options
             }
         )
-    }
-
-    /// This is used in for loop `for item in parser{}`
-    pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
-        parse_mrt_record(&mut self.reader)
     }
 }
 
@@ -110,9 +114,7 @@ mod tests {
         // bzip2 reader for compressed file
         let http_stream = ureq::get("http://archive.routeviews.org/route-views.ny/bgpdata/2023.02/UPDATES/updates.20230215.0630.bz2")
             .call().unwrap().into_reader();
-        let reader = Box::new(
-            bzip2::read::BzDecoder::new(http_stream)
-        );
+        let reader = bzip2::read::BzDecoder::new(http_stream);
         assert_eq!(12683, BgpkitParser::from_reader(reader).into_elem_iter().count());
 
         // remote reader for uncompressed updates file

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use bgpkit_parser::*;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -61,7 +62,7 @@ fn pybgpkit_parser(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyclass]
     #[pyo3(text_signature = "(url, filters, /)")]
     struct Parser {
-        elem_iter: ElemIterator,
+        elem_iter: ElemIterator<Box<dyn Send + Read>>,
     }
 
     #[pymethods]
