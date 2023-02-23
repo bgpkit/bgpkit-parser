@@ -39,7 +39,7 @@ use byteorder::{BE, ReadBytesExt};
 /// |                      Message... (variable)
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-pub fn parse_common_header<T: Read>(input: &mut T) -> Result<(Vec<u8>, CommonHeader), ParserError> {
+pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
     let timestamp = match input.read_32b()  {
         Ok(t) => {t}
         Err(e) => {
@@ -71,26 +71,19 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<(Vec<u8>, CommonHea
         },
         _ => None,
     };
-    let mut bytes: Vec<u8> = vec![];
-    bytes.extend(timestamp.to_be_bytes());
-    bytes.extend(entry_type_raw.to_be_bytes());
-    bytes.extend(entry_subtype.to_be_bytes());
-    bytes.extend(length.to_be_bytes());
-    if let Some(mt) = &microsecond_timestamp {
-        bytes.extend(mt.to_be_bytes());
-    }
-    Ok((bytes, CommonHeader {
+
+    Ok(CommonHeader {
         timestamp,
         microsecond_timestamp,
         entry_type,
         entry_subtype,
         length,
-    }))
+    })
 }
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     // parse common header
-    let (header_bytes, common_header) = match parse_common_header(input){
+    let common_header = match parse_common_header(input){
         Ok(v) => v,
         Err(e) => return Err(ParserErrorWithBytes {error: e, bytes: None})
     };
@@ -111,7 +104,10 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
         },
         Err(e) => {
             let mut total_bytes = vec![];
-            total_bytes.extend(header_bytes);
+            if let Err(_) = common_header.write_header(&mut total_bytes) {
+                unreachable!("Vec<u8> will never produce errors when used as a std::io::Write")
+            }
+
             total_bytes.extend(buffer);
             Err(ParserErrorWithBytes { error: e, bytes: Some(total_bytes) })
         }
