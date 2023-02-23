@@ -39,16 +39,16 @@ fn main() {
 ```
 */
 use crate::parser::rislive::error::ParserRisliveError;
-use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 use crate::parser::rislive::messages::ris_message::path_to_as_path;
+use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
 use crate::BgpElem;
-use std::net::IpAddr;
-use ipnet::IpNet;
-use bgp_models::bgp::community::Community;
 use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
+use bgp_models::bgp::community::Community;
 use bgp_models::bgp::{ElemType, MetaCommunity};
 use bgp_models::network::{Asn, NetworkPrefix};
+use ipnet::IpNet;
+use std::net::IpAddr;
 
 pub mod error;
 pub mod messages;
@@ -60,12 +60,11 @@ macro_rules! unwrap_or_return {
             Ok(x) => x,
             Err(_) => return Err(ParserRisliveError::IncorrectJson($msg_string)),
         }
-    }
+    };
 }
 
 /// This function parses one message and returns a result of a vector of [BgpElem]s or an error
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
-
     let msg_string = msg_str.to_string();
 
     // parse RIS Live message to internal struct using serde.
@@ -81,7 +80,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
             // thus for now will be ignored.
 
             if ris_msg.msg.is_none() {
-                return Ok(vec![])
+                return Ok(vec![]);
             }
 
             match ris_msg.msg.unwrap() {
@@ -96,19 +95,22 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     let mut elems: Vec<BgpElem> = vec![];
 
                     let peer_ip = unwrap_or_return!(ris_msg.peer.parse::<IpAddr>(), msg_string);
-                    let peer_asn: Asn = unwrap_or_return!(ris_msg.peer_asn.parse::<i32>(), msg_string).into();
+                    let peer_asn: Asn =
+                        unwrap_or_return!(ris_msg.peer_asn.parse::<i32>(), msg_string).into();
 
                     // parse path
                     let as_path = path.map(path_to_as_path);
 
                     // parse community
                     let communities = match community {
-                        None => {None}
+                        None => None,
                         Some(cs) => {
                             let mut comms: Vec<MetaCommunity> = vec![];
                             for c in cs {
-                                comms.push(
-                                    MetaCommunity::Community(Community::Custom((c.0 as i32).into(),c.1)));
+                                comms.push(MetaCommunity::Community(Community::Custom(
+                                    (c.0 as i32).into(),
+                                    c.1,
+                                )));
                             }
                             Some(comms)
                         }
@@ -116,32 +118,37 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
 
                     // parse origin
                     let bgp_origin = match origin {
-                        None => {None}
-                        Some(o) => {
-                            Some(match o.as_str(){
-                                "igp" | "IGP" => IGP,
-                                "egp" | "EGP" => EGP,
-                                "incomplete" | "INCOMPLETE" => INCOMPLETE,
-                                other => {
-                                    return Err(ParserRisliveError::ElemUnknownOriginType(other.to_string()))
-                                }
-                            })
-                        }
+                        None => None,
+                        Some(o) => Some(match o.as_str() {
+                            "igp" | "IGP" => IGP,
+                            "egp" | "EGP" => EGP,
+                            "incomplete" | "INCOMPLETE" => INCOMPLETE,
+                            other => {
+                                return Err(ParserRisliveError::ElemUnknownOriginType(
+                                    other.to_string(),
+                                ))
+                            }
+                        }),
                     };
 
                     // parse med
                     let bgp_med = med;
 
                     // parse aggregator
-                    let bgp_aggregator = match aggregator{
-                        None => {(None, None)}
+                    let bgp_aggregator = match aggregator {
+                        None => (None, None),
                         Some(aggr_str) => {
                             let parts = aggr_str.split(':').collect::<Vec<&str>>();
-                            if parts.len()!=2 {
-                                return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str))
+                            if parts.len() != 2 {
+                                return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str));
                             }
-                            let asn = unwrap_or_return!(parts[0].to_owned().parse::<u32>(), msg_string).into();
-                            let ip = unwrap_or_return!(parts[1].to_owned().parse::<IpAddr>(), msg_string);
+                            let asn =
+                                unwrap_or_return!(parts[0].to_owned().parse::<u32>(), msg_string)
+                                    .into();
+                            let ip = unwrap_or_return!(
+                                parts[1].to_owned().parse::<IpAddr>(),
+                                msg_string
+                            );
                             (Some(asn), Some(ip))
                         }
                     };
@@ -149,41 +156,44 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     // parser announcements
                     if let Some(announcements) = announcements {
                         for announcement in announcements {
-                            let nexthop = match announcement.next_hop.parse::<IpAddr>(){
-                                Ok(a) => {a}
+                            let nexthop = match announcement.next_hop.parse::<IpAddr>() {
+                                Ok(a) => a,
                                 Err(_) => {
                                     return Err(ParserRisliveError::IncorrectJson(msg_string))
                                 }
                             };
                             for prefix in &announcement.prefixes {
-                                let p = match prefix.parse::<IpNet>(){
-                                    Ok(net) => { net }
+                                let p = match prefix.parse::<IpNet>() {
+                                    Ok(net) => net,
                                     Err(_) => {
                                         if prefix == "eor" {
-                                            return Err(ParserRisliveError::ElemEndOfRibPrefix)
+                                            return Err(ParserRisliveError::ElemEndOfRibPrefix);
                                         }
-                                        return Err(ParserRisliveError::ElemIncorrectPrefix(prefix.to_string()))
+                                        return Err(ParserRisliveError::ElemIncorrectPrefix(
+                                            prefix.to_string(),
+                                        ));
                                     }
                                 };
-                                elems.push(
-                                    BgpElem{
-                                        timestamp: ris_msg.timestamp,
-                                        elem_type: ElemType::ANNOUNCE,
-                                        peer_ip,
-                                        peer_asn,
-                                        prefix: NetworkPrefix{ prefix: p, path_id: 0 },
-                                        next_hop: Some(nexthop),
-                                        as_path: as_path.clone(),
-                                        origin_asns: None,
-                                        origin: bgp_origin,
-                                        local_pref: None,
-                                        med: bgp_med,
-                                        communities: communities.clone(),
-                                        atomic: None,
-                                        aggr_asn: bgp_aggregator.0,
-                                        aggr_ip: bgp_aggregator.1,
-                                    }
-                                );
+                                elems.push(BgpElem {
+                                    timestamp: ris_msg.timestamp,
+                                    elem_type: ElemType::ANNOUNCE,
+                                    peer_ip,
+                                    peer_asn,
+                                    prefix: NetworkPrefix {
+                                        prefix: p,
+                                        path_id: 0,
+                                    },
+                                    next_hop: Some(nexthop),
+                                    as_path: as_path.clone(),
+                                    origin_asns: None,
+                                    origin: bgp_origin,
+                                    local_pref: None,
+                                    med: bgp_med,
+                                    communities: communities.clone(),
+                                    atomic: None,
+                                    aggr_asn: bgp_aggregator.0,
+                                    aggr_ip: bgp_aggregator.1,
+                                });
                             }
                         }
                     }
@@ -192,7 +202,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                 }
                 _ => Ok(vec![]),
             }
-        },
+        }
         _ => Ok(vec![]),
     }
 }

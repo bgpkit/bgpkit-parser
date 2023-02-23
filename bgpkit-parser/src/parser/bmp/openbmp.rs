@@ -1,7 +1,7 @@
-use std::io::{Cursor, Seek, SeekFrom};
-use std::net::IpAddr;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use std::io::{Cursor, Seek, SeekFrom};
+use std::net::IpAddr;
 
 ///
 /// ```text
@@ -57,18 +57,18 @@ pub struct OpenBmpHeader {
     pub router_group: Option<String>,
 }
 
-pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader, ParserBmpError>{
+pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader, ParserBmpError> {
     // read magic number
     let magic_number = reader.read_n_bytes_to_string(4)?;
     if magic_number != "OBMP" {
-        return Err(ParserBmpError::InvalidOpenBmpHeader)
+        return Err(ParserBmpError::InvalidOpenBmpHeader);
     }
 
     // read version numbers
     let version_major = reader.read_8b()?;
     let version_minor = reader.read_8b()?;
-    if (version_major, version_minor) != (1,7) {
-        return Err(ParserBmpError::InvalidOpenBmpHeader)
+    if (version_major, version_minor) != (1, 7) {
+        return Err(ParserBmpError::InvalidOpenBmpHeader);
     }
 
     // read msg lengths
@@ -77,27 +77,27 @@ pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader,
 
     // read flags
     let flags = reader.read_8b()?;
-    let (is_router_msg, is_router_ipv6) = (flags&0x80!=0, flags&0x40!=0);
+    let (is_router_msg, is_router_ipv6) = (flags & 0x80 != 0, flags & 0x40 != 0);
     if !is_router_msg {
-        return Err(ParserBmpError::UnsupportedOpenBmpMessage)
+        return Err(ParserBmpError::UnsupportedOpenBmpMessage);
     }
 
     // read object type
     let object_type = reader.read_8b()?;
     if object_type != 12 {
-        return Err(ParserBmpError::UnsupportedOpenBmpMessage)
+        return Err(ParserBmpError::UnsupportedOpenBmpMessage);
     }
 
     // read_timestamp
     let t_sec = reader.read_32b()?;
     let t_usec = reader.read_32b()?;
-    let timestamp = t_sec as f64 + (t_usec as f64)/1_000_000.0;
+    let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
 
     // read admin-id
     reader.seek(SeekFrom::Current(16))?;
     let mut name_len = reader.read_16b()?;
-    if name_len >255{
-        name_len =255;
+    if name_len > 255 {
+        name_len = 255;
     }
     let admin_id = reader.read_n_bytes_to_string(name_len as usize)?;
 
@@ -106,7 +106,7 @@ pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader,
     let ip: IpAddr = if is_router_ipv6 {
         reader.read_ipv6_address()?.into()
     } else {
-        let ip= reader.read_ipv4_address()?;
+        let ip = reader.read_ipv4_address()?;
         reader.seek(SeekFrom::Current(12))?;
         ip.into()
     };
@@ -114,28 +114,26 @@ pub fn parse_openbmp_header(reader: &mut Cursor<&[u8]>) -> Result<OpenBmpHeader,
     // read router group
     let group = match reader.read_16b()? {
         0 => "".to_string(),
-        n => reader.read_n_bytes_to_string(n as usize)?
+        n => reader.read_n_bytes_to_string(n as usize)?,
     };
 
     // read msg count
     let row_count = reader.read_32b()?;
-    if row_count!=1 {
-        return Err(ParserBmpError::InvalidOpenBmpHeader)
+    if row_count != 1 {
+        return Err(ParserBmpError::InvalidOpenBmpHeader);
     }
 
-    Ok(
-        OpenBmpHeader{
-            major_version: version_major,
-            minor_version: version_minor,
-            header_len,
-            msg_len,
-            object_type,
-            timestamp,
-            admin_id,
-            router_ip: ip,
-            router_group: Some(group)
-        }
-    )
+    Ok(OpenBmpHeader {
+        major_version: version_major,
+        minor_version: version_minor,
+        header_len,
+        msg_len,
+        object_type,
+        timestamp,
+        admin_id,
+        router_ip: ip,
+        router_group: Some(group),
+    })
 }
 
 #[cfg(test)]

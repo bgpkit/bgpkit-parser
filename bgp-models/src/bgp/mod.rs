@@ -1,24 +1,24 @@
 //! BGP messages and relevant structs.
 
 pub mod attributes;
-pub mod elem;
-pub mod community;
-pub mod error;
 pub mod capabilities;
+pub mod community;
+pub mod elem;
+pub mod error;
 pub mod role;
 
 pub use crate::bgp::attributes::*;
-pub use crate::bgp::elem::*;
-pub use crate::bgp::community::*;
-pub use crate::bgp::error::*;
 pub use crate::bgp::capabilities::*;
+pub use crate::bgp::community::*;
+pub use crate::bgp::elem::*;
+pub use crate::bgp::error::*;
 pub use crate::bgp::role::*;
 
-use serde::Serialize;
-use std::net::Ipv4Addr;
 use crate::bgp::capabilities::BgpCapabilityType;
 use crate::bgp::error::BgpError;
 use crate::network::*;
+use serde::Serialize;
+use std::net::Ipv4Addr;
 
 #[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq)]
 pub enum BgpMessageType {
@@ -30,7 +30,7 @@ pub enum BgpMessageType {
 
 // https://tools.ietf.org/html/rfc4271#section-4
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub enum BgpMessage{
+pub enum BgpMessage {
     Open(BgpOpenMessage),
     Update(BgpUpdateMessage),
     Notification(BgpNotificationMessage),
@@ -65,7 +65,7 @@ pub struct BgpOpenMessage {
     pub hold_time: u16,
     pub sender_ip: Ipv4Addr,
     pub extended_length: bool,
-    pub opt_params: Vec<OptParam>
+    pub opt_params: Vec<OptParam>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -78,7 +78,7 @@ pub struct OptParam {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum ParamValue {
     Raw(Vec<u8>),
-    Capability(Capability)
+    Capability(Capability),
 }
 
 /// BGP Capability.
@@ -109,7 +109,4 @@ pub struct BgpNotificationMessage {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BgpKeepAliveMessage {
-
-}
-
+pub struct BgpKeepAliveMessage {}

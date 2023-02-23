@@ -1,19 +1,19 @@
+use itertools::Itertools;
 use serde_json::json;
-use std::path::PathBuf;
 use std::io::Write;
 use std::net::IpAddr;
-use itertools::Itertools;
+use std::path::PathBuf;
 
+use bgpkit_parser::{BgpkitParser, Elementor};
 use clap::Parser;
 use ipnet::IpNet;
-use bgpkit_parser::{BgpkitParser, Elementor};
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
 #[derive(Parser, Debug)]
-#[clap(name="bgpkit-parser-cli")]
+#[clap(name = "bgpkit-parser-cli")]
 struct Opts {
     /// File path to a MRT file, local or remote.
-    #[clap(name="FILE")]
+    #[clap(name = "FILE")]
     file_path: PathBuf,
 
     /// Output as JSON objects
@@ -25,11 +25,11 @@ struct Opts {
     pretty: bool,
 
     /// Count BGP elems
-    #[clap(short,long)]
+    #[clap(short, long)]
     elems_count: bool,
 
     /// Count MRT records
-    #[clap(short,long)]
+    #[clap(short, long)]
     records_count: bool,
 
     #[clap(flatten)]
@@ -39,43 +39,43 @@ struct Opts {
 #[derive(Parser, Debug)]
 struct Filters {
     /// Filter by origin AS Number
-    #[clap(short='o', long)]
+    #[clap(short = 'o', long)]
     origin_asn: Option<u32>,
 
     /// Filter by network prefix
-    #[clap(short='p', long)]
+    #[clap(short = 'p', long)]
     prefix: Option<IpNet>,
 
     /// Include super-prefix when filtering
-    #[clap(short='s', long)]
+    #[clap(short = 's', long)]
     include_super: bool,
 
     /// Include sub-prefix when filtering
-    #[clap(short='S', long)]
+    #[clap(short = 'S', long)]
     include_sub: bool,
 
     /// Filter by peer IP address
-    #[clap(short='j', long)]
+    #[clap(short = 'j', long)]
     peer_ip: Vec<IpAddr>,
 
     /// Filter by peer ASN
-    #[clap(short='J', long)]
+    #[clap(short = 'J', long)]
     peer_asn: Option<u32>,
 
     /// Filter by elem type: announce (a) or withdraw (w)
-    #[clap(short='m', long)]
+    #[clap(short = 'm', long)]
     elem_type: Option<String>,
 
     /// Filter by start unix timestamp inclusive
-    #[clap(short='t', long)]
+    #[clap(short = 't', long)]
     start_ts: Option<f64>,
 
     /// Filter by end unix timestamp inclusive
-    #[clap(short='T', long)]
+    #[clap(short = 'T', long)]
     end_ts: Option<f64>,
 
     /// Filter by AS path regex string
-    #[clap(short='a', long)]
+    #[clap(short = 'a', long)]
     as_path: Option<String>,
 }
 
@@ -90,7 +90,9 @@ fn main() {
         parser = parser.add_filter("as_path", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.origin_asn {
-        parser = parser.add_filter("origin_asn", v.to_string().as_str()).unwrap();
+        parser = parser
+            .add_filter("origin_asn", v.to_string().as_str())
+            .unwrap();
     }
     if let Some(v) = opts.filters.prefix {
         let filter_type = match (opts.filters.include_super, opts.filters.include_sub) {
@@ -99,20 +101,26 @@ fn main() {
             (false, true) => "prefix_sub",
             (true, true) => "prefix_super_sub",
         };
-        parser = parser.add_filter(filter_type, v.to_string().as_str()).unwrap();
+        parser = parser
+            .add_filter(filter_type, v.to_string().as_str())
+            .unwrap();
     }
-    if !opts.filters.peer_ip.is_empty(){
+    if !opts.filters.peer_ip.is_empty() {
         let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",");
         parser = parser.add_filter("peer_ips", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.peer_asn {
-        parser = parser.add_filter("peer_asn", v.to_string().as_str()).unwrap();
+        parser = parser
+            .add_filter("peer_asn", v.to_string().as_str())
+            .unwrap();
     }
     if let Some(v) = opts.filters.elem_type {
         parser = parser.add_filter("type", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.start_ts {
-        parser = parser.add_filter("start_ts", v.to_string().as_str()).unwrap();
+        parser = parser
+            .add_filter("start_ts", v.to_string().as_str())
+            .unwrap();
     }
     if let Some(v) = opts.filters.end_ts {
         parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
@@ -158,4 +166,3 @@ fn main() {
         }
     }
 }
-

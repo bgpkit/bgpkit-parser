@@ -1,13 +1,13 @@
 //! MRT message and relevant structs.
 
-pub mod tabledump;
 pub mod bgp4mp;
+pub mod tabledump;
 
-use std::io;
-use std::io::Write;
 pub use crate::mrt::bgp4mp::*;
 pub use crate::mrt::tabledump::*;
 use serde::Serialize;
+use std::io;
+use std::io::Write;
 
 /// MrtRecord is a wrapper struct that contains a header and a message.
 ///
@@ -87,9 +87,7 @@ impl CommonHeader {
         writer.write_all(&self.entry_subtype.to_be_bytes())?;
 
         match self.microsecond_timestamp {
-            None => {
-                writer.write_all(&self.length.to_be_bytes())
-            }
+            None => writer.write_all(&self.length.to_be_bytes()),
             Some(microseconds) => {
                 // When the microsecond timestamp is present, the length must be adjusted to account
                 // for the stace used by the extra timestamp data.
@@ -156,4 +154,3 @@ pub enum EntryType {
     OSPFv3 = 48,
     OSPFv3_ET = 49,
 }
-

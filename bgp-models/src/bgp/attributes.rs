@@ -1,10 +1,10 @@
 //! BGP attribute structs
+use crate::bgp::{Community, ExtendedCommunity, LargeCommunity};
+use crate::network::*;
+use itertools::Itertools;
+use serde::{Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
-use itertools::Itertools;
-use crate::network::*;
-use serde::{Serialize, Serializer};
-use crate::bgp::{ExtendedCommunity, LargeCommunity, Community};
 
 /// The high-order bit (bit 0) of the Attribute Flags octet is the
 /// Optional bit.  It defines whether the attribute is optional (if
@@ -146,11 +146,9 @@ pub enum AsPathSegment {
 impl AsPathSegment {
     pub fn count_asns(&self) -> usize {
         match self {
-            AsPathSegment::AsSequence(v) => {
-                v.len()
-            },
+            AsPathSegment::AsSequence(v) => v.len(),
             AsPathSegment::AsSet(_) => 1,
-            AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_)=> 0,
+            AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => 0,
         }
     }
 }
@@ -207,20 +205,22 @@ impl AsPath {
     ///    segment that is prepended.
     pub fn merge_aspath_as4path(aspath: &AsPath, as4path: &AsPath) -> Option<AsPath> {
         if aspath.count_asns() < as4path.count_asns() {
-            return Some(aspath.clone())
+            return Some(aspath.clone());
         }
 
         let mut as4iter = as4path.segments.iter();
         let mut as4seg = as4iter.next();
         let mut new_segs: Vec<AsPathSegment> = vec![];
-        if as4seg.is_none(){
+        if as4seg.is_none() {
             new_segs.extend(aspath.segments.clone());
-            return Some(AsPath{ segments: new_segs })
+            return Some(AsPath { segments: new_segs });
         }
 
         for seg in &aspath.segments {
             let as4seg_unwrapped = as4seg.unwrap();
-            if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) = (seg, as4seg_unwrapped) {
+            if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
+                (seg, as4seg_unwrapped)
+            {
                 let diff_len = seq.len() - seq4.len();
                 let mut new_seq: Vec<Asn> = vec![];
                 new_seq.extend(seq.iter().take(diff_len));
@@ -232,17 +232,15 @@ impl AsPath {
             as4seg = as4iter.next();
         }
 
-        Some(AsPath{ segments: new_segs })
+        Some(AsPath { segments: new_segs })
     }
 
     pub fn get_origin(&self) -> Option<Vec<Asn>> {
         if let Some(seg) = self.segments.last() {
             match seg {
-                AsPathSegment::AsSequence(v) => {
-                    v.last().map(|n| vec![*n])
-                }
-                AsPathSegment::AsSet(v) => { Some(v.clone()) }
-                AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => { None }
+                AsPathSegment::AsSequence(v) => v.last().map(|n| vec![*n]),
+                AsPathSegment::AsSet(v) => Some(v.clone()),
+                AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => None,
             }
         } else {
             None
@@ -250,9 +248,13 @@ impl AsPath {
     }
 
     pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
-        if !self.segments.iter().all(|seg| matches!(seg, AsPathSegment::AsSequence(_v))) {
+        if !self
+            .segments
+            .iter()
+            .all(|seg| matches!(seg, AsPathSegment::AsSequence(_v)))
+        {
             // as path contains AS set or confederated sequence/set
-            return None
+            return None;
         }
         let mut path = vec![];
         for s in &self.segments {
@@ -262,7 +264,7 @@ impl AsPath {
                 }
             } else {
                 // this won't happen
-                return None
+                return None;
             }
         }
         Some(path)
@@ -334,9 +336,9 @@ impl MpUnreachableNlri {
 impl Display for Origin {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Origin::IGP => {"IGP"}
-            Origin::EGP => {"EGP"}
-            Origin::INCOMPLETE => {"INCOMPLETE"}
+            Origin::IGP => "IGP",
+            Origin::EGP => "EGP",
+            Origin::INCOMPLETE => "INCOMPLETE",
         };
         write!(f, "{}", s)
     }
@@ -344,45 +346,56 @@ impl Display for Origin {
 
 impl Display for AtomicAggregate {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            AtomicAggregate::NAG => {"NAG"}
-            AtomicAggregate::AG => {"AG"}
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                AtomicAggregate::NAG => {
+                    "NAG"
+                }
+                AtomicAggregate::AG => {
+                    "AG"
+                }
+            }
+        )
     }
 }
 
-
 impl Display for NextHopAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}",
-               match self {
-                   NextHopAddress::Ipv4(v) => {v.to_string()}
-                   NextHopAddress::Ipv6(v) => {v.to_string()}
-                   NextHopAddress::Ipv6LinkLocal(v1, _v2) => {v1.to_string()}
-               }
+        write!(
+            f,
+            "{}",
+            match self {
+                NextHopAddress::Ipv4(v) => {
+                    v.to_string()
+                }
+                NextHopAddress::Ipv6(v) => {
+                    v.to_string()
+                }
+                NextHopAddress::Ipv6LinkLocal(v1, _v2) => {
+                    v1.to_string()
+                }
+            }
         )
     }
 }
 
 impl Display for AsPath {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}",
-               self
-                   .segments()
-                   .iter()
-                   .map(|seg| match seg {
-                       AsPathSegment::AsSequence(v) | AsPathSegment::ConfedSequence(v) => v
-                           .iter()
-                           .join(" "),
-                       AsPathSegment::AsSet(v) | AsPathSegment::ConfedSet(v) => {
-                           format!(
-                               "{{{}}}",
-                               v.iter()
-                                   .join(",")
-                           )
-                       }
-                   })
-                   .join(" ")
+        write!(
+            f,
+            "{}",
+            self.segments()
+                .iter()
+                .map(|seg| match seg {
+                    AsPathSegment::AsSequence(v) | AsPathSegment::ConfedSequence(v) =>
+                        v.iter().join(" "),
+                    AsPathSegment::AsSet(v) | AsPathSegment::ConfedSet(v) => {
+                        format!("{{{}}}", v.iter().join(","))
+                    }
+                })
+                .join(" ")
         )
     }
 }
@@ -392,19 +405,28 @@ impl Display for AsPath {
 ///////////////
 
 impl Serialize for AsPath {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
 
 impl Serialize for Origin {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
 
 impl Serialize for AtomicAggregate {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
@@ -415,59 +437,64 @@ mod tests {
 
     #[test]
     fn test_aspath_as4path_merge() {
-        let aspath = AsPath{
-            segments: vec![AsPathSegment::AsSequence([1,2,3,5].map(|i|{i.into()}).to_vec())]
+        let aspath = AsPath {
+            segments: vec![AsPathSegment::AsSequence(
+                [1, 2, 3, 5].map(|i| i.into()).to_vec(),
+            )],
         };
-        let as4path = AsPath{
-            segments: vec![AsPathSegment::AsSequence([2,3,7].map(|i|{i.into()}).to_vec())]
+        let as4path = AsPath {
+            segments: vec![AsPathSegment::AsSequence(
+                [2, 3, 7].map(|i| i.into()).to_vec(),
+            )],
         };
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
-        assert_eq!(newpath.segments[0], AsPathSegment::AsSequence([1,2,3,7].map(|i|{i.into()}).to_vec()));
+        assert_eq!(
+            newpath.segments[0],
+            AsPathSegment::AsSequence([1, 2, 3, 7].map(|i| { i.into() }).to_vec())
+        );
     }
 
     #[test]
     fn test_get_origin() {
-        let aspath = AsPath{
-            segments: vec![
-                AsPathSegment::AsSequence([1,2,3,5].map(|i|{i.into()}).to_vec()),
-            ]
+        let aspath = AsPath {
+            segments: vec![AsPathSegment::AsSequence(
+                [1, 2, 3, 5].map(|i| i.into()).to_vec(),
+            )],
         };
         let origins = aspath.get_origin();
         assert!(origins.is_some());
         assert_eq!(origins.unwrap(), vec![5]);
 
-        let aspath = AsPath{
+        let aspath = AsPath {
             segments: vec![
-                AsPathSegment::AsSequence([1,2,3,5].map(|i|{i.into()}).to_vec()),
-                AsPathSegment::AsSet([7,8].map(|i|{i.into()}).to_vec()),
-            ]
+                AsPathSegment::AsSequence([1, 2, 3, 5].map(|i| i.into()).to_vec()),
+                AsPathSegment::AsSet([7, 8].map(|i| i.into()).to_vec()),
+            ],
         };
         let origins = aspath.get_origin();
         assert!(origins.is_some());
-        assert_eq!(origins.unwrap(), vec![7,8]);
+        assert_eq!(origins.unwrap(), vec![7, 8]);
     }
 
     #[test]
     fn test_aspath_to_vec() {
-        let as4path = AsPath{
-            segments: vec![
-                AsPathSegment::AsSequence([2,3,4].map(|i|{i.into()}).to_vec())
-            ]
+        let as4path = AsPath {
+            segments: vec![AsPathSegment::AsSequence(
+                [2, 3, 4].map(|i| i.into()).to_vec(),
+            )],
         };
-        assert_eq!(as4path.to_u32_vec(), Some(vec![2,3,4]));
+        assert_eq!(as4path.to_u32_vec(), Some(vec![2, 3, 4]));
 
-        let as4path = AsPath{
+        let as4path = AsPath {
             segments: vec![
-                AsPathSegment::AsSequence([2,3,4].map(|i|{i.into()}).to_vec()),
-                AsPathSegment::AsSequence([5,6,7].map(|i|{i.into()}).to_vec())
-            ]
+                AsPathSegment::AsSequence([2, 3, 4].map(|i| i.into()).to_vec()),
+                AsPathSegment::AsSequence([5, 6, 7].map(|i| i.into()).to_vec()),
+            ],
         };
-        assert_eq!(as4path.to_u32_vec(), Some(vec![2,3,4,5,6,7]));
+        assert_eq!(as4path.to_u32_vec(), Some(vec![2, 3, 4, 5, 6, 7]));
 
-        let as4path = AsPath{
-            segments: vec![
-                AsPathSegment::AsSet([2,3,4].map(|i|{i.into()}).to_vec())
-            ]
+        let as4path = AsPath {
+            segments: vec![AsPathSegment::AsSet([2, 3, 4].map(|i| i.into()).to_vec())],
         };
         assert_eq!(as4path.to_u32_vec(), None);
     }

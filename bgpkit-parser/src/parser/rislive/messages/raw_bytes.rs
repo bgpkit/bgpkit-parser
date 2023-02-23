@@ -1,23 +1,25 @@
-use std::net::IpAddr;
-use std::str::FromStr;
+use crate::parser::bgp::parse_bgp_message;
+use crate::parser::rislive::error::ParserRisliveError;
+use crate::{BgpElem, Elementor};
 use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};
 use bgp_models::network::{Afi, AsnLength};
 use serde_json::Value;
-use crate::{BgpElem, Elementor};
-use crate::parser::bgp::parse_bgp_message;
-use crate::parser::rislive::error::ParserRisliveError;
+use std::net::IpAddr;
+use std::str::FromStr;
 
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
     let msg_type = match msg.get("type") {
-        None => { return Err(ParserRisliveError::IrregularRisLiveFormat)}
-        Some(t) => {t.as_str().unwrap()}
+        None => return Err(ParserRisliveError::IrregularRisLiveFormat),
+        Some(t) => t.as_str().unwrap(),
     };
 
     match msg_type {
         "ris_message" => {}
-        "ris_error" | "ris_rrc_list" | "ris_subscribe_ok" | "pong" => { return Err(ParserRisliveError::UnsupportedMessage)}
-        _ => {return Err(ParserRisliveError::IrregularRisLiveFormat)}
+        "ris_error" | "ris_rrc_list" | "ris_subscribe_ok" | "pong" => {
+            return Err(ParserRisliveError::UnsupportedMessage)
+        }
+        _ => return Err(ParserRisliveError::IrregularRisLiveFormat),
     }
 
     let data = msg.get("data").unwrap().as_object().unwrap();
@@ -25,7 +27,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
     let bytes = hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap();
 
     let timestamp = data.get("timestamp").unwrap().as_f64().unwrap();
-    let peer_str =  data.get("peer").unwrap().as_str().unwrap().to_owned();
+    let peer_str = data.get("peer").unwrap().as_str().unwrap().to_owned();
 
     let peer_ip = peer_str.parse::<IpAddr>().unwrap();
     let afi = match peer_ip.is_ipv4() {
@@ -33,18 +35,16 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
         false => Afi::Ipv6,
     };
 
-    let peer_asn_str =data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
+    let peer_asn_str = data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
 
     let peer_asn = peer_asn_str.parse::<i32>().unwrap().into();
 
     let bgp_msg = match parse_bgp_message(bytes.as_slice(), false, &AsnLength::Bits32) {
-        Ok(m) => {m}
-        Err(_) => {
-            match parse_bgp_message(bytes.as_slice(), false, &AsnLength::Bits16) {
-                Ok(m) => {m}
-                Err(_) => {return Err(ParserRisliveError::IncorrectRawBytes)}
-            }
-        }
+        Ok(m) => m,
+        Err(_) => match parse_bgp_message(bytes.as_slice(), false, &AsnLength::Bits16) {
+            Ok(m) => m,
+            Err(_) => return Err(ParserRisliveError::IncorrectRawBytes),
+        },
     };
 
     let t_sec = timestamp as u32;
@@ -55,27 +55,32 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
         microsecond_timestamp: Some(t_msec),
         entry_type: EntryType::BGP4MP,
         entry_subtype: 4, // Bgp4MpMessageAs4
-        length: 0
+        length: 0,
     };
 
-    let record = MrtRecord{ common_header: header, message: MrtMessage::Bgp4Mp(
-        bgp_models::mrt::bgp4mp::Bgp4Mp::Bgp4MpMessage(bgp_models::mrt::bgp4mp::Bgp4MpMessage{
-            msg_type: Bgp4MpType::Bgp4MpMessageAs4,
-            peer_asn,
-            local_asn: 0.into(),
-            interface_index: 0,
-            afi,
-            peer_ip,
-            local_ip: IpAddr::from_str("0.0.0.0").unwrap(),
-            bgp_message: bgp_msg
-        })
-    )
+    let record = MrtRecord {
+        common_header: header,
+        message: MrtMessage::Bgp4Mp(bgp_models::mrt::bgp4mp::Bgp4Mp::Bgp4MpMessage(
+            bgp_models::mrt::bgp4mp::Bgp4MpMessage {
+                msg_type: Bgp4MpType::Bgp4MpMessageAs4,
+                peer_asn,
+                local_asn: 0.into(),
+                interface_index: 0,
+                afi,
+                peer_ip,
+                local_ip: IpAddr::from_str("0.0.0.0").unwrap(),
+                bgp_message: bgp_msg,
+            },
+        )),
     };
-    Ok( Elementor::new().record_to_elems(record) )
+    Ok(Elementor::new().record_to_elems(record))
 }
 
 fn get_micro_seconds(sec: f64) -> u32 {
-    format!("{:.6}", sec).split('.').collect::<Vec<&str>>()[1].to_owned().parse::<u32>().unwrap()
+    format!("{:.6}", sec).split('.').collect::<Vec<&str>>()[1]
+        .to_owned()
+        .parse::<u32>()
+        .unwrap()
 }
 
 #[cfg(test)]

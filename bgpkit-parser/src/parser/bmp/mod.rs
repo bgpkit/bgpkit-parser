@@ -1,14 +1,14 @@
 /*!
 Provides parsing for BMP and OpenBMP binary-formatted messages.
 */
-use std::io::Cursor;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;
 pub use crate::parser::bmp::openbmp::parse_openbmp_header;
+use std::io::Cursor;
 
-pub mod openbmp;
 pub mod error;
 pub mod messages;
+pub mod openbmp;
 
 /// Parse OpenBMP `raw_bmp` message.
 ///
@@ -20,7 +20,7 @@ pub fn parse_openbmp_msg(data: &[u8]) -> Result<BmpMessage, ParserBmpError> {
 }
 
 /// Parse a BMP message.
-pub fn parse_bmp_msg(reader: &mut Cursor<&[u8]>) -> Result<BmpMessage, ParserBmpError>{
+pub fn parse_bmp_msg(reader: &mut Cursor<&[u8]>) -> Result<BmpMessage, ParserBmpError> {
     let common_header = parse_bmp_common_header(reader)?;
 
     // let mut buffer ;
@@ -36,85 +36,69 @@ pub fn parse_bmp_msg(reader: &mut Cursor<&[u8]>) -> Result<BmpMessage, ParserBmp
     // };
     // reader.read_exact(&mut buffer)?;
 
-    match &common_header.msg_type{
+    match &common_header.msg_type {
         BmpMsgType::RouteMonitoring => {
             let per_peer_header = parse_per_peer_header(reader)?;
             let pos_start = reader.position() as usize;
             let data_bytes = &reader.get_ref()[pos_start..];
-            let msg = parse_route_monitoring(data_bytes,
-                                             &per_peer_header.asn_len)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: Some(per_peer_header),
-                    message_body: MessageBody::RouteMonitoring(msg)
-                }
-            )
+            let msg = parse_route_monitoring(data_bytes, &per_peer_header.asn_len)?;
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: Some(per_peer_header),
+                message_body: MessageBody::RouteMonitoring(msg),
+            })
         }
         BmpMsgType::RouteMirroringMessage => {
             let per_peer_header = parse_per_peer_header(reader)?;
             let msg = parse_route_mirroring(reader, &per_peer_header.asn_len)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: Some(per_peer_header),
-                    message_body: MessageBody::RouteMirroring(msg)
-                }
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: Some(per_peer_header),
+                message_body: MessageBody::RouteMirroring(msg),
+            })
         }
         BmpMsgType::StatisticsReport => {
             let per_peer_header = parse_per_peer_header(reader)?;
             let msg = parse_stats_report(reader)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: Some(per_peer_header),
-                    message_body: MessageBody::StatsReport(msg)
-                }
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: Some(per_peer_header),
+                message_body: MessageBody::StatsReport(msg),
+            })
         }
         BmpMsgType::PeerDownNotification => {
             let per_peer_header = parse_per_peer_header(reader)?;
             let msg = parse_peer_down_notification(reader)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: Some(per_peer_header),
-                    message_body: MessageBody::PeerDownNotification(msg)
-                }
-
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: Some(per_peer_header),
+                message_body: MessageBody::PeerDownNotification(msg),
+            })
         }
         BmpMsgType::PeerUpNotification => {
             let per_peer_header = parse_per_peer_header(reader)?;
             let msg = parse_peer_up_notification(reader, &per_peer_header.afi)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: Some(per_peer_header),
-                    message_body: MessageBody::PeerUpNotification(msg)
-                }
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: Some(per_peer_header),
+                message_body: MessageBody::PeerUpNotification(msg),
+            })
         }
         BmpMsgType::InitiationMessage => {
             let msg = parse_initiation_message(reader)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: None,
-                    message_body: MessageBody::InitiationMessage(msg)
-                }
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: None,
+                message_body: MessageBody::InitiationMessage(msg),
+            })
         }
         BmpMsgType::TerminationMessage => {
             let msg = parse_termination_message(reader)?;
-            Ok(
-                BmpMessage{
-                    common_header,
-                    per_peer_header: None,
-                    message_body: MessageBody::TerminationMessage(msg)
-                }
-            )
+            Ok(BmpMessage {
+                common_header,
+                per_peer_header: None,
+                message_body: MessageBody::TerminationMessage(msg),
+            })
         }
     }
 }
@@ -122,8 +106,8 @@ pub fn parse_bmp_msg(reader: &mut Cursor<&[u8]>) -> Result<BmpMessage, ParserBmp
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
-    use crate::parser::bmp::openbmp::parse_openbmp_header;
     use super::*;
+    use crate::parser::bmp::openbmp::parse_openbmp_header;
 
     #[test]
     fn test_peer_down_notification() {

@@ -1,5 +1,5 @@
-use serde::Serialize;
 use num_traits::FromPrimitive;
+use serde::Serialize;
 
 /// BGP Role
 ///
@@ -34,32 +34,32 @@ pub fn parse_bgp_role_value(value: &u8) -> Option<BgpRole> {
 pub fn validate_role_pairs(local_role: &BgpRole, remote_role: &BgpRole) -> bool {
     match local_role {
         BgpRole::Provider => {
-            if let BgpRole::Customer =  remote_role {
-                return true
+            if let BgpRole::Customer = remote_role {
+                return true;
             }
             false
         }
         BgpRole::RouteServer => {
-            if let BgpRole::RouteServerClient =  remote_role {
-                return true
+            if let BgpRole::RouteServerClient = remote_role {
+                return true;
             }
             false
         }
         BgpRole::RouteServerClient => {
-            if let BgpRole::RouteServer =  remote_role {
-                return true
+            if let BgpRole::RouteServer = remote_role {
+                return true;
             }
             false
         }
         BgpRole::Customer => {
-            if let BgpRole::Provider =  remote_role {
-                return true
+            if let BgpRole::Provider = remote_role {
+                return true;
             }
             false
         }
         BgpRole::Peer => {
-            if let BgpRole::Peer =  remote_role {
-                return true
+            if let BgpRole::Peer = remote_role {
+                return true;
             }
             false
         }
@@ -68,8 +68,8 @@ pub fn validate_role_pairs(local_role: &BgpRole, remote_role: &BgpRole) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use crate::bgp::BgpRole::*;
     use super::*;
+    use crate::bgp::BgpRole::*;
 
     #[test]
     fn test_bgp_role_validation() {
@@ -79,35 +79,35 @@ mod tests {
         local = Provider;
         remote = Customer;
         assert_eq!(validate_role_pairs(&local, &remote), true);
-        for remote in [ Provider, Peer, RouteServer, RouteServerClient] {
+        for remote in [Provider, Peer, RouteServer, RouteServerClient] {
             assert_eq!(validate_role_pairs(&local, &remote), false);
         }
 
         local = Customer;
         remote = Provider;
         assert_eq!(validate_role_pairs(&local, &remote), true);
-        for remote in [ Customer, Peer, RouteServer, RouteServerClient] {
+        for remote in [Customer, Peer, RouteServer, RouteServerClient] {
             assert_eq!(validate_role_pairs(&local, &remote), false);
         }
 
         local = RouteServer;
         remote = RouteServerClient;
         assert_eq!(validate_role_pairs(&local, &remote), true);
-        for remote in [ Provider, Customer, Peer, RouteServer] {
+        for remote in [Provider, Customer, Peer, RouteServer] {
             assert_eq!(validate_role_pairs(&local, &remote), false);
         }
 
         local = RouteServerClient;
         remote = RouteServer;
         assert_eq!(validate_role_pairs(&local, &remote), true);
-        for remote in [ Provider, Customer, Peer, RouteServerClient] {
+        for remote in [Provider, Customer, Peer, RouteServerClient] {
             assert_eq!(validate_role_pairs(&local, &remote), false);
         }
 
         local = Peer;
         remote = Peer;
         assert_eq!(validate_role_pairs(&local, &remote), true);
-        for remote in [ Provider, Customer, RouteServer, RouteServerClient] {
+        for remote in [Provider, Customer, RouteServer, RouteServerClient] {
             assert_eq!(validate_role_pairs(&local, &remote), false);
         }
     }

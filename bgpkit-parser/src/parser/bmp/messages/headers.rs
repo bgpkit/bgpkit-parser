@@ -1,9 +1,9 @@
+use crate::parser::bmp::error::ParserBmpError;
+use crate::parser::ReadUtils;
+use bgp_models::network::{Afi, AsnLength};
+use num_traits::FromPrimitive;
 use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
-use bgp_models::network::{Afi, AsnLength};
-use crate::parser::bmp::error::ParserBmpError;
-use num_traits::FromPrimitive;
-use crate::parser::ReadUtils;
 
 /// BMP message type enum.
 ///
@@ -22,13 +22,13 @@ use crate::parser::ReadUtils;
 /// ```
 #[derive(Debug, Primitive)]
 pub enum BmpMsgType {
-    RouteMonitoring=0,
-    StatisticsReport=1,
-    PeerDownNotification=2,
-    PeerUpNotification=3,
-    InitiationMessage=4,
-    TerminationMessage=5,
-    RouteMirroringMessage=6,
+    RouteMonitoring = 0,
+    StatisticsReport = 1,
+    PeerDownNotification = 2,
+    PeerUpNotification = 3,
+    InitiationMessage = 4,
+    TerminationMessage = 5,
+    RouteMirroringMessage = 6,
 }
 
 /// BMP Common Header
@@ -51,21 +51,22 @@ pub struct BmpCommonHeader {
     pub msg_type: BmpMsgType,
 }
 
-pub fn parse_bmp_common_header(reader: &mut Cursor<&[u8]>) -> Result<BmpCommonHeader, ParserBmpError>{
-
+pub fn parse_bmp_common_header(
+    reader: &mut Cursor<&[u8]>,
+) -> Result<BmpCommonHeader, ParserBmpError> {
     let version = reader.read_8b()?;
-    if version!=3 {
+    if version != 3 {
         // has to be 3 per rfc7854
-        return Err(ParserBmpError::CorruptedBmpMessage)
+        return Err(ParserBmpError::CorruptedBmpMessage);
     }
 
     let msg_len = reader.read_32b()?;
 
     let msg_type = BmpMsgType::from_u8(reader.read_8b()?).unwrap();
-    Ok(BmpCommonHeader{
+    Ok(BmpCommonHeader {
         version,
         msg_len,
-        msg_type
+        msg_type,
     })
 }
 
@@ -108,23 +109,25 @@ pub struct BmpPerPeerHeader {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Primitive)]
 pub enum PeerType {
-    GlobalInstancePeer=0,
-    RDInstancePeer=1,
-    LocalInstancePeer=2,
+    GlobalInstancePeer = 0,
+    RDInstancePeer = 1,
+    LocalInstancePeer = 2,
 }
 
-pub fn parse_per_peer_header(reader: &mut Cursor<&[u8]>) -> Result<BmpPerPeerHeader, ParserBmpError>{
+pub fn parse_per_peer_header(
+    reader: &mut Cursor<&[u8]>,
+) -> Result<BmpPerPeerHeader, ParserBmpError> {
     let peer_type = PeerType::from_u8(reader.read_8b()?).unwrap();
 
     let peer_flags = reader.read_8b()?;
 
     let peer_distinguisher = reader.read_64b()?;
 
-    let (is_router_ipv6, is_2byte_asn) = (peer_flags&0x80>0, peer_flags&0x20>0);
+    let (is_router_ipv6, is_2byte_asn) = (peer_flags & 0x80 > 0, peer_flags & 0x20 > 0);
 
     let afi = match is_router_ipv6 {
-        true => {Afi::Ipv6},
-        false => {Afi::Ipv4},
+        true => Afi::Ipv6,
+        false => Afi::Ipv4,
     };
 
     let asn_len = match is_2byte_asn {
@@ -136,7 +139,7 @@ pub fn parse_per_peer_header(reader: &mut Cursor<&[u8]>) -> Result<BmpPerPeerHea
         reader.read_ipv6_address()?.into()
     } else {
         reader.seek(SeekFrom::Current(12))?;
-        let ip= reader.read_ipv4_address()?;
+        let ip = reader.read_ipv4_address()?;
         ip.into()
     };
 
@@ -151,9 +154,9 @@ pub fn parse_per_peer_header(reader: &mut Cursor<&[u8]>) -> Result<BmpPerPeerHea
 
     let t_sec = reader.read_32b()?;
     let t_usec = reader.read_32b()?;
-    let timestamp = t_sec as f64 + (t_usec as f64)/1_000_000.0;
+    let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
 
-    Ok(BmpPerPeerHeader{
+    Ok(BmpPerPeerHeader {
         peer_type,
         peer_flags,
         peer_distinguisher,
@@ -162,8 +165,6 @@ pub fn parse_per_peer_header(reader: &mut Cursor<&[u8]>) -> Result<BmpPerPeerHea
         peer_bgp_id,
         timestamp,
         afi,
-        asn_len
+        asn_len,
     })
 }
-
-

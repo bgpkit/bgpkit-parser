@@ -1,7 +1,7 @@
-use std::{error::Error, fmt, io};
+use oneio::OneIoError;
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;
-use oneio::OneIoError;
+use std::{error::Error, fmt, io};
 
 #[derive(Debug)]
 pub enum ParserError {
@@ -57,7 +57,10 @@ impl fmt::Display for ParserError {
 
 impl From<OneIoError> for ParserErrorWithBytes {
     fn from(error: OneIoError) -> Self {
-        ParserErrorWithBytes { error: ParserError::OneIoError(error), bytes: None}
+        ParserErrorWithBytes {
+            error: ParserError::OneIoError(error),
+            bytes: None,
+        }
     }
 }
 
@@ -69,15 +72,15 @@ impl From<OneIoError> for ParserError {
 
 impl From<ParserError> for ParserErrorWithBytes {
     fn from(error: ParserError) -> Self {
-        ParserErrorWithBytes{error, bytes: None}
+        ParserErrorWithBytes { error, bytes: None }
     }
 }
 
 impl From<io::Error> for ParserError {
     fn from(io_error: io::Error) -> Self {
         match io_error.kind() {
-            ErrorKind::UnexpectedEof => { ParserError::EofError(io_error)}
-            _ => ParserError::IoError(io_error)
+            ErrorKind::UnexpectedEof => ParserError::EofError(io_error),
+            _ => ParserError::IoError(io_error),
         }
     }
 }

@@ -1,13 +1,13 @@
 /*!
 Provides parser iterator implementation.
 */
-use std::io::Read;
-use log::{error, warn};
-use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
-use crate::{BgpElem, Elementor};
 use crate::error::ParserError;
 use crate::parser::BgpkitParser;
 use crate::Filterable;
+use crate::{BgpElem, Elementor};
+use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
+use log::{error, warn};
+use std::io::Read;
 
 /// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
 impl<R: Read> IntoIterator for BgpkitParser<R> {
@@ -32,7 +32,6 @@ impl<R> BgpkitParser<R> {
 MrtRecord Iterator
 **********/
 
-
 pub struct RecordIterator<R> {
     pub parser: BgpkitParser<R>,
     pub count: u64,
@@ -42,7 +41,9 @@ pub struct RecordIterator<R> {
 impl<R> RecordIterator<R> {
     fn new(parser: BgpkitParser<R>) -> Self {
         RecordIterator {
-            parser , count: 0, elementor: Elementor::new()
+            parser,
+            count: 0,
+            elementor: Elementor::new(),
         }
     }
 }
@@ -60,62 +61,72 @@ impl<R: Read> Iterator for RecordIterator<R> {
                     if filters.is_empty() {
                         Some(v)
                     } else {
-                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) = &v.message {
+                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(
+                            _,
+                        )) = &v.message
+                        {
                             let _ = self.elementor.record_to_elems(v.clone());
-                            return Some(v)
+                            return Some(v);
                         }
-                        let elems =  self.elementor.record_to_elems(v.clone());
+                        let elems = self.elementor.record_to_elems(v.clone());
                         if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
                             Some(v)
                         } else {
-                            continue
+                            continue;
                         }
                     }
-                },
+                }
                 Err(e) => {
                     match e.error {
-                        ParserError::TruncatedMsg(err_str)| ParserError::Unsupported(err_str)
-                        | ParserError::UnknownAttr(err_str) | ParserError::DeprecatedAttr(err_str) => {
+                        ParserError::TruncatedMsg(err_str)
+                        | ParserError::Unsupported(err_str)
+                        | ParserError::UnknownAttr(err_str)
+                        | ParserError::DeprecatedAttr(err_str) => {
                             if self.parser.options.show_warnings {
                                 warn!("parser warn: {}", err_str);
                             }
                             if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                std::fs::write("mrt_core_dump", bytes)
+                                    .expect("Unable to write to mrt_core_dump");
                             }
-                            continue
+                            continue;
                         }
                         ParserError::ParseError(err_str) => {
                             error!("parser error: {}", err_str);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                    std::fs::write("mrt_core_dump", bytes)
+                                        .expect("Unable to write to mrt_core_dump");
                                 }
                                 None
                             } else {
-                                continue
+                                continue;
                             }
                         }
-                        ParserError::EofExpected =>{
+                        ParserError::EofExpected => {
                             // normal end of file
                             None
                         }
-                        ParserError::IoError(err)| ParserError::EofError(err) => {
+                        ParserError::IoError(err) | ParserError::EofError(err) => {
                             // when reaching IO error, stop iterating
                             error!("{:?}", err);
                             if self.parser.core_dump {
                                 if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_core_dump", bytes).expect("Unable to write to mrt_core_dump");
+                                    std::fs::write("mrt_core_dump", bytes)
+                                        .expect("Unable to write to mrt_core_dump");
                                 }
                             }
                             None
                         }
-                        ParserError::OneIoError(_) | ParserError::FilterError(_) | ParserError::IoNotEnoughBytes()=> {
+                        ParserError::OneIoError(_)
+                        | ParserError::FilterError(_)
+                        | ParserError::IoNotEnoughBytes() => {
                             // this should not happen at this stage
                             None
                         }
                     }
-                },
-            }
+                }
+            };
         }
     }
 }
@@ -133,7 +144,12 @@ pub struct ElemIterator<R> {
 
 impl<R> ElemIterator<R> {
     fn new(parser: BgpkitParser<R>) -> Self {
-        ElemIterator { record_iter: RecordIterator::new(parser) , count: 0 , cache_elems: vec![], elementor: Elementor::new()}
+        ElemIterator {
+            record_iter: RecordIterator::new(parser),
+            count: 0,
+            cache_elems: vec![],
+            elementor: Elementor::new(),
+        }
     }
 }
 
@@ -150,17 +166,17 @@ impl<R: Read> Iterator for ElemIterator<R> {
                     match self.record_iter.next() {
                         None => {
                             // no more records
-                            return None
+                            return None;
                         }
                         Some(r) => {
-                            let mut elems =  self.elementor.record_to_elems(r);
+                            let mut elems = self.elementor.record_to_elems(r);
                             if elems.is_empty() {
                                 // somehow this record does not contain any elems, continue to parse next record
-                                continue
+                                continue;
                             } else {
                                 elems.reverse();
                                 self.cache_elems = elems;
-                                break
+                                break;
                             }
                         }
                     }
@@ -174,11 +190,9 @@ impl<R: Read> Iterator for ElemIterator<R> {
             match elem {
                 None => return None,
                 Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
-                    true => {return Some(e)}
-                    false => {
-                        continue
-                    }
-                }
+                    true => return Some(e),
+                    false => continue,
+                },
             }
         }
     }

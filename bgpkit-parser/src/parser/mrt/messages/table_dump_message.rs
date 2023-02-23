@@ -1,11 +1,11 @@
-use std::io::Cursor;
 use crate::error::*;
-use std::net::IpAddr;
-use byteorder::{BE, ReadBytesExt};
-use bgp_models::mrt::tabledump::TableDumpMessage;
-use bgp_models::network::{Afi, AsnLength, NetworkPrefix};
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
+use bgp_models::mrt::tabledump::TableDumpMessage;
+use bgp_models::network::{Afi, AsnLength, NetworkPrefix};
+use byteorder::{ReadBytesExt, BE};
+use std::io::Cursor;
+use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
 ///

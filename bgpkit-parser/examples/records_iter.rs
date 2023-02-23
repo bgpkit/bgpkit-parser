@@ -10,29 +10,25 @@ fn main() {
         match record.message {
             MrtMessage::TableDumpMessage(_) => {}
             MrtMessage::TableDumpV2Message(_) => {}
-            MrtMessage::Bgp4Mp(msg) => {
-                match msg {
-                    Bgp4Mp::Bgp4MpStateChange(_) => {}
-                    Bgp4Mp::Bgp4MpStateChangeAs4(_) => {}
-                    Bgp4Mp::Bgp4MpMessage(m)|
-                    Bgp4Mp::Bgp4MpMessageLocal(m)|
-                    Bgp4Mp::Bgp4MpMessageAs4(m) |
-                    Bgp4Mp::Bgp4MpMessageAs4Local(m) => {
-                        match m.bgp_message {
-                            BgpMessage::Open(_) => {}
-                            BgpMessage::Update(u) => {
-                                for attr in &u.attributes {
-                                    if let AttributeValue::OnlyToCustomer(remote) = attr.value {
-                                        println!("OTC message found, remote ASN = {remote}");
-                                    }
-                                }
+            MrtMessage::Bgp4Mp(msg) => match msg {
+                Bgp4Mp::Bgp4MpStateChange(_) => {}
+                Bgp4Mp::Bgp4MpStateChangeAs4(_) => {}
+                Bgp4Mp::Bgp4MpMessage(m)
+                | Bgp4Mp::Bgp4MpMessageLocal(m)
+                | Bgp4Mp::Bgp4MpMessageAs4(m)
+                | Bgp4Mp::Bgp4MpMessageAs4Local(m) => match m.bgp_message {
+                    BgpMessage::Open(_) => {}
+                    BgpMessage::Update(u) => {
+                        for attr in &u.attributes {
+                            if let AttributeValue::OnlyToCustomer(remote) = attr.value {
+                                println!("OTC message found, remote ASN = {remote}");
                             }
-                            BgpMessage::Notification(_) => {}
-                            BgpMessage::KeepAlive(_) => {}
                         }
                     }
-                }
-            }
+                    BgpMessage::Notification(_) => {}
+                    BgpMessage::KeepAlive(_) => {}
+                },
+            },
         }
     }
 }
