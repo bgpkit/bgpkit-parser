@@ -50,6 +50,8 @@ criterion = {version= "0.4.0", features=["html_reports"]}
 rayon = "1.5.1"
 ureq = "2.6.2"
 bzip2 = "0.4"
+md5 = "0.7.0"
+which = "4.4.0"
 
 [features]
 default = ["build-binary"]
