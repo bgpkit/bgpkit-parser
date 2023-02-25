@@ -39,7 +39,7 @@ const RECORD_LIMIT: usize = 100_000;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let update_data = data_source::test_data_file("update-example.gz");
-    let rib_data = data_source::test_data_file("rib-example.bz2");
+    let rib_data = data_source::test_data_file("rib-example-small.bz2");
 
     let updates_reader = BufReader::new(File::open(update_data).unwrap());
     let rib_reader = BufReader::new(File::open(rib_data).unwrap());

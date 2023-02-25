@@ -141,7 +141,7 @@ fn benchmark(c: &mut Criterion) {
 
     update_group.finish();
 
-    let rib_data = data_source::test_data_file("rib-example.bz2");
+    let rib_data = data_source::test_data_file("rib-example-small.bz2");
     let mut rib_group = c.benchmark_group("rib-data.bz2");
 
     // The file is fairly large when decompressed, so we only do a couple iterations

@@ -13,7 +13,7 @@ use std::sync::Once;
 /// available.
 pub const DATA_SOURCES: &[(&str, &str)] = &[
     (
-        "https://spaces.bgpkit.org/parser/rib-example.bz2",
+        "https://spaces.bgpkit.org/parser/rib-example-small.bz2",
         "c6dbc2125ec198d24702e57b28d9ca38",
     ),
     (
