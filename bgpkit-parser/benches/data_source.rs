@@ -14,7 +14,7 @@ use std::sync::Once;
 pub const DATA_SOURCES: &[(&str, &str)] = &[
     (
         "https://spaces.bgpkit.org/parser/rib-example-small.bz2",
-        "c6dbc2125ec198d24702e57b28d9ca38",
+        "fb06ea281008c19e479d91433c99c599",
     ),
     (
         "https://spaces.bgpkit.org/parser/update-example.gz",
@@ -71,12 +71,21 @@ pub fn download_test_data() {
             data_file_path.display(),
             url
         );
-        if let Err(e) = download_file(url, &data_file_path) {
-            panic!(
+
+        match download_file(url, &data_file_path) {
+            Ok(download_checksum) => {
+                if &format!("{:x}", download_checksum) != checksum {
+                    println!("MD5 checksum for downloaded file ({:x}) does not match expected checksum ({:?}).", download_checksum, checksum);
+                    println!("Perhaps a different file is being used?");
+
+                    panic!("Unable to find expected test data file")
+                }
+            }
+            Err(e) => panic!(
                 "Failed to download test file {}: {}",
                 data_file_path.display(),
                 e
-            )
+            ),
         }
     }
 }
@@ -89,15 +98,37 @@ fn md5_checksum_for_file<P: AsRef<Path>>(path: P) -> io::Result<Digest> {
     Ok(context.compute())
 }
 
-fn download_file<P: AsRef<Path>>(url: &str, target: P) -> io::Result<()> {
+struct HashingWriter<W> {
+    writer: W,
+    hasher: md5::Context,
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let length = self.writer.write(buf)?;
+        self.hasher.write_all(&buf[..length])?;
+        Ok(length)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+fn download_file<P: AsRef<Path>>(url: &str, target: P) -> io::Result<Digest> {
     let response = ureq::get(url)
         .call()
         .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
 
-    let mut file = BufWriter::new(File::create(target)?);
-    io::copy(&mut response.into_reader(), &mut file)?;
+    let mut writer = HashingWriter {
+        writer: BufWriter::new(File::create(target)?),
+        hasher: md5::Context::new(),
+    };
 
-    file.flush()
+    io::copy(&mut response.into_reader(), &mut writer)?;
+    writer.flush()?;
+
+    Ok(writer.hasher.compute())
 }
 
 pub fn test_data_dir() -> PathBuf {
