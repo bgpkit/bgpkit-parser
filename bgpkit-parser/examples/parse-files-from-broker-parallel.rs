@@ -1,4 +1,4 @@
-use bgpkit_broker::{BgpkitBroker, QueryParams};
+use bgpkit_broker::BgpkitBroker;
 use bgpkit_parser::BgpkitParser;
 use rayon::prelude::*;
 
@@ -8,15 +8,10 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // retrieve 10 files from broker within the time period.
-    let broker = BgpkitBroker::new_with_params(
-        "https://api.broker.bgpkit.com/v1",
-        QueryParams {
-            start_ts: Some(1634693400),
-            end_ts: Some(1634693400),
-            page: 1,
-            ..Default::default()
-        },
-    );
+    let broker = BgpkitBroker::new()
+        .ts_start("1634693400")
+        .ts_end("1634693400")
+        .page(1);
 
     let file_urls: Vec<String> = broker.into_iter().take(10).map(|x| x.url).collect();
 
