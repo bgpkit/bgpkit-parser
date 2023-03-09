@@ -57,36 +57,31 @@ The example below shows a relatively more interesting example that does the foll
 ```no_run
 use bgpkit_parser::{BgpkitParser, BgpElem};
 
-// set broker query parameters
-let broker = bgpkit_broker::BgpkitBroker::new_with_params(
-   "https://api.broker.bgpkit.com/v1",
-   bgpkit_broker::QueryParams{
-       start_ts: Some(1634693400),
-       end_ts: Some(1634693400),
-       page: 1,
-       ..Default::default()
-});
+let broker = bgpkit_broker::BgpkitBroker::new()
+    .ts_start("1634693400")
+    .ts_end("1634693400")
+    .page(1);
 
-// loop through data files found by broker
-for item in broker {
-
-    // create a parser that takes an URL and automatically determine
-    // the file location and file type, and handles data download and
-    // decompression streaming intelligently
+for item in broker.into_iter().take(2) {
+    log::info!("downloading updates file: {}", &item.url);
     let parser = BgpkitParser::new(item.url.as_str()).unwrap();
 
+    log::info!("parsing updates file");
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
-    let elems = parser.into_elem_iter().map(|elem|{
-        if let Some(origins) = &elem.origin_asns {
-            if origins.contains(&13335.into()) {
-                Some(elem)
+    let elems = parser
+        .into_elem_iter()
+        .filter_map(|elem| {
+            if let Some(origins) = &elem.origin_asns {
+                if origins.contains(&13335.into()) {
+                    Some(elem)
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    }).filter_map(|x|x).collect::<Vec<BgpElem>>();
+        })
+        .collect::<Vec<BgpElem>>();
     log::info!("{} elems matches", elems.len());
 }
 ```
