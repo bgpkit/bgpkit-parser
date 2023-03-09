@@ -23,7 +23,7 @@ chrono = "0.4"
 regex = "1"
 byteorder = "1"
 
-bgp-models = {path="../bgp-models"}
+bgp-models = {path="../bgp-models", version="0.9.0"}
 
 # logging
 log="0.4"
