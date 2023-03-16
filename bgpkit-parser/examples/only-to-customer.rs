@@ -1,5 +1,4 @@
 use bgpkit_parser::BgpkitParser;
-use itertools::Itertools;
 
 fn main() {
     for elem in BgpkitParser::new(
@@ -11,15 +10,7 @@ fn main() {
             println!(
                 "OTC found: {} for path {}\n{}\n",
                 &otc,
-                &elem
-                    .as_path
-                    .as_ref()
-                    .unwrap()
-                    .to_u32_vec()
-                    .unwrap()
-                    .iter()
-                    .map(|x| x.to_string())
-                    .join(":"),
+                &elem.as_path.as_ref().unwrap(),
                 &elem
             );
         }
