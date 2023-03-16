@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "./attributes_tests.rs"]
+mod attributes_tests;
+
 use bgp_models::bgp::attributes::*;
 use bgp_models::bgp::community::*;
 use bgp_models::network::*;
@@ -204,13 +208,13 @@ impl AttributeParser {
         };
         let pos_end = input.position() + total_bytes as u64;
         while input.position() < pos_end {
-            let segment = self.parse_as_segment(input, asn_len)?;
+            let segment = self.parse_as_path_segment(input, asn_len)?;
             output.add_segment(segment);
         }
         Ok(AttributeValue::AsPath(output))
     }
 
-    fn parse_as_segment(
+    fn parse_as_path_segment(
         &self,
         input: &mut Cursor<&[u8]>,
         asn_len: &AsnLength,
