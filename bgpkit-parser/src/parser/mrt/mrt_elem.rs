@@ -42,6 +42,7 @@ fn get_relevant_attributes(
     Option<(Asn, IpAddr)>,
     Option<Nlri>,
     Option<Nlri>,
+    Option<u32>,
 ) {
     let mut as_path = None;
     let mut as4_path = None;
@@ -53,6 +54,7 @@ fn get_relevant_attributes(
     let mut aggregator = None;
     let mut announced = None;
     let mut withdrawn = None;
+    let mut otc = None;
 
     let mut communities_vec: Vec<MetaCommunity> = vec![];
 
@@ -83,11 +85,11 @@ fn get_relevant_attributes(
             AttributeValue::Aggregator(v, v2) => aggregator = Some((v, v2)),
             AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
+            AttributeValue::OnlyToCustomer(o) => otc = Some(o),
 
             AttributeValue::OriginatorId(_)
             | AttributeValue::Clusters(_)
-            | AttributeValue::Development(_)
-            | AttributeValue::OnlyToCustomer(_) => {}
+            | AttributeValue::Development(_) => {}
         };
     }
 
@@ -108,6 +110,7 @@ fn get_relevant_attributes(
         aggregator,
         announced,
         withdrawn,
+        otc,
     )
 }
 
@@ -157,6 +160,7 @@ impl Elementor {
             aggregator,
             announced,
             withdrawn,
+            only_to_customer,
         ) = get_relevant_attributes(msg.attributes);
 
         let path = match (as_path, as4_path) {
@@ -187,6 +191,7 @@ impl Elementor {
             atomic,
             aggr_asn: aggregator.as_ref().map(|v| v.0),
             aggr_ip: aggregator.as_ref().map(|v| v.1),
+            only_to_customer,
         }));
 
         if let Some(nlri) = announced {
@@ -206,6 +211,7 @@ impl Elementor {
                 atomic,
                 aggr_asn: aggregator.as_ref().map(|v| v.0),
                 aggr_ip: aggregator.as_ref().map(|v| v.1),
+                only_to_customer,
             }));
         }
 
@@ -225,6 +231,7 @@ impl Elementor {
             atomic: None,
             aggr_asn: None,
             aggr_ip: None,
+            only_to_customer,
         }));
         if let Some(nlri) = withdrawn {
             elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
@@ -243,6 +250,7 @@ impl Elementor {
                 atomic: None,
                 aggr_asn: None,
                 aggr_ip: None,
+                only_to_customer,
             }));
         };
         elems
@@ -273,6 +281,7 @@ impl Elementor {
                     aggregator,
                     _announced,
                     _withdrawn,
+                    only_to_customer,
                 ) = get_relevant_attributes(msg.attributes);
 
                 let origin_asns = match &as_path {
@@ -296,6 +305,7 @@ impl Elementor {
                     atomic,
                     aggr_asn: aggregator.map(|v| v.0),
                     aggr_ip: aggregator.map(|v| v.1),
+                    only_to_customer,
                 });
             }
 
@@ -327,6 +337,7 @@ impl Elementor {
                                 aggregator,
                                 announced,
                                 _withdrawn,
+                                only_to_customer,
                             ) = get_relevant_attributes(e.attributes);
 
                             let path = match (as_path, as4_path) {
@@ -380,6 +391,7 @@ impl Elementor {
                                 atomic,
                                 aggr_asn: aggregator.map(|v| v.0),
                                 aggr_ip: aggregator.map(|v| v.1),
+                                only_to_customer,
                             });
                         }
                     }
