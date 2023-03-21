@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use bgp_models::bgp::BgpElem;
+    use bgp_models::prelude::BgpElem;
     use bgpkit_parser::BgpkitParser;
 
     #[test]

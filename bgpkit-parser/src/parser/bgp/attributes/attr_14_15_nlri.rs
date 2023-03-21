@@ -1,3 +1,4 @@
+use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
 use bgp_models::prelude::*;
@@ -110,24 +111,91 @@ pub fn parse_nlri(
     }
 }
 
-fn parse_mp_next_hop(
-    next_hop_length: u8,
-    input: &mut Cursor<&[u8]>,
-) -> Result<Option<NextHopAddress>, ParserError> {
-    let output = match next_hop_length {
-        0 => None,
-        4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
-        16 => Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
-        32 => Some(NextHopAddress::Ipv6LinkLocal(
-            input.read_ipv6_address()?,
-            input.read_ipv6_address()?,
-        )),
-        v => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid next hop length found: {}",
-                v
-            )));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ipnet::IpNet;
+    use std::net::Ipv4Addr;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_parsing_nlri_simple() {
+        let test_bytes = vec![
+            0x00, 0x01, // address family: IPv4
+            0x01, // safi: unicast
+            0x04, // next hop length: 4
+            0xC0, 0x00, 0x02, 0x01, // next hop: 192.0.2.1
+            0x00, // reserved
+            // NLRI
+            0x18, // 24 bits prefix length
+            0xC0, 0x00, 0x02, // 192.0.2
+        ];
+        let res = parse_nlri(
+            &mut Cursor::new(&test_bytes),
+            &None,
+            &None,
+            &None,
+            true,
+            false,
+            test_bytes.len(),
+        );
+
+        if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
+            dbg!(&nlri);
+            assert_eq!(nlri.afi, Afi::Ipv4);
+            assert_eq!(nlri.safi, Safi::Unicast);
+            assert_eq!(
+                nlri.next_hop,
+                Some(NextHopAddress::Ipv4(
+                    Ipv4Addr::from_str("192.0.2.1").unwrap()
+                ))
+            );
+            assert_eq!(
+                nlri.prefixes,
+                vec![NetworkPrefix::from_str("192.0.2.0/24").unwrap()]
+            );
+        } else {
+            panic!("Unexpected result: {:?}", res);
         }
-    };
-    Ok(output)
+    }
+
+    #[test]
+    fn test_parsing_nlri_add_path() {
+        let test_bytes = vec![
+            0x00, 0x01, // address family: IPv4
+            0x01, // safi: unicast
+            0x04, // next hop length: 4
+            0xC0, 0x00, 0x02, 0x01, // next hop: 192.0.2.1
+            0x00, // reserved
+            // NLRI
+            0x00, 0x00, 0x00, 0x7B, // path_id: 123
+            0x18, // 24 bits prefix length
+            0xC0, 0x00, 0x02, // 192.0.2
+        ];
+        let res = parse_nlri(
+            &mut Cursor::new(&test_bytes),
+            &None,
+            &None,
+            &None,
+            true,
+            true,
+            test_bytes.len(),
+        );
+
+        if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
+            assert_eq!(nlri.afi, Afi::Ipv4);
+            assert_eq!(nlri.safi, Safi::Unicast);
+            assert_eq!(
+                nlri.next_hop,
+                Some(NextHopAddress::Ipv4(
+                    Ipv4Addr::from_str("192.0.2.1").unwrap()
+                ))
+            );
+            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), 123);
+            assert_eq!(nlri.prefixes[0], prefix);
+            assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
+        } else {
+            panic!("Unexpected result: {:?}", res);
+        }
+    }
 }

@@ -1,8 +1,14 @@
+//! BGP Extended Communities Attribute
+//!
+//! RFC4360: <https://datatracker.ietf.org/doc/html/rfc4360#section-4.5>
+//! IANA Codes: <https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml>
+
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bgp_models::prelude::*;
 use num_traits::FromPrimitive;
 use std::io::Cursor;
+
 use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(
@@ -175,4 +181,147 @@ pub fn parse_ipv6_extended_community(
         communities.push(ec);
     }
     Ok(AttributeValue::ExtendedCommunities(communities))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+
+    // TransitiveTwoOctetAsSpecific = 0x00,
+    // TransitiveIpv4AddressSpecific = 0x01,
+    // TransitiveFourOctetAsSpecific = 0x02,
+    // TransitiveOpaque = 0x03,
+
+    #[test]
+    fn test_parse_extended_communities_two_octet_as() {
+        let data: Vec<u8> = vec![
+            0x00, // Transitive Two Octet AS Specific
+            0x02, // Route Target
+            0x00, 0x01, // AS 1
+            0x00, 0x00, 0x00, 0x01, // Local Admin 1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::TransitiveTwoOctetAsSpecific(community) = &communities[0] {
+                assert_eq!(community.ec_type, 0x00);
+                assert_eq!(community.ec_subtype, 0x02);
+                assert_eq!(community.global_administrator.asn, 1);
+                assert_eq!(community.local_administrator, [0x00, 0x00, 0x00, 0x01]);
+            } else {
+                panic!("Unexpected community type");
+            }
+        } else {
+            panic!("Unexpected attribute type");
+        }
+    }
+
+    #[test]
+    fn test_parse_extended_communities_ipv4() {
+        let data: Vec<u8> = vec![
+            0x01, // Transitive IPv4 Address Specific
+            0x02, // Route Target
+            0xC0, 0x00, 0x02, 0x01, // ipv4: 192.0.2.1
+            0x00, 0x01, // Local Admin 1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::TransitiveIpv4AddressSpecific(community) = &communities[0] {
+                assert_eq!(community.ec_type, 0x01);
+                assert_eq!(community.ec_subtype, 0x02);
+                assert_eq!(community.global_administrator, Ipv4Addr::new(192, 0, 2, 1));
+                assert_eq!(community.local_administrator, [0x00, 0x01]);
+            } else {
+                panic!("Unexpected community type");
+            }
+        } else {
+            panic!("Unexpected attribute type");
+        }
+    }
+
+    #[test]
+    fn test_parse_extended_communities_four_octet_as() {
+        let data: Vec<u8> = vec![
+            0x02, // Transitive Four Octet AS Specific
+            0x02, // Route Target
+            0x00, 0x00, 0x00, 0x01, // AS 1
+            0x00, 0x01, // Local Admin 1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::TransitiveFourOctetAsSpecific(community) = &communities[0] {
+                assert_eq!(community.ec_type, 0x02);
+                assert_eq!(community.ec_subtype, 0x02);
+                assert_eq!(community.global_administrator.asn, 1);
+                assert_eq!(community.local_administrator, [0x00, 0x01]);
+            } else {
+                panic!("Unexpected community type");
+            }
+        } else {
+            panic!("Unexpected attribute type");
+        }
+    }
+
+    #[test]
+    fn test_parse_extended_communities_opaque() {
+        let data: Vec<u8> = vec![
+            0x03, // Transitive Opaque
+            0x02, // Route Target
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, // Opaque
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::TransitiveOpaque(community) = &communities[0] {
+                assert_eq!(community.ec_type, 0x03);
+                assert_eq!(community.ec_subtype, 0x02);
+                assert_eq!(community.value, [0x00, 0x01, 0x02, 0x03, 0x04, 0x05]);
+            } else {
+                panic!("Unexpected community type");
+            }
+        } else {
+            panic!("Unexpected attribute type");
+        }
+    }
+
+    #[test]
+    fn test_parse_extended_communities_ipv6() {
+        let data: Vec<u8> = vec![
+            0x40, // Transitive IPv6 Address Specific
+            0x02, // Route Target
+            0x20, 0x01, 0x0D, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, // ipv6: 2001:db8::1
+            0x00, 0x01, // Local Admin 1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_ipv6_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::Ipv6AddressSpecific(community) = &communities[0] {
+                assert_eq!(community.ec_type, 0x40);
+                assert_eq!(community.ec_subtype, 0x02);
+                assert_eq!(
+                    community.global_administrator,
+                    Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)
+                );
+                assert_eq!(community.local_administrator, [0x00, 0x01]);
+            } else {
+                panic!("Unexpected community type");
+            }
+        } else {
+            panic!("Unexpected attribute type");
+        }
+    }
 }

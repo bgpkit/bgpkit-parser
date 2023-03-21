@@ -48,3 +48,30 @@ pub fn parse_regular_communities(
     );
     Ok(AttributeValue::Communities(communities))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test parsing of communities values, as defined in RFC1997.
+    #[test]
+    fn test_parse_communities() {
+        if let Ok(AttributeValue::Communities(communities)) = parse_regular_communities(
+            &mut Cursor::new(&[
+                0xFF, 0xFF, 0xFF, 0x01, // NoExport
+                0xFF, 0xFF, 0xFF, 0x02, // NoAdvertise
+                0xFF, 0xFF, 0xFF, 0x03, // NoExportSubConfed
+                0x00, 0x7B, 0x01, 0xC8, // Custom(123, 456)
+            ]),
+            16,
+        ) {
+            assert_eq!(communities.len(), 4);
+            assert_eq!(communities[0], Community::NoExport);
+            assert_eq!(communities[1], Community::NoAdvertise);
+            assert_eq!(communities[2], Community::NoExportSubConfed);
+            assert_eq!(communities[3], Community::Custom(Asn::from(123), 456));
+        } else {
+            panic!("parsing error");
+        }
+    }
+}

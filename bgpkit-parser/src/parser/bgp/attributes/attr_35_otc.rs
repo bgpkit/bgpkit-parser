@@ -23,3 +23,18 @@ pub fn parse_only_to_customer(input: &mut Cursor<&[u8]>) -> Result<AttributeValu
     let remote_asn = input.read_32b()?;
     Ok(AttributeValue::OnlyToCustomer(remote_asn))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_otc() {
+        if let Ok(AttributeValue::OnlyToCustomer(123)) =
+            parse_only_to_customer(&mut Cursor::new(&[0, 0, 0, 123]))
+        {
+        } else {
+            panic!("parsing error")
+        }
+    }
+}

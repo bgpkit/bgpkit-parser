@@ -1,5 +1,4 @@
-use bgp_models::bgp::{AttributeValue, BgpMessage};
-use bgp_models::mrt::{Bgp4Mp, MrtMessage};
+use bgp_models::prelude::*;
 use bgpkit_parser::BgpkitParser;
 
 /// an very simple example that reads a remote BGP data file and print out the message count.
