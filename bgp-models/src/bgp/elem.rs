@@ -30,6 +30,15 @@ impl Serialize for ElemType {
     }
 }
 
+impl ElemType {
+    pub fn is_announce(&self) -> bool {
+        match self {
+            ElemType::ANNOUNCE => true,
+            ElemType::WITHDRAW => false,
+        }
+    }
+}
+
 /// BgpElem represents per-prefix BGP element.
 ///
 /// The information is for per announced/withdrawn prefix.
