@@ -1,8 +1,7 @@
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bgp_models::bgp::BgpUpdateMessage;
-use bgp_models::network::AsnLength;
+use bgp_models::prelude::*;
 use num_traits::FromPrimitive;
 use std::io::Cursor;
 

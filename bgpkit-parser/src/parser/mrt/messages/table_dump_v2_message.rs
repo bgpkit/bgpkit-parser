@@ -1,9 +1,6 @@
 use crate::error::ParserError;
 use crate::parser::{AttributeParser, ReadUtils};
-use bgp_models::mrt::tabledump::{
-    Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
-};
-use bgp_models::network::*;
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use log::warn;
 use num_traits::FromPrimitive;

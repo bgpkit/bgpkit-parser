@@ -8,7 +8,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use log::debug;
 use num_traits::FromPrimitive;

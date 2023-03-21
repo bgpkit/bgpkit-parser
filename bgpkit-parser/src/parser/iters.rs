@@ -5,7 +5,7 @@ use crate::error::ParserError;
 use crate::parser::BgpkitParser;
 use crate::Filterable;
 use crate::{BgpElem, Elementor};
-use bgp_models::mrt::{MrtMessage, MrtRecord, TableDumpV2Message};
+use bgp_models::prelude::*;
 use log::{error, warn};
 use std::io::Read;
 

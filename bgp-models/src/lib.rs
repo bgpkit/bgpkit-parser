@@ -52,10 +52,10 @@ RFCs. Here is a list of them:
 
 #![allow(dead_code)]
 
-pub mod bgp;
-pub mod err;
-pub mod mrt;
-pub mod network;
+mod bgp;
+mod err;
+mod mrt;
+mod network;
 pub mod prelude;
 
 #[macro_use]

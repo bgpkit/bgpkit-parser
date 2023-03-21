@@ -43,10 +43,8 @@ use crate::parser::rislive::messages::ris_message::path_to_as_path;
 use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
 use crate::BgpElem;
-use bgp_models::bgp::attributes::Origin::{EGP, IGP, INCOMPLETE};
-use bgp_models::bgp::community::Community;
-use bgp_models::bgp::{ElemType, MetaCommunity};
-use bgp_models::network::{Asn, NetworkPrefix};
+use bgp_models::prelude::Origin::{EGP, IGP, INCOMPLETE};
+use bgp_models::prelude::*;
 use ipnet::IpNet;
 use std::net::IpAddr;
 

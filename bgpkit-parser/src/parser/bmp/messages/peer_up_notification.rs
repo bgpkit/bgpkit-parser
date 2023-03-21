@@ -1,8 +1,7 @@
 use crate::parser::bgp::messages::parse_bgp_open_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bgp_models::bgp::BgpOpenMessage;
-use bgp_models::network::Afi;
+use bgp_models::prelude::*;
 use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
 

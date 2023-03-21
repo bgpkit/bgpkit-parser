@@ -3,7 +3,7 @@ use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
     ReadUtils,
 };
-use bgp_models::mrt::{CommonHeader, EntryType, MrtMessage, MrtRecord};
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use num_traits::FromPrimitive;
 use std::io::{ErrorKind, Read};

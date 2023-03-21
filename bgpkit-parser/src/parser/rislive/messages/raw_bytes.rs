@@ -1,8 +1,7 @@
 use crate::parser::bgp::parse_bgp_message;
 use crate::parser::rislive::error::ParserRisliveError;
 use crate::{BgpElem, Elementor};
-use bgp_models::mrt::{Bgp4MpType, CommonHeader, EntryType, MrtMessage, MrtRecord};
-use bgp_models::network::{Afi, AsnLength};
+use bgp_models::prelude::*;
 use serde_json::Value;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -60,18 +59,16 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let record = MrtRecord {
         common_header: header,
-        message: MrtMessage::Bgp4Mp(bgp_models::mrt::bgp4mp::Bgp4Mp::Bgp4MpMessage(
-            bgp_models::mrt::bgp4mp::Bgp4MpMessage {
-                msg_type: Bgp4MpType::Bgp4MpMessageAs4,
-                peer_asn,
-                local_asn: 0.into(),
-                interface_index: 0,
-                afi,
-                peer_ip,
-                local_ip: IpAddr::from_str("0.0.0.0").unwrap(),
-                bgp_message: bgp_msg,
-            },
-        )),
+        message: MrtMessage::Bgp4Mp(Bgp4Mp::Bgp4MpMessage(Bgp4MpMessage {
+            msg_type: Bgp4MpType::Bgp4MpMessageAs4,
+            peer_asn,
+            local_asn: 0.into(),
+            interface_index: 0,
+            afi,
+            peer_ip,
+            local_ip: IpAddr::from_str("0.0.0.0").unwrap(),
+            bgp_message: bgp_msg,
+        })),
     };
     Ok(Elementor::new().record_to_elems(record))
 }
