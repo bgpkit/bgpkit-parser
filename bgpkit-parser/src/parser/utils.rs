@@ -8,7 +8,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use bgp_models::network::{Afi, Asn, AsnLength, NetworkPrefix, Safi};
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use log::debug;
 use num_traits::FromPrimitive;
@@ -88,7 +88,7 @@ pub trait ReadUtils: io::Read {
     fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserError> {
         match as_length {
             AsnLength::Bits16 => {
-                let asn = self.read_u16::<BE>()? as u32;
+                let asn = self.read_16b()? as u32;
                 Ok(Asn {
                     asn,
                     len: AsnLength::Bits16,

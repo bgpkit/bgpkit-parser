@@ -1,5 +1,4 @@
-use bgp_models::bgp::*;
-use bgp_models::network::*;
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use num_traits::FromPrimitive;
 use std::io::{Cursor, Seek, SeekFrom};

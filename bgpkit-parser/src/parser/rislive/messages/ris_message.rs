@@ -1,6 +1,5 @@
-use bgp_models::bgp::attributes::AsPath;
-use bgp_models::bgp::attributes::AsPathSegment::{AsSequence, AsSet};
-use bgp_models::network::Asn;
+use bgp_models::prelude::AsPathSegment::{AsSequence, AsSet};
+use bgp_models::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

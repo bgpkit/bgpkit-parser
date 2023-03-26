@@ -1,9 +1,7 @@
 use crate::error::ParserError;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use bgp_models::bgp::BgpMessage;
-use bgp_models::mrt::bgp4mp::{Bgp4Mp, Bgp4MpMessage, Bgp4MpStateChange, Bgp4MpType, BgpState};
-use bgp_models::network::{Afi, Asn, AsnLength};
+use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use num_traits::FromPrimitive;
 use std::io::Cursor;
