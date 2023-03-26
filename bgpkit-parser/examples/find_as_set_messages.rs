@@ -1,4 +1,4 @@
-use bgp_models::bgp::AsPathSegment;
+use bgp_models::prelude::AsPathSegment;
 use bgpkit_broker::BgpkitBroker;
 use bgpkit_parser::BgpkitParser;
 use rayon::prelude::*;
