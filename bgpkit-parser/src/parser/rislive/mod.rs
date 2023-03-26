@@ -191,6 +191,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                     atomic: None,
                                     aggr_asn: bgp_aggregator.0,
                                     aggr_ip: bgp_aggregator.1,
+                                    only_to_customer: None,
                                 });
                             }
                         }

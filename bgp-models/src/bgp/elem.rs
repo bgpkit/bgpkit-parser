@@ -30,6 +30,15 @@ impl Serialize for ElemType {
     }
 }
 
+impl ElemType {
+    pub fn is_announce(&self) -> bool {
+        match self {
+            ElemType::ANNOUNCE => true,
+            ElemType::WITHDRAW => false,
+        }
+    }
+}
+
 /// BgpElem represents per-prefix BGP element.
 ///
 /// The information is for per announced/withdrawn prefix.
@@ -54,6 +63,7 @@ pub struct BgpElem {
     pub atomic: Option<AtomicAggregate>,
     pub aggr_asn: Option<Asn>,
     pub aggr_ip: Option<IpAddr>,
+    pub only_to_customer: Option<u32>,
 }
 
 impl Eq for BgpElem {}
@@ -111,6 +121,7 @@ impl Default for BgpElem {
             atomic: None,
             aggr_asn: None,
             aggr_ip: None,
+            only_to_customer: None,
         }
     }
 }
