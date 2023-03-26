@@ -85,6 +85,21 @@ pub enum AttrType {
     DEVELOPMENT = 255,
 }
 
+pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
+    match attr_type {
+        11 => Some("DPA"),
+        12 => Some("ADVERTISER"),
+        13 => Some("RCID_PATH"),
+        19 => Some("SAFI Specific Attribute"),
+        20 => Some("Connector Attribute"),
+        21 => Some("AS_PATHLIMIT"),
+        28 => Some("BGP Entropy Label Capability"),
+        30 | 31 | 129 | 241 | 242 | 243 => Some("RFC8093"),
+
+        _ => None,
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
 pub enum Origin {

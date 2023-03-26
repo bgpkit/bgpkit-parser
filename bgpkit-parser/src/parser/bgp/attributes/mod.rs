@@ -102,14 +102,12 @@ impl AttributeParser {
                 None => {
                     // input.read_and_drop_n_bytes(length)?;
                     input.seek(SeekFrom::Current(length as i64))?;
-                    return match attr_type {
-                        11 | 12 | 13 | 19 | 20 | 21 | 28 | 30 | 31 | 129 | 241..=243 => {
-                            Err(ParserError::DeprecatedAttr(format!(
-                                "deprecated attribute type: {}",
-                                attr_type
-                            )))
-                        }
-                        _ => Err(ParserError::UnknownAttr(format!(
+                    return match get_deprecated_attr_type(attr_type) {
+                        Some(t) => Err(ParserError::DeprecatedAttr(format!(
+                            "deprecated attribute type: {} - {}",
+                            attr_type, t
+                        ))),
+                        None => Err(ParserError::UnknownAttr(format!(
                             "unknown attribute type: {}",
                             attr_type
                         ))),
