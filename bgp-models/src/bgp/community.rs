@@ -19,6 +19,12 @@ pub enum Community {
     Custom(Asn, u16),
 }
 
+/// Large community structure as defined in [RFC8092](https://datatracker.ietf.org/doc/html/rfc8092)
+///
+/// ## Display
+///
+/// Large community is displayed as `lg:GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`, where `lg`
+/// is a prefix for large community.
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub struct LargeCommunity {
     pub global_administrator: u32,
