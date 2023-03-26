@@ -289,3 +289,33 @@ pub fn parse_nlri_list(
 
 // All types that implement Read can now read prefixes
 impl<R: io::Read> ReadUtils for R {}
+
+/// A CRC32 implementation that converts a string to a hex string.
+///
+/// CRC32 is a checksum algorithm that is used to verify the integrity of data. It is short in
+/// length and sufficient for generating unique file names based on remote URLs.
+pub fn crc32(input: &str) -> String {
+    let input_bytes = input.as_bytes();
+    let mut table = [0u32; 256];
+    let polynomial = 0xedb88320u32;
+
+    for i in 0..256 {
+        let mut crc = i as u32;
+        for _ in 0..8 {
+            if crc & 1 == 1 {
+                crc = (crc >> 1) ^ polynomial;
+            } else {
+                crc >>= 1;
+            }
+        }
+        table[i as usize] = crc;
+    }
+
+    let mut crc = !0u32;
+    for byte in input_bytes.iter() {
+        let index = ((crc ^ (*byte as u32)) & 0xff) as usize;
+        crc = (crc >> 8) ^ table[index];
+    }
+
+    format!("{:08x}", !crc)
+}
