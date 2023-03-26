@@ -16,6 +16,10 @@ struct Opts {
     #[clap(name = "FILE")]
     file_path: PathBuf,
 
+    /// Set the cache directory for caching remote files. Default behavior does not enable caching.
+    #[clap(short, long)]
+    cache_dir: Option<PathBuf>,
+
     /// Output as JSON objects
     #[clap(long)]
     json: bool,
@@ -84,7 +88,12 @@ fn main() {
 
     env_logger::init();
 
-    let mut parser = BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap();
+    let mut parser = match opts.cache_dir {
+        None => BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap(),
+        Some(c) => {
+            BgpkitParser::new_cached(opts.file_path.to_str().unwrap(), c.to_str().unwrap()).unwrap()
+        }
+    };
 
     if let Some(v) = opts.filters.as_path {
         parser = parser.add_filter("as_path", v.as_str()).unwrap();
