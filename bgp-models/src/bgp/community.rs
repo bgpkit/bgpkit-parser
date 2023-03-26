@@ -19,6 +19,12 @@ pub enum Community {
     Custom(Asn, u16),
 }
 
+/// Large community structure as defined in [RFC8092](https://datatracker.ietf.org/doc/html/rfc8092)
+///
+/// ## Display
+///
+/// Large community is displayed as `lg:GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`, where `lg`
+/// is a prefix for large community.
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub struct LargeCommunity {
     pub global_administrator: u32,
@@ -53,10 +59,12 @@ pub enum ExtendedCommunityType {
 
 /// Extended Communities.
 ///
+/// ## Overview  
+///
 /// It is a 8-octet data that has flexible definition based on the types:
 /// <https://datatracker.ietf.org/doc/html/rfc4360>
 ///
-/// For more up-to-date definitions, see [IANA' website](https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml#e-tree-flags).
+/// For more up-to-date definitions, see [IANA' website](https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml).
 ///
 /// ```text
 ///    Each Extended Community is encoded as an 8-octet quantity, as
@@ -76,6 +84,16 @@ pub enum ExtendedCommunityType {
 ///       (*) Present for Extended types only, used for the Value field
 ///           otherwise.
 /// ```
+///
+/// ## Display
+///
+/// When output, the extended communities has the following string prefixes to indicate the sub type:
+/// - `ecas2:` stands for `Extended Community AS Specific 2-octet`
+/// - `ecas4:` stands for `Extended Community AS Specific 4-octet`
+/// - `ecv4:` stands for `Extended Community IPv4 Specific`
+/// - `ecv6:` stands for `Extended Community IPv6 Specific`
+/// - `ecop:` stands for `Extended Community Opaque`
+/// - `ecraw:` stands for `Extended Community Raw`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ExtendedCommunity {
     TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific),
