@@ -9,13 +9,13 @@
 | Next Hop                 | [RFC4271][rfc4271] | 3     | Yes       |
 | Multi Exit Discriminator | [RFC4271][rfc4271] | 4     | Yes       |
 | Local Preference         | [RFC4271][rfc4271] | 5     | Yes       |
-| Atomic Aggregate         | [RFC4271][rfc4271] | 6     | YES       |
+| Atomic Aggregate         | [RFC4271][rfc4271] | 6     | Yes       |
 | Aggregate                | [RFC4271][rfc4271] | 7,18  | Yes       |
 | Community                | [RFC1997][rfc1997] | 8     | Yes       |
 | Originator ID            | [RFC4456][rfc4456] | 9     | Yes       |
 | Cluster List             | [RFC4456][rfc4456] | 10,13 | Yes       |
 | MP NLRI                  | [RFC4760][rfc4760] | 14,15 | Yes       |
-| Extended Community       | [RFC4360][rfc4360] | 16,25 | YES       |
+| Extended Community       | [RFC4360][rfc4360] | 16,25 | Yes       |
 | Large Community          | [RFC8092][rfc8092] | 32    | Yes       |
 | Only To Customer         | [RFC9234][rfc9234] | 35    | Yes       |
 
