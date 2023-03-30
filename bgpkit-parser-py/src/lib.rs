@@ -68,8 +68,15 @@ fn pybgpkit_parser(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pymethods]
     impl Parser {
         #[new]
-        fn new(url: String, filters: Option<HashMap<String, String>>) -> PyResult<Self> {
-            let mut parser = BgpkitParser::new(url.as_str()).unwrap();
+        fn new(
+            url: String,
+            filters: Option<HashMap<String, String>>,
+            cache_dir: Option<String>,
+        ) -> PyResult<Self> {
+            let mut parser = match cache_dir {
+                None => BgpkitParser::new(url.as_str()).unwrap(),
+                Some(dir) => BgpkitParser::new_cached(url.as_str(), dir.as_str()).unwrap(),
+            };
 
             if let Some(filters) = filters {
                 for (k, v) in filters {
