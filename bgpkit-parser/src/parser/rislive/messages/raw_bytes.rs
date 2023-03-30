@@ -139,7 +139,6 @@ mod tests {
         "#;
 
         let res = parse_raw_bytes(message);
-        dbg!(&res);
         for elem in res.unwrap() {
             println!("{}", elem);
         }

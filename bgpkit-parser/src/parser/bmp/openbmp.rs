@@ -145,7 +145,6 @@ mod tests {
         let input = "4f424d500107006400000033800c6184b9c2000c602cbf4f072f3ae149d23486024bc3dadfc4000a69732d63632d626d7031c677060bdd020a9e92be000200de2e3180df3369000000000000000000000000000c726f7574652d76696577733500000001030000003302000000000000000000000000000000000000000000003fda060e00000da30000000061523c36000c0e1c0200000a";
         let decoded = hex::decode(input).unwrap();
         let mut reader = Cursor::new(decoded.as_slice());
-        let header = parse_openbmp_header(&mut reader).unwrap();
-        dbg!(header);
+        let _header = parse_openbmp_header(&mut reader).unwrap();
     }
 }

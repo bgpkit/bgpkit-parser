@@ -141,7 +141,6 @@ mod tests {
         );
 
         if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
-            dbg!(&nlri);
             assert_eq!(nlri.afi, Afi::Ipv4);
             assert_eq!(nlri.safi, Safi::Unicast);
             assert_eq!(

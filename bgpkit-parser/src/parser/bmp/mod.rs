@@ -115,8 +115,7 @@ mod tests {
         let decoded = hex::decode(input).unwrap();
         let mut reader = Cursor::new(decoded.as_slice());
         let _header = parse_openbmp_header(&mut reader).unwrap();
-        let msg = parse_bmp_msg(&mut reader).unwrap();
-        dbg!(msg);
+        let _msg = parse_bmp_msg(&mut reader).unwrap();
     }
 
     #[test]
@@ -125,7 +124,6 @@ mod tests {
         let decoded = hex::decode(input).unwrap();
         let mut reader = Cursor::new(decoded.as_slice());
         let _header = parse_openbmp_header(&mut reader).unwrap();
-        let msg = parse_bmp_msg(&mut reader).unwrap();
-        dbg!(msg);
+        let _msg = parse_bmp_msg(&mut reader).unwrap();
     }
 }

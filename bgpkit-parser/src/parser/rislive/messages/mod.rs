@@ -79,7 +79,6 @@ mod tests {
     #[test]
     fn test_deserialize_pong() {
         let msg_str = r#"{"type":"pong","data":null}"#;
-        let pong_msg: RisLiveMessage = serde_json::from_str(msg_str).unwrap();
-        dbg!(pong_msg);
+        let _pong_msg: RisLiveMessage = serde_json::from_str(msg_str).unwrap();
     }
 }
