@@ -77,6 +77,26 @@ maturin publish --interpreter python3.10 --skip-existing
 maturin publish --interpreter python3.11 --skip-existing
 ```
 
+#### Using docker
+
+```
+docker build -t bgpkit-builder:latest .
+docker run --rm -it bgpkit-builder:latest bash
+
+####
+# TODO: copy the content of .pypirc to the root folder
+####
+git clone https://github.com/bgpkit/bgpkit-parser.git
+cd bgpkit-parser/bgpkit-parser-py
+
+maturin publish --interpreter python3.7 --skip-existing
+maturin publish --interpreter python3.8 --skip-existing
+maturin publish --interpreter python3.9 --skip-existing
+maturin publish --interpreter python3.10 --skip-existing
+maturin publish --interpreter python3.11 --skip-existing
+
+```
+
 ### Publish for MacOS
 
 ```bash
