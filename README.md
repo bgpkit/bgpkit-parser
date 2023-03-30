@@ -371,10 +371,6 @@ We support normal communities, extended communities, and large communities.
 
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 
-## Minimum Supported Rust Version (MSRV)
-
-`1.48.0`
-
 ## Contribution
 
 Issues and pull requests are welcome!

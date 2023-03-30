@@ -10,10 +10,6 @@ description = """
 A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
-rust-version = "1.48.0"
-
-[package.metadata]
-msrv = "1.48.0"
 
 [dependencies]
 ipnet = "2.7"
