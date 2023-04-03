@@ -3,9 +3,9 @@
 //! RFC4360: <https://datatracker.ietf.org/doc/html/rfc4360#section-4.5>
 //! IANA Codes: <https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml>
 
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::*;
 use num_traits::FromPrimitive;
 use std::io::Cursor;
 

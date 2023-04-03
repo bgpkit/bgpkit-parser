@@ -316,9 +316,10 @@ extern crate enum_primitive_derive;
 extern crate core;
 
 pub mod error;
+pub mod models;
 pub mod parser;
 
-pub use bgp_models::prelude::*;
+pub use models::BgpElem;
 pub use parser::bmp::parse_bmp_msg;
 pub use parser::bmp::parse_openbmp_header;
 pub use parser::bmp::parse_openbmp_msg;

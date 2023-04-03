@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bgp_models::prelude::*;
 use num_traits::FromPrimitive;
 use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;

@@ -1,5 +1,5 @@
-use bgp_models::prelude::AsPathSegment;
 use bgpkit_broker::BgpkitBroker;
+use bgpkit_parser::models::AsPathSegment;
 use bgpkit_parser::BgpkitParser;
 use rayon::prelude::*;
 use std::collections::HashSet;

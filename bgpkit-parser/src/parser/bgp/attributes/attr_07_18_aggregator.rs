@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::*;
 use std::io::Cursor;
 
 pub fn parse_aggregator(
@@ -20,7 +20,6 @@ pub fn parse_aggregator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bgp_models::prelude::Asn;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 

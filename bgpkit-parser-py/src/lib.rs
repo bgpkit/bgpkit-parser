@@ -1,3 +1,4 @@
+use bgpkit_parser::models::*;
 use bgpkit_parser::*;
 use dict_derive::{FromPyObject, IntoPyObject};
 use pyo3::exceptions::PyValueError;

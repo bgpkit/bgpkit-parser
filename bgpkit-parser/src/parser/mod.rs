@@ -16,8 +16,8 @@ pub(crate) use mrt::{
 };
 
 pub use crate::error::{ParserError, ParserErrorWithBytes};
+use crate::models::MrtRecord;
 use crate::Filter;
-use bgp_models::prelude::MrtRecord;
 pub use mrt::mrt_elem::Elementor;
 use oneio::{get_cache_reader, get_reader};
 

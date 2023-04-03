@@ -1,7 +1,7 @@
+use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
-use bgp_models::prelude::*;
 use log::warn;
 use std::io::Cursor;
 

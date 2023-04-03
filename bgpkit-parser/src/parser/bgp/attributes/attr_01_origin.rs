@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::{AttributeValue, Origin};
 use num_traits::FromPrimitive;
 use std::io::Cursor;
 

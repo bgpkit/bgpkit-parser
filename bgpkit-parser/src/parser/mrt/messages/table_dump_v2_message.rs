@@ -1,6 +1,6 @@
 use crate::error::ParserError;
+use crate::models::*;
 use crate::parser::{AttributeParser, ReadUtils};
-use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use log::warn;
 use num_traits::FromPrimitive;

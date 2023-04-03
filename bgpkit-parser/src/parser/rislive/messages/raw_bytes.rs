@@ -1,7 +1,7 @@
+use crate::models::*;
 use crate::parser::bgp::parse_bgp_message;
 use crate::parser::rislive::error::ParserRisliveError;
-use crate::{BgpElem, Elementor};
-use bgp_models::prelude::*;
+use crate::Elementor;
 use serde_json::Value;
 use std::net::IpAddr;
 use std::str::FromStr;

@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::*;
 use log::debug;
 use std::io::Cursor;
 

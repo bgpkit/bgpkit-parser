@@ -1,5 +1,4 @@
-use crate::network::Asn;
-use enum_primitive_derive::Primitive;
+use crate::models::Asn;
 use serde::Serialize;
 use std::fmt::Formatter;
 use std::net::{Ipv4Addr, Ipv6Addr};

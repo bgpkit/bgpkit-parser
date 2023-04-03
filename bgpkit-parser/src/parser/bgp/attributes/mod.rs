@@ -16,7 +16,7 @@ use byteorder::{ReadBytesExt, BE};
 use log::{debug, warn};
 use std::io::{Cursor, Seek, SeekFrom};
 
-use bgp_models::prelude::*;
+use crate::models::*;
 use num_traits::FromPrimitive;
 
 use crate::error::ParserError;

@@ -1,6 +1,5 @@
 //! MRT BGP4MP structs
-use crate::bgp::BgpMessage;
-use crate::network::{Afi, Asn};
+use crate::models::*;
 use serde::Serialize;
 use std::net::IpAddr;
 

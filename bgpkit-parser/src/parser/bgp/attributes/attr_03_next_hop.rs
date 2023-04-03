@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::*;
 use std::io::Cursor;
 
 pub fn parse_next_hop(

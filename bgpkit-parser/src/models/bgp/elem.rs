@@ -1,6 +1,4 @@
-use crate::bgp::attributes::{AsPath, AtomicAggregate, Origin};
-use crate::bgp::community::*;
-use crate::network::{Asn, NetworkPrefix};
+use crate::models::*;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use std::cmp::Ordering;

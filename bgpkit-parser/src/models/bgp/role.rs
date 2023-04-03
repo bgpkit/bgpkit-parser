@@ -69,7 +69,7 @@ pub fn validate_role_pairs(local_role: &BgpRole, remote_role: &BgpRole) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgp::BgpRole::*;
+    use crate::models::BgpRole::*;
 
     #[test]
     fn test_bgp_role_validation() {
