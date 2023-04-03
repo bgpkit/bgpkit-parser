@@ -1,7 +1,7 @@
 use crate::error::*;
+use crate::models::*;
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
-use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use std::io::Cursor;
 use std::net::IpAddr;

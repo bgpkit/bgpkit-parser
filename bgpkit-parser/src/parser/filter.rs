@@ -51,9 +51,9 @@ Currently, only [BgpElem] implements the filtering capability. Support for [MrtR
 later releases.
 
 */
+use crate::models::*;
 use crate::ParserError;
 use crate::ParserError::FilterError;
-use bgp_models::prelude::*;
 use ipnet::IpNet;
 use regex::Regex;
 use std::net::IpAddr;
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_prefix_match() {
-        // networks
+        // network
         let p1 = IpNet::from_str("10.1.1.0/24").unwrap();
         let p1_exact = IpNet::from_str("10.1.1.0/24").unwrap();
         let p1_super = IpNet::from_str("10.1.0.0/16").unwrap();

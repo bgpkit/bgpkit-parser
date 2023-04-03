@@ -4,8 +4,8 @@
 //! Each MRT record may contain reachability information for multiple prefixes. This module breaks
 //! down MRT records into corresponding BGP elements, and thus allowing users to more conveniently
 //! process BGP information on a per-prefix basis.
+use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
-use bgp_models::prelude::*;
 use itertools::Itertools;
 use log::warn;
 use std::collections::HashMap;

@@ -1,7 +1,7 @@
 use crate::error::ParserError;
+use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use bgp_models::prelude::*;
 use byteorder::{ReadBytesExt, BE};
 use num_traits::FromPrimitive;
 use std::io::Cursor;

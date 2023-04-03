@@ -1,6 +1,6 @@
+use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
-use bgp_models::prelude::*;
 
 #[derive(Debug)]
 pub struct RouteMonitoring {

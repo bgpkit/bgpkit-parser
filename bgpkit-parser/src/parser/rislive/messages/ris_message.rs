@@ -1,5 +1,5 @@
-use bgp_models::prelude::AsPathSegment::{AsSequence, AsSet};
-use bgp_models::prelude::*;
+use crate::models::AsPathSegment::{AsSequence, AsSet};
+use crate::models::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -3,11 +3,11 @@
 pub mod bgp4mp;
 pub mod tabledump;
 
-pub use crate::mrt::bgp4mp::*;
-pub use crate::mrt::tabledump::*;
+pub use bgp4mp::*;
 use serde::Serialize;
 use std::io;
 use std::io::Write;
+pub use tabledump::*;
 
 /// MrtRecord is a wrapper struct that contains a header and a message.
 ///

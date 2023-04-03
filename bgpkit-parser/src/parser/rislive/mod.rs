@@ -42,9 +42,7 @@ use crate::parser::rislive::error::ParserRisliveError;
 use crate::parser::rislive::messages::ris_message::path_to_as_path;
 use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
-use crate::BgpElem;
-use bgp_models::prelude::Origin::{EGP, IGP, INCOMPLETE};
-use bgp_models::prelude::*;
+use crate::models::*;
 use ipnet::IpNet;
 use std::net::IpAddr;
 
@@ -118,9 +116,9 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     let bgp_origin = match origin {
                         None => None,
                         Some(o) => Some(match o.as_str() {
-                            "igp" | "IGP" => IGP,
-                            "egp" | "EGP" => EGP,
-                            "incomplete" | "INCOMPLETE" => INCOMPLETE,
+                            "igp" | "IGP" => Origin::IGP,
+                            "egp" | "EGP" => Origin::EGP,
+                            "incomplete" | "INCOMPLETE" => Origin::INCOMPLETE,
                             other => {
                                 return Err(ParserRisliveError::ElemUnknownOriginType(
                                     other.to_string(),

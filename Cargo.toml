@@ -1,2 +1,2 @@
 [workspace]
-members = ["bgp-models", "bgpkit-parser", "bgpkit-parser-py"]
+members = ["bgpkit-parser", "bgpkit-parser-py"]

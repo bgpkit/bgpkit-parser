@@ -7,16 +7,16 @@ pub mod elem;
 pub mod error;
 pub mod role;
 
-pub use crate::bgp::attributes::*;
-pub use crate::bgp::capabilities::*;
-pub use crate::bgp::community::*;
-pub use crate::bgp::elem::*;
-pub use crate::bgp::error::*;
-pub use crate::bgp::role::*;
+pub use attributes::*;
+pub use capabilities::*;
+pub use community::*;
+pub use elem::*;
+pub use error::*;
+pub use role::*;
 
-use crate::bgp::capabilities::BgpCapabilityType;
-use crate::bgp::error::BgpError;
-use crate::network::*;
+use crate::models::network::*;
+use capabilities::BgpCapabilityType;
+use error::BgpError;
 use serde::Serialize;
 use std::net::Ipv4Addr;
 

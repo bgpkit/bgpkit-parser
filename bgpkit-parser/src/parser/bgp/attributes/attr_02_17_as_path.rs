@@ -1,6 +1,7 @@
+use crate::models::attributes::AttributeValue;
+use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bgp_models::prelude::*;
 use std::io::Cursor;
 
 const AS_PATH_AS_SET: u8 = 1;
@@ -47,7 +48,7 @@ fn parse_as_path_segment(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bgp_models::prelude::AttributeValue::AsPath;
+    use crate::models::AttributeValue::AsPath;
 
     ///
     /// ```text

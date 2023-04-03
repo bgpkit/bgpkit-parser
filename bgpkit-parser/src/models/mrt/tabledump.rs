@@ -1,6 +1,5 @@
 //! MRT table dump version 1 and 2 structs
-use crate::bgp::Attribute;
-use crate::network::{Afi, Asn, NetworkPrefix, Safi};
+use crate::models::*;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};

@@ -2,10 +2,9 @@
 Provides parser iterator implementation.
 */
 use crate::error::ParserError;
+use crate::models::*;
 use crate::parser::BgpkitParser;
-use crate::Filterable;
-use crate::{BgpElem, Elementor};
-use bgp_models::prelude::*;
+use crate::{Elementor, Filterable};
 use log::{error, warn};
 use std::io::Read;
 
