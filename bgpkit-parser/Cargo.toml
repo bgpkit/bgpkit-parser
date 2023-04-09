@@ -21,7 +21,6 @@ ipnet = "2.7"
 enum-primitive-derive = "0.2"
 num-traits = "0.2"
 regex = "1"
-byteorder = "1"
 log="0.4"
 itertools = "0.10.1"
 serde={version="1.0.130", features=["derive"]}
