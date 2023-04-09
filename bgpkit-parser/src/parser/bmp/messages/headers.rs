@@ -1,8 +1,8 @@
 use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use bytes::{Buf, Bytes};
 use num_traits::FromPrimitive;
-use std::io::{Cursor, Seek, SeekFrom};
 use std::net::IpAddr;
 
 /// BMP message type enum.
@@ -51,18 +51,16 @@ pub struct BmpCommonHeader {
     pub msg_type: BmpMsgType,
 }
 
-pub fn parse_bmp_common_header(
-    reader: &mut Cursor<&[u8]>,
-) -> Result<BmpCommonHeader, ParserBmpError> {
-    let version = reader.read_8b()?;
+pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, ParserBmpError> {
+    let version = data.read_u8()?;
     if version != 3 {
         // has to be 3 per rfc7854
         return Err(ParserBmpError::CorruptedBmpMessage);
     }
 
-    let msg_len = reader.read_32b()?;
+    let msg_len = data.read_u32()?;
 
-    let msg_type = BmpMsgType::from_u8(reader.read_8b()?).unwrap();
+    let msg_type = BmpMsgType::from_u8(data.read_u8()?).unwrap();
     Ok(BmpCommonHeader {
         version,
         msg_len,
@@ -114,14 +112,12 @@ pub enum PeerType {
     LocalInstancePeer = 2,
 }
 
-pub fn parse_per_peer_header(
-    reader: &mut Cursor<&[u8]>,
-) -> Result<BmpPerPeerHeader, ParserBmpError> {
-    let peer_type = PeerType::from_u8(reader.read_8b()?).unwrap();
+pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
+    let peer_type = PeerType::from_u8(data.read_u8()?).unwrap();
 
-    let peer_flags = reader.read_8b()?;
+    let peer_flags = data.read_u8()?;
 
-    let peer_distinguisher = reader.read_64b()?;
+    let peer_distinguisher = data.read_u64()?;
 
     let (is_router_ipv6, is_2byte_asn) = (peer_flags & 0x80 > 0, peer_flags & 0x20 > 0);
 
@@ -136,24 +132,24 @@ pub fn parse_per_peer_header(
     };
 
     let peer_ip: IpAddr = if is_router_ipv6 {
-        reader.read_ipv6_address()?.into()
+        data.read_ipv6_address()?.into()
     } else {
-        reader.seek(SeekFrom::Current(12))?;
-        let ip = reader.read_ipv4_address()?;
+        data.advance(12);
+        let ip = data.read_ipv4_address()?;
         ip.into()
     };
 
     let peer_asn: u32 = if is_2byte_asn {
-        reader.seek(SeekFrom::Current(2))?;
-        reader.read_16b()? as u32
+        data.advance(2);
+        data.read_u16()? as u32
     } else {
-        reader.read_32b()?
+        data.read_u32()?
     };
 
-    let peer_bgp_id = reader.read_32b()?;
+    let peer_bgp_id = data.read_u32()?;
 
-    let t_sec = reader.read_32b()?;
-    let t_usec = reader.read_32b()?;
+    let t_sec = data.read_u32()?;
+    let t_usec = data.read_u32()?;
     let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
 
     Ok(BmpPerPeerHeader {

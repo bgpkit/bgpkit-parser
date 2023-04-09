@@ -2,40 +2,55 @@
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use std::io::{Cursor, Seek, SeekFrom};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
 };
 
 use crate::models::*;
-use byteorder::{ReadBytesExt, BE};
+use bytes::{Buf, Bytes};
 use log::debug;
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
+use crate::ParserError::IoNotEnoughBytes;
+
+impl ReadUtils for Bytes {}
 
 // Allow reading IPs from Reads
-pub trait ReadUtils: io::Read {
-    fn read_8b(&mut self) -> io::Result<u8> {
-        self.read_u8()
+pub trait ReadUtils: Buf {
+    #[inline]
+    fn has_n_remaining(&self, n: usize) -> Result<(), ParserError> {
+        if self.remaining() < n {
+            Err(IoNotEnoughBytes())
+        } else {
+            Ok(())
+        }
     }
 
-    fn read_16b(&mut self) -> io::Result<u16> {
-        self.read_u16::<BE>()
+    #[inline]
+    fn read_u8(&mut self) -> Result<u8, ParserError> {
+        self.has_n_remaining(1)?;
+        Ok(self.get_u8())
     }
 
-    fn read_32b(&mut self) -> io::Result<u32> {
-        self.read_u32::<BE>()
+    #[inline]
+    fn read_u16(&mut self) -> Result<u16, ParserError> {
+        self.has_n_remaining(2)?;
+        Ok(self.get_u16())
     }
 
-    fn read_64b(&mut self) -> io::Result<u64> {
-        self.read_u64::<BE>()
+    #[inline]
+    fn read_u32(&mut self) -> Result<u32, ParserError> {
+        self.has_n_remaining(4)?;
+        Ok(self.get_u32())
     }
 
-    fn read_128b(&mut self) -> io::Result<u128> {
-        self.read_u128::<BE>()
+    #[inline]
+    fn read_u64(&mut self) -> Result<u64, ParserError> {
+        self.has_n_remaining(8)?;
+        Ok(self.get_u64())
     }
 
     fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
@@ -58,18 +73,19 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserError> {
-        let addr = self.read_32b()?;
+        let addr = self.read_u32()?;
         Ok(Ipv4Addr::from(addr))
     }
 
     fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserError> {
-        let buf = self.read_u128::<BE>()?;
+        self.has_n_remaining(16)?;
+        let buf = self.get_u128();
         Ok(Ipv6Addr::from(buf))
     }
 
     fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
         let addr = self.read_ipv4_address()?;
-        let mask = self.read_8b()?;
+        let mask = self.read_u8()?;
         match Ipv4Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
@@ -78,7 +94,7 @@ pub trait ReadUtils: io::Read {
 
     fn read_ipv6_prefix(&mut self) -> Result<Ipv6Net, ParserError> {
         let addr = self.read_ipv6_address()?;
-        let mask = self.read_8b()?;
+        let mask = self.read_u8()?;
         match Ipv6Net::new(addr, mask) {
             Ok(n) => Ok(n),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
@@ -88,14 +104,14 @@ pub trait ReadUtils: io::Read {
     fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserError> {
         match as_length {
             AsnLength::Bits16 => {
-                let asn = self.read_16b()? as u32;
+                let asn = self.read_u16()? as u32;
                 Ok(Asn {
                     asn,
                     len: AsnLength::Bits16,
                 })
             }
             AsnLength::Bits32 => {
-                let asn = self.read_32b()?;
+                let asn = self.read_u32()?;
                 Ok(Asn {
                     asn,
                     len: AsnLength::Bits32,
@@ -108,8 +124,9 @@ pub trait ReadUtils: io::Read {
         let mut path = [0; 255];
         Ok(match as_length {
             AsnLength::Bits16 => {
+                self.has_n_remaining(count * 2)?; // 2 bytes for 16-bit ASN
                 for i in 0..count {
-                    path[i] = self.read_u16::<BE>()? as u32;
+                    path[i] = self.get_u16() as u32;
                 }
                 path[..count]
                     .iter()
@@ -120,8 +137,9 @@ pub trait ReadUtils: io::Read {
                     .collect::<Vec<Asn>>()
             }
             AsnLength::Bits32 => {
+                self.has_n_remaining(count * 4)?; // 4 bytes for 32-bit ASN
                 for i in 0..count {
-                    path[i] = self.read_32b()?;
+                    path[i] = self.get_u32();
                 }
                 path[..count]
                     .iter()
@@ -135,7 +153,7 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
-        let afi = self.read_u16::<BE>()?;
+        let afi = self.read_u16()?;
         match Afi::from_i16(afi as i16) {
             Some(afi) => Ok(afi),
             None => Err(crate::error::ParserError::Unsupported(format!(
@@ -146,7 +164,7 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_safi(&mut self) -> Result<Safi, ParserError> {
-        let safi = self.read_8b()?;
+        let safi = self.read_u8()?;
         match Safi::from_u8(safi) {
             Some(safi) => Ok(safi),
             None => Err(crate::error::ParserError::Unsupported(format!(
@@ -166,10 +184,10 @@ pub trait ReadUtils: io::Read {
         afi: &Afi,
         add_path: bool,
     ) -> Result<NetworkPrefix, ParserError> {
-        let path_id = if add_path { self.read_32b()? } else { 0 };
+        let path_id = if add_path { self.read_u32()? } else { 0 };
 
         // Length in bits
-        let bit_len = self.read_8b()?;
+        let bit_len = self.read_u8()?;
 
         // Convert to bytes
         let byte_len: usize = (bit_len as usize + 7) / 8;
@@ -183,8 +201,9 @@ pub trait ReadUtils: io::Read {
                     )));
                 }
                 let mut buff = [0; 4];
+                self.has_n_remaining(byte_len)?;
                 for i in 0..byte_len {
-                    buff[i] = self.read_8b()?
+                    buff[i] = self.get_u8();
                 }
                 IpAddr::V4(Ipv4Addr::from(buff))
             }
@@ -196,9 +215,10 @@ pub trait ReadUtils: io::Read {
                         byte_len, bit_len
                     )));
                 }
+                self.has_n_remaining(byte_len)?;
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
-                    buff[i] = self.read_8b()?
+                    buff[i] = self.get_u8();
                 }
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
@@ -217,15 +237,8 @@ pub trait ReadUtils: io::Read {
     }
 
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
-        // TODO: fix the checking
-        // if self.total - self.pos < n_bytes {
-        //     return Err(ParserError::IoNotEnoughBytes())
-        // }
-        let mut bytes = vec![];
-        for _ in 0..n_bytes {
-            bytes.push(self.read_8b()?);
-        }
-        Ok(bytes)
+        self.has_n_remaining(n_bytes)?;
+        Ok(self.copy_to_bytes(n_bytes).into())
     }
 
     fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError> {
@@ -238,27 +251,26 @@ pub trait ReadUtils: io::Read {
 }
 
 pub fn parse_nlri_list(
-    input: &mut Cursor<&[u8]>,
+    mut input: Bytes,
     add_path: bool,
     afi: &Afi,
-    total_bytes: u64,
 ) -> Result<Vec<NetworkPrefix>, ParserError> {
-    let pos_end = input.position() + total_bytes;
-
     let mut is_add_path = add_path;
     let mut prefixes = vec![];
 
     let mut retry = false;
     let mut guessed = false;
 
-    let pos_save = input.position();
+    let mut input_copy = None;
 
-    while input.position() < pos_end {
-        if !is_add_path && input.get_ref()[input.position() as usize] == 0 {
+    while input.remaining() > 0 {
+        if !is_add_path && input[0] == 0 {
             // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
             debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
+            // cloning the data bytes
             is_add_path = true;
             guessed = true;
+            input_copy = Some(input.clone());
         }
         let prefix = match input.read_nlri_prefix(afi, is_add_path) {
             Ok(p) => p,
@@ -277,18 +289,16 @@ pub fn parse_nlri_list(
     if retry {
         prefixes.clear();
         // try again without attempt to guess add-path
-        input.seek(SeekFrom::Start(pos_save))?;
-        while input.position() < pos_end {
-            let prefix = input.read_nlri_prefix(afi, add_path)?;
+        // if we reach here (retry==true), input_copy must be Some
+        let mut input_2 = input_copy.unwrap();
+        while input_2.remaining() > 0 {
+            let prefix = input_2.read_nlri_prefix(afi, add_path)?;
             prefixes.push(prefix);
         }
     }
 
     Ok(prefixes)
 }
-
-// All types that implement Read can now read prefixes
-impl<R: io::Read> ReadUtils for R {}
 
 /// A CRC32 implementation that converts a string to a hex string.
 ///

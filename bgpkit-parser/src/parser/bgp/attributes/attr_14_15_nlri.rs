@@ -2,8 +2,8 @@ use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
+use bytes::Bytes;
 use log::warn;
-use std::io::Cursor;
 
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4760#section-3>
@@ -22,16 +22,14 @@ use std::io::Cursor;
 /// | Network Layer Reachability Information (variable)       |
 /// +---------------------------------------------------------+
 pub fn parse_nlri(
-    input: &mut Cursor<&[u8]>,
+    mut input: Bytes,
     afi: &Option<Afi>,
     safi: &Option<Safi>,
     prefixes: &Option<&[NetworkPrefix]>,
-    reachable: bool,
-    additional_paths: bool,
-    total_bytes: usize,
+    reachable: bool,        // whether the NLRI is announcements or withdrawals
+    additional_paths: bool, // whether the NLRI is part of an additional paths message
 ) -> Result<AttributeValue, ParserError> {
-    let first_byte_zero = input.get_ref()[input.position() as usize] == 0;
-    let pos_end = input.position() + total_bytes as u64;
+    let first_byte_zero = input[0] == 0;
 
     // read address family
     let afi = match afi {
@@ -57,14 +55,14 @@ pub fn parse_nlri(
 
     let mut next_hop = None;
     if reachable {
-        let next_hop_length = input.read_8b()?;
-        next_hop = match parse_mp_next_hop(next_hop_length, input) {
+        let next_hop_length = input.read_u8()? as usize;
+        input.has_n_remaining(next_hop_length)?;
+        let next_hop_bytes = input.split_to(next_hop_length);
+        next_hop = match parse_mp_next_hop(next_hop_bytes) {
             Ok(x) => x,
             Err(e) => return Err(e),
         };
     }
-
-    let mut bytes_left = pos_end - input.position();
 
     let prefixes = match prefixes {
         Some(pfxs) => {
@@ -72,12 +70,11 @@ pub fn parse_nlri(
             if first_byte_zero {
                 if reachable {
                     // skip reserved byte for reachable NRLI
-                    if input.read_8b()? != 0 {
+                    if input.read_u8()? != 0 {
                         warn!("NRLI reserved byte not 0");
                     }
-                    bytes_left -= 1;
                 }
-                parse_nlri_list(input, additional_paths, &afi, bytes_left)?
+                parse_nlri_list(input, additional_paths, &afi)?
             } else {
                 pfxs.to_vec()
             }
@@ -85,12 +82,11 @@ pub fn parse_nlri(
         None => {
             if reachable {
                 // skip reserved byte for reachable NRLI
-                if input.read_8b()? != 0 {
+                if input.read_u8()? != 0 {
                     warn!("NRLI reserved byte not 0");
                 }
-                bytes_left -= 1;
             }
-            parse_nlri_list(input, additional_paths, &afi, bytes_left)?
+            parse_nlri_list(input, additional_paths, &afi)?
         }
     };
 
@@ -120,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_parsing_nlri_simple() {
-        let test_bytes = vec![
+        let test_bytes = Bytes::from(vec![
             0x00, 0x01, // address family: IPv4
             0x01, // safi: unicast
             0x04, // next hop length: 4
@@ -129,16 +125,8 @@ mod tests {
             // NLRI
             0x18, // 24 bits prefix length
             0xC0, 0x00, 0x02, // 192.0.2
-        ];
-        let res = parse_nlri(
-            &mut Cursor::new(&test_bytes),
-            &None,
-            &None,
-            &None,
-            true,
-            false,
-            test_bytes.len(),
-        );
+        ]);
+        let res = parse_nlri(test_bytes, &None, &None, &None, true, false);
 
         if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
             assert_eq!(nlri.afi, Afi::Ipv4);
@@ -160,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_parsing_nlri_add_path() {
-        let test_bytes = vec![
+        let test_bytes = Bytes::from(vec![
             0x00, 0x01, // address family: IPv4
             0x01, // safi: unicast
             0x04, // next hop length: 4
@@ -170,16 +158,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x7B, // path_id: 123
             0x18, // 24 bits prefix length
             0xC0, 0x00, 0x02, // 192.0.2
-        ];
-        let res = parse_nlri(
-            &mut Cursor::new(&test_bytes),
-            &None,
-            &None,
-            &None,
-            true,
-            true,
-            test_bytes.len(),
-        );
+        ]);
+        let res = parse_nlri(test_bytes, &None, &None, &None, true, true);
 
         if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
             assert_eq!(nlri.afi, Afi::Ipv4);

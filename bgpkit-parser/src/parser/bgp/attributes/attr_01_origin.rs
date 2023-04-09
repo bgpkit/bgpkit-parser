@@ -1,12 +1,11 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
+use bytes::Bytes;
 use num_traits::FromPrimitive;
-use std::io::Cursor;
 
-pub fn parse_origin(input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-    let origin = input.read_8b()?;
-    match Origin::from_u8(origin) {
+pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    match Origin::from_u8(input.read_u8()?) {
         Some(v) => Ok(AttributeValue::Origin(v)),
         None => Err(ParserError::UnknownAttr(
             "Failed to parse attribute type: origin".to_string(),
@@ -41,18 +40,18 @@ mod tests {
     fn test_parse_origin() {
         assert_eq!(
             AttributeValue::Origin(Origin::IGP),
-            parse_origin(&mut Cursor::new(&[0u8])).unwrap()
+            parse_origin(Bytes::from_static(&[0u8])).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::EGP),
-            parse_origin(&mut Cursor::new(&[1u8])).unwrap()
+            parse_origin(Bytes::from_static(&[1u8])).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::INCOMPLETE),
-            parse_origin(&mut Cursor::new(&[2u8])).unwrap()
+            parse_origin(Bytes::from_static(&[2u8])).unwrap()
         );
         assert!(matches!(
-            parse_origin(&mut Cursor::new(&[3u8])).unwrap_err(),
+            parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
             ParserError::UnknownAttr(_)
         ));
     }

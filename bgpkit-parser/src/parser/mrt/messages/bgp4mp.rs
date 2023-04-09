@@ -2,15 +2,14 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use byteorder::{ReadBytesExt, BE};
+use bytes::{Buf, Bytes};
 use num_traits::FromPrimitive;
-use std::io::Cursor;
 
 /// Parse MRT BGP4MP type
 ///
 /// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.4
 ///
-pub fn parse_bgp4mp(sub_type: u16, input: &[u8]) -> Result<Bgp4Mp, ParserError> {
+pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> {
     let bgp4mp_type: Bgp4MpType = match Bgp4MpType::from_u16(sub_type) {
         Some(t) => t,
         None => {
@@ -83,32 +82,29 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_message(
-    data: &[u8],
+    mut data: Bytes,
     add_path: bool,
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpMessage, ParserError> {
     let total_size = data.len();
-    let mut input = Cursor::new(data);
 
-    let peer_asn: Asn = input.read_asn(&asn_len)?;
-    let local_asn: Asn = input.read_asn(&asn_len)?;
-    let interface_index: u16 = input.read_u16::<BE>()?;
-    let afi: Afi = input.read_afi()?;
-    let peer_ip = input.read_address(&afi)?;
-    let local_ip = input.read_address(&afi)?;
+    let peer_asn: Asn = data.read_asn(&asn_len)?;
+    let local_asn: Asn = data.read_asn(&asn_len)?;
+    let interface_index: u16 = data.read_u16()?;
+    let afi: Afi = data.read_afi()?;
+    let peer_ip = data.read_address(&afi)?;
+    let local_ip = data.read_address(&afi)?;
 
     let should_read = total_should_read(&afi, &asn_len, total_size);
-    let current_position = input.position() as usize;
-    let data_slice = &input.into_inner()[current_position..];
-    if should_read != data_slice.len() {
+    if should_read != data.remaining() {
         return Err(ParserError::TruncatedMsg(format!(
             "truncated bgp4mp message: should read {} bytes, have {} bytes available",
             should_read,
-            data_slice.len()
+            data.remaining()
         )));
     }
-    let bgp_message: BgpMessage = parse_bgp_message(data_slice, add_path, &asn_len)?;
+    let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, &asn_len)?;
 
     Ok(Bgp4MpMessage {
         msg_type: *msg_type,
@@ -154,18 +150,17 @@ pub fn parse_bgp4mp_message(
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_state_change(
-    data: &[u8],
+    mut input: Bytes,
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpStateChange, ParserError> {
-    let mut input = Cursor::new(data);
     let peer_asn: Asn = input.read_asn(&asn_len)?;
     let local_asn: Asn = input.read_asn(&asn_len)?;
-    let interface_index: u16 = input.read_u16::<BE>()?;
+    let interface_index: u16 = input.read_u16()?;
     let address_family: Afi = input.read_afi()?;
     let peer_addr = input.read_address(&address_family)?;
     let local_addr = input.read_address(&address_family)?;
-    let old_state = match BgpState::from_u16(input.read_u16::<BE>()?) {
+    let old_state = match BgpState::from_u16(input.read_u16()?) {
         Some(t) => t,
         None => {
             return Err(ParserError::ParseError(
@@ -173,7 +168,7 @@ pub fn parse_bgp4mp_state_change(
             ))
         }
     };
-    let new_state = match BgpState::from_u16(input.read_u16::<BE>()?) {
+    let new_state = match BgpState::from_u16(input.read_u16()?) {
         Some(t) => t,
         None => {
             return Err(ParserError::ParseError(

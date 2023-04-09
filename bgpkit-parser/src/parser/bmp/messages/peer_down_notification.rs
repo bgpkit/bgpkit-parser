@@ -1,6 +1,6 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use std::io::Cursor;
+use bytes::{Buf, Bytes};
 
 #[derive(Debug)]
 pub struct PeerDownNotification {
@@ -9,10 +9,10 @@ pub struct PeerDownNotification {
 }
 
 pub fn parse_peer_down_notification(
-    reader: &mut Cursor<&[u8]>,
+    data: &mut Bytes,
 ) -> Result<PeerDownNotification, ParserBmpError> {
-    let reason = reader.read_8b()?;
-    let bytes_left = reader.get_ref().len() - (reader.position() as usize);
+    let reason = data.read_u8()?;
+    let bytes_left = data.remaining();
     let data: Option<Vec<u8>> = match reason {
         1 => {
             /*
@@ -20,7 +20,7 @@ pub fn parse_peer_down_notification(
             Reason is a BGP PDU containing a BGP NOTIFICATION message that
             would have been sent to the peer.
             */
-            Some(reader.read_n_bytes(bytes_left)?)
+            Some(data.read_n_bytes(bytes_left)?)
         }
         2 => {
             /*
@@ -31,7 +31,7 @@ pub fn parse_peer_down_notification(
             Section 8.1 of [RFC4271]).  Two bytes both set to 0 are used to
             indicate that no relevant Event code is defined.
              */
-            Some(reader.read_n_bytes(bytes_left)?)
+            Some(data.read_n_bytes(bytes_left)?)
         }
         3 => {
             /*
@@ -39,7 +39,7 @@ pub fn parse_peer_down_notification(
             message.  Following the Reason is a BGP PDU containing the BGP
             NOTIFICATION message as received from the peer.
              */
-            Some(reader.read_n_bytes(bytes_left)?)
+            Some(data.read_n_bytes(bytes_left)?)
         }
         4 => {
             /*

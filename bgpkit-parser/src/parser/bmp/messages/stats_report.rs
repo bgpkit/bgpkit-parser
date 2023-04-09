@@ -1,6 +1,6 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use std::io::Cursor;
+use bytes::Bytes;
 
 #[derive(Debug)]
 pub struct StatsReport {
@@ -21,15 +21,15 @@ pub enum StatsData {
     Gauge(u64),
 }
 
-pub fn parse_stats_report(reader: &mut Cursor<&[u8]>) -> Result<StatsReport, ParserBmpError> {
-    let stats_count = reader.read_32b()?;
+pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpError> {
+    let stats_count = data.read_u32()?;
     let mut counters = vec![];
     for _ in 0..stats_count {
-        let stat_type = reader.read_16b()?;
-        let stat_len = reader.read_16b()?;
+        let stat_type = data.read_u16()?;
+        let stat_len = data.read_u16()?;
         let stat_data = match stat_len {
-            4 => StatsData::Counter(reader.read_32b()?),
-            8 => StatsData::Gauge(reader.read_64b()?),
+            4 => StatsData::Counter(data.read_u32()?),
+            8 => StatsData::Gauge(data.read_u64()?),
             _ => return Err(ParserBmpError::CorruptedBmpMessage),
         };
         counters.push(StatCounter {

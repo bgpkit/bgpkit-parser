@@ -1,12 +1,9 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use std::io::Cursor;
+use bytes::Bytes;
 
-pub fn parse_next_hop(
-    input: &mut Cursor<&[u8]>,
-    afi: &Option<Afi>,
-) -> Result<AttributeValue, ParserError> {
+pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
     if let Some(afi) = afi {
         Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
     } else {
@@ -16,11 +13,8 @@ pub fn parse_next_hop(
     }
 }
 
-pub fn parse_mp_next_hop(
-    next_hop_length: u8,
-    input: &mut Cursor<&[u8]>,
-) -> Result<Option<NextHopAddress>, ParserError> {
-    let output = match next_hop_length {
+pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, ParserError> {
+    let output = match input.len() {
         0 => None,
         4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
         16 => Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
@@ -41,6 +35,7 @@ pub fn parse_mp_next_hop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::BytesMut;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
@@ -48,15 +43,17 @@ mod tests {
     fn test_parse_next_hop() {
         let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
         let ipv6 = Ipv6Addr::from_str("FC00::1").unwrap();
+        let ipv4_bytes = Bytes::from(ipv4.octets().to_vec());
+        let ipv6_bytes = Bytes::from(ipv6.octets().to_vec());
 
-        let res = parse_next_hop(&mut Cursor::new(&ipv4.octets()), &None).unwrap();
+        let res = parse_next_hop(ipv4_bytes, &None).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
         } else {
             panic!();
         }
 
-        let res = parse_next_hop(&mut Cursor::new(&ipv6.octets()), &Some(Afi::Ipv6)).unwrap();
+        let res = parse_next_hop(ipv6_bytes, &Some(Afi::Ipv6)).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string().to_ascii_uppercase(), "FC00::1".to_string())
         } else {
@@ -66,37 +63,27 @@ mod tests {
 
     #[test]
     fn test_parse_np_next_hop() {
-        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
-        let ipv6 = Ipv6Addr::from_str("fc00::1").unwrap();
-        let ipv6_2 = Ipv6Addr::from_str("fc00::2").unwrap();
+        let ipv4 = Bytes::from(Ipv4Addr::from_str("10.0.0.1").unwrap().octets().to_vec());
+        let ipv6 = Bytes::from(Ipv6Addr::from_str("fc00::1").unwrap().octets().to_vec());
+        let ipv6_2 = Bytes::from(Ipv6Addr::from_str("fc00::2").unwrap().octets().to_vec());
 
-        assert_eq!(
-            None,
-            parse_mp_next_hop(0, &mut Cursor::new(&ipv4.octets())).unwrap()
-        );
-
-        if let Some(NextHopAddress::Ipv4(n)) =
-            parse_mp_next_hop(4, &mut Cursor::new(&ipv4.octets())).unwrap()
-        {
+        if let Some(NextHopAddress::Ipv4(n)) = parse_mp_next_hop(ipv4).unwrap() {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
         } else {
             panic!();
         }
 
-        if let Some(NextHopAddress::Ipv6(n)) =
-            parse_mp_next_hop(16, &mut Cursor::new(&ipv6.octets())).unwrap()
-        {
+        if let Some(NextHopAddress::Ipv6(n)) = parse_mp_next_hop(ipv6.clone()).unwrap() {
             assert_eq!(n.to_string(), "fc00::1".to_string())
         } else {
             panic!();
         }
 
-        let mut bytes = vec![];
-        bytes.extend(ipv6.octets());
-        bytes.extend(ipv6_2.octets());
+        let mut combined = BytesMut::from(ipv6.to_vec().as_slice());
+        combined.extend_from_slice(&ipv6_2.to_vec());
 
         if let Some(NextHopAddress::Ipv6LinkLocal(n, m)) =
-            parse_mp_next_hop(32, &mut Cursor::new(&bytes)).unwrap()
+            parse_mp_next_hop(combined.into()).unwrap()
         {
             assert_eq!(n.to_string(), "fc00::1".to_string());
             assert_eq!(m.to_string(), "fc00::2".to_string());
