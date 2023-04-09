@@ -58,7 +58,10 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     /// will be cached as `cache-682cb1eb-rib.20230326.0600.bz2` in the cache directory.
     pub fn new_cached(path: &str, cache_dir: &str) -> Result<Self, ParserErrorWithBytes> {
         let file_name = path.rsplit('/').next().unwrap().to_string();
-        let new_file_name = format!("cache-{}-{}", crc32(file_name.as_str()), file_name);
+        let new_file_name = format!(
+            "cache-{}",
+            add_suffix_to_filename(file_name.as_str(), crc32(path).as_str())
+        );
         let reader = get_cache_reader(path, cache_dir, Some(new_file_name), false)?;
         Ok(BgpkitParser {
             reader,
@@ -66,6 +69,19 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
         })
+    }
+}
+
+fn add_suffix_to_filename(filename: &str, suffix: &str) -> String {
+    let mut parts: Vec<&str> = filename.split('.').collect(); // Split filename by dots
+    if parts.len() > 1 {
+        let last_part = parts.pop().unwrap(); // Remove the last part (suffix) from the parts vector
+        let new_last_part = format!("{}.{}", suffix, last_part); // Add the suffix to the last part
+        parts.push(&new_last_part); // Add the updated last part back to the parts vector
+        parts.join(".") // Join the parts back into a filename string with dots
+    } else {
+        // If the filename does not have any dots, simply append the suffix to the end
+        format!("{}.{}", filename, suffix)
     }
 }
 
