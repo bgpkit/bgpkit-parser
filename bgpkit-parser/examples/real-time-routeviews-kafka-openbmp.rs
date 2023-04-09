@@ -3,10 +3,10 @@ extern crate core;
 use bgpkit_parser::parser::bmp::messages::MessageBody;
 use bgpkit_parser::Elementor;
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
+use bytes::Bytes;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
 use kafka::error::Error as KafkaError;
 use log::{error, info};
-use std::io::Cursor;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -30,25 +30,21 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
 
         for ms in mss.iter() {
             for m in ms.messages() {
-                let bytes = m.value.to_vec();
-                let mut reader = Cursor::new(bytes.as_slice());
-                let header = parse_openbmp_header(&mut reader).unwrap();
-                let bmp_msg = parse_bmp_msg(&mut reader);
+                let mut bytes = Bytes::from(m.value.to_vec());
+                let header = parse_openbmp_header(&mut bytes).unwrap();
+                let bmp_msg = parse_bmp_msg(&mut bytes);
                 match bmp_msg {
                     Ok(msg) => {
                         let per_peer_header = msg.per_peer_header.unwrap();
-                        match msg.message_body {
-                            MessageBody::RouteMonitoring(m) => {
-                                for elem in Elementor::bgp_to_elems(
-                                    m.bgp_message,
-                                    header.timestamp,
-                                    &per_peer_header.peer_ip,
-                                    &per_peer_header.peer_asn.into(),
-                                ) {
-                                    info!("{}", elem);
-                                }
+                        if let MessageBody::RouteMonitoring(m) = msg.message_body {
+                            for elem in Elementor::bgp_to_elems(
+                                m.bgp_message,
+                                header.timestamp,
+                                &per_peer_header.peer_ip,
+                                &per_peer_header.peer_asn.into(),
+                            ) {
+                                info!("{}", elem);
                             }
-                            _ => {}
                         }
                     }
                     Err(_e) => {

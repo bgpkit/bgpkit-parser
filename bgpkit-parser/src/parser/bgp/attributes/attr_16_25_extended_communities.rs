@@ -7,18 +7,15 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use num_traits::FromPrimitive;
-use std::io::Cursor;
 
+use bytes::{Buf, Bytes};
 use std::net::Ipv4Addr;
 
-pub fn parse_extended_community(
-    input: &mut Cursor<&[u8]>,
-    total_bytes: usize,
-) -> Result<AttributeValue, ParserError> {
+pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
-    let pos_end = input.position() + total_bytes as u64;
-    while input.position() < pos_end {
-        let ec_type_u8 = input.read_8b()?;
+
+    while input.remaining() > 0 {
+        let ec_type_u8 = input.read_u8()?;
         let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8) {
             Some(t) => t,
             None => {
@@ -27,7 +24,7 @@ pub fn parse_extended_community(
                 buffer[i] = ec_type_u8;
                 for _b in 0..7 {
                     i += 1;
-                    buffer[i] = input.read_8b()?;
+                    buffer[i] = input.read_u8()?;
                 }
                 let ec = ExtendedCommunity::Raw(buffer);
                 communities.push(ec);
@@ -36,11 +33,11 @@ pub fn parse_extended_community(
         };
         let ec: ExtendedCommunity = match ec_type {
             ExtendedCommunityType::TransitiveTwoOctetAsSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = input.read_16b()?;
+                let sub_type = input.read_u8()?;
+                let global = input.read_u16()?;
                 let mut local: [u8; 4] = [0; 4];
                 for i in 0..4 {
-                    local[i] = input.read_8b()?;
+                    local[i] = input.read_u8()?;
                 }
                 ExtendedCommunity::TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                     ec_type: ec_type_u8,
@@ -53,11 +50,11 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::NonTransitiveTwoOctetAsSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = input.read_16b()?;
+                let sub_type = input.read_u8()?;
+                let global = input.read_u16()?;
                 let mut local: [u8; 4] = [0; 4];
                 for i in 0..4 {
-                    local[i] = input.read_8b()?;
+                    local[i] = input.read_u8()?;
                 }
                 ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                     ec_type: ec_type_u8,
@@ -71,11 +68,11 @@ pub fn parse_extended_community(
             }
 
             ExtendedCommunityType::TransitiveIpv4AddressSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = Ipv4Addr::from(input.read_32b()?);
+                let sub_type = input.read_u8()?;
+                let global = Ipv4Addr::from(input.read_u32()?);
                 let mut local: [u8; 2] = [0; 2];
-                local[0] = input.read_8b()?;
-                local[1] = input.read_8b()?;
+                local[0] = input.read_u8()?;
+                local[1] = input.read_u8()?;
                 ExtendedCommunity::TransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
@@ -84,11 +81,11 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::NonTransitiveIpv4AddressSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = Ipv4Addr::from(input.read_32b()?);
+                let sub_type = input.read_u8()?;
+                let global = Ipv4Addr::from(input.read_u32()?);
                 let mut local: [u8; 2] = [0; 2];
-                local[0] = input.read_8b()?;
-                local[1] = input.read_8b()?;
+                local[0] = input.read_u8()?;
+                local[1] = input.read_u8()?;
                 ExtendedCommunity::NonTransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
@@ -97,11 +94,11 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::TransitiveFourOctetAsSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = input.read_32b()?;
+                let sub_type = input.read_u8()?;
+                let global = input.read_u32()?;
                 let mut local: [u8; 2] = [0; 2];
-                local[0] = input.read_8b()?;
-                local[1] = input.read_8b()?;
+                local[0] = input.read_u8()?;
+                local[1] = input.read_u8()?;
                 ExtendedCommunity::TransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
@@ -113,11 +110,11 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::NonTransitiveFourOctetAsSpecific => {
-                let sub_type = input.read_8b()?;
-                let global = input.read_32b()?;
+                let sub_type = input.read_u8()?;
+                let global = input.read_u32()?;
                 let mut local: [u8; 2] = [0; 2];
-                local[0] = input.read_8b()?;
-                local[1] = input.read_8b()?;
+                local[0] = input.read_u8()?;
+                local[1] = input.read_u8()?;
                 ExtendedCommunity::NonTransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
@@ -129,10 +126,10 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::TransitiveOpaque => {
-                let sub_type = input.read_8b()?;
+                let sub_type = input.read_u8()?;
                 let mut value: [u8; 6] = [0; 6];
                 for i in 0..6 {
-                    value[i] = input.read_8b()?;
+                    value[i] = input.read_u8()?;
                 }
                 ExtendedCommunity::TransitiveOpaque(Opaque {
                     ec_type: ec_type_u8,
@@ -141,10 +138,10 @@ pub fn parse_extended_community(
                 })
             }
             ExtendedCommunityType::NonTransitiveOpaque => {
-                let sub_type = input.read_8b()?;
+                let sub_type = input.read_u8()?;
                 let mut value: [u8; 6] = [0; 6];
                 for i in 0..6 {
-                    value[i] = input.read_8b()?;
+                    value[i] = input.read_u8()?;
                 }
                 ExtendedCommunity::NonTransitiveOpaque(Opaque {
                     ec_type: ec_type_u8,
@@ -159,19 +156,15 @@ pub fn parse_extended_community(
     Ok(AttributeValue::ExtendedCommunities(communities))
 }
 
-pub fn parse_ipv6_extended_community(
-    input: &mut Cursor<&[u8]>,
-    total_bytes: usize,
-) -> Result<AttributeValue, ParserError> {
+pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
-    let pos_end = input.position() + total_bytes as u64;
-    while input.position() < pos_end {
-        let ec_type_u8 = input.read_8b()?;
-        let sub_type = input.read_8b()?;
+    while input.remaining() > 0 {
+        let ec_type_u8 = input.read_u8()?;
+        let sub_type = input.read_u8()?;
         let global = input.read_ipv6_address()?;
         let mut local: [u8; 2] = [0; 2];
-        local[0] = input.read_8b()?;
-        local[1] = input.read_8b()?;
+        local[0] = input.read_u8()?;
+        local[1] = input.read_u8()?;
         let ec = ExtendedCommunity::Ipv6AddressSpecific(Ipv6AddressSpecific {
             ec_type: ec_type_u8,
             ec_subtype: sub_type,
@@ -203,7 +196,7 @@ mod tests {
         ];
 
         if let AttributeValue::ExtendedCommunities(communities) =
-            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+            parse_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
             if let ExtendedCommunity::TransitiveTwoOctetAsSpecific(community) = &communities[0] {
@@ -229,7 +222,7 @@ mod tests {
         ];
 
         if let AttributeValue::ExtendedCommunities(communities) =
-            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+            parse_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
             if let ExtendedCommunity::TransitiveIpv4AddressSpecific(community) = &communities[0] {
@@ -255,7 +248,7 @@ mod tests {
         ];
 
         if let AttributeValue::ExtendedCommunities(communities) =
-            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+            parse_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
             if let ExtendedCommunity::TransitiveFourOctetAsSpecific(community) = &communities[0] {
@@ -280,7 +273,7 @@ mod tests {
         ];
 
         if let AttributeValue::ExtendedCommunities(communities) =
-            parse_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+            parse_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
             if let ExtendedCommunity::TransitiveOpaque(community) = &communities[0] {
@@ -306,7 +299,7 @@ mod tests {
         ];
 
         if let AttributeValue::ExtendedCommunities(communities) =
-            parse_ipv6_extended_community(&mut Cursor::new(data.as_slice()), data.len()).unwrap()
+            parse_ipv6_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
             if let ExtendedCommunity::Ipv6AddressSpecific(community) = &communities[0] {

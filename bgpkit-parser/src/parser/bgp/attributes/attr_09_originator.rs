@@ -1,10 +1,10 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use std::io::Cursor;
+use bytes::Bytes;
 
 pub fn parse_originator_id(
-    input: &mut Cursor<&[u8]>,
+    mut input: Bytes,
     afi: &Option<Afi>,
 ) -> Result<AttributeValue, ParserError> {
     let afi = match afi {
@@ -25,7 +25,7 @@ mod tests {
     fn test_parse_originator_id() {
         let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
         if let Ok(AttributeValue::OriginatorId(n)) =
-            parse_originator_id(&mut Cursor::new(&ipv4.octets()), &None)
+            parse_originator_id(Bytes::from(ipv4.octets().to_vec()), &None)
         {
             assert_eq!(n, ipv4);
         } else {
@@ -34,7 +34,7 @@ mod tests {
 
         let ipv6 = Ipv6Addr::from_str("fc::1").unwrap();
         if let Ok(AttributeValue::OriginatorId(n)) =
-            parse_originator_id(&mut Cursor::new(&ipv6.octets()), &Some(Afi::Ipv6))
+            parse_originator_id(Bytes::from(ipv6.octets().to_vec()), &Some(Afi::Ipv6))
         {
             assert_eq!(n, ipv6);
         } else {

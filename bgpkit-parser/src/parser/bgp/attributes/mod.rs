@@ -12,9 +12,8 @@ mod attr_16_25_extended_communities;
 mod attr_32_large_communities;
 mod attr_35_otc;
 
-use byteorder::{ReadBytesExt, BE};
+use bytes::{Buf, Bytes};
 use log::{debug, warn};
-use std::io::{Cursor, Seek, SeekFrom};
 
 use crate::models::*;
 use num_traits::FromPrimitive;
@@ -54,30 +53,27 @@ impl AttributeParser {
     /// the slice is the total byte length of the attributes section of the message.
     pub fn parse_attributes(
         &self,
-        data: &[u8],
+        mut data: Bytes,
         asn_len: &AsnLength,
         afi: Option<Afi>,
         safi: Option<Safi>,
         prefixes: Option<&[NetworkPrefix]>,
     ) -> Result<Vec<Attribute>, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
-        let total_slices_bytes = data.len() as u64;
-        let mut input = Cursor::new(data);
 
-        while input.position() + 3 <= total_slices_bytes {
+        while data.remaining() >= 3 {
             // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
             // thus the while loop condition is set to be at least 3 bytes to read.
 
             // has content to read
-            let flag = input.read_8b()?;
-            let attr_type = input.read_8b()?;
+            let flag = data.get_u8();
+            let attr_type = data.get_u8();
             let length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-                0 => input.read_8b()? as usize,
-                _ => input.read_u16::<BE>()? as usize,
+                0 => data.get_u8() as usize,
+                _ => data.get_u16() as usize,
             };
 
             let mut partial = false;
-
             if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
                 /*
                 https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
@@ -88,7 +84,6 @@ impl AttributeParser {
                 > set to 1) or complete (if set to 0).  For well-known attributes
                 > and for optional non-transitive attributes, the Partial bit
                 > MUST be set to 0.
-
                 */
                 partial = true;
             }
@@ -101,7 +96,8 @@ impl AttributeParser {
                 Some(t) => t,
                 None => {
                     // input.read_and_drop_n_bytes(length)?;
-                    input.seek(SeekFrom::Current(length as i64))?;
+                    data.has_n_remaining(length)?;
+                    data.advance(length);
                     return match get_deprecated_attr_type(attr_type) {
                         Some(t) => Err(ParserError::DeprecatedAttr(format!(
                             "deprecated attribute type: {} - {}",
@@ -115,78 +111,71 @@ impl AttributeParser {
                 }
             };
 
-            let bytes_left = total_slices_bytes - input.position();
-            let attr_end_pos = input.position() + length as u64;
+            let bytes_left = data.remaining();
 
-            if bytes_left < length as u64 {
+            if data.remaining() < length {
                 warn!(
                     "not enough bytes: input bytes left - {}, want to read - {}; skipping",
                     bytes_left, length
                 );
+                // break and return already parsed attributes
                 break;
             }
 
+            // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
+            let mut attr_data = data.split_to(length);
+
             let attr = match attr_type {
-                AttrType::ORIGIN => parse_origin(&mut input),
-                AttrType::AS_PATH => parse_as_path(&mut input, asn_len, length),
-                AttrType::NEXT_HOP => parse_next_hop(&mut input, &afi),
-                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(&mut input),
-                AttrType::LOCAL_PREFERENCE => parse_local_pref(&mut input),
+                AttrType::ORIGIN => parse_origin(attr_data),
+                AttrType::AS_PATH => parse_as_path(attr_data, asn_len),
+                AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
+                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
+                AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
                 AttrType::ATOMIC_AGGREGATE => {
                     Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
                 }
-                AttrType::AGGREGATOR => parse_aggregator(&mut input, asn_len, &afi),
-                AttrType::ORIGINATOR_ID => parse_originator_id(&mut input, &afi),
-                AttrType::CLUSTER_LIST => parse_clusters(&mut input, &afi, length),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len, &afi),
+                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
+                AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
-                    &mut input,
+                    attr_data,
                     &afi,
                     &safi,
                     &prefixes,
                     true,
                     self.additional_paths,
-                    length,
                 ),
                 AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
-                    &mut input,
+                    attr_data,
                     &afi,
                     &safi,
                     &prefixes,
                     false,
                     self.additional_paths,
-                    length,
                 ),
-                AttrType::AS4_PATH => parse_as_path(&mut input, &AsnLength::Bits32, length),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(&mut input, &AsnLength::Bits32, &afi),
+                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32),
+                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32, &afi),
 
                 // communities
-                AttrType::COMMUNITIES => parse_regular_communities(&mut input, length),
-                AttrType::LARGE_COMMUNITIES => parse_large_communities(&mut input, length),
-                AttrType::EXTENDED_COMMUNITIES => parse_extended_community(&mut input, length),
+                AttrType::COMMUNITIES => parse_regular_communities(attr_data),
+                AttrType::LARGE_COMMUNITIES => parse_large_communities(attr_data),
+                AttrType::EXTENDED_COMMUNITIES => parse_extended_community(attr_data),
                 AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
-                    parse_ipv6_extended_community(&mut input, length)
+                    parse_ipv6_extended_community(attr_data)
                 }
                 AttrType::DEVELOPMENT => {
                     let mut value = vec![];
                     for _i in 0..length {
-                        value.push(input.read_8b()?);
+                        value.push(attr_data.get_u8());
                     }
                     Ok(AttributeValue::Development(value))
                 }
-                AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(&mut input),
+                AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
                 _ => Err(ParserError::Unsupported(format!(
                     "unsupported attribute type: {:?}",
                     attr_type
                 ))),
             };
-
-            debug!(
-                "seeking position tp {}/{}",
-                attr_end_pos,
-                input.get_ref().len()
-            );
-            // always fast forward to the attribute end position.
-            input.seek(SeekFrom::Start(attr_end_pos))?;
 
             match attr {
                 Ok(value) => {

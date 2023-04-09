@@ -2,8 +2,8 @@ use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use bytes::{Buf, Bytes};
 use num_traits::FromPrimitive;
-use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct RouteMirroring {
@@ -29,25 +29,24 @@ pub enum RouteMirroringInfo {
 }
 
 pub fn parse_route_mirroring(
-    reader: &mut Cursor<&[u8]>,
+    data: &mut Bytes,
     asn_len: &AsnLength,
 ) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
-    while reader.get_ref().len() - (reader.position() as usize) > 4 {
-        match reader.read_16b()? {
+    while data.remaining() > 4 {
+        match data.read_u16()? {
             0 => {
-                let info_len = reader.read_16b()?;
-                let bytes = reader.read_n_bytes(info_len as usize)?;
-                let mut reader = Cursor::new(bytes.as_slice());
-                let value = parse_bgp_update_message(&mut reader, false, asn_len, info_len as u64)?;
+                let info_len = data.read_u16()?;
+                let bytes = data.split_to(info_len as usize);
+                let value = parse_bgp_update_message(bytes, false, asn_len)?;
                 tlvs.push(RouteMirroringTlv {
                     info_len,
                     value: RouteMirroringValue::BgpMessage(value),
                 });
             }
             1 => {
-                let info_len = reader.read_16b()?;
-                let value = RouteMirroringInfo::from_u16(reader.read_16b()?).unwrap();
+                let info_len = data.read_u16()?;
+                let value = RouteMirroringInfo::from_u16(data.read_u16()?).unwrap();
                 tlvs.push(RouteMirroringTlv {
                     info_len,
                     value: RouteMirroringValue::Information(value),

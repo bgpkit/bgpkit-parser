@@ -2,8 +2,7 @@ use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
-use byteorder::{ReadBytesExt, BE};
-use std::io::Cursor;
+use bytes::Bytes;
 use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
@@ -37,7 +36,7 @@ use std::net::IpAddr;
 /// ```
 pub fn parse_table_dump_message(
     sub_type: u16,
-    data: &[u8],
+    mut data: Bytes,
 ) -> Result<TableDumpMessage, ParserError> {
     // ####
     // Step 0. prepare
@@ -59,9 +58,6 @@ pub fn parse_table_dump_message(
         }
     };
 
-    // create a reader for the passed in data slice.
-    let mut input = Cursor::new(data);
-
     // ####
     // Step 1. read simple fields
     //   - view number
@@ -74,18 +70,20 @@ pub fn parse_table_dump_message(
     //   - peer ASN
     //   - attribute length
 
-    let view_number = input.read_u16::<BE>()?;
-    let sequence_number = input.read_u16::<BE>()?;
+    let view_number = data.read_u16()?;
+    let sequence_number = data.read_u16()?;
     let prefix = match &afi {
-        Afi::Ipv4 => input.read_ipv4_prefix().map(ipnet::IpNet::V4),
-        Afi::Ipv6 => input.read_ipv6_prefix().map(ipnet::IpNet::V6),
+        Afi::Ipv4 => data.read_ipv4_prefix().map(ipnet::IpNet::V4),
+        Afi::Ipv6 => data.read_ipv6_prefix().map(ipnet::IpNet::V6),
     }?;
-    let status = input.read_8b()?;
-    let time = input.read_32b()? as u64;
 
-    let peer_address: IpAddr = input.read_address(&afi)?;
-    let peer_asn = input.read_asn(&asn_len)?;
-    let attribute_length = input.read_u16::<BE>()? as usize;
+    let status = data.read_u8()?;
+    let time = data.read_u32()? as u64;
+
+    let peer_address: IpAddr = data.read_address(&afi)?;
+    let peer_asn = data.read_asn(&asn_len)?;
+
+    let attribute_length = data.read_u16()? as usize;
 
     // ####
     // Step 2. read the attributes
@@ -93,10 +91,9 @@ pub fn parse_table_dump_message(
     //   - pass the data into the parser function
 
     let attr_parser = AttributeParser::new(false);
-    let current_position = input.position() as usize;
-    let attr_data_slice = &input.into_inner()[current_position..];
-    // TODO: relax this assertion with error matching later
-    assert_eq!(attr_data_slice.len(), attribute_length);
+
+    data.has_n_remaining(attribute_length)?;
+    let attr_data_slice = data.split_to(attribute_length);
     let attributes = attr_parser.parse_attributes(attr_data_slice, &asn_len, None, None, None)?;
 
     Ok(TableDumpMessage {

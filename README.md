@@ -185,10 +185,9 @@ data received from their collectors. Below is an partial example of how we handl
 received from the Kafka stream. For full examples, check out the [examples folder on GitHub](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
 
 ```rust
-let bytes = m.value;
-let mut reader = Cursor::new(Vec::from(bytes));
-let header = parse_openbmp_header(&mut reader).unwrap();
-let bmp_msg = parse_bmp_msg(&mut reader);
+let mut bytes = Bytes::from(m.value.to_vec());
+let header = parse_openbmp_header(&mut bytes).unwrap();
+let bmp_msg = parse_bmp_msg(&mut bytes);
 match bmp_msg {
     Ok(msg) => {
         let timestamp = header.timestamp;

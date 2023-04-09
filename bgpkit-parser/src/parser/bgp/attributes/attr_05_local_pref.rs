@@ -1,13 +1,10 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use std::io::Cursor;
+use bytes::Bytes;
 
-pub fn parse_local_pref(input: &mut Cursor<&[u8]>) -> Result<AttributeValue, ParserError> {
-    match input.read_32b() {
-        Ok(v) => Ok(AttributeValue::LocalPreference(v)),
-        Err(err) => Err(ParserError::from(err)),
-    }
+pub fn parse_local_pref(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    Ok(AttributeValue::LocalPreference(input.read_u32()?))
 }
 
 #[cfg(test)]
@@ -17,7 +14,7 @@ mod tests {
     #[test]
     fn test_parse_med() {
         if let Ok(AttributeValue::LocalPreference(123)) =
-            parse_local_pref(&mut Cursor::new(&[0, 0, 0, 123]))
+            parse_local_pref(Bytes::from(vec![0, 0, 0, 123]))
         {
         } else {
             panic!()

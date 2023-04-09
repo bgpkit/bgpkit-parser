@@ -1,7 +1,7 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use bytes::{Buf, Bytes};
 use num_traits::FromPrimitive;
-use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct TerminationMessage {
@@ -24,21 +24,17 @@ pub enum TerminationTlvType {
     Reason = 1,
 }
 
-pub fn parse_termination_message(
-    reader: &mut Cursor<&[u8]>,
-) -> Result<TerminationMessage, ParserBmpError> {
+pub fn parse_termination_message(data: &mut Bytes) -> Result<TerminationMessage, ParserBmpError> {
     let mut tlvs = vec![];
-    let total = reader.get_ref().len() as u64;
 
-    while total - reader.position() > 4 {
-        let info_type: TerminationTlvType =
-            TerminationTlvType::from_u16(reader.read_16b()?).unwrap();
-        let info_len = reader.read_16b()?;
-        if total - reader.position() < info_len as u64 {
+    while data.remaining() > 4 {
+        let info_type: TerminationTlvType = TerminationTlvType::from_u16(data.read_u16()?).unwrap();
+        let info_len = data.read_u16()?;
+        if data.remaining() < info_len as usize {
             // not enough bytes to read
             break;
         }
-        let info = reader.read_n_bytes_to_string(info_len as usize)?;
+        let info = data.read_n_bytes_to_string(info_len as usize)?;
         tlvs.push(TerminationTlv {
             info_type,
             info_len,

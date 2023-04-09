@@ -1,17 +1,12 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use std::io::Cursor;
+use bytes::{Buf, Bytes};
 
-pub fn parse_clusters(
-    input: &mut Cursor<&[u8]>,
-    afi: &Option<Afi>,
-    total_bytes: usize,
-) -> Result<AttributeValue, ParserError> {
+pub fn parse_clusters(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
     // FIXME: in https://tools.ietf.org/html/rfc4456, the CLUSTER_LIST is a set of CLUSTER_ID each represented by a 4-byte number
     let mut clusters = Vec::new();
-    let initial_pos = input.position();
-    while input.position() - initial_pos < total_bytes as u64 {
+    while input.remaining() > 0 {
         let afi = match afi {
             None => &Afi::Ipv4,
             Some(a) => a,
@@ -31,12 +26,11 @@ mod tests {
     #[test]
     fn test_parse_clusters() {
         if let Ok(AttributeValue::Clusters(n)) = parse_clusters(
-            &mut Cursor::new(&[
+            Bytes::from(vec![
                 0xC0, 0x00, 0x02, 0x01, // 192.0.2.1
                 0xC0, 0x00, 0x02, 0x02, // 192.0.2.2
             ]),
             &None,
-            8,
         ) {
             assert_eq!(n.len(), 2);
             assert_eq!(n[0], Ipv4Addr::from_str("192.0.2.1").unwrap());
