@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.9.1"
+version = "0.9.2"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 license = "MIT"
@@ -10,6 +10,7 @@ description = """
 A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
+default-run = "bgpkit-parser"
 
 [[bin]]
 name = "bgpkit-parser"
