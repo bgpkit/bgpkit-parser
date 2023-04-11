@@ -77,8 +77,7 @@ impl<R: Read> Iterator for RecordIterator<R> {
                 }
                 Err(e) => {
                     match e.error {
-                        ParserError::TruncatedMsg(err_str)
-                        | ParserError::Unsupported(err_str) => {
+                        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
                             if self.parser.options.show_warnings {
                                 warn!("parser warn: {}", err_str);
                             }
