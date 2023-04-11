@@ -10,6 +10,7 @@ description = """
 A library to parse MRT/BGP/BMP binary data.
 """
 keywords = ["bgp", "bgpkit", "mrt"]
+default-run = "bgpkit-parser"
 
 [[bin]]
 name = "bgpkit-parser"
