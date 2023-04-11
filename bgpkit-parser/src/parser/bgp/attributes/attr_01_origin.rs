@@ -7,7 +7,7 @@ use num_traits::FromPrimitive;
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     match Origin::from_u8(input.read_u8()?) {
         Some(v) => Ok(AttributeValue::Origin(v)),
-        None => Err(ParserError::UnknownAttr(
+        None => Err(ParserError::ParseError(
             "Failed to parse attribute type: origin".to_string(),
         )),
     }
@@ -52,7 +52,7 @@ mod tests {
         );
         assert!(matches!(
             parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
-            ParserError::UnknownAttr(_)
+            ParserError::ParseError(_)
         ));
     }
 }
