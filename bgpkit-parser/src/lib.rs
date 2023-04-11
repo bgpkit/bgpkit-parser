@@ -315,6 +315,7 @@ We support normal communities, extended communities, and large communities.
 extern crate enum_primitive_derive;
 extern crate core;
 
+pub mod encoder;
 pub mod error;
 pub mod models;
 pub mod parser;

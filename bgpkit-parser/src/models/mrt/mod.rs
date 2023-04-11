@@ -5,8 +5,6 @@ pub mod tabledump;
 
 pub use bgp4mp::*;
 use serde::Serialize;
-use std::io;
-use std::io::Write;
 pub use tabledump::*;
 
 /// MrtRecord is a wrapper struct that contains a header and a message.
@@ -77,25 +75,6 @@ pub struct CommonHeader {
     pub entry_type: EntryType,
     pub entry_subtype: u16,
     pub length: u32,
-}
-
-impl CommonHeader {
-    /// Writes the binary representation of the header to the given writer.
-    pub fn write_header<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write_all(&self.timestamp.to_be_bytes())?;
-        writer.write_all(&(self.entry_type as u16).to_be_bytes())?;
-        writer.write_all(&self.entry_subtype.to_be_bytes())?;
-
-        match self.microsecond_timestamp {
-            None => writer.write_all(&self.length.to_be_bytes()),
-            Some(microseconds) => {
-                // When the microsecond timestamp is present, the length must be adjusted to account
-                // for the stace used by the extra timestamp data.
-                writer.write_all(&(self.length + 4).to_be_bytes())?;
-                writer.write_all(&microseconds.to_be_bytes())
-            }
-        }
-    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]

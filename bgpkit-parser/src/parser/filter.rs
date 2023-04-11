@@ -164,14 +164,14 @@ impl Filter {
                     filter_value
                 ))),
             },
-            "start_ts" => match f64::from_str(filter_value) {
+            "start_ts" | "ts_start" => match f64::from_str(filter_value) {
                 Ok(v) => Ok(Filter::TsStart(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse f64 value from {}",
                     filter_value
                 ))),
             },
-            "end_ts" => match f64::from_str(filter_value) {
+            "end_ts" | "ts_end" => match f64::from_str(filter_value) {
                 Ok(v) => Ok(Filter::TsEnd(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse f64 value from {}",
