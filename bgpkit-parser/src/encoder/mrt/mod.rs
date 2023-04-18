@@ -1,6 +1,7 @@
 use crate::encoder::MrtEncode;
-use crate::models::{MrtMessage, MrtRecord, TableDumpMessage};
+use crate::models::{EntryType, MrtMessage, MrtRecord, TableDumpMessage};
 use bytes::{BufMut, Bytes, BytesMut};
+use ipnet::IpNet;
 
 mod common_header;
 
@@ -15,11 +16,34 @@ impl MrtEncode for MrtRecord {
 
 impl MrtMessage {
     fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
         match self {
-            MrtMessage::TableDumpMessage(m) => m.encode(),
-            MrtMessage::TableDumpV2Message(m) => m.encode(),
-            MrtMessage::Bgp4Mp(m) => m.encode(),
+            MrtMessage::TableDumpMessage(m) => {
+                let entry_type = EntryType::TABLE_DUMP;
+                bytes.put_u16(m.view_number);
+                bytes.put_u16(m.sequence_number);
+                match &m.prefix.prefix {
+                    IpNet::V4(prefix) => {
+                        bytes.put_u32(prefix.into());
+                    }
+                    IpNet::V6(prefix) => {
+                        bytes.put_u128(prefix.ip().to_be());
+                    }
+                }
+                match &m.prefix.prefix {
+                    IpNet::V4(prefix) => {}
+                    IpNet::V6(prefix) => {}
+                }
+            },
+            MrtMessage::TableDumpV2Message(m) => {
+                let entry_type = EntryType::TABLE_DUMP_V2;
+            },
+            MrtMessage::Bgp4Mp(m) => {
+                let entry_type = EntryType::BGP4MP;
+            },
         }
+
+        todo!()
     }
 }
 
