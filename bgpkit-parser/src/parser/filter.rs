@@ -89,6 +89,16 @@ pub enum PrefixMatchType {
     IncludeSuperSub,
 }
 
+fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
+    if let Ok(t) = time_str.parse::<f64>() {
+        return chrono::NaiveDateTime::from_timestamp_opt(t as i64, 0);
+    }
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(time_str) {
+        return Some(t.naive_utc());
+    }
+    None
+}
+
 impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         match filter_type {
@@ -164,17 +174,17 @@ impl Filter {
                     filter_value
                 ))),
             },
-            "start_ts" => match f64::from_str(filter_value) {
-                Ok(v) => Ok(Filter::TsStart(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse f64 value from {}",
+            "ts_start" | "start_ts" => match parse_time_str(filter_value) {
+                Some(t) => Ok(Filter::TsStart(t.timestamp() as f64)),
+                None => Err(FilterError(format!(
+                    "cannot parse TsStart filter from {}",
                     filter_value
                 ))),
             },
-            "end_ts" => match f64::from_str(filter_value) {
-                Ok(v) => Ok(Filter::TsEnd(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse f64 value from {}",
+            "ts_end" | "end_ts" => match parse_time_str(filter_value) {
+                Some(t) => Ok(Filter::TsEnd(t.timestamp() as f64)),
+                None => Err(FilterError(format!(
+                    "cannot parse TsEnd filter from {}",
                     filter_value
                 ))),
             },
@@ -284,6 +294,7 @@ impl Filterable for BgpElem {
 mod tests {
     use super::*;
     use crate::BgpkitParser;
+    use anyhow::Result;
     use std::str::FromStr;
 
     #[test]
@@ -292,67 +303,63 @@ mod tests {
         let parser = BgpkitParser::new(url).unwrap();
         let elems = parser.into_elem_iter().collect::<Vec<BgpElem>>();
 
-        let mut filters = vec![];
-        filters.push(Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap()));
+        let filters = vec![Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap())];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 3393);
 
-        let mut filters = vec![];
-        filters.push(Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap()));
-        filters.push(Filter::Prefix(
-            IpNet::from_str("190.115.192.0/22").unwrap(),
-            PrefixMatchType::Exact,
-        ));
+        let filters = vec![
+            Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap()),
+            Filter::Prefix(
+                IpNet::from_str("190.115.192.0/22").unwrap(),
+                PrefixMatchType::Exact,
+            ),
+        ];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 5);
 
-        let mut filters = vec![];
-        filters.push(Filter::Prefix(
+        let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/24").unwrap(),
             PrefixMatchType::IncludeSuper,
-        ));
+        )];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 18);
 
-        let mut filters = vec![];
-        filters.push(Filter::Prefix(
+        let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/22").unwrap(),
             PrefixMatchType::IncludeSub,
-        ));
+        )];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 42);
 
-        let mut filters = vec![];
-        filters.push(Filter::Prefix(
+        let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/23").unwrap(),
             PrefixMatchType::IncludeSuperSub,
-        ));
+        )];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 24);
 
-        let mut filters = vec![];
-        let regex = Regex::new(r" ?174 1916 52888$").unwrap();
-        filters.push(Filter::AsPath(regex));
+        let filters = vec![Filter::AsPath(Regex::new(r" ?174 1916 52888$").unwrap())];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 12);
 
-        let mut filters = vec![];
-        filters.push(Filter::TsStart(1637437798 as f64));
-        filters.push(Filter::TsEnd(1637437798 as f64));
+        let filters = vec![
+            Filter::TsStart(1637437798_f64),
+            Filter::TsEnd(1637437798_f64),
+        ];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 13);
 
-        let mut filters = vec![];
-        filters.push(Filter::Type(ElemType::WITHDRAW));
+        let filters = vec![Filter::Type(ElemType::WITHDRAW)];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 379);
 
-        let mut filters = vec![];
-        filters.push(Filter::Type(ElemType::WITHDRAW));
-        filters.push(Filter::Prefix(
-            IpNet::from_str("2804:100::/32").unwrap(),
-            PrefixMatchType::Exact,
-        ));
+        let filters = vec![
+            Filter::Type(ElemType::WITHDRAW),
+            Filter::Prefix(
+                IpNet::from_str("2804:100::/32").unwrap(),
+                PrefixMatchType::Exact,
+            ),
+        ];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 1);
 
@@ -366,27 +373,42 @@ mod tests {
           94 2001:7f8:73::c2a8:0:1
         1058 2001:7f8:73::edfc:0:2
          */
-        let mut filters = vec![];
-        let peers = vec![
+        let filters = vec![Filter::PeerIps(vec![
             IpAddr::from_str("185.1.8.65").unwrap(),
             IpAddr::from_str("2001:7f8:73:0:3:fa4:0:1").unwrap(),
-        ];
-        filters.push(Filter::PeerIps(peers));
+        ])];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 3393 + 834);
     }
 
     #[test]
-    fn test_filter_iter() {
+    fn test_parsing_time_str() {
+        let ts = chrono::NaiveDateTime::from_str("2021-11-20T19:49:58").unwrap();
+        assert_eq!(parse_time_str("1637437798"), Some(ts));
+        assert_eq!(parse_time_str("2021-11-20T19:49:58Z"), Some(ts));
+        assert_eq!(parse_time_str("2021-11-20T19:49:58+00:00"), Some(ts));
+
+        assert_eq!(parse_time_str("2021-11-20T19:49:58"), None);
+        assert_eq!(parse_time_str("2021-11-20T19:49:58ZDXV"), None);
+        assert_eq!(parse_time_str("2021-11-20 19:49:58"), None);
+        assert_eq!(parse_time_str("2021-11-20"), None);
+    }
+
+    #[test]
+    fn test_filter_iter() -> Result<()> {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
-        let parser = BgpkitParser::new(url)
-            .unwrap()
-            .add_filter("peer_ip", "185.1.8.50")
-            .unwrap()
-            .add_filter("type", "w")
-            .unwrap();
+        let parser = BgpkitParser::new(url)?
+            .add_filter("peer_ip", "185.1.8.50")?
+            .add_filter("type", "w")?;
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 39);
+
+        let parser = BgpkitParser::new(url)?
+            .add_filter("ts_start", "1637437798")?
+            .add_filter("ts_end", "2021-11-20T19:49:58Z")?;
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 13);
+        Ok(())
     }
 
     #[test]
@@ -411,60 +433,39 @@ mod tests {
         let p2 = IpNet::from_str("2001:0DB8:0000:000b::/64").unwrap();
 
         // exact
-        assert_eq!(prefix_match(&p1, &p1_exact, &PrefixMatchType::Exact), true);
-        assert_eq!(prefix_match(&p1, &p1_sub, &PrefixMatchType::Exact), false);
-        assert_eq!(prefix_match(&p1, &p1_super, &PrefixMatchType::Exact), false);
-        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::Exact), false);
+        assert!(prefix_match(&p1, &p1_exact, &PrefixMatchType::Exact));
+        assert!(!prefix_match(&p1, &p1_sub, &PrefixMatchType::Exact));
+        assert!(!prefix_match(&p1, &p1_super, &PrefixMatchType::Exact));
+        assert!(!prefix_match(&p1, &p2, &PrefixMatchType::Exact));
 
         // include super
-        assert_eq!(
-            prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSuper),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSuper),
-            false
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSuper),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuper),
-            false
-        );
+        assert!(prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSuper));
+        assert!(!prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSuper));
+        assert!(prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSuper));
+        assert!(!prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuper));
 
         // include sub
-        assert_eq!(
-            prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSub),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSub),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSub),
-            false
-        );
-        assert_eq!(prefix_match(&p1, &p2, &PrefixMatchType::IncludeSub), false);
+        assert!(prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSub));
+        assert!(prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSub));
+        assert!(!prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSub));
+        assert!(!prefix_match(&p1, &p2, &PrefixMatchType::IncludeSub));
 
         // include both
-        assert_eq!(
-            prefix_match(&p1, &p1_exact, &PrefixMatchType::IncludeSuperSub),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_sub, &PrefixMatchType::IncludeSuperSub),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p1_super, &PrefixMatchType::IncludeSuperSub),
-            true
-        );
-        assert_eq!(
-            prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuperSub),
-            false
-        );
+        assert!(prefix_match(
+            &p1,
+            &p1_exact,
+            &PrefixMatchType::IncludeSuperSub
+        ));
+        assert!(prefix_match(
+            &p1,
+            &p1_sub,
+            &PrefixMatchType::IncludeSuperSub
+        ));
+        assert!(prefix_match(
+            &p1,
+            &p1_super,
+            &PrefixMatchType::IncludeSuperSub
+        ));
+        assert!(!prefix_match(&p1, &p2, &PrefixMatchType::IncludeSuperSub));
     }
 }
