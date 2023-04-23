@@ -129,7 +129,7 @@ impl AttributeParser {
                 AttrType::ATOMIC_AGGREGATE => {
                     Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
                 }
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len, &afi),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
@@ -149,7 +149,7 @@ impl AttributeParser {
                     self.additional_paths,
                 ),
                 AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32, &afi),
+                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
 
                 // communities
                 AttrType::COMMUNITIES => parse_regular_communities(attr_data),
