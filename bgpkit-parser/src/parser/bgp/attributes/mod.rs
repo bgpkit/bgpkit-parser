@@ -15,14 +15,15 @@ mod attr_35_otc;
 use bytes::{Buf, Bytes};
 use log::{debug, warn};
 
+use crate::encoder::MrtEncode;
 use crate::models::*;
 use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
-use crate::parser::bgp::attributes::attr_01_origin::parse_origin;
-use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
-use crate::parser::bgp::attributes::attr_03_next_hop::parse_next_hop;
-use crate::parser::bgp::attributes::attr_04_med::parse_med;
+use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
+use crate::parser::bgp::attributes::attr_02_17_as_path::{encode_as_path, parse_as_path};
+use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
+use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
 use crate::parser::bgp::attributes::attr_05_local_pref::parse_local_pref;
 use crate::parser::bgp::attributes::attr_07_18_aggregator::parse_aggregator;
 use crate::parser::bgp::attributes::attr_08_communities::parse_regular_communities;
@@ -198,5 +199,54 @@ impl AttributeParser {
         }
 
         Ok(attributes)
+    }
+}
+
+impl MrtEncode for Attribute {
+    fn encode(&self) -> Bytes {
+        let bytes = match &self.value {
+            AttributeValue::Origin(v) => encode_origin(v),
+            AttributeValue::AsPath(v) => encode_as_path(v, AsnLength::Bits16),
+            AttributeValue::As4Path(v) => encode_as_path(v, AsnLength::Bits32),
+            AttributeValue::NextHop(v) => encode_next_hop(v),
+            AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
+            AttributeValue::LocalPreference(v) => {
+                todo!()
+            }
+            AttributeValue::OnlyToCustomer(v) => {
+                todo!()
+            }
+            AttributeValue::AtomicAggregate(v) => {
+                todo!()
+            }
+            AttributeValue::Aggregator(v, _) => {
+                todo!()
+            }
+            AttributeValue::Communities(v) => {
+                todo!()
+            }
+            AttributeValue::ExtendedCommunities(v) => {
+                todo!()
+            }
+            AttributeValue::LargeCommunities(v) => {
+                todo!()
+            }
+            AttributeValue::OriginatorId(v) => {
+                todo!()
+            }
+            AttributeValue::Clusters(v) => {
+                todo!()
+            }
+            AttributeValue::MpReachNlri(v) => {
+                todo!()
+            }
+            AttributeValue::MpUnreachNlri(v) => {
+                todo!()
+            }
+            AttributeValue::Development(v) => {
+                todo!()
+            }
+        };
+        todo!()
     }
 }

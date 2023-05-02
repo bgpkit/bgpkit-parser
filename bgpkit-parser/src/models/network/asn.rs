@@ -1,3 +1,5 @@
+use crate::encoder::MrtEncode;
+use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 
@@ -75,5 +77,39 @@ impl Serialize for Asn {
 impl Display for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
+    }
+}
+
+impl MrtEncode for Asn {
+    fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        match self.len {
+            AsnLength::Bits16 => bytes.put_u16(self.asn as u16),
+            AsnLength::Bits32 => bytes.put_u32(self.asn),
+        }
+        bytes.freeze()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::ReadUtils;
+
+    #[test]
+    fn test_asn_encode() {
+        let asn = Asn {
+            asn: 123,
+            len: AsnLength::Bits16,
+        };
+        let mut bytes = asn.encode();
+        assert_eq!(123, bytes.read_u16().unwrap());
+
+        let asn = Asn {
+            asn: 123,
+            len: AsnLength::Bits32,
+        };
+        let mut bytes = asn.encode();
+        assert_eq!(123, bytes.read_u32().unwrap());
     }
 }

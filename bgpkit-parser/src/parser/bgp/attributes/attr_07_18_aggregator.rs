@@ -1,7 +1,9 @@
+use crate::encoder::MrtEncode;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use std::net::IpAddr;
 
 pub fn parse_aggregator(
     mut input: Bytes,
@@ -15,6 +17,19 @@ pub fn parse_aggregator(
     };
     let addr = input.read_address(afi)?;
     Ok(AttributeValue::Aggregator(asn, addr))
+}
+
+pub fn encode_aggregator(asn: &Asn, addr: &IpAddr) -> Bytes {
+    let mut bytes = BytesMut::new();
+
+    bytes.extend(asn.encode());
+    match addr {
+        IpAddr::V4(ip) => bytes.put_u32((*ip).into()),
+        IpAddr::V6(ip) => {
+            bytes.put_u128((*ip).into());
+        }
+    }
+    bytes.freeze()
 }
 
 #[cfg(test)]

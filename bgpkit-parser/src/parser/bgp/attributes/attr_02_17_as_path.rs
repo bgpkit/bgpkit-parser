@@ -2,7 +2,7 @@ use crate::models::attributes::AttributeValue;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 const AS_PATH_AS_SET: u8 = 1;
 const AS_PATH_AS_SEQUENCE: u8 = 2;
@@ -37,6 +37,50 @@ fn parse_as_path_segment(
             "Invalid AS path segment type: {}",
             segment_type
         ))),
+    }
+}
+
+pub fn encode_as_path(path: &AsPath, asn_len: AsnLength) -> Bytes {
+    let mut output = BytesMut::with_capacity(1024);
+    for segment in path.segments.iter() {
+        match segment {
+            AsPathSegment::AsSet(asns) => {
+                output.put_u8(AS_PATH_AS_SET);
+                output.put_u8(asns.len() as u8);
+                write_asns(asns, asn_len, &mut output);
+            }
+            AsPathSegment::AsSequence(asns) => {
+                output.put_u8(AS_PATH_AS_SEQUENCE);
+                output.put_u8(asns.len() as u8);
+                write_asns(asns, asn_len, &mut output);
+            }
+            AsPathSegment::ConfedSequence(asns) => {
+                output.put_u8(AS_PATH_CONFED_SEQUENCE);
+                output.put_u8(asns.len() as u8);
+                write_asns(asns, asn_len, &mut output);
+            }
+            AsPathSegment::ConfedSet(asns) => {
+                output.put_u8(AS_PATH_CONFED_SET);
+                output.put_u8(asns.len() as u8);
+                write_asns(asns, asn_len, &mut output);
+            }
+        }
+    }
+    output.freeze()
+}
+
+fn write_asns(asns: &Vec<Asn>, asn_len: AsnLength, output: &mut BytesMut) {
+    match asn_len {
+        AsnLength::Bits16 => {
+            for asn in asns.iter() {
+                output.put_u16(asn.asn as u16);
+            }
+        }
+        AsnLength::Bits32 => {
+            for asn in asns.iter() {
+                output.put_u32(asn.asn);
+            }
+        }
     }
 }
 

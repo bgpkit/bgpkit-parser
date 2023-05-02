@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -11,6 +11,10 @@ pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
             "Failed to parse attribute type: origin".to_string(),
         )),
     }
+}
+
+pub fn encode_origin(origin: &Origin) -> Bytes {
+    Bytes::from(vec![*origin as u8])
 }
 
 #[cfg(test)]
