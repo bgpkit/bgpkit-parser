@@ -88,10 +88,18 @@ fn main() {
 
     env_logger::init();
 
-    let mut parser = match opts.cache_dir {
-        None => BgpkitParser::new(opts.file_path.to_str().unwrap()).unwrap(),
-        Some(c) => {
-            BgpkitParser::new_cached(opts.file_path.to_str().unwrap(), c.to_str().unwrap()).unwrap()
+    let file_path = opts.file_path.to_str().unwrap();
+
+    let mut parser = match {
+        match opts.cache_dir {
+            None => BgpkitParser::new(file_path),
+            Some(c) => BgpkitParser::new_cached(file_path, c.to_str().unwrap()),
+        }
+    } {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(1);
         }
     };
 
