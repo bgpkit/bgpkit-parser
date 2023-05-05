@@ -1,9 +1,11 @@
 use crate::models::*;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
-use crate::parser::{parse_nlri_list, AttributeParser, ReadUtils};
+use crate::parser::{
+    encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, AttributeParser, ReadUtils,
+};
 use log::warn;
 
 /// BGP message
@@ -115,6 +117,16 @@ pub fn parse_bgp_notification_message(
     })
 }
 
+impl BgpNotificationMessage {
+    pub fn encode(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        buf.put_u8(self.error_code);
+        buf.put_u8(self.error_subcode);
+        buf.put_slice(&self.data);
+        buf.freeze()
+    }
+}
+
 /// Parse BGP OPEN messages.
 ///
 /// The parsing of BGP OPEN messages also includes decoding the BGP capabilities.
@@ -207,6 +219,32 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     })
 }
 
+impl BgpOpenMessage {
+    pub fn encode(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        buf.put_u8(self.version);
+        buf.put_u16(self.asn.asn as u16);
+        buf.put_u16(self.hold_time);
+        buf.extend(encode_ipaddr(&self.sender_ip.into()));
+        buf.put_u8(self.opt_params.len() as u8);
+        for param in &self.opt_params {
+            buf.put_u8(param.param_type);
+            buf.put_u8(param.param_len as u8);
+            match &param.param_value {
+                ParamValue::Capability(cap) => {
+                    buf.put_u8(cap.code);
+                    buf.put_u8(cap.len);
+                    buf.extend(&cap.value);
+                }
+                ParamValue::Raw(bytes) => {
+                    buf.extend(bytes);
+                }
+            }
+        }
+        buf.freeze()
+    }
+}
+
 /// read nlri portion of a bgp update message.
 fn read_nlri(
     mut input: Bytes,
@@ -260,4 +298,50 @@ pub fn parse_bgp_update_message(
         attributes,
         announced_prefixes,
     })
+}
+
+impl BgpUpdateMessage {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+
+        // withdrawn prefixes
+        let withdrawn_bytes = encode_nlri_prefixes(&self.withdrawn_prefixes, add_path);
+        bytes.put_u16(withdrawn_bytes.len() as u16);
+        bytes.put_slice(&withdrawn_bytes);
+
+        // attributes
+        let mut attr_bytes = BytesMut::new();
+        for attribute in &self.attributes {
+            attr_bytes.extend(&attribute.encode(add_path, asn_len));
+        }
+
+        bytes.put_u16(attr_bytes.len() as u16);
+        bytes.put_slice(&attr_bytes);
+
+        bytes.extend(encode_nlri_prefixes(&self.announced_prefixes, add_path));
+        bytes.freeze()
+    }
+}
+
+impl BgpMessage {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(0); // marker
+        bytes.put_u32(0); // marker
+        bytes.put_u32(0); // marker
+        bytes.put_u32(0); // marker
+
+        let (msg_type, msg_bytes) = match self {
+            BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()),
+            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(add_path, asn_len)),
+            BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
+            BgpMessage::KeepAlive(_) => (BgpMessageType::KEEPALIVE, Bytes::new()),
+        };
+
+        // msg total bytes length = msg bytes + 16 bytes marker + 2 bytes length + 1 byte type
+        bytes.put_u16(msg_bytes.len() as u16 + 16 + 2 + 1);
+        bytes.put_u8(msg_type as u8);
+        bytes.put_slice(&msg_bytes);
+        bytes.freeze()
+    }
 }

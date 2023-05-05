@@ -24,6 +24,10 @@ pub fn parse_only_to_customer(mut input: Bytes) -> Result<AttributeValue, Parser
     Ok(AttributeValue::OnlyToCustomer(remote_asn))
 }
 
+pub fn encode_only_to_customer(remote_asn: u32) -> Bytes {
+    Bytes::from(remote_asn.to_be_bytes().to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,5 +40,13 @@ mod tests {
         } else {
             panic!("parsing error")
         }
+    }
+
+    #[test]
+    fn test_encode_otc() {
+        assert_eq!(
+            encode_only_to_customer(123),
+            Bytes::from(vec![0, 0, 0, 123])
+        );
     }
 }

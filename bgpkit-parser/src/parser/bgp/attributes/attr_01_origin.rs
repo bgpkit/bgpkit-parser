@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use num_traits::FromPrimitive;
 
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -58,5 +58,26 @@ mod tests {
             parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
             ParserError::UnknownAttr(_)
         ));
+    }
+
+    #[test]
+    fn test_encode_origin() {
+        let value = Origin::IGP;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
+
+        let value = Origin::EGP;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
+
+        let value = Origin::INCOMPLETE;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
     }
 }

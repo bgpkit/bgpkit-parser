@@ -83,6 +83,19 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_next_hop() {
+        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        let ipv6 = Ipv6Addr::from_str("FC00::1").unwrap();
+        let ipv4_bytes = Bytes::from(ipv4.octets().to_vec());
+        let ipv6_bytes = Bytes::from(ipv6.octets().to_vec());
+
+        let res = parse_next_hop(ipv4_bytes.clone(), &None).unwrap();
+        assert_eq!(ipv4_bytes, encode_next_hop(&ipv4.into()));
+        let res = parse_next_hop(ipv6_bytes.clone(), &None).unwrap();
+        assert_eq!(ipv6_bytes, encode_next_hop(&ipv6.into()));
+    }
+
+    #[test]
     fn test_parse_mp_next_hop() {
         let ipv4 = Bytes::from(Ipv4Addr::from_str("10.0.0.1").unwrap().octets().to_vec());
         let ipv6 = Bytes::from(Ipv6Addr::from_str("fc00::1").unwrap().octets().to_vec());
@@ -111,5 +124,13 @@ mod tests {
         } else {
             panic!();
         }
+    }
+
+    #[test]
+    fn test_encode_mp_next_hop() {
+        let ipv4 = Bytes::from(Ipv4Addr::from_str("10.0.0.1").unwrap().octets().to_vec());
+        let next_hop = parse_mp_next_hop(ipv4.clone()).unwrap().unwrap();
+        let bytes = encode_mp_next_hop(&next_hop);
+        assert_eq!(bytes, ipv4);
     }
 }

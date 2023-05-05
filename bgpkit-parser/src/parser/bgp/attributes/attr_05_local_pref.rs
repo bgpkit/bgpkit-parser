@@ -16,12 +16,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_med() {
+    fn test_parse_local_pref() {
         if let Ok(AttributeValue::LocalPreference(123)) =
             parse_local_pref(Bytes::from(vec![0, 0, 0, 123]))
         {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_local_pref() {
+        assert_eq!(encode_local_pref(123), Bytes::from(vec![0, 0, 0, 123]));
     }
 }

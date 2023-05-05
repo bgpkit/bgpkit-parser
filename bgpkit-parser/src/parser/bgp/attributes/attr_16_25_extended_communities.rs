@@ -8,7 +8,7 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use num_traits::FromPrimitive;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -93,6 +93,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                     local_administrator: local,
                 })
             }
+
             ExtendedCommunityType::TransitiveFourOctetAsSpecific => {
                 let sub_type = input.read_u8()?;
                 let global = input.read_u32()?;
@@ -125,6 +126,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                     local_administrator: local,
                 })
             }
+
             ExtendedCommunityType::TransitiveOpaque => {
                 let sub_type = input.read_u8()?;
                 let mut value: [u8; 6] = [0; 6];
@@ -174,6 +176,54 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         communities.push(ec);
     }
     Ok(AttributeValue::ExtendedCommunities(communities))
+}
+
+pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
+    let mut bytes = BytesMut::new();
+    for community in communities {
+        match community {
+            ExtendedCommunity::TransitiveTwoOctetAsSpecific(two_octet)
+            | ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(two_octet) => {
+                bytes.put_u8(two_octet.ec_type);
+                bytes.put_u8(two_octet.ec_subtype);
+                bytes.put_u16(two_octet.global_administrator.asn as u16);
+                bytes.put_slice(two_octet.local_administrator.as_slice());
+            }
+            ExtendedCommunity::TransitiveIpv4AddressSpecific(ipv4)
+            | ExtendedCommunity::NonTransitiveIpv4AddressSpecific(ipv4) => {
+                bytes.put_u8(ipv4.ec_type);
+                bytes.put_u8(ipv4.ec_subtype);
+                bytes.put_u32(ipv4.global_administrator.into());
+                bytes.put_slice(ipv4.local_administrator.as_slice());
+            }
+
+            ExtendedCommunity::TransitiveFourOctetAsSpecific(four_octet)
+            | ExtendedCommunity::NonTransitiveFourOctetAsSpecific(four_octet) => {
+                bytes.put_u8(four_octet.ec_type);
+                bytes.put_u8(four_octet.ec_subtype);
+                bytes.put_u32(four_octet.global_administrator.asn);
+                bytes.put_slice(four_octet.local_administrator.as_slice());
+            }
+
+            ExtendedCommunity::TransitiveOpaque(opaque)
+            | ExtendedCommunity::NonTransitiveOpaque(opaque) => {
+                bytes.put_u8(opaque.ec_type);
+                bytes.put_u8(opaque.ec_subtype);
+                bytes.put_slice(&opaque.value);
+            }
+
+            ExtendedCommunity::Raw(raw) => {
+                bytes.put_slice(raw);
+            }
+            ExtendedCommunity::Ipv6AddressSpecific(ipv6) => {
+                bytes.put_u8(ipv6.ec_type);
+                bytes.put_u8(ipv6.ec_subtype);
+                bytes.put_slice(&ipv6.global_administrator.octets());
+                bytes.put_slice(ipv6.local_administrator.as_slice());
+            }
+        }
+    }
+    bytes.freeze()
 }
 
 #[cfg(test)]
@@ -316,5 +366,66 @@ mod tests {
         } else {
             panic!("Unexpected attribute type");
         }
+    }
+
+    #[test]
+    fn test_encode_extended_communites() {
+        let communities = vec![
+            ExtendedCommunity::TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
+                ec_type: 0x00,
+                ec_subtype: 0x02,
+                global_administrator: Asn::from(1),
+                local_administrator: [0x00, 0x00, 0x00, 0x01],
+            }),
+            ExtendedCommunity::TransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
+                ec_type: 0x01,
+                ec_subtype: 0x02,
+                global_administrator: Ipv4Addr::new(192, 0, 2, 1),
+                local_administrator: [0x00, 0x01],
+            }),
+            ExtendedCommunity::TransitiveFourOctetAsSpecific(FourOctetAsSpecific {
+                ec_type: 0x02,
+                ec_subtype: 0x02,
+                global_administrator: Asn::from(1),
+                local_administrator: [0x00, 0x01],
+            }),
+            ExtendedCommunity::TransitiveOpaque(Opaque {
+                ec_type: 0x03,
+                ec_subtype: 0x02,
+                value: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05],
+            }),
+            ExtendedCommunity::Ipv6AddressSpecific(Ipv6AddressSpecific {
+                ec_type: 0x40,
+                ec_subtype: 0x02,
+                global_administrator: Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+                local_administrator: [0x00, 0x01],
+            }),
+        ];
+
+        let data = encode_extended_communities(&communities);
+        assert_eq!(
+            data,
+            vec![
+                0x00, // Transitive Two Octet AS Specific
+                0x02, // Route Target
+                0x00, 0x01, // AS 1
+                0x00, 0x00, 0x00, 0x01, // Local Admin 1
+                0x01, // Transitive IPv4 Address Specific
+                0x02, // Route Target
+                0xC0, 0x00, 0x02, 0x01, // ipv4:
+                0x00, 0x01, // Local Admin 1
+                0x02, // Transitive Four Octet AS Specific
+                0x02, // Route Target
+                0x00, 0x00, 0x00, 0x01, // AS 1
+                0x00, 0x01, // Local Admin 1
+                0x03, // Transitive Opaque
+                0x02, // Route Target
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, // Opaque
+                0x40, // Transitive IPv6 Address Specific
+                0x02, // Route Target
+                0x20, 0x01, 0x0D, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x01, 0x00, 0x01, // Local Admin 1
+            ]
+        );
     }
 }

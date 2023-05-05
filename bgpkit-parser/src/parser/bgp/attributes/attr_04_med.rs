@@ -24,4 +24,9 @@ mod tests {
             panic!()
         }
     }
+
+    #[test]
+    fn test_encode_med() {
+        assert_eq!(encode_med(123), Bytes::from(vec![0, 0, 0, 123]));
+    }
 }

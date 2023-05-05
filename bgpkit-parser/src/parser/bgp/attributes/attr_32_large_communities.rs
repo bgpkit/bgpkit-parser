@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
@@ -12,6 +12,16 @@ pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, Parse
         communities.push(LargeCommunity::new(global_administrator, local_data));
     }
     Ok(AttributeValue::LargeCommunities(communities))
+}
+
+pub fn encode_large_communities(communities: &[LargeCommunity]) -> Bytes {
+    let mut data = BytesMut::new();
+    for community in communities {
+        data.put_u32(community.global_administrator);
+        data.put_u32(community.local_data[0]);
+        data.put_u32(community.local_data[1]);
+    }
+    data.freeze()
 }
 
 #[cfg(test)]
@@ -42,5 +52,19 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_large_communities() {
+        let communities = vec![
+            LargeCommunity::new(1, [2, 3]),
+            LargeCommunity::new(4, [5, 6]),
+        ];
+        let data = encode_large_communities(&communities);
+        assert_eq!(data.len(), 24);
+        assert_eq!(
+            data,
+            [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6].to_vec()
+        );
     }
 }

@@ -2,8 +2,8 @@ use crate::encoder::MrtEncode;
 use crate::models::CommonHeader;
 use bytes::{BufMut, Bytes, BytesMut};
 
-impl MrtEncode for CommonHeader {
-    fn encode(&self) -> Bytes {
+impl CommonHeader {
+    pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.put_slice(&self.timestamp.to_be_bytes());
         bytes.put_u16(self.entry_type as u16);

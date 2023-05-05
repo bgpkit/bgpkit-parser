@@ -1,8 +1,9 @@
+use crate::encoder::MrtEncode;
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
-use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
+use crate::parser::{encode_asn, encode_ipaddr, ReadUtils};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 
 /// Parse MRT BGP4MP type
@@ -118,6 +119,20 @@ pub fn parse_bgp4mp_message(
     })
 }
 
+impl Bgp4MpMessage {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.extend(self.peer_asn.encode());
+        bytes.extend(self.local_asn.encode());
+        bytes.put_u16(self.interface_index);
+        bytes.put_u16(self.afi as u16);
+        bytes.extend(encode_ipaddr(&self.peer_ip));
+        bytes.extend(encode_ipaddr(&self.local_ip));
+        bytes.extend(&self.bgp_message.encode(add_path, asn_len));
+        bytes.freeze()
+    }
+}
+
 /*
    0                   1                   2                   3
    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -187,4 +202,19 @@ pub fn parse_bgp4mp_state_change(
         old_state,
         new_state,
     })
+}
+
+impl Bgp4MpStateChange {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.extend(encode_asn(&self.peer_asn, &asn_len));
+        bytes.extend(encode_asn(&self.local_asn, &asn_len));
+        bytes.put_u16(self.interface_index);
+        bytes.put_u16(self.address_family as u16);
+        bytes.extend(encode_ipaddr(&self.peer_addr));
+        bytes.extend(encode_ipaddr(&self.local_addr));
+        bytes.put_u16(self.old_state as u16);
+        bytes.put_u16(self.new_state as u16);
+        bytes.freeze()
+    }
 }

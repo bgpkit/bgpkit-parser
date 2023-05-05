@@ -97,4 +97,15 @@ mod tests {
             panic!()
         }
     }
+
+    #[test]
+    fn test_encode_aggregator() {
+        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        let asn = Asn {
+            asn: 258,
+            len: AsnLength::Bits16,
+        };
+        let bytes = encode_aggregator(&asn, &ipv4.into());
+        assert_eq!(bytes, Bytes::from_static(&[1u8, 2, 10, 0, 0, 1]));
+    }
 }

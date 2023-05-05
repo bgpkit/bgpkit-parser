@@ -12,10 +12,9 @@ mod attr_16_25_extended_communities;
 mod attr_32_large_communities;
 mod attr_35_otc;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::{debug, warn};
 
-use crate::encoder::MrtEncode;
 use crate::models::*;
 use num_traits::FromPrimitive;
 
@@ -24,17 +23,25 @@ use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin
 use crate::parser::bgp::attributes::attr_02_17_as_path::{encode_as_path, parse_as_path};
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
 use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
-use crate::parser::bgp::attributes::attr_05_local_pref::parse_local_pref;
-use crate::parser::bgp::attributes::attr_07_18_aggregator::parse_aggregator;
-use crate::parser::bgp::attributes::attr_08_communities::parse_regular_communities;
-use crate::parser::bgp::attributes::attr_09_originator::parse_originator_id;
-use crate::parser::bgp::attributes::attr_10_13_cluster::parse_clusters;
-use crate::parser::bgp::attributes::attr_14_15_nlri::parse_nlri;
-use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
-    parse_extended_community, parse_ipv6_extended_community,
+use crate::parser::bgp::attributes::attr_05_local_pref::{encode_local_pref, parse_local_pref};
+use crate::parser::bgp::attributes::attr_07_18_aggregator::{encode_aggregator, parse_aggregator};
+use crate::parser::bgp::attributes::attr_08_communities::{
+    encode_regular_communities, parse_regular_communities,
 };
-use crate::parser::bgp::attributes::attr_32_large_communities::parse_large_communities;
-use crate::parser::bgp::attributes::attr_35_otc::parse_only_to_customer;
+use crate::parser::bgp::attributes::attr_09_originator::{
+    encode_originator_id, parse_originator_id,
+};
+use crate::parser::bgp::attributes::attr_10_13_cluster::{encode_clusters, parse_clusters};
+use crate::parser::bgp::attributes::attr_14_15_nlri::{encode_nlri, parse_nlri};
+use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
+    encode_extended_communities, parse_extended_community, parse_ipv6_extended_community,
+};
+use crate::parser::bgp::attributes::attr_32_large_communities::{
+    encode_large_communities, parse_large_communities,
+};
+use crate::parser::bgp::attributes::attr_35_otc::{
+    encode_only_to_customer, parse_only_to_customer,
+};
 use crate::parser::ReadUtils;
 
 pub struct AttributeParser {
@@ -128,7 +135,8 @@ impl AttributeParser {
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => parse_as_path(attr_data, asn_len),
+                AttrType::AS_PATH => parse_as_path(attr_data, asn_len, false),
+                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32, true),
                 AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
                 AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
@@ -154,7 +162,6 @@ impl AttributeParser {
                     false,
                     self.additional_paths,
                 ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32),
                 AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32, &afi),
 
                 // communities
@@ -202,51 +209,42 @@ impl AttributeParser {
     }
 }
 
-impl MrtEncode for Attribute {
-    fn encode(&self) -> Bytes {
-        let bytes = match &self.value {
+impl Attribute {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+
+        bytes.put_u8(self.flag);
+        bytes.put_u8(self.attr_type as u8);
+
+        let value_bytes = match &self.value {
             AttributeValue::Origin(v) => encode_origin(v),
-            AttributeValue::AsPath(v) => encode_as_path(v, AsnLength::Bits16),
+            AttributeValue::AsPath(v) => encode_as_path(v, asn_len),
             AttributeValue::As4Path(v) => encode_as_path(v, AsnLength::Bits32),
             AttributeValue::NextHop(v) => encode_next_hop(v),
             AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
-            AttributeValue::LocalPreference(v) => {
-                todo!()
-            }
-            AttributeValue::OnlyToCustomer(v) => {
-                todo!()
-            }
-            AttributeValue::AtomicAggregate(v) => {
-                todo!()
-            }
-            AttributeValue::Aggregator(v, _) => {
-                todo!()
-            }
-            AttributeValue::Communities(v) => {
-                todo!()
-            }
-            AttributeValue::ExtendedCommunities(v) => {
-                todo!()
-            }
-            AttributeValue::LargeCommunities(v) => {
-                todo!()
-            }
-            AttributeValue::OriginatorId(v) => {
-                todo!()
-            }
-            AttributeValue::Clusters(v) => {
-                todo!()
-            }
-            AttributeValue::MpReachNlri(v) => {
-                todo!()
-            }
-            AttributeValue::MpUnreachNlri(v) => {
-                todo!()
-            }
-            AttributeValue::Development(v) => {
-                todo!()
-            }
+            AttributeValue::LocalPreference(v) => encode_local_pref(*v),
+            AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(*v),
+            AttributeValue::AtomicAggregate(_v) => Bytes::default(),
+            AttributeValue::Aggregator(asn, ip) => encode_aggregator(asn, ip),
+            AttributeValue::Communities(v) => encode_regular_communities(v),
+            AttributeValue::ExtendedCommunities(v) => encode_extended_communities(v),
+            AttributeValue::LargeCommunities(v) => encode_large_communities(v),
+            AttributeValue::OriginatorId(v) => encode_originator_id(v),
+            AttributeValue::Clusters(v) => encode_clusters(v),
+            AttributeValue::MpReachNlri(v) => encode_nlri(v, true, add_path),
+            AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false, add_path),
+            AttributeValue::Development(v) => Bytes::from(v.to_owned()),
         };
-        todo!()
+
+        match self.flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
+            0 => {
+                bytes.put_u8(value_bytes.len() as u8);
+            }
+            _ => {
+                bytes.put_u16(value_bytes.len() as u16);
+            }
+        }
+        bytes.extend(value_bytes);
+        bytes.freeze()
     }
 }
