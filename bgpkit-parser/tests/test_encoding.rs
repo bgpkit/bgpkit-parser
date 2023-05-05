@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bgpkit_parser::encoder::MrtEncode;
     use bgpkit_parser::{parse_mrt_record, BgpkitParser, Elementor};
     use std::io::Cursor;
 

@@ -1,33 +1,72 @@
-use crate::encoder::MrtEncode;
-use crate::models::{AsnLength, Bgp4Mp, Bgp4MpType, MrtMessage, MrtRecord, TableDumpMessage};
-
-use bytes::{BufMut, Bytes, BytesMut};
-use ipnet::IpNet;
+use crate::models::{AsnLength, Bgp4Mp, Bgp4MpType, EntryType, MrtMessage};
+use crate::parser::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message};
+use crate::ParserError;
+use bytes::Bytes;
 use num_traits::FromPrimitive;
-use std::net::IpAddr;
 
-mod common_header;
+pub(crate) mod bgp4mp;
+pub(crate) mod table_dump_message;
+pub(crate) mod table_dump_v2_message;
 
-impl MrtEncode for MrtRecord {
-    fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
-        let header_bytes = self.common_header.encode();
-        let message_bytes = self.message.encode(self.common_header.entry_subtype);
-        // let parsed_body = crate::parser::mrt::mrt_record::parse_mrt_body(
-        //     self.common_header.entry_type as u16,
-        //     self.common_header.entry_subtype,
-        //     message_bytes.clone(),
-        // )
-        // .unwrap();
-        // assert!(self.message == parsed_body);
-        bytes.put_slice(&header_bytes);
-        bytes.put_slice(&message_bytes);
-        bytes.freeze()
-    }
+/// Parse MRT message body with given entry type and subtype.
+///
+/// The entry type and subtype are parsed from the common header. The message body is parsed
+/// according to the entry type and subtype. The message body is the remaining bytes after the
+/// common header. The length of the message body is also parsed from the common header.
+pub fn parse_mrt_message(
+    entry_type: u16,
+    entry_subtype: u16,
+    data: Bytes,
+) -> Result<MrtMessage, ParserError> {
+    let etype = match EntryType::from_u16(entry_type) {
+        Some(t) => Ok(t),
+        None => Err(ParserError::ParseError(format!(
+            "Failed to parse entry type: {}",
+            entry_type
+        ))),
+    }?;
+
+    let message: MrtMessage = match &etype {
+        EntryType::TABLE_DUMP => {
+            let msg = parse_table_dump_message(entry_subtype, data);
+            match msg {
+                Ok(msg) => MrtMessage::TableDumpMessage(msg),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        EntryType::TABLE_DUMP_V2 => {
+            let msg = parse_table_dump_v2_message(entry_subtype, data);
+            match msg {
+                Ok(msg) => MrtMessage::TableDumpV2Message(msg),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        EntryType::BGP4MP | EntryType::BGP4MP_ET => {
+            let msg = parse_bgp4mp(entry_subtype, data);
+            match msg {
+                Ok(msg) => MrtMessage::Bgp4Mp(msg),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        v => {
+            // deprecated
+            return Err(ParserError::Unsupported(format!(
+                "unsupported MRT type: {:?}",
+                v
+            )));
+        }
+    };
+    Ok(message)
 }
 
 impl MrtMessage {
-    fn encode(&self, sub_type: u16) -> Bytes {
+    pub fn encode(&self, sub_type: u16) -> Bytes {
         let msg_bytes: Bytes = match self {
             MrtMessage::TableDumpMessage(m) => {
                 todo!("tabledump message is not supported yet");
@@ -90,47 +129,5 @@ impl MrtMessage {
         };
 
         msg_bytes
-    }
-}
-
-impl MrtEncode for TableDumpMessage {
-    fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
-        bytes.put_u16(self.view_number);
-        bytes.put_u16(self.sequence_number);
-        // TODO: prefix
-        match &self.prefix.prefix {
-            IpNet::V4(p) => {
-                bytes.put_u32(p.addr().into());
-                bytes.put_u8(p.prefix_len());
-            }
-            IpNet::V6(p) => {
-                bytes.put_u128(p.addr().into());
-                bytes.put_u8(p.prefix_len());
-            }
-        }
-        bytes.put_u8(self.status);
-        bytes.put_u32(self.originated_time as u32);
-
-        // peer address and peer asn
-        match self.peer_address {
-            IpAddr::V4(a) => {
-                bytes.put_u32(a.into());
-            }
-            IpAddr::V6(a) => {
-                bytes.put_u128(a.into());
-            }
-        }
-        bytes.put_u16(self.peer_asn.asn as u16);
-
-        // encode attributes
-        let attr_bytes = BytesMut::new();
-        // TODO encode attributes to attr_bytes
-        for attr in &self.attributes {}
-
-        bytes.put_u16(attr_bytes.len() as u16);
-        bytes.put_slice(&attr_bytes);
-
-        bytes.freeze()
     }
 }

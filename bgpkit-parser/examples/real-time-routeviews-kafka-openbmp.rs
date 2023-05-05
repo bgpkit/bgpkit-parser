@@ -23,7 +23,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
     loop {
         let mss = con.poll()?;
         if mss.is_empty() {
-            println!("No messages available right now, wait for 5 seconds.");
+            println!("No mrt_message available right now, wait for 5 seconds.");
             sleep(Duration::from_secs(5));
             continue;
         }

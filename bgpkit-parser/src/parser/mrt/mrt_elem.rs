@@ -121,7 +121,7 @@ impl Elementor {
 
     /// Convert a [BgpMessage] to a vector of [BgpElem]s.
     ///
-    /// A [BgpMessage] may include `Update`, `Open`, `Notification` or `KeepAlive` messages,
+    /// A [BgpMessage] may include `Update`, `Open`, `Notification` or `KeepAlive` mrt_message,
     /// and only `Update` message contains [BgpElem]s.
     pub fn bgp_to_elems(
         msg: BgpMessage,

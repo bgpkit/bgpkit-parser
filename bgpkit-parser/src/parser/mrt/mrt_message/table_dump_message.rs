@@ -2,7 +2,8 @@ use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use ipnet::IpNet;
 use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
@@ -106,4 +107,48 @@ pub fn parse_table_dump_message(
         peer_asn,
         attributes,
     })
+}
+
+impl TableDumpMessage {
+    fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put_u16(self.view_number);
+        bytes.put_u16(self.sequence_number);
+        // TODO: prefix
+        match &self.prefix.prefix {
+            IpNet::V4(p) => {
+                bytes.put_u32(p.addr().into());
+                bytes.put_u8(p.prefix_len());
+            }
+            IpNet::V6(p) => {
+                bytes.put_u128(p.addr().into());
+                bytes.put_u8(p.prefix_len());
+            }
+        }
+        bytes.put_u8(self.status);
+        bytes.put_u32(self.originated_time as u32);
+
+        // peer address and peer asn
+        match self.peer_address {
+            IpAddr::V4(a) => {
+                bytes.put_u32(a.into());
+            }
+            IpAddr::V6(a) => {
+                bytes.put_u128(a.into());
+            }
+        }
+        bytes.put_u16(self.peer_asn.asn as u16);
+
+        // encode attributes
+        let mut attr_bytes = BytesMut::new();
+        // TODO encode attributes to attr_bytes
+        for attr in &self.attributes {
+            // attr_bytes.extend(attr.encode());
+        }
+
+        bytes.put_u16(attr_bytes.len() as u16);
+        bytes.put_slice(&attr_bytes);
+
+        bytes.freeze()
+    }
 }

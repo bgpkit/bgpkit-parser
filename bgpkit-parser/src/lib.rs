@@ -89,7 +89,7 @@ for item in broker.into_iter().take(2) {
 ### Filtering BGP Messages
 
 BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [BgpkitParser] instance,
-once can also call `add_filter` function to customize the parser to only show matching messages
+once can also call `add_filter` function to customize the parser to only show matching mrt_message
 when iterating through [BgpElem]s.
 
 For all types of filters, check out the [Filter] enum documentation.
@@ -118,13 +118,13 @@ log::info!("done");
 ### Parsing Real-time Data Streams
 
 BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
-and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] messages. See the examples below and the documentation for more.
+and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] mrt_message. See the examples below and the documentation for more.
 
 #### Parsing Messages From RIS-Live
 
 Here is an example of handling RIS-Live message streams. After connecting to the websocket server,
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
-from on collector (`rrc21`). We can then loop and read messages from the websocket.
+from on collector (`rrc21`). We can then loop and read mrt_message from the websocket.
 
 ```no_run
 use bgpkit_parser::parse_ris_live_message;
@@ -143,7 +143,7 @@ fn main() {
         connect(Url::parse(RIS_LIVE_URL).unwrap())
             .expect("Can't connect to RIS Live websocket server");
 
-    // subscribe to messages from one collector
+    // subscribe to mrt_message from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
     socket.write_message(Message::Text(msg)).unwrap();
 
@@ -315,7 +315,6 @@ We support normal communities, extended communities, and large communities.
 extern crate enum_primitive_derive;
 extern crate core;
 
-pub mod encoder;
 pub mod error;
 pub mod models;
 pub mod parser;

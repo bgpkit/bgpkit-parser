@@ -1,5 +1,5 @@
 /*!
-Provides parsing for BMP and OpenBMP binary-formatted messages.
+Provides parsing for BMP and OpenBMP binary-formatted mrt_message.
 */
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;

@@ -1,78 +1,13 @@
+use super::mrt_header::parse_common_header;
+use super::mrt_message::parse_mrt_message;
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
 };
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::Read;
-
-/// MRT common header
-///
-/// A MRT record is constructed as the following:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// ```
-///
-/// Or with extended timestamp:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Microsecond Timestamp                    |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// ```
-pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
-    let mut raw_bytes = [0u8; 12];
-    input.read_exact(&mut raw_bytes)?;
-    let mut data = BytesMut::from(&raw_bytes[..]);
-
-    let timestamp = data.get_u32();
-    let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::from_u16(entry_type_raw).ok_or_else(|| {
-        ParserError::ParseError(format!("Failed to parse entry type: {}", entry_type_raw))
-    })?;
-    let entry_subtype = data.get_u16();
-    // the length field does not include the length of the common header
-    let mut length = data.get_u32();
-
-    let microsecond_timestamp = match &entry_type {
-        EntryType::BGP4MP_ET => {
-            length -= 4;
-            let mut raw_bytes: [u8; 4] = [0; 4];
-            input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).get_u32())
-        }
-        _ => None,
-    };
-
-    Ok(CommonHeader {
-        timestamp,
-        microsecond_timestamp,
-        entry_type,
-        entry_subtype,
-        length,
-    })
-}
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     // parse common header
@@ -107,7 +42,7 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
         }
     }
 
-    match parse_mrt_body(
+    match parse_mrt_message(
         common_header.entry_type.to_u16().unwrap(),
         common_header.entry_subtype,
         buffer.freeze(), // freeze the BytesMute to Bytes
@@ -136,59 +71,20 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
     }
 }
 
-/// Parse MRT message body with given entry type and subtype.
-///
-/// The entry type and subtype are parsed from the common header. The message body is parsed
-/// according to the entry type and subtype. The message body is the remaining bytes after the
-/// common header. The length of the message body is also parsed from the common header.
-pub fn parse_mrt_body(
-    entry_type: u16,
-    entry_subtype: u16,
-    data: Bytes,
-) -> Result<MrtMessage, ParserError> {
-    let etype = match EntryType::from_u16(entry_type) {
-        Some(t) => Ok(t),
-        None => Err(ParserError::ParseError(format!(
-            "Failed to parse entry type: {}",
-            entry_type
-        ))),
-    }?;
-
-    let message: MrtMessage = match &etype {
-        EntryType::TABLE_DUMP => {
-            let msg = parse_table_dump_message(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::TableDumpMessage(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-        EntryType::TABLE_DUMP_V2 => {
-            let msg = parse_table_dump_v2_message(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::TableDumpV2Message(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-        EntryType::BGP4MP | EntryType::BGP4MP_ET => {
-            let msg = parse_bgp4mp(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::Bgp4Mp(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-        v => {
-            // deprecated
-            return Err(ParserError::Unsupported(format!(
-                "unsupported MRT type: {:?}",
-                v
-            )));
-        }
-    };
-    Ok(message)
+impl MrtRecord {
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        let header_bytes = self.common_header.encode();
+        let message_bytes = self.message.encode(self.common_header.entry_subtype);
+        // let parsed_body = crate::parser::mrt::mrt_record::parse_mrt_body(
+        //     self.common_header.entry_type as u16,
+        //     self.common_header.entry_subtype,
+        //     message_bytes.clone(),
+        // )
+        // .unwrap();
+        // assert!(self.message == parsed_body);
+        bytes.put_slice(&header_bytes);
+        bytes.put_slice(&message_bytes);
+        bytes.freeze()
+    }
 }

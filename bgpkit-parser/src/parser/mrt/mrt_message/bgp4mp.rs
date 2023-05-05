@@ -1,4 +1,3 @@
-use crate::encoder::MrtEncode;
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;

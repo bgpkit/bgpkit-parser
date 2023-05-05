@@ -1,4 +1,3 @@
-use crate::encoder::MrtEncode;
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
@@ -80,8 +79,8 @@ impl Display for Asn {
     }
 }
 
-impl MrtEncode for Asn {
-    fn encode(&self) -> Bytes {
+impl Asn {
+    pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         match self.len {
             AsnLength::Bits16 => bytes.put_u16(self.asn as u16),

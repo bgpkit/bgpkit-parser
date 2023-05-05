@@ -1,4 +1,3 @@
-use crate::encoder::MrtEncode;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
