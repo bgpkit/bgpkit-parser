@@ -76,7 +76,7 @@ impl AttributeParser {
             // has content to read
             let flag = data.get_u8();
             let attr_type = data.get_u8();
-            let length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
+            let attr_length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
                 0 => data.get_u8() as usize,
                 _ => data.get_u16() as usize,
             };
@@ -98,40 +98,35 @@ impl AttributeParser {
 
             debug!(
                 "reading attribute: type -- {:?}, length -- {}",
-                &attr_type, length
+                &attr_type, attr_length
             );
             let attr_type = match AttrType::from_u8(attr_type) {
                 Some(t) => t,
                 None => {
-                    // input.read_and_drop_n_bytes(length)?;
-                    data.has_n_remaining(length)?;
-                    data.advance(length);
-                    return match get_deprecated_attr_type(attr_type) {
-                        Some(t) => Err(ParserError::DeprecatedAttr(format!(
-                            "deprecated attribute type: {} - {}",
-                            attr_type, t
-                        ))),
-                        None => Err(ParserError::UnknownAttr(format!(
-                            "unknown attribute type: {}",
-                            attr_type
-                        ))),
+                    match get_deprecated_attr_type(attr_type) {
+                        Some(t) => warn!("deprecated attribute type: {} - {}", attr_type, t),
+                        None => warn!("unknown attribute type: {}", attr_type),
                     };
+                    // skip pass the remaining bytes of this attribute
+                    data.has_n_remaining(attr_length)?;
+                    data.advance(attr_length);
+                    continue;
                 }
             };
 
             let bytes_left = data.remaining();
 
-            if data.remaining() < length {
+            if data.remaining() < attr_length {
                 warn!(
                     "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                    bytes_left, length
+                    bytes_left, attr_length
                 );
                 // break and return already parsed attributes
                 break;
             }
 
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
-            let mut attr_data = data.split_to(length);
+            let mut attr_data = data.split_to(attr_length);
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
@@ -143,7 +138,7 @@ impl AttributeParser {
                 AttrType::ATOMIC_AGGREGATE => {
                     Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
                 }
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len, &afi),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
@@ -162,7 +157,7 @@ impl AttributeParser {
                     false,
                     self.additional_paths,
                 ),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32, &afi),
+                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
 
                 // communities
                 AttrType::COMMUNITIES => parse_regular_communities(attr_data),
@@ -173,7 +168,7 @@ impl AttributeParser {
                 }
                 AttrType::DEVELOPMENT => {
                     let mut value = vec![];
-                    for _i in 0..length {
+                    for _i in 0..attr_length {
                         value.push(attr_data.get_u8());
                     }
                     Ok(AttributeValue::Development(value))

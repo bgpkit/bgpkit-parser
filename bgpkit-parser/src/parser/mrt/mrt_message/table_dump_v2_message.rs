@@ -218,8 +218,6 @@ pub fn parse_rib_entry(
         Some(prefixes),
     )?;
 
-    input.advance(input.remaining());
-
     Ok(RibEntry {
         peer_index,
         originated_time,
