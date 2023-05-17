@@ -3,9 +3,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
-use crate::parser::{
-    encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, AttributeParser, ReadUtils,
-};
+use crate::parser::bgp::attributes::parse_attributes;
+use crate::parser::{encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, ReadUtils};
 use log::warn;
 
 /// BGP message
@@ -283,11 +282,10 @@ pub fn parse_bgp_update_message(
 
     // parse attributes
     let attribute_length = input.read_u16()? as usize;
-    let attr_parser = AttributeParser::new(add_path);
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = attr_parser.parse_attributes(attr_data_slice, asn_len, None, None, None)?;
+    let attributes = parse_attributes(attr_data_slice, asn_len, add_path, None, None, None)?;
 
     // parse announced prefixes nlri.
     // the remaining bytes are announced prefixes.

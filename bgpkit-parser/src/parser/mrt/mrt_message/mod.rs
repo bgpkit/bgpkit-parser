@@ -68,29 +68,11 @@ pub fn parse_mrt_message(
 impl MrtMessage {
     pub fn encode(&self, sub_type: u16) -> Bytes {
         let msg_bytes: Bytes = match self {
-            MrtMessage::TableDumpMessage(m) => {
-                todo!("tabledump message is not supported yet");
-                // let entry_type = EntryType::TABLE_DUMP;
-                // bytes.put_u16(m.view_number);
-                // bytes.put_u16(m.sequence_number);
-                // match &m.prefix.prefix {
-                //     IpNet::V4(prefix) => {
-                //         todo!();
-                //         // bytes.put_u32(prefix..into());
-                //     }
-                //     IpNet::V6(prefix) => {
-                //         todo!();
-                //         // bytes.put_u128(prefix.ip().to_be());
-                //     }
-                // }
-                // match &m.prefix.prefix {
-                //     IpNet::V4(prefix) => {}
-                //     IpNet::V6(prefix) => {}
-                // }
+            MrtMessage::TableDumpMessage(_m) => {
+                todo!("TableDump message is not supported yet");
             }
-            MrtMessage::TableDumpV2Message(m) => {
-                todo!("tabledump message is not supported yet");
-                // let entry_type = EntryType::TABLE_DUMP_V2;
+            MrtMessage::TableDumpV2Message(_m) => {
+                todo!("TableDumpV2 message is not supported yet");
             }
             MrtMessage::Bgp4Mp(m) => {
                 let msg_type = Bgp4MpType::from_u16(sub_type).unwrap();

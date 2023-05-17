@@ -1,6 +1,7 @@
 use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::{AttributeParser, ReadUtils};
+use crate::parser::bgp::attributes::parse_attributes;
+use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
 use log::warn;
 use num_traits::FromPrimitive;
@@ -36,7 +37,7 @@ pub fn parse_table_dump_v2_message(
     let msg: TableDumpV2Message = match v2_type {
         TableDumpV2Type::PeerIndexTable => {
             // peer index table type
-            TableDumpV2Message::PeerIndexTable(parse_peer_index_table(input)?)
+            TableDumpV2Message::PeerIndexTable(parse_peer_index_table(&mut input)?)
         }
         TableDumpV2Type::RibIpv4Unicast
         | TableDumpV2Type::RibIpv4Multicast
@@ -63,7 +64,7 @@ pub fn parse_table_dump_v2_message(
 /// Peer index table
 ///
 /// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3.1
-pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserError> {
+pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, ParserError> {
     let collector_bgp_id = Ipv4Addr::from(data.read_u32()?);
     // read and ignore view name
     let view_name_length = data.read_u16()?;
@@ -156,7 +157,6 @@ pub fn parse_rib_afi_entries(
     // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
     //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
     let prefix = data.read_nlri_prefix(&afi, false)?;
-    let prefixes = vec![prefix];
 
     let entry_count = data.read_u16()?;
     let mut rib_entries = Vec::with_capacity((entry_count * 2) as usize);
@@ -165,7 +165,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        let entry = match parse_rib_entry(data, add_path, &afi, &safi, &prefixes) {
+        let entry = match parse_rib_entry(data, add_path, &afi, &safi, prefix) {
             Ok(entry) => entry,
             Err(e) => {
                 warn!("early break due to error {}", e.to_string());
@@ -183,12 +183,13 @@ pub fn parse_rib_afi_entries(
     })
 }
 
+/// RIB entry: one prefix per entry
 pub fn parse_rib_entry(
     input: &mut Bytes,
     add_path: bool,
     afi: &Afi,
     safi: &Safi,
-    prefixes: &[NetworkPrefix],
+    prefix: NetworkPrefix,
 ) -> Result<RibEntry, ParserError> {
     if input.remaining() < 8 {
         // total length - current position less than 16 --
@@ -207,15 +208,14 @@ pub fn parse_rib_entry(
         return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
     }
 
-    let attr_parser = AttributeParser::new(add_path);
-
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = attr_parser.parse_attributes(
+    let attributes = parse_attributes(
         attr_data_slice,
         &AsnLength::Bits32,
+        add_path,
         Some(*afi),
         Some(*safi),
-        Some(prefixes),
+        Some(&[prefix]),
     )?;
 
     Ok(RibEntry {

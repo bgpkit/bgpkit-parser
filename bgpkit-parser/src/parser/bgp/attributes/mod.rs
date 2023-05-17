@@ -44,164 +44,140 @@ use crate::parser::bgp::attributes::attr_35_otc::{
 };
 use crate::parser::ReadUtils;
 
-pub struct AttributeParser {
-    additional_paths: bool,
-}
+/// Parse BGP attributes given a slice of u8 and some options.
+///
+/// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
+/// the slice is the total byte length of the attributes section of the message.
+pub fn parse_attributes(
+    mut data: Bytes,
+    asn_len: &AsnLength,
+    add_path: bool,
+    afi: Option<Afi>,
+    safi: Option<Safi>,
+    prefixes: Option<&[NetworkPrefix]>,
+) -> Result<Vec<Attribute>, ParserError> {
+    let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
-impl AttributeParser {
-    pub fn new(has_add_path: bool) -> AttributeParser {
-        AttributeParser {
-            additional_paths: has_add_path,
+    while data.remaining() >= 3 {
+        // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
+        // thus the while loop condition is set to be at least 3 bytes to read.
+
+        // has content to read
+        let flag = data.get_u8();
+        let attr_type = data.get_u8();
+        let attr_length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
+            0 => data.get_u8() as usize,
+            _ => data.get_u16() as usize,
+        };
+
+        let mut partial = false;
+        if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
+            /*
+            https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
+
+            > The third high-order bit (bit 2) of the Attribute Flags octet
+            > is the Partial bit.  It defines whether the information
+            > contained in the optional transitive attribute is partial (if
+            > set to 1) or complete (if set to 0).  For well-known attributes
+            > and for optional non-transitive attributes, the Partial bit
+            > MUST be set to 0.
+            */
+            partial = true;
         }
-    }
 
-    /// Parse BGP attributes given a slice of u8 and some options.
-    ///
-    /// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
-    /// the slice is the total byte length of the attributes section of the message.
-    pub fn parse_attributes(
-        &self,
-        mut data: Bytes,
-        asn_len: &AsnLength,
-        afi: Option<Afi>,
-        safi: Option<Safi>,
-        prefixes: Option<&[NetworkPrefix]>,
-    ) -> Result<Vec<Attribute>, ParserError> {
-        let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
-
-        while data.remaining() >= 3 {
-            // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
-            // thus the while loop condition is set to be at least 3 bytes to read.
-
-            // has content to read
-            let flag = data.get_u8();
-            let attr_type = data.get_u8();
-            let attr_length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-                0 => data.get_u8() as usize,
-                _ => data.get_u16() as usize,
-            };
-
-            let mut partial = false;
-            if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
-                /*
-                https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-
-                > The third high-order bit (bit 2) of the Attribute Flags octet
-                > is the Partial bit.  It defines whether the information
-                > contained in the optional transitive attribute is partial (if
-                > set to 1) or complete (if set to 0).  For well-known attributes
-                > and for optional non-transitive attributes, the Partial bit
-                > MUST be set to 0.
-                */
-                partial = true;
+        debug!(
+            "reading attribute: type -- {:?}, length -- {}",
+            &attr_type, attr_length
+        );
+        let attr_type = match AttrType::from_u8(attr_type) {
+            Some(t) => t,
+            None => {
+                match get_deprecated_attr_type(attr_type) {
+                    Some(t) => warn!("deprecated attribute type: {} - {}", attr_type, t),
+                    None => warn!("unknown attribute type: {}", attr_type),
+                };
+                // skip pass the remaining bytes of this attribute
+                data.has_n_remaining(attr_length)?;
+                data.advance(attr_length);
+                continue;
             }
+        };
 
-            debug!(
-                "reading attribute: type -- {:?}, length -- {}",
-                &attr_type, attr_length
+        let bytes_left = data.remaining();
+
+        if data.remaining() < attr_length {
+            warn!(
+                "not enough bytes: input bytes left - {}, want to read - {}; skipping",
+                bytes_left, attr_length
             );
-            let attr_type = match AttrType::from_u8(attr_type) {
-                Some(t) => t,
-                None => {
-                    match get_deprecated_attr_type(attr_type) {
-                        Some(t) => warn!("deprecated attribute type: {} - {}", attr_type, t),
-                        None => warn!("unknown attribute type: {}", attr_type),
-                    };
-                    // skip pass the remaining bytes of this attribute
-                    data.has_n_remaining(attr_length)?;
-                    data.advance(attr_length);
-                    continue;
-                }
-            };
-
-            let bytes_left = data.remaining();
-
-            if data.remaining() < attr_length {
-                warn!(
-                    "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                    bytes_left, attr_length
-                );
-                // break and return already parsed attributes
-                break;
-            }
-
-            // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
-            let mut attr_data = data.split_to(attr_length);
-
-            let attr = match attr_type {
-                AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => parse_as_path(attr_data, asn_len, false),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32, true),
-                AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
-                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
-                AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
-                AttrType::ATOMIC_AGGREGATE => {
-                    Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
-                }
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
-                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
-                AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
-                AttrType::MP_REACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    true,
-                    self.additional_paths,
-                ),
-                AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    false,
-                    self.additional_paths,
-                ),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
-
-                // communities
-                AttrType::COMMUNITIES => parse_regular_communities(attr_data),
-                AttrType::LARGE_COMMUNITIES => parse_large_communities(attr_data),
-                AttrType::EXTENDED_COMMUNITIES => parse_extended_community(attr_data),
-                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
-                    parse_ipv6_extended_community(attr_data)
-                }
-                AttrType::DEVELOPMENT => {
-                    let mut value = vec![];
-                    for _i in 0..attr_length {
-                        value.push(attr_data.get_u8());
-                    }
-                    Ok(AttributeValue::Development(value))
-                }
-                AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
-                _ => Err(ParserError::Unsupported(format!(
-                    "unsupported attribute type: {:?}",
-                    attr_type
-                ))),
-            };
-
-            match attr {
-                Ok(value) => {
-                    attributes.push(Attribute {
-                        value,
-                        flag,
-                        attr_type,
-                    });
-                }
-                Err(e) => {
-                    if partial {
-                        // it's ok to have errors when reading partial bytes
-                        warn!("PARTIAL: {}", e.to_string());
-                    } else {
-                        warn!("{}", e.to_string());
-                    }
-                    continue;
-                }
-            };
+            // break and return already parsed attributes
+            break;
         }
 
-        Ok(attributes)
+        // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
+        let mut attr_data = data.split_to(attr_length);
+
+        let attr = match attr_type {
+            AttrType::ORIGIN => parse_origin(attr_data),
+            AttrType::AS_PATH => parse_as_path(attr_data, asn_len, false),
+            AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32, true),
+            AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
+            AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
+            AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
+            AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG)),
+            AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
+            AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
+            AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
+            AttrType::MP_REACHABLE_NLRI => {
+                parse_nlri(attr_data, &afi, &safi, &prefixes, true, add_path)
+            }
+            AttrType::MP_UNREACHABLE_NLRI => {
+                parse_nlri(attr_data, &afi, &safi, &prefixes, false, add_path)
+            }
+            AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
+
+            // communities
+            AttrType::COMMUNITIES => parse_regular_communities(attr_data),
+            AttrType::LARGE_COMMUNITIES => parse_large_communities(attr_data),
+            AttrType::EXTENDED_COMMUNITIES => parse_extended_community(attr_data),
+            AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                parse_ipv6_extended_community(attr_data)
+            }
+            AttrType::DEVELOPMENT => {
+                let mut value = vec![];
+                for _i in 0..attr_length {
+                    value.push(attr_data.get_u8());
+                }
+                Ok(AttributeValue::Development(value))
+            }
+            AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
+            _ => Err(ParserError::Unsupported(format!(
+                "unsupported attribute type: {:?}",
+                attr_type
+            ))),
+        };
+
+        match attr {
+            Ok(value) => {
+                attributes.push(Attribute {
+                    value,
+                    flag,
+                    attr_type,
+                });
+            }
+            Err(e) => {
+                if partial {
+                    // it's ok to have errors when reading partial bytes
+                    warn!("PARTIAL: {}", e.to_string());
+                } else {
+                    warn!("{}", e.to_string());
+                }
+                continue;
+            }
+        };
     }
+
+    Ok(attributes)
 }
 
 impl Attribute {

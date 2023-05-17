@@ -10,7 +10,6 @@ pub mod mrt;
 pub mod rislive;
 
 pub(crate) use self::utils::*;
-pub(crate) use bgp::attributes::AttributeParser;
 pub(crate) use mrt::{
     parse_bgp4mp, parse_mrt_record, parse_table_dump_message, parse_table_dump_v2_message,
 };

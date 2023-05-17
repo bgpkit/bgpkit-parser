@@ -2,11 +2,9 @@ use super::mrt_header::parse_common_header;
 use super::mrt_message::parse_mrt_message;
 use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::{
-    parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
-};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use num_traits::{FromPrimitive, ToPrimitive};
+use crate::parser::ParserErrorWithBytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use num_traits::ToPrimitive;
 use std::io::Read;
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
