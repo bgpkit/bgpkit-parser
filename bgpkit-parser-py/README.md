@@ -96,6 +96,25 @@ maturin publish --interpreter python3.11 --skip-existing
 
 ### Publish for MacOS
 
+#### M1-based
+
+**Minimum support version for M1 Macs is Python 3.8**
+
+Install multiple Python interpreters:
 ```bash
-maturin publish --skip-existing
+brew install python@3.8
+brew install python@3.9
+brew install python@3.10
+brew install python@3.11
 ```
+
+```bash
+maturin publish --interpreter python3.8 --skip-existing
+maturin publish --interpreter python3.9 --skip-existing
+maturin publish --interpreter python3.10 --skip-existing
+maturin publish --interpreter python3.11 --skip-existing
+```
+
+#### Intel-based
+
+- [ ] add support for packaging for Intel-based Macs 
