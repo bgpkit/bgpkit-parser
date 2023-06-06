@@ -62,6 +62,10 @@ pub struct BgpElem {
     pub aggr_asn: Option<Asn>,
     pub aggr_ip: Option<IpAddr>,
     pub only_to_customer: Option<u32>,
+    /// unknown attributes formatted as (TYPE, RAW_BYTES)
+    pub unknown: Option<Vec<AttrRaw>>,
+    /// deprecated attributes formatted as (TYPE, RAW_BYTES)
+    pub deprecated: Option<Vec<AttrRaw>>,
 }
 
 impl Eq for BgpElem {}
@@ -120,6 +124,8 @@ impl Default for BgpElem {
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer: None,
+            unknown: None,
+            deprecated: None,
         }
     }
 }
