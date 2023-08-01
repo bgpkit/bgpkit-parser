@@ -308,6 +308,10 @@ We support normal communities, extended communities, and large communities.
 [mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
 */
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/icon-transparent.png",
+    html_favicon_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/favicon.ico"
+)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::needless_range_loop)]
 
