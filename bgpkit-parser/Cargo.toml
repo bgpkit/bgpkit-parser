@@ -15,7 +15,7 @@ default-run = "bgpkit-parser"
 [[bin]]
 name = "bgpkit-parser"
 path = "src/bin/main.rs"
-required-features = ["build-binary"]
+required-features = ["cli"]
 
 [dependencies]
 
@@ -65,7 +65,7 @@ parser = [
     "regex",
     "serde_json",
 ]
-build-binary = [
+cli = [
     "clap",
     "parser",
     "env_logger"

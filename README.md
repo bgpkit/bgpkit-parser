@@ -225,11 +225,11 @@ match bmp_msg {
 
 You can install the tool by running 
 ```bash
-cargo install bgpkit-parser
+cargo install bgpkit-parser --features cli
 ```
 or checkout this repository and run
 ```bash
-cargo install --path ./bgpkit-parser
+cargo install --path ./bgpkit-parser --features cli
 ```
 
 ```
