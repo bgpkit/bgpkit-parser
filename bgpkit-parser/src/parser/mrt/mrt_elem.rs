@@ -95,7 +95,7 @@ fn get_relevant_attributes(
                 unknown.push(t);
             }
             AttributeValue::Deprecated(t) => {
-                deprecated.push((t));
+                deprecated.push(t);
             }
 
             AttributeValue::OriginatorId(_)
