@@ -315,22 +315,18 @@ We support normal communities, extended communities, and large communities.
 #![allow(clippy::new_without_default)]
 #![allow(clippy::needless_range_loop)]
 
+#[cfg(feature = "models")]
 #[macro_use]
 extern crate enum_primitive_derive;
-extern crate core;
 
+#[cfg(feature = "parser")]
 pub mod error;
+#[cfg(feature = "models")]
 pub mod models;
+#[cfg(feature = "parser")]
 pub mod parser;
 
+#[cfg(feature = "models")]
 pub use models::BgpElem;
-pub use parser::bmp::parse_bmp_msg;
-pub use parser::bmp::parse_openbmp_header;
-pub use parser::bmp::parse_openbmp_msg;
-pub use parser::filter::*;
-pub use parser::iters::{ElemIterator, RecordIterator};
-pub use parser::mrt::parse_mrt_record;
-pub use parser::rislive::parse_ris_live_message;
-pub use parser::BgpkitParser;
-pub use parser::Elementor;
-pub use parser::ParserError;
+#[cfg(feature = "parser")]
+pub use parser::*;
