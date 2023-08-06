@@ -50,8 +50,6 @@ RFCs. Here is a list of them:
 
  */
 
-#![allow(dead_code)]
-
 mod bgp;
 mod err;
 mod mrt;
