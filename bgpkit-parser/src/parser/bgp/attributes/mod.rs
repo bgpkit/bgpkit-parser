@@ -99,11 +99,11 @@ impl AttributeParser {
                     let bytes = data.read_n_bytes(attr_length)?;
                     let attr_value = match get_deprecated_attr_type(attr_type) {
                         Some(t) => {
-                            warn!("deprecated attribute type: {} - {}", attr_type, t);
+                            debug!("deprecated attribute type: {} - {}", attr_type, t);
                             AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
                         }
                         None => {
-                            warn!("unknown attribute type: {}", attr_type);
+                            debug!("unknown attribute type: {}", attr_type);
                             AttributeValue::Unknown(AttrRaw { attr_type, bytes })
                         }
                     };
