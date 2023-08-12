@@ -23,7 +23,7 @@ fn main() {
         connect(Url::parse(RIS_LIVE_URL).unwrap())
             .expect("Can't connect to RIS Live websocket server");
 
-    // subscribe to mrt_message from one collector
+    // subscribe to message from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
     socket.write_message(Message::Text(msg)).unwrap();
 

@@ -88,7 +88,7 @@ pub fn parse_bgp_message(
     })
 }
 
-/// Parse BGP NOTIFICATION mrt_message.
+/// Parse BGP NOTIFICATION message.
 ///
 /// The BGP NOTIFICATION messages contains BGP error codes received from a connected BGP router. The
 /// error code is parsed into [BgpError](crate::models::error::BgpError) data structure and any unknown codes will produce warning
@@ -127,9 +127,9 @@ impl BgpNotificationMessage {
     }
 }
 
-/// Parse BGP OPEN mrt_message.
+/// Parse BGP OPEN message.
 ///
-/// The parsing of BGP OPEN mrt_message also includes decoding the BGP capabilities.
+/// The parsing of BGP OPEN message also includes decoding the BGP capabilities.
 pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
     input.has_n_remaining(10)?;
     let version = input.get_u8();

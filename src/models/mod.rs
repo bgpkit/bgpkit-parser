@@ -2,7 +2,7 @@
 `bgp-models` module defines the basic BGP and MRT message data structures.
 
 This library aims to provide building blocks for downstream libraries working with BGP and MRT
-mrt_message such as MRT bgpkit-parser or BGP table constructor.
+message such as MRT bgpkit-parser or BGP table constructor.
 
 ## Supported RFCs
 
