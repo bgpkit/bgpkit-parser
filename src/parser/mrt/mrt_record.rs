@@ -1,5 +1,5 @@
+use super::messages::parse_mrt_message;
 use super::mrt_header::parse_common_header;
-use super::mrt_message::parse_mrt_message;
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::ParserErrorWithBytes;
