@@ -215,6 +215,8 @@ impl Attribute {
             AttributeValue::MpReachNlri(v) => encode_nlri(v, true, add_path),
             AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false, add_path),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
+            AttributeValue::Deprecated(v) => Bytes::from(v.bytes.to_owned()),
+            AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),
         };
 
         match self.flag & AttributeFlagsBit::ExtendedLengthBit as u8 {

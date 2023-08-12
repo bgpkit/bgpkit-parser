@@ -132,7 +132,7 @@ mod tests {
             0, 2, // AS2
             0, 3, // AS3
         ]);
-        let res = parse_as_path(data, &AsnLength::Bits16).unwrap();
+        let res = parse_as_path(data, &AsnLength::Bits16, false).unwrap();
 
         assert!(matches!(res, AsPath(_)));
         if let AsPath(path) = res {
