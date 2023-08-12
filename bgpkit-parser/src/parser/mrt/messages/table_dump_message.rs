@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
 ///
-/// https://www.rfc-editor.org/rfc/rfc6396#section-4.2
+/// <https://www.rfc-editor.org/rfc/rfc6396#section-4.2>
 ///
 /// ```text
 /// The TABLE_DUMP Type does not permit 4-byte Peer AS numbers, nor does

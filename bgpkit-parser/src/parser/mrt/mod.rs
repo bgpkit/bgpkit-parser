@@ -1,5 +1,7 @@
 /*!
-Parse MRT header and content, provides [BgpElem] struct for per-prefix information.
+Parse MRT header and content, provides [BgpElem][BgpElem] struct for per-prefix information.
+
+[BgpElem]: crate::BgpElem
 */
 pub mod messages;
 pub mod mrt_elem;

@@ -2,7 +2,7 @@ use serde::Serialize;
 
 /// AFI -- Address Family Identifier
 ///
-/// https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml
+/// <https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml>
 #[derive(Debug, PartialEq, Primitive, Clone, Copy, Serialize, Eq)]
 pub enum Afi {
     Ipv4 = 1,
