@@ -195,7 +195,7 @@ impl Attribute {
         let mut bytes = BytesMut::new();
 
         bytes.put_u8(self.flag);
-        bytes.put_u8(self.attr_type as u8);
+        bytes.put_u8(self.attr_type);
 
         let value_bytes = match &self.value {
             AttributeValue::Origin(v) => encode_origin(v),

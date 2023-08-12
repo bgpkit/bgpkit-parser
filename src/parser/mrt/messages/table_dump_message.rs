@@ -108,11 +108,10 @@ pub fn parse_table_dump_message(
 }
 
 impl TableDumpMessage {
-    fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.view_number);
         bytes.put_u16(self.sequence_number);
-        // TODO: prefix
         match &self.prefix.prefix {
             IpNet::V4(p) => {
                 bytes.put_u32(p.addr().into());
@@ -139,9 +138,10 @@ impl TableDumpMessage {
 
         // encode attributes
         let mut attr_bytes = BytesMut::new();
-        // TODO encode attributes to attr_bytes
         for attr in &self.attributes {
-            // attr_bytes.extend(attr.encode());
+            // add_path always false for v1 table dump
+            // asn_len always 16 bites
+            attr_bytes.extend(attr.encode(false, AsnLength::Bits16));
         }
 
         bytes.put_u16(attr_bytes.len() as u16);

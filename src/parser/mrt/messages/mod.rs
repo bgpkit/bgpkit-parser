@@ -68,9 +68,7 @@ pub fn parse_mrt_message(
 impl MrtMessage {
     pub fn encode(&self, sub_type: u16) -> Bytes {
         let msg_bytes: Bytes = match self {
-            MrtMessage::TableDumpMessage(_m) => {
-                todo!("TableDump message is not supported yet");
-            }
+            MrtMessage::TableDumpMessage(m) => m.encode(),
             MrtMessage::TableDumpV2Message(_m) => {
                 todo!("TableDumpV2 message is not supported yet");
             }
