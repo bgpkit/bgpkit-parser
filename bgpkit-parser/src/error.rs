@@ -1,3 +1,6 @@
+/*!
+error module defines the error types used in bgpkit-parser.
+*/
 use oneio::OneIoError;
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;

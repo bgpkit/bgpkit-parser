@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// enum that represents the type of the next hop address.
 ///
-/// [NextHopAddress] is used when parsing for next hops in [Nlri].
+/// [NextHopAddress] is used when parsing for next hops in [Nlri](crate::models::Nlri).
 #[derive(Debug, PartialEq, Copy, Clone, Serialize, Eq)]
 pub enum NextHopAddress {
     Ipv4(Ipv4Addr),

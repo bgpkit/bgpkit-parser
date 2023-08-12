@@ -1,3 +1,6 @@
+/*!
+parser module maintains the main logic for processing BGP and MRT messages.
+*/
 use std::io::Read;
 
 #[macro_use]

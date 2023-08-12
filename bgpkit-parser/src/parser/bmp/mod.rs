@@ -12,7 +12,9 @@ pub mod openbmp;
 
 /// Parse OpenBMP `raw_bmp` message.
 ///
-/// An OpenBMP `raw_bmp` message contains a [OpenBmpHeader] and a [BmpMessage].
+/// An OpenBMP `raw_bmp` message contains a [OpenBmpHeader][OpenBmpHeader] and a [BmpMessage].
+///
+/// [OpenBmpHeader]: crate::parser::bmp::openbmp::OpenBmpHeader
 pub fn parse_openbmp_msg(mut data: Bytes) -> Result<BmpMessage, ParserBmpError> {
     let _header = parse_openbmp_header(&mut data)?;
     parse_bmp_msg(&mut data)

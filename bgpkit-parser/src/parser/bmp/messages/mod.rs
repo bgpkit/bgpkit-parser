@@ -1,6 +1,6 @@
 //! BMP message parsing.
 //!
-//! https://datatracker.ietf.org/doc/html/rfc7854
+//! <https://datatracker.ietf.org/doc/html/rfc7854>
 
 pub use headers::{
     parse_bmp_common_header, parse_per_peer_header, BmpCommonHeader, BmpMsgType, BmpPerPeerHeader,

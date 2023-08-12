@@ -50,7 +50,9 @@ impl AsPath {
 
     /// Construct AsPath from AS_PATH and AS4_PATH
     ///
-    /// https://datatracker.ietf.org/doc/html/rfc6793#section-4.2.3
+    /// <https://datatracker.ietf.org/doc/html/rfc6793#section-4.2.3>
+    ///
+    /// ```text
     ///    If the number of AS numbers in the AS_PATH attribute is less than the
     ///    number of AS numbers in the AS4_PATH attribute, then the AS4_PATH
     ///    attribute SHALL be ignored, and the AS_PATH attribute SHALL be taken
@@ -66,6 +68,7 @@ impl AsPath {
     ///    AS_CONFED_SEQUENCE or AS_CONFED_SET path segment SHALL be prepended
     ///    if it is either the leading path segment or is adjacent to a path
     ///    segment that is prepended.
+    /// ```
     pub fn merge_aspath_as4path(aspath: &AsPath, as4path: &AsPath) -> Option<AsPath> {
         if aspath.count_asns() < as4path.count_asns() {
             return Some(aspath.clone());

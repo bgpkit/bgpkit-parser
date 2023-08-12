@@ -1,15 +1,17 @@
 /*!
-BGPKIT Parser aims to provides the most ergonomic MRT/BGP message parsing Rust API.
+BGPKIT Parser aims to provide the most ergonomic MRT/BGP/BMP message parsing Rust API.
 
-Features:
+BGPKIT Parser has the following features:
 - **performant**: comparable to C-based implementations like `bgpdump` or `bgpreader`.
 - **actively maintained**: we consistently introduce feature updates and bug fixes, and support most of the relevant BGP RFCs.
 - **ergonomic API**: a three-line for loop can already get you started.
 - **battery-included**: ready to handle remote or local, bzip2 or gz data files out of the box
 
-## Examples
+# Examples
 
-### Parsing single MRT file
+For complete examples, check out the [examples folder](https://github.com/bgpkit/bgpkit-parser/examples).
+
+## Parsing single MRT file
 
 Let's say we want to print out all the BGP announcements/withdrawal from a single MRT file, either located remotely or locally.
 Here is an example that does so.
@@ -38,7 +40,7 @@ and it prints out
 total: 255849
 ```
 
-### Parsing multiple MRT files with BGPKIT Broker
+## Parsing multiple MRT files with BGPKIT Broker
 
 [BGPKIT Broker][broker-repo] library provides search API for all RouteViews and RIPE RIS MRT data files. Using the
 broker's Rust API ([`bgpkit-broker`][broker-crates-io]), we can easily compile a list of MRT files that we are interested
@@ -86,13 +88,15 @@ for item in broker.into_iter().take(2) {
 }
 ```
 
-### Filtering BGP Messages
+## Filtering BGP Messages
 
-BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [BgpkitParser] instance,
+BGPKIT Parser also has built-in [Filter][filter] mechanism. When creating a new [`BgpkitParser`] instance,
 once can also call `add_filter` function to customize the parser to only show matching messages
 when iterating through [BgpElem]s.
 
-For all types of filters, check out the [Filter] enum documentation.
+For all types of filters, check out the [Filter][filter] enum documentation.
+
+[filter]: crate::parser::filter::Filter
 
 ```no_run
 use bgpkit_parser::BgpkitParser;
@@ -115,12 +119,12 @@ log::info!("done");
 ```
 
 
-### Parsing Real-time Data Streams
+## Parsing Real-time Data Streams
 
 BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
 and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] messages. See the examples below and the documentation for more.
 
-#### Parsing Messages From RIS-Live
+### Parsing Messages From RIS-Live
 
 Here is an example of handling RIS-Live message streams. After connecting to the websocket server,
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
@@ -158,7 +162,7 @@ fn main() {
 }
 ```
 
-#### Parsing OpenBMP Messages From RouteViews Kafka Stream
+### Parsing OpenBMP Messages From RouteViews Kafka Stream
 
 [RouteViews](http://www.routeviews.org/routeviews/) provides a real-time Kafka stream of the OpenBMP
 data received from their collectors. Below is an partial example of how we handle the raw bytes
@@ -200,14 +204,57 @@ match bmp_msg {
 [bmp-rfc]: https://datatracker.ietf.org/doc/html/rfc7854
 [openbmp-url]: https://www.openbmp.org/
 
-## Data Representation
+# Command Line Tool
 
-There are two key data structure to understand for the parsing results: [MrtRecord][bgp_models::mrt::MrtRecord] and [BgpElem].
+`bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
 
-### `MrtRecord`: unmodified MRT information representation
+You can install the tool by running
+```bash
+cargo install bgpkit-parser --features cli
+```
+or checkout this repository and run
+```bash
+cargo install --path ./bgpkit-parser --features cli
+```
 
-The MrtRecord is the data structrue that holds the unmodified, complete information parsed
-from the MRT data file. The code definition of the `MrtRecord` is defined in the crate `bgp-models` ([documentation][mrt-record-doc]).
+```text
+➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
+
+Mingwei Zhang <mingwei@bgpkit.com>
+
+bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
+
+USAGE:
+    bgpkit-parser-cli [FLAGS] [OPTIONS] <FILE>
+
+FLAGS:
+    -e, --elems-count      Count BGP elems
+    -h, --help             Prints help information
+        --json             Output as JSON objects
+        --pretty           Pretty-print JSON output
+    -r, --records-count    Count MRT records
+    -V, --version          Prints version information
+
+OPTIONS:
+    -a, --as-path <as-path>          Filter by AS path regex string
+    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
+    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
+    -o, --origin-asn <origin-asn>    Filter by origin AS Number
+    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
+    -j, --peer-ip <peer-ip>          Filter by peer IP address
+    -p, --prefix <prefix>            Filter by network prefix
+    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
+```
+
+# Data Representation
+
+There are two key data structure to understand for the parsing results: [MrtRecord][mrtrecord] and [BgpElem].
+
+[mrtrecord]: crate::models::MrtRecord
+
+## `MrtRecord`: unmodified MRT information representation
+
+The [`MrtRecord`][mrtrecord] is the data structure that holds the unmodified, complete information parsed from the MRT data file.
 
 ```ignore
 pub struct MrtRecord {
@@ -222,12 +269,12 @@ pub enum MrtMessage {
 }
 ```
 
-MrtRecord record representation is concise, storage efficient, but often less convenient to use. For example, when
+`MrtRecord` record representation is concise, storage efficient, but often less convenient to use. For example, when
 trying to find out specific BGP announcements for certain IP prefix, we often needs to go through nested layers of
 internal data structure (NLRI, announced, prefix, or even looking up peer index table for Table Dump V2 format), which
 could be irrelevant to what users really want to do.
 
-### [BgpElem]: per-prefix BGP information, MRT-format-agnostic
+## [BgpElem]: per-prefix BGP information, MRT-format-agnostic
 
 To facilitate simpler data analysis of BGP data, we defined a new data structure called [BgpElem] in this crate. Each
 [BgpElem] contains a piece of self-containing BGP information about one single IP prefix.
@@ -258,36 +305,38 @@ The main benefit of using [BgpElem] is that the analysis can be executed on a pe
 backend MRT data format (bgp4mp, tabledumpv1, tabledumpv2, etc.). The obvious drawback is that we will have to duplicate
 information to save at each elem, that consuming more memory.
 
-## RFCs Support
+# RFCs Support
 
 We support most of the RFCs and plan to continue adding support for more recent RFCs in the future.
 Here is a list of relevant RFCs that we support or plan to add support.
 
 If you would like to see any specific RFC's support, please submit an issue on GitHub.
 
-### BGP
+## BGP
 
 - [X] [RFC 2042](https://datatracker.ietf.org/doc/html/rfc2042): Registering New BGP Attribute Types
 - [X] [RFC 3392](https://datatracker.ietf.org/doc/html/rfc3392): Capabilities Advertisement with BGP-4
 - [X] [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271): A Border Gateway Protocol 4 (BGP-4)
+- [X] [RFC 4456](https://datatracker.ietf.org/doc/html/rfc4456): BGP Route Reflection: An Alternative to Full Mesh Internal BGP (IBGP)
 - [X] [RFC 5065](https://datatracker.ietf.org/doc/html/rfc5065): Autonomous System Confederations for BGP
 - [X] [RFC 6793](https://datatracker.ietf.org/doc/html/rfc6793): BGP Support for Four-Octet Autonomous System (AS) Number Space
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)
 - [ ] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
+- [X] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
-### MRT
+## MRT
 
 - [X] [RFC 6396](https://datatracker.ietf.org/doc/html/rfc6396): Multi-Threaded Routing Toolkit (MRT) Routing Information Export Format
 - [ ] [RFC 6397](https://datatracker.ietf.org/doc/html/rfc6397): Multi-Threaded Routing Toolkit (MRT) Border Gateway Protocol (BGP) Routing Information Export Format with Geo-Location Extensions
 - [X] [RFC 8050](https://datatracker.ietf.org/doc/html/rfc8050): Multi-Threaded Routing Toolkit (MRT) Routing Information Export Format with BGP Additional Path Extensions
 
-### BMP
+## BMP
 
 - [X] [RFC 7854](https://datatracker.ietf.org/doc/html/rfc7854): BGP Monitoring Protocol (BMP)
 - [ ] [RFC 8671](https://datatracker.ietf.org/doc/html/rfc8671): Support for Adj-RIB-Out in the BGP Monitoring Protocol (BMP)
 
-### Communities
+## Communities
 
 We support normal communities, extended communities, and large communities.
 
@@ -299,13 +348,15 @@ We support normal communities, extended communities, and large communities.
 - [X] [RFC 8097](https://datatracker.ietf.org/doc/html/rfc8097): BGP Prefix Origin Validation State Extended Community
 - [X] [RFC 8092](https://datatracker.ietf.org/doc/html/rfc8092): BGP Large Communities
 
-### FlowSpec
+## FlowSpec
 
 - [ ] [RFC 8955](https://datatracker.ietf.org/doc/html/rfc8955) Dissemination of Flow Specification Rules
 - [ ] [RFC 8956](https://datatracker.ietf.org/doc/html/rfc8956) Dissemination of Flow Specification Rules for IPv6
 - [ ] [RFC 9117](https://datatracker.ietf.org/doc/html/rfc9117) Revised Validation Procedure for BGP Flow Specifications Updates 8955
 
-[mrt-record-doc]: https://docs.rs/bgp-models/0.3.4/bgp_models/mrt/struct.MrtRecord.html
+# Built with ❤️ by BGPKIT Team
+
+<a href="https://bgpkit.com"><img src="https://bgpkit.com/Original%20Logo%20Cropped.png" alt="https://bgpkit.com/favicon.ico" width="200"/></a>
 */
 
 #![doc(
