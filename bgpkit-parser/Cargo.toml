@@ -1,10 +1,11 @@
 [package]
 name = "bgpkit-parser"
-version = "0.9.4"
+version = "0.10.0-alpha.1"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2018"
 license = "MIT"
 repository = "https://github.com/bgpkit/bgpkit-parser"
+readme = "../README.md"
 documentation = "https://docs.rs/bgpkit-parser"
 description = """
 A library to parse MRT/BGP/BMP binary data.
@@ -15,28 +16,61 @@ default-run = "bgpkit-parser"
 [[bin]]
 name = "bgpkit-parser"
 path = "src/bin/main.rs"
-required-features = ["build-binary"]
+required-features = ["cli"]
 
 [dependencies]
-chrono = "0.4.24"
-bytes = "1.4.0"
-enum-primitive-derive = "0.2"
-hex="0.4.3" # bmp/openbmp parsing
-ipnet = "2.7"
-itertools = "0.10.1"
-log="0.4"
-num-traits = "0.2"
-oneio = {version= "0.9.0", features=["lib_only"]}
-regex = "1"
-serde={version="1.0.130", features=["derive"]}
-serde_json = "1.0.69" # RIS Live parsing
 
+####################
+# Core BGP structs #
+####################
+enum-primitive-derive = {version="0.2", optional = true}
+serde={version="1.0", features=["derive"], optional = true}
+num-traits = {version = "0.2", optional = true}
+itertools = {version = "0.11.0", optional = true}
+ipnet = {version="2.7", optional = true}
+
+#######################
+# Parser dependencies #
+#######################
+bytes = {version = "1.4.0", optional = true}
+hex= {version = "0.4.3", optional = true} # bmp/openbmp parsing
+log= {version = "0.4", optional = true }
+oneio = {version= "0.11.0", features=["lib"], optional = true }
+regex = {version = "1", optional = true} # used in parser filter
+chrono = {version="0.4.24", optional = true} # parser filter
+serde_json = {version = "1.0", optional = true } # RIS Live parsing
+
+####################
+# CLI dependencies #
+####################
 env_logger = {version="0.10", optional=true}
 clap = {version= "4.0", features=["derive"], optional=true}
 
 [features]
-default = ["build-binary"]
-build-binary = ["clap", "env_logger"]
+default = ["parser"]
+models = [
+    "serde",
+    "enum-primitive-derive",
+    "ipnet",
+    "itertools",
+    "num-traits",
+]
+parser = [
+    "bytes",
+    "chrono",
+    "env_logger",
+    "hex",
+    "log",
+    "models",
+    "oneio",
+    "regex",
+    "serde_json",
+]
+cli = [
+    "clap",
+    "parser",
+    "env_logger"
+]
 
 [[bench]]
 name = "internals"
@@ -48,15 +82,14 @@ harness = false
 
 [dev-dependencies]
 anyhow = "1"
-bgpkit-broker = "0.5.1"
+bgpkit-broker = "0.6.2"
 kafka = "0.9.0"
-tungstenite= "0.18.0"
+tungstenite= "0.20.0"
 url = "2.1.0"
-criterion = {version= "0.4.0", features=["html_reports"]}
+criterion = {version= "0.5.1", features=["html_reports"]}
 rayon = "1.5.1"
 ureq = "2.6.2"
 bzip2 = "0.4"
 flate2 = "1.0.25"
 md5 = "0.7.0"
 which = "4.4.0"
-

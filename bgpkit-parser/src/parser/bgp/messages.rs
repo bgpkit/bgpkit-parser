@@ -90,9 +90,10 @@ pub fn parse_bgp_message(
 
 /// Parse BGP NOTIFICATION mrt_message.
 ///
-/// The BGP NOTIFICATION mrt_message contains BGP error codes received from a connected BGP router. The
-/// error code is parsed into [BgpError] data structure and any unknown codes will produce warning
-/// mrt_message, but not critical errors.
+/// The BGP NOTIFICATION messages contains BGP error codes received from a connected BGP router. The
+/// error code is parsed into [BgpError](crate::models::error::BgpError) data structure and any unknown codes will produce warning
+/// messages, but not critical errors.
+///
 pub fn parse_bgp_notification_message(
     mut input: Bytes,
 ) -> Result<BgpNotificationMessage, ParserError> {
@@ -266,7 +267,7 @@ fn read_nlri(
 
 /// read bgp update message.
 ///
-/// RFC: https://tools.ietf.org/html/rfc4271#section-4.3
+/// RFC: <https://tools.ietf.org/html/rfc4271#section-4.3>
 pub fn parse_bgp_update_message(
     mut input: Bytes,
     add_path: bool,

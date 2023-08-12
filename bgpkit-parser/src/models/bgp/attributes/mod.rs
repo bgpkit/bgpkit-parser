@@ -112,7 +112,7 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 /// BGP Attribute struct with attribute value and flag
 #[derive(Debug, PartialEq, Clone, Serialize, Eq)]
 pub struct Attribute {
-    pub attr_type: AttrType,
+    pub attr_type: u8,
     pub value: AttributeValue,
     pub flag: u8,
 }
@@ -137,6 +137,14 @@ pub enum AttributeValue {
     MpReachNlri(Nlri),
     MpUnreachNlri(Nlri),
     Development(Vec<u8>),
+    Deprecated(AttrRaw),
+    Unknown(AttrRaw),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+pub struct AttrRaw {
+    pub attr_type: u8,
+    pub bytes: Vec<u8>,
 }
 
 ///////////////////

@@ -1,3 +1,6 @@
+/*!
+parser module maintains the main logic for processing BGP and MRT messages.
+*/
 use std::io::Read;
 
 #[macro_use]
@@ -10,15 +13,22 @@ pub mod mrt;
 pub mod rislive;
 
 pub(crate) use self::utils::*;
+pub(crate) use bgp::attributes::AttributeParser;
 pub(crate) use mrt::{
     parse_bgp4mp, parse_mrt_record, parse_table_dump_message, parse_table_dump_v2_message,
 };
 
-pub use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::MrtRecord;
-use crate::Filter;
+use filter::Filter;
 pub use mrt::mrt_elem::Elementor;
 use oneio::{get_cache_reader, get_reader};
+
+pub use crate::error::{ParserError, ParserErrorWithBytes};
+pub use bmp::{parse_bmp_msg, parse_openbmp_header, parse_openbmp_msg};
+pub use filter::*;
+pub use iters::*;
+pub use mrt::*;
+pub use rislive::parse_ris_live_message;
 
 pub struct BgpkitParser<R> {
     reader: R,

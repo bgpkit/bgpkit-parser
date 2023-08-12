@@ -8,7 +8,7 @@ use crate::{Elementor, Filterable};
 use log::{error, warn};
 use std::io::Read;
 
-/// Use [BgpElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
+/// Use [ElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
 impl<R: Read> IntoIterator for BgpkitParser<R> {
     type Item = BgpElem;
     type IntoIter = ElemIterator<R>;

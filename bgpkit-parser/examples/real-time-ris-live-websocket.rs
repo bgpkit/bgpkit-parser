@@ -16,13 +16,10 @@ fn main() {
     // subscribe to mrt_message from one collector
     // let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
     let msg = json!({"type": "ris_subscribe", "data": null}).to_string();
-    socket.write_message(Message::Text(msg)).unwrap();
+    socket.send(Message::Text(msg)).unwrap();
 
     loop {
-        let msg = socket
-            .read_message()
-            .expect("Error reading message")
-            .to_string();
+        let msg = socket.read().expect("Error reading message").to_string();
         if msg.is_empty() {
             continue;
         }

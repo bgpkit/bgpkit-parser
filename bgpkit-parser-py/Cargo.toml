@@ -4,7 +4,7 @@ description = "BGPKIT Parser Python Binding"
 keywords = ["bgp", "mrt", "parser"]
 repository = "https://github.com/bgpkit/bgpkit-parser/tree/main/bgpkit-parser-py"
 documentation = "https://github.com/bgpkit/bgpkit-parser/blob/main/bgpkit-parser-py/README.md"
-version = "0.4.2"
+version = "0.4.3"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 license = "MIT"
@@ -15,7 +15,7 @@ name = "pybgpkit_parser"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-bgpkit-parser = {path="../bgpkit-parser"}
+bgpkit-parser = "0.9.4"
 pyo3 = { version = "0.18.2", features = ["extension-module"] }
 dict_derive = "0.4.0"
 

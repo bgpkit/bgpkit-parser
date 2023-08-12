@@ -1,5 +1,6 @@
 /*!
-`bgp-models` is a library that defines the basic BGP and MRT message data structures.
+`bgp-models` module defines the basic BGP and MRT message data structures.
+
 This library aims to provide building blocks for downstream libraries working with BGP and MRT
 mrt_message such as MRT bgpkit-parser or BGP table constructor.
 
@@ -49,8 +50,6 @@ RFCs. Here is a list of them:
 - [RFC 8642](https://datatracker.ietf.org/doc/html/rfc8642): Policy Behavior for Well-Known BGP Communities
 
  */
-
-#![allow(dead_code)]
 
 mod bgp;
 mod err;

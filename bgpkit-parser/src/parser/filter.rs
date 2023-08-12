@@ -17,7 +17,7 @@ The available filters are:
 [Filter::new] function takes a `str` for filter type and `str` for filter value and returns a Result
 of a [Filter] or a parsing error.
 
-[BgpkitParser] implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
+[BgpkitParser](crate::BgpkitParser) implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
 and returns a new parser with specified filter added. See the example below.
 
 ### Example

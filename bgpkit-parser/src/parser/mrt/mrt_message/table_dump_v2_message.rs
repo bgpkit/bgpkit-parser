@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 /// Parse TABLE_DUMP V2 format MRT message.
 ///
-/// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3
+/// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.3>
 ///
 /// Subtypes include
 /// 1. PEER_INDEX_TABLE

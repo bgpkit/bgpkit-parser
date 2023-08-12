@@ -62,6 +62,10 @@ pub struct BgpElem {
     pub aggr_asn: Option<Asn>,
     pub aggr_ip: Option<IpAddr>,
     pub only_to_customer: Option<u32>,
+    /// unknown attributes formatted as (TYPE, RAW_BYTES)
+    pub unknown: Option<Vec<AttrRaw>>,
+    /// deprecated attributes formatted as (TYPE, RAW_BYTES)
+    pub deprecated: Option<Vec<AttrRaw>>,
 }
 
 impl Eq for BgpElem {}
@@ -120,6 +124,8 @@ impl Default for BgpElem {
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer: None,
+            unknown: None,
+            deprecated: None,
         }
     }
 }
@@ -167,6 +173,37 @@ impl Display for BgpElem {
             option_to_string!(&self.aggr_ip),
         );
         write!(f, "{}", format)
+    }
+}
+
+impl BgpElem {
+    /// Returns true if the element is an announcement.
+    ///
+    /// Most of the time, users do not really need to get the type out, only needs to know if it is an announcement or a withdrawal.
+    pub fn is_announcement(&self) -> bool {
+        self.elem_type == ElemType::ANNOUNCE
+    }
+
+    /// Returns the AS path as a vector of ASNs in u32 format. Returns None if the AS path is not present or it contains AS set or confederated segments.
+    pub fn get_as_path_opt(&self) -> Option<Vec<u32>> {
+        match &self.as_path {
+            Some(as_path) => as_path.to_u32_vec(),
+            None => None,
+        }
+    }
+
+    /// Returns the origin AS number as u32. Returns None if the origin AS number is not present or it's a AS set.
+    pub fn get_origin_asn_opt(&self) -> Option<u32> {
+        match &self.origin_asns {
+            Some(origin_asns) => {
+                if origin_asns.len() == 1 {
+                    Some(origin_asns[0].asn)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
     }
 }
 

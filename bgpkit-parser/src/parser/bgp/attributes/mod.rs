@@ -92,13 +92,23 @@ pub fn parse_attributes(
         let attr_type = match AttrType::from_u8(attr_type) {
             Some(t) => t,
             None => {
-                match get_deprecated_attr_type(attr_type) {
-                    Some(t) => warn!("deprecated attribute type: {} - {}", attr_type, t),
-                    None => warn!("unknown attribute type: {}", attr_type),
-                };
                 // skip pass the remaining bytes of this attribute
-                data.has_n_remaining(attr_length)?;
-                data.advance(attr_length);
+                let bytes = data.read_n_bytes(attr_length)?;
+                let attr_value = match get_deprecated_attr_type(attr_type) {
+                    Some(t) => {
+                        debug!("deprecated attribute type: {} - {}", attr_type, t);
+                        AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
+                    }
+                    None => {
+                        debug!("unknown attribute type: {}", attr_type);
+                        AttributeValue::Unknown(AttrRaw { attr_type, bytes })
+                    }
+                };
+                attributes.push(Attribute {
+                    attr_type,
+                    value: attr_value,
+                    flag,
+                });
                 continue;
             }
         };
@@ -162,7 +172,7 @@ pub fn parse_attributes(
                 attributes.push(Attribute {
                     value,
                     flag,
-                    attr_type,
+                    attr_type: attr_type as u8,
                 });
             }
             Err(e) => {

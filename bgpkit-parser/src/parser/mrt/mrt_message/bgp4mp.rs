@@ -7,7 +7,7 @@ use num_traits::FromPrimitive;
 
 /// Parse MRT BGP4MP type
 ///
-/// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.4
+/// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.4>
 ///
 pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> {
     let bgp4mp_type: Bgp4MpType = match Bgp4MpType::from_u16(sub_type) {
