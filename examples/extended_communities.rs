@@ -1,7 +1,7 @@
 use bgpkit_parser::models::MetaCommunity;
 use bgpkit_parser::BgpkitParser;
 
-/// This example shows how to printout BGP message with extended or large communities;
+/// This example shows how to printout BGP messages with extended or large communities;
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 

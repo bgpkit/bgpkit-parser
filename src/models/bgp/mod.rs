@@ -1,4 +1,4 @@
-//! BGP message and relevant structs.
+//! BGP messages and relevant structs.
 
 pub mod attributes;
 pub mod capabilities;

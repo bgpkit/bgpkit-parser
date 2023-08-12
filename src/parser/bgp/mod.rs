@@ -1,5 +1,5 @@
 /*!
-Provides parsing of BGP message.
+Provides parsing of BGP messages.
 */
 pub mod attributes;
 pub mod messages;

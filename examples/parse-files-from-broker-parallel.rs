@@ -24,5 +24,5 @@ fn main() {
         })
         .sum();
 
-    log::info!("total of {} BGP message parsed", total_elems_count);
+    log::info!("total of {} BGP messages parsed", total_elems_count);
 }

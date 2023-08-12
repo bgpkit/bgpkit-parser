@@ -122,13 +122,13 @@ log::info!("done");
 ## Parsing Real-time Data Streams
 
 BGPKIT Parser also provides parsing functionalities for real-time data streams, including [RIS-Live][ris-live-url]
-and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] message. See the examples below and the documentation for more.
+and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] messages. See the examples below and the documentation for more.
 
 ### Parsing Messages From RIS-Live
 
 Here is an example of handling RIS-Live message streams. After connecting to the websocket server,
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
-from on collector (`rrc21`). We can then loop and read message from the websocket.
+from on collector (`rrc21`). We can then loop and read messages from the websocket.
 
 ```no_run
 use bgpkit_parser::parse_ris_live_message;
@@ -147,7 +147,7 @@ fn main() {
         connect(Url::parse(RIS_LIVE_URL).unwrap())
             .expect("Can't connect to RIS Live websocket server");
 
-    // subscribe to message from one collector
+    // subscribe to messages from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
     socket.write_message(Message::Text(msg)).unwrap();
 
