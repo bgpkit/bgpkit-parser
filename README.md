@@ -18,7 +18,7 @@ BGPKIT Parser has the following features:
 
 ## Examples
 
-For complete examples, check out the [examples folder](https://github.com/bgpkit/bgpkit-parser/examples).
+For complete examples, check out the [examples folder](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
 
 ### Parsing single MRT file
 
