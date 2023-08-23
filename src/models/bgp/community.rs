@@ -305,7 +305,7 @@ macro_rules! impl_serialize {
             where
                 S: serde::Serializer,
             {
-                serializer.serialize_str(self.to_string().as_str())
+                serializer.collect_str(self)
             }
         }
     };

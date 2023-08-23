@@ -24,6 +24,6 @@ impl Serialize for Origin {
     where
         S: Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.collect_str(self)
     }
 }

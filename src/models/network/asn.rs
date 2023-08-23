@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 
 /// AS number length: 16 or 32 bits.
@@ -69,6 +69,15 @@ impl Serialize for Asn {
         S: Serializer,
     {
         serializer.serialize_u32(self.asn)
+    }
+}
+
+impl<'de> Deserialize<'de> for Asn {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        u32::deserialize(deserializer).map(Asn::from)
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::models::*;
 use itertools::Itertools;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
@@ -10,22 +10,11 @@ use std::str::FromStr;
 ///
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename = "lowercase")]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,
-}
-
-impl Serialize for ElemType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(match self {
-            ElemType::ANNOUNCE => "announce",
-            ElemType::WITHDRAW => "withdraw",
-        })
-    }
 }
 
 impl ElemType {
