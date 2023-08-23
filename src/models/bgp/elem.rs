@@ -155,7 +155,8 @@ impl Display for BgpElem {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
         };
-        let format = format!(
+        write!(
+            f,
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             t,
             &self.timestamp,
@@ -171,8 +172,7 @@ impl Display for BgpElem {
             option_to_string!(&self.atomic),
             option_to_string!(&self.aggr_asn),
             option_to_string!(&self.aggr_ip),
-        );
-        write!(f, "{}", format)
+        )
     }
 }
 

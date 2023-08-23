@@ -11,12 +11,11 @@ pub enum Origin {
 
 impl Display for Origin {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Origin::IGP => "IGP",
-            Origin::EGP => "EGP",
-            Origin::INCOMPLETE => "INCOMPLETE",
-        };
-        write!(f, "{}", s)
+        match self {
+            Origin::IGP => write!(f, "IGP"),
+            Origin::EGP => write!(f, "EGP"),
+            Origin::INCOMPLETE => write!(f, "INCOMPLETE"),
+        }
     }
 }
 

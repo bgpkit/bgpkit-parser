@@ -139,20 +139,38 @@ impl AsPath {
 
 impl Display for AsPath {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.segments()
-                .iter()
-                .map(|seg| match seg {
-                    AsPathSegment::AsSequence(v) | AsPathSegment::ConfedSequence(v) =>
-                        v.iter().join(" "),
-                    AsPathSegment::AsSet(v) | AsPathSegment::ConfedSet(v) => {
-                        format!("{{{}}}", v.iter().join(","))
+        for (index, segment) in self.segments().iter().enumerate() {
+            if index != 0 {
+                write!(f, " ")?;
+            }
+
+            match segment {
+                AsPathSegment::AsSequence(v) | AsPathSegment::ConfedSequence(v) => {
+                    let mut asn_iter = v.iter();
+                    if let Some(first_element) = asn_iter.next() {
+                        write!(f, "{}", first_element)?;
+
+                        for asn in asn_iter {
+                            write!(f, " {}", asn)?;
+                        }
                     }
-                })
-                .join(" ")
-        )
+                },
+                AsPathSegment::AsSet(v) | AsPathSegment::ConfedSet(v) => {
+                    write!(f, "{{")?;
+                    let mut asn_iter = v.iter();
+                    if let Some(first_element) = asn_iter.next() {
+                        write!(f, "{}", first_element)?;
+
+                        for asn in asn_iter {
+                            write!(f, ",{}", asn)?;
+                        }
+                    }
+                    write!(f, "}}")?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

@@ -14,20 +14,10 @@ pub enum NextHopAddress {
 
 impl Display for NextHopAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                NextHopAddress::Ipv4(v) => {
-                    v.to_string()
-                }
-                NextHopAddress::Ipv6(v) => {
-                    v.to_string()
-                }
-                NextHopAddress::Ipv6LinkLocal(v1, _v2) => {
-                    v1.to_string()
-                }
-            }
-        )
+        match self {
+            NextHopAddress::Ipv4(v) => write!(f, "{}", v),
+            NextHopAddress::Ipv6(v) => write!(f, "{}", v),
+            NextHopAddress::Ipv6LinkLocal(v, _) => write!(f, "{}", v),
+        }
     }
 }

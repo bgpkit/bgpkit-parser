@@ -10,18 +10,10 @@ pub enum AtomicAggregate {
 
 impl Display for AtomicAggregate {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                AtomicAggregate::NAG => {
-                    "NAG"
-                }
-                AtomicAggregate::AG => {
-                    "AG"
-                }
-            }
-        )
+        match self {
+            AtomicAggregate::NAG => write!(f, "NAG"),
+            AtomicAggregate::AG => write!(f, "AG"),
+        }
     }
 }
 
