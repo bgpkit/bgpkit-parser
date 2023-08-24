@@ -205,6 +205,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
+    #[cfg(feature = "serde")]
     fn test_default() {
         let elem = BgpElem {
             timestamp: 0.0,
