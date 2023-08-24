@@ -10,6 +10,8 @@ pub enum AsnLength {
 
 /// ASN -- Autonomous System Number
 #[derive(Debug, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub struct Asn {
     pub asn: u32,
     pub len: AsnLength,
@@ -66,29 +68,5 @@ impl From<Asn> for u32 {
 impl Display for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
-    }
-}
-
-#[cfg(feature = "serde")]
-mod serde_impl {
-    use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    impl Serialize for Asn {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-        {
-            serializer.serialize_u32(self.asn)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for Asn {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: Deserializer<'de>,
-        {
-            u32::deserialize(deserializer).map(Asn::from)
-        }
     }
 }

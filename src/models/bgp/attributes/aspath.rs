@@ -24,7 +24,10 @@ impl AsPathSegment {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc3065#section-5>
     pub fn is_confed(&self) -> bool {
-        matches!(self, AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_))
+        matches!(
+            self,
+            AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_)
+        )
     }
 }
 
@@ -160,7 +163,7 @@ impl Display for AsPath {
                             write!(f, " {}", asn)?;
                         }
                     }
-                },
+                }
                 AsPathSegment::AsSet(v) | AsPathSegment::ConfedSet(v) => {
                     write!(f, "{{")?;
                     let mut asn_iter = v.iter();
@@ -182,11 +185,11 @@ impl Display for AsPath {
 
 #[cfg(feature = "serde")]
 mod serde_impl {
-    use std::borrow::Cow;
-    use serde::{Serialize, Serializer, Deserialize, Deserializer};
+    use super::*;
     use serde::de::{SeqAccess, Visitor};
     use serde::ser::SerializeSeq;
-    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::borrow::Cow;
 
     /// Segment type names using names from RFC3065.
     ///
@@ -207,7 +210,10 @@ mod serde_impl {
     }
 
     impl Serialize for AsPathSegment {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
             let (ty, elements) = match self {
                 AsPathSegment::AsSequence(x) => (SegmentType::AS_SEQUENCE, x.as_ref()),
                 AsPathSegment::AsSet(x) => (SegmentType::AS_SET, x.as_ref()),
@@ -225,7 +231,10 @@ mod serde_impl {
     }
 
     impl<'de> Deserialize<'de> for AsPathSegment {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
             let verbose = VerboseSegment::deserialize(deserializer)?;
 
             let values = verbose.values.into_owned();
@@ -249,11 +258,11 @@ mod serde_impl {
                 AsPathSegment::AsSequence(seq) if !prev_was_sequence => {
                     prev_was_sequence = true;
                     elements += seq.len();
-                },
+                }
                 AsPathSegment::AsSet(_) => {
                     prev_was_sequence = false;
                     elements += 1;
-                },
+                }
                 _ => return None,
             }
         }
@@ -310,7 +319,10 @@ mod serde_impl {
     /// ]);
     /// ```
     impl Serialize for AsPath {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
             if let Some(num_elements) = simplified_format_len(&self.segments) {
                 // Serialize simplified format
                 let mut seq_serializer = serializer.serialize_seq(Some(num_elements))?;
@@ -318,12 +330,12 @@ mod serde_impl {
                 for segment in &self.segments {
                     match segment {
                         AsPathSegment::AsSequence(elements) => {
-                            elements.iter().try_for_each(|x| {
-                                seq_serializer.serialize_element(x)
-                            })?;
+                            elements
+                                .iter()
+                                .try_for_each(|x| seq_serializer.serialize_element(x))?;
                         }
                         AsPathSegment::AsSet(x) => seq_serializer.serialize_element(x)?,
-                        _ => unreachable!("simplified_format_len checked for confed segments")
+                        _ => unreachable!("simplified_format_len checked for confed segments"),
                     }
                 }
                 return seq_serializer.end();
@@ -369,15 +381,16 @@ mod serde_impl {
                             segments.push(AsPathSegment::AsSequence(Vec::new()));
                         }
 
-                        if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut() {
+                        if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut()
+                        {
                             last_sequence.push(x);
                         } else {
                             segments.push(AsPathSegment::AsSequence(vec![x]));
                         }
-                    },
+                    }
                     PathElement::Set(values) => {
                         segments.push(AsPathSegment::AsSet(values));
-                    },
+                    }
                     PathElement::Verbose(verbose) => {
                         segments.push(verbose);
                     }
@@ -389,11 +402,13 @@ mod serde_impl {
     }
 
     impl<'de> Deserialize<'de> for AsPath {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
             deserializer.deserialize_seq(AsPathVisitor)
         }
     }
-
 }
 
 #[cfg(test)]

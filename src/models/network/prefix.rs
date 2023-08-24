@@ -40,34 +40,38 @@ mod serde_impl {
     #[serde(untagged, deny_unknown_fields)]
     enum SerdeNetworkPrefixRepr {
         PlainPrefix(IpNet),
-        WithPathId {
-            prefix: IpNet,
-            path_id: u32,
-        }
+        WithPathId { prefix: IpNet, path_id: u32 },
     }
 
     impl Serialize for NetworkPrefix {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
             if serializer.is_human_readable() && self.path_id == 0 {
                 self.prefix.serialize(serializer)
             } else {
                 SerdeNetworkPrefixRepr::WithPathId {
                     prefix: self.prefix,
                     path_id: self.path_id,
-                }.serialize(serializer)
+                }
+                .serialize(serializer)
             }
         }
     }
 
     impl<'de> Deserialize<'de> for NetworkPrefix {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
             match SerdeNetworkPrefixRepr::deserialize(deserializer)? {
-                SerdeNetworkPrefixRepr::PlainPrefix(prefix) => Ok(NetworkPrefix {
-                    prefix,
-                    path_id: 0,
-                }),
-                SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } =>
-                    Ok(NetworkPrefix { prefix, path_id }),
+                SerdeNetworkPrefixRepr::PlainPrefix(prefix) => {
+                    Ok(NetworkPrefix { prefix, path_id: 0 })
+                }
+                SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } => {
+                    Ok(NetworkPrefix { prefix, path_id })
+                }
             }
         }
     }
