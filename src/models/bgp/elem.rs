@@ -11,7 +11,7 @@ use std::str::FromStr;
 /// - WITHDRAW: withdrawn/unreachable prefix
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(rename = "lowercase")]
+#[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,
@@ -36,7 +36,7 @@ impl ElemType {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpElem {
     pub timestamp: f64,
-    #[serde(rename = "type")]
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
     pub elem_type: ElemType,
     pub peer_ip: IpAddr,
     pub peer_asn: Asn,

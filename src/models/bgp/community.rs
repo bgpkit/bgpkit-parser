@@ -1,9 +1,10 @@
 use crate::models::Asn;
-use serde::Serialize;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum MetaCommunity {
     Community(Community),
     ExtendedCommunity(ExtendedCommunity),
@@ -11,6 +12,7 @@ pub enum MetaCommunity {
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Community {
     NoExport,
     NoAdvertise,
@@ -25,6 +27,7 @@ pub enum Community {
 /// Large community is displayed as `lg:GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`, where `lg`
 /// is a prefix for large community.
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LargeCommunity {
     pub global_administrator: u32,
     pub local_data: [u32; 2],
@@ -41,6 +44,7 @@ impl LargeCommunity {
 
 /// Type definitions of extended communities
 #[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExtendedCommunityType {
     // transitive types
     TransitiveTwoOctetAsSpecific = 0x00,
@@ -94,6 +98,7 @@ pub enum ExtendedCommunityType {
 /// - `ecop:` stands for `Extended Community Opaque`
 /// - `ecraw:` stands for `Extended Community Raw`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExtendedCommunity {
     TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific),
     TransitiveIpv4AddressSpecific(Ipv4AddressSpecific),
@@ -108,6 +113,7 @@ pub enum ExtendedCommunity {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Ipv6AddressSpecific {
     pub ec_type: u8,
     pub ec_subtype: u8,
@@ -121,6 +127,7 @@ pub struct Ipv6AddressSpecific {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.1>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TwoOctetAsSpecific {
     pub ec_type: u8,
     pub ec_subtype: u8,
@@ -134,6 +141,7 @@ pub struct TwoOctetAsSpecific {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc5668#section-2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FourOctetAsSpecific {
     pub ec_type: u8,
     pub ec_subtype: u8,
@@ -147,6 +155,7 @@ pub struct FourOctetAsSpecific {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Ipv4AddressSpecific {
     pub ec_type: u8,
     pub ec_subtype: u8,
@@ -160,6 +169,7 @@ pub struct Ipv4AddressSpecific {
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.3>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Opaque {
     pub ec_type: u8,
     pub ec_subtype: u8,
@@ -272,31 +282,3 @@ impl Display for MetaCommunity {
         }
     }
 }
-
-///////////////
-// SERIALIZE //
-///////////////
-
-macro_rules! impl_serialize {
-    ($a:ident) => {
-        impl Serialize for $a {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                serializer.collect_str(self)
-            }
-        }
-
-        impl<'de> serde::Deserialize<'de> for $a {
-            fn deserialize<D>(_: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
-                todo!()
-            }
-        }
-    };
-}
-
-impl_serialize!(Community);
-impl_serialize!(ExtendedCommunity);
-impl_serialize!(LargeCommunity);
-impl_serialize!(MetaCommunity);
