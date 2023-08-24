@@ -1,10 +1,10 @@
 use num_traits::FromPrimitive;
-use serde::Serialize;
 
 /// BGP Role
 ///
 /// Defined in [RFC9234](https://www.iana.org/go/rfc9234).
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpRole {
     Provider = 0,
     RouteServer = 1,

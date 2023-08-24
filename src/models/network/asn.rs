@@ -2,7 +2,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 
 /// AS number length: 16 or 32 bits.
-#[derive(Debug, Clone, Serialize, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AsnLength {
     Bits16,
     Bits32,

@@ -308,6 +308,12 @@ macro_rules! impl_serialize {
                 serializer.collect_str(self)
             }
         }
+
+        impl<'de> serde::Deserialize<'de> for $a {
+            fn deserialize<D>(_: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+                todo!()
+            }
+        }
     };
 }
 

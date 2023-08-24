@@ -5,7 +5,6 @@ mod nlri;
 mod origin;
 
 use crate::models::network::*;
-use serde::Serialize;
 use std::net::IpAddr;
 
 use crate::models::*;
@@ -54,7 +53,8 @@ pub enum AttributeFlagsBit {
 /// To see the full list, check out IANA at:
 /// <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-2>
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttrType {
     RESERVED = 0,
     ORIGIN = 1,
@@ -110,7 +110,8 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 }
 
 /// BGP Attribute struct with attribute value and flag
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Attribute {
     pub attr_type: u8,
     pub value: AttributeValue,
@@ -118,7 +119,8 @@ pub struct Attribute {
 }
 
 /// The `AttributeValue` enum represents different kinds of Attribute values.
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttributeValue {
     Origin(Origin),
     AsPath(AsPath),
@@ -141,7 +143,8 @@ pub enum AttributeValue {
     Unknown(AttrRaw),
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttrRaw {
     pub attr_type: u8,
     pub bytes: Vec<u8>,

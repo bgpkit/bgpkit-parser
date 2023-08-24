@@ -1,10 +1,10 @@
 use num_traits::FromPrimitive;
-use serde::Serialize;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 /// BGP capability parsing error
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum BgpCapabilityParsingError {
     Unassigned(u8),
     DeprecatedCode(u8),
@@ -38,7 +38,8 @@ impl Display for BgpCapabilityParsingError {
 impl Error for BgpCapabilityParsingError {}
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpCapabilityType {
     MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4 = 1,
     ROUTE_REFRESH_CAPABILITY_FOR_BGP_4 = 2,

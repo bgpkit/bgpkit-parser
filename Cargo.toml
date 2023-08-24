@@ -48,7 +48,6 @@ clap = {version= "4.0", features=["derive"], optional=true}
 [features]
 default = ["parser"]
 models = [
-    "serde",
     "enum-primitive-derive",
     "ipnet",
     "itertools",
@@ -69,6 +68,10 @@ cli = [
     "clap",
     "parser",
     "env_logger"
+]
+serde = [
+    "dep:serde",
+    "ipnet/serde",
 ]
 
 [[bench]]

@@ -1,6 +1,5 @@
 use crate::models::*;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
@@ -10,7 +9,8 @@ use std::str::FromStr;
 ///
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(rename = "lowercase")]
 pub enum ElemType {
     ANNOUNCE,
@@ -32,7 +32,8 @@ impl ElemType {
 ///
 /// Note: it consumes more memory to construct BGP elements due to duplicate information
 /// shared between multiple elements of one MRT record.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpElem {
     pub timestamp: f64,
     #[serde(rename = "type")]
@@ -75,7 +76,8 @@ impl Ord for BgpElem {
 }
 
 /// Reference version of the [BgpElem] struct.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BgpElemRef<'a> {
     pub timestamp: &'a f64,
     pub elem_type: &'a ElemType,

@@ -3,12 +3,12 @@
 //! The full list of IANA error code assignments for BGP can be viewed at here:
 //! <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-3>.
 use num_traits::FromPrimitive;
-use serde::Serialize;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 /// Error for parsing BGP error code
-#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpErrorCodeParsingError {
     UnknownCode(u8),
     UnknownSubcode(u8),
@@ -87,7 +87,8 @@ pub fn parse_error_codes(
 ///
 /// <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-4>
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpError {
     Reserved,
     MessageHeaderError(MessageHeaderErrorSubcode),
@@ -105,7 +106,8 @@ pub enum BgpError {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MessageHeaderErrorSubcode {
     UNSPECIFIC = 0,
     CONNECTION_NOT_SYNCHRONIZED = 1,
@@ -120,7 +122,8 @@ pub enum MessageHeaderErrorSubcode {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OpenMessageErrorSubcode {
     UNSPECIFIC = 0,
     UNSUPPORTED_VERSION_NUMBER = 1,
@@ -143,7 +146,8 @@ pub enum OpenMessageErrorSubcode {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum UpdateMessageErrorSubcode {
     UNSPECIFIC = 0,
     MALFORMED_ATTRIBUTE_LIST = 1,
@@ -166,7 +170,8 @@ pub enum UpdateMessageErrorSubcode {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpFiniteStateMachineErrorSubcode {
     UNSPECIFIED = 0,
     RECEIVE_UNEXPECTED_MESSAGE_IN_OPENSENT_State = 1,
@@ -181,7 +186,8 @@ pub enum BgpFiniteStateMachineErrorSubcode {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpCeaseNotificationMessageSubcode {
     RESERVED = 0,
     MAXIMUM_NUMBER_OF_PREFIXES_REACHED = 1,
@@ -203,7 +209,8 @@ pub enum BgpCeaseNotificationMessageSubcode {
 ///
 /// *See source code for number assignment*
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpRouteRefreshMessageErrorSubcode {
     RESERVED = 0,
     INVALID_MESSAGE_LENGTH = 1,
