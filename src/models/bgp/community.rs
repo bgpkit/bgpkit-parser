@@ -1,6 +1,6 @@
 use crate::models::Asn;
 use serde::Serialize;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter, Write};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
@@ -179,31 +179,19 @@ fn bytes_to_string(bytes: &[u8]) -> String {
         .join("")
 }
 
-impl std::fmt::Display for Community {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Community::NoExport => {
-                    "no-export".to_string()
-                }
-                Community::NoAdvertise => {
-                    "no-advertise".to_string()
-                }
-                Community::NoExportSubConfed => {
-                    "no-export-sub-confed".to_string()
-                }
-                Community::Custom(asn, value) => {
-                    format!("{}:{}", asn, value)
-                }
-            }
-        )
+impl Display for Community {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Community::NoExport => write!(f, "no-export"),
+            Community::NoAdvertise => write!(f, "no-advertise"),
+            Community::NoExportSubConfed => write!(f, "no-export-sub-confed"),
+            Community::Custom(asn, value) => write!(f, "{}:{}", asn, value),
+        }
     }
 }
 
-impl std::fmt::Display for LargeCommunity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for LargeCommunity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "lg:{}:{}:{}",
@@ -212,85 +200,76 @@ impl std::fmt::Display for LargeCommunity {
     }
 }
 
-impl std::fmt::Display for ExtendedCommunity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                ExtendedCommunity::TransitiveTwoOctetAsSpecific(ec)
-                | ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(ec) => {
-                    format!(
-                        "ecas2:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveIpv4AddressSpecific(ec)
-                | ExtendedCommunity::NonTransitiveIpv4AddressSpecific(ec) => {
-                    format!(
-                        "ecv4:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveFourOctetAsSpecific(ec)
-                | ExtendedCommunity::NonTransitiveFourOctetAsSpecific(ec) => {
-                    format!(
-                        "ecas4:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveOpaque(ec)
-                | ExtendedCommunity::NonTransitiveOpaque(ec) => {
-                    format!(
-                        "ecop:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        bytes_to_string(&ec.value)
-                    )
-                }
-                ExtendedCommunity::Ipv6AddressSpecific(ec) => {
-                    format!(
-                        "ecv6:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::Raw(ec) => {
-                    format!("ecraw:{}", bytes_to_string(ec))
-                }
+impl Display for ExtendedCommunity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExtendedCommunity::TransitiveTwoOctetAsSpecific(ec)
+            | ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(ec) => {
+                write!(
+                    f,
+                    "ecas2:{}:{}:{}:{}",
+                    ec.ec_type,
+                    ec.ec_subtype,
+                    ec.global_administrator,
+                    bytes_to_string(&ec.local_administrator)
+                )
             }
-        )
+            ExtendedCommunity::TransitiveIpv4AddressSpecific(ec)
+            | ExtendedCommunity::NonTransitiveIpv4AddressSpecific(ec) => {
+                write!(
+                    f,
+                    "ecv4:{}:{}:{}:{}",
+                    ec.ec_type,
+                    ec.ec_subtype,
+                    ec.global_administrator,
+                    bytes_to_string(&ec.local_administrator)
+                )
+            }
+            ExtendedCommunity::TransitiveFourOctetAsSpecific(ec)
+            | ExtendedCommunity::NonTransitiveFourOctetAsSpecific(ec) => {
+                write!(
+                    f,
+                    "ecas4:{}:{}:{}:{}",
+                    ec.ec_type,
+                    ec.ec_subtype,
+                    ec.global_administrator,
+                    bytes_to_string(&ec.local_administrator)
+                )
+            }
+            ExtendedCommunity::TransitiveOpaque(ec)
+            | ExtendedCommunity::NonTransitiveOpaque(ec) => {
+                write!(
+                    f,
+                    "ecop:{}:{}:{}",
+                    ec.ec_type,
+                    ec.ec_subtype,
+                    bytes_to_string(&ec.value)
+                )
+            }
+            ExtendedCommunity::Ipv6AddressSpecific(ec) => {
+                write!(
+                    f,
+                    "ecv6:{}:{}:{}:{}",
+                    ec.ec_type,
+                    ec.ec_subtype,
+                    ec.global_administrator,
+                    bytes_to_string(&ec.local_administrator)
+                )
+            }
+            ExtendedCommunity::Raw(ec) => {
+                write!(f, "ecraw:{}", bytes_to_string(ec))
+            }
+        }
     }
 }
 
-impl std::fmt::Display for MetaCommunity {
+impl Display for MetaCommunity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                MetaCommunity::Community(c) => {
-                    c.to_string()
-                }
-                MetaCommunity::ExtendedCommunity(c) => {
-                    c.to_string()
-                }
-                MetaCommunity::LargeCommunity(c) => {
-                    c.to_string()
-                }
-            }
-        )
+        match self {
+            MetaCommunity::Community(c) => write!(f, "{}", c),
+            MetaCommunity::ExtendedCommunity(c) => write!(f, "{}", c),
+            MetaCommunity::LargeCommunity(c) => write!(f, "{}", c),
+        }
     }
 }
 
