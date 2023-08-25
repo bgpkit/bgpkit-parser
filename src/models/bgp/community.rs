@@ -181,12 +181,15 @@ pub struct Opaque {
 // DISPLAY //
 /////////////
 
-fn bytes_to_string(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|x| format!("{:02X}", x))
-        .collect::<Vec<String>>()
-        .join("")
+struct ToHexString<'a>(&'a [u8]);
+
+impl Display for ToHexString<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(f, "{:02X}", byte)?;
+        }
+        Ok(())
+    }
 }
 
 impl Display for Community {
@@ -221,7 +224,7 @@ impl Display for ExtendedCommunity {
                     ec.ec_type,
                     ec.ec_subtype,
                     ec.global_administrator,
-                    bytes_to_string(&ec.local_administrator)
+                    ToHexString(&ec.local_administrator)
                 )
             }
             ExtendedCommunity::TransitiveIpv4AddressSpecific(ec)
@@ -232,7 +235,7 @@ impl Display for ExtendedCommunity {
                     ec.ec_type,
                     ec.ec_subtype,
                     ec.global_administrator,
-                    bytes_to_string(&ec.local_administrator)
+                    ToHexString(&ec.local_administrator)
                 )
             }
             ExtendedCommunity::TransitiveFourOctetAsSpecific(ec)
@@ -243,7 +246,7 @@ impl Display for ExtendedCommunity {
                     ec.ec_type,
                     ec.ec_subtype,
                     ec.global_administrator,
-                    bytes_to_string(&ec.local_administrator)
+                    ToHexString(&ec.local_administrator)
                 )
             }
             ExtendedCommunity::TransitiveOpaque(ec)
@@ -253,7 +256,7 @@ impl Display for ExtendedCommunity {
                     "ecop:{}:{}:{}",
                     ec.ec_type,
                     ec.ec_subtype,
-                    bytes_to_string(&ec.value)
+                    ToHexString(&ec.value)
                 )
             }
             ExtendedCommunity::Ipv6AddressSpecific(ec) => {
@@ -263,11 +266,11 @@ impl Display for ExtendedCommunity {
                     ec.ec_type,
                     ec.ec_subtype,
                     ec.global_administrator,
-                    bytes_to_string(&ec.local_administrator)
+                    ToHexString(&ec.local_administrator)
                 )
             }
             ExtendedCommunity::Raw(ec) => {
-                write!(f, "ecraw:{}", bytes_to_string(ec))
+                write!(f, "ecraw:{}", ToHexString(ec))
             }
         }
     }
