@@ -65,7 +65,9 @@ parser = [
 cli = [
     "clap",
     "parser",
-    "env_logger"
+    "env_logger",
+    "serde",
+    "serde_json"
 ]
 rislive = [
     "parser",
