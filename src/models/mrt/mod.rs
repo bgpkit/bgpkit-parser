@@ -9,6 +9,7 @@ use std::io;
 use std::io::Write;
 pub use tabledump::*;
 
+// TODO(jmeggitt): Add function to get the timestamp as chrono type
 /// MrtRecord is a wrapper struct that contains a header and a message.
 ///
 /// A MRT record is constructed as the following:
@@ -98,6 +99,7 @@ impl CommonHeader {
     }
 }
 
+// TODO: Why isn't there an option for an unknown message?
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),

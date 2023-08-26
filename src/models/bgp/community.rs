@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::fmt::Formatter;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+// TODO(jmeggitt): Revisit MetaCommunity to see if it can be made easier to work with
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
 pub enum MetaCommunity {
     Community(Community),
@@ -105,6 +106,38 @@ pub enum ExtendedCommunity {
     NonTransitiveOpaque(Opaque),
     Ipv6AddressSpecific(Ipv6AddressSpecific),
     Raw([u8; 8]),
+}
+
+impl ExtendedCommunity {
+    pub const fn community_type(&self) -> Option<ExtendedCommunityType> {
+        match self {
+            ExtendedCommunity::TransitiveTwoOctetAsSpecific(_) => {
+                Some(ExtendedCommunityType::TransitiveTwoOctetAsSpecific)
+            }
+            ExtendedCommunity::TransitiveIpv4AddressSpecific(_) => {
+                Some(ExtendedCommunityType::TransitiveIpv4AddressSpecific)
+            }
+            ExtendedCommunity::TransitiveFourOctetAsSpecific(_) => {
+                Some(ExtendedCommunityType::TransitiveFourOctetAsSpecific)
+            }
+            ExtendedCommunity::TransitiveOpaque(_) => Some(ExtendedCommunityType::TransitiveOpaque),
+            ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(_) => {
+                Some(ExtendedCommunityType::NonTransitiveTwoOctetAsSpecific)
+            }
+            ExtendedCommunity::NonTransitiveIpv4AddressSpecific(_) => {
+                Some(ExtendedCommunityType::NonTransitiveIpv4AddressSpecific)
+            }
+            ExtendedCommunity::NonTransitiveFourOctetAsSpecific(_) => {
+                Some(ExtendedCommunityType::NonTransitiveFourOctetAsSpecific)
+            }
+            ExtendedCommunity::NonTransitiveOpaque(_) => {
+                Some(ExtendedCommunityType::NonTransitiveOpaque)
+            }
+            // TODO: Does Ipv6AddressSpecific not have a format type?
+            ExtendedCommunity::Ipv6AddressSpecific(_) => None,
+            ExtendedCommunity::Raw(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]

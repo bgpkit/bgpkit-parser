@@ -37,6 +37,17 @@ pub enum BgpMessage {
     KeepAlive(BgpKeepAliveMessage),
 }
 
+impl BgpMessage {
+    pub const fn msg_type(&self) -> BgpMessageType {
+        match self {
+            BgpMessage::Open(_) => BgpMessageType::OPEN,
+            BgpMessage::Update(_) => BgpMessageType::UPDATE,
+            BgpMessage::Notification(_) => BgpMessageType::NOTIFICATION,
+            BgpMessage::KeepAlive(_) => BgpMessageType::KEEPALIVE,
+        }
+    }
+}
+
 /// BGP Open Message
 ///
 /// ```text
@@ -88,6 +99,7 @@ pub enum ParamValue {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Capability {
     pub code: u8,
+    // TODO: Is length field a duplicate of the Vec's length?
     pub len: u8,
     pub value: Vec<u8>,
     pub capability_type: Option<BgpCapabilityType>,
@@ -102,11 +114,13 @@ pub struct BgpUpdateMessage {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BgpNotificationMessage {
+    // TODO: Do error code and error subcode have existing enums?
     pub error_code: u8,
     pub error_subcode: u8,
     pub error_type: Option<BgpError>,
     pub data: Vec<u8>,
 }
 
+// TODO: Is this type necessary? It could probably be left as a unit enum variant.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BgpKeepAliveMessage;

@@ -14,6 +14,7 @@ pub enum BgpState {
     Established = 6,
 }
 
+// TODO: Could the As4 variants be removed? That information can be gained through Bgp4MpType.
 /// BGP4MP message types.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Bgp4Mp {
@@ -23,6 +24,18 @@ pub enum Bgp4Mp {
     Bgp4MpMessageLocal(Bgp4MpMessage),
     Bgp4MpMessageAs4(Bgp4MpMessage),
     Bgp4MpMessageAs4Local(Bgp4MpMessage),
+}
+
+impl Bgp4Mp {
+    pub const fn msg_type(&self) -> Bgp4MpType {
+        match self {
+            Bgp4Mp::Bgp4MpStateChange(x) | Bgp4Mp::Bgp4MpStateChangeAs4(x) => x.msg_type,
+            Bgp4Mp::Bgp4MpMessage(x)
+            | Bgp4Mp::Bgp4MpMessageLocal(x)
+            | Bgp4Mp::Bgp4MpMessageAs4(x)
+            | Bgp4Mp::Bgp4MpMessageAs4Local(x) => x.msg_type,
+        }
+    }
 }
 
 /// BGP4MP message subtypes.
@@ -65,4 +78,16 @@ pub struct Bgp4MpMessage {
     pub peer_ip: IpAddr,
     pub local_ip: IpAddr,
     pub bgp_message: BgpMessage,
+}
+
+impl Bgp4MpMessage {
+    pub const fn is_local(&self) -> bool {
+        matches!(
+            self.msg_type,
+            Bgp4MpType::Bgp4MpMessageLocal
+                | Bgp4MpType::Bgp4MpMessageAs4Local
+                | Bgp4MpType::Bgp4MpMessageLocalAddpath
+                | Bgp4MpType::Bgp4MpMessageLocalAs4Addpath
+        )
+    }
 }

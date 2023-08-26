@@ -25,6 +25,16 @@ pub enum TableDumpV2Message {
     RibGenericEntries(RibGenericEntries),
 }
 
+impl TableDumpV2Message {
+    pub const fn dump_type(&self) -> TableDumpV2Type {
+        match self {
+            TableDumpV2Message::PeerIndexTable(_) => TableDumpV2Type::PeerIndexTable,
+            TableDumpV2Message::RibAfiEntries(x) => x.rib_type,
+            TableDumpV2Message::RibGenericEntries(_) => TableDumpV2Type::RibGeneric,
+        }
+    }
+}
+
 /// TableDump version 2 subtypes.
 ///
 /// <https://www.iana.org/assignments/mrt/mrt.xhtml#subtype-codes>
