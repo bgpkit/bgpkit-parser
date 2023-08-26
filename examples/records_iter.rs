@@ -19,7 +19,7 @@ fn main() {
                     BgpMessage::Open(_) => {}
                     BgpMessage::Update(u) => {
                         for attr in &u.attributes {
-                            if let AttributeValue::OnlyToCustomer(remote) = attr.value {
+                            if let AttributeValue::OnlyToCustomer(remote) = attr {
                                 println!("OTC message found, remote ASN = {remote}");
                             }
                         }

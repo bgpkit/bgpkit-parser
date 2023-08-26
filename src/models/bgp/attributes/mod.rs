@@ -5,12 +5,13 @@ mod nlri;
 mod origin;
 
 use crate::models::network::*;
-use num_traits::ToPrimitive;
 use serde::{Serialize, Serializer};
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
 use std::ops::Deref;
+use std::slice::Iter;
 use std::vec::IntoIter;
+use bitflags::bitflags;
 
 use crate::models::*;
 
@@ -19,37 +20,36 @@ pub use atomic_aggregate::*;
 pub use nlri::*;
 pub use origin::*;
 
-/// The high-order bit (bit 0) of the Attribute Flags octet is the
-/// Optional bit.  It defines whether the attribute is optional (if
-/// set to 1) or well-known (if set to 0).
-///
-/// The second high-order bit (bit 1) of the Attribute Flags octet
-/// is the Transitive bit.  It defines whether an optional
-/// attribute is transitive (if set to 1) or non-transitive (if set
-/// to 0).
-///
-/// For well-known attributes, the Transitive bit MUST be set to 1.
-/// (See Section 5 for a discussion of transitive attributes.)
-///
-/// The third high-order bit (bit 2) of the Attribute Flags octet
-/// is the Partial bit.  It defines whether the information
-/// contained in the optional transitive attribute is partial (if
-/// set to 1) or complete (if set to 0).  For well-known attributes
-/// and for optional non-transitive attributes, the Partial bit
-/// MUST be set to 0.
-///
-/// The fourth high-order bit (bit 3) of the Attribute Flags octet
-/// is the Extended Length bit.  It defines whether the Attribute
-/// Length is one octet (if set to 0) or two octets (if set to 1).
-pub enum AttributeFlagsBit {
-    /// 128 = 0b10000000
-    OptionalBit = 0b10000000,
-    /// 64 = 0b01000000
-    TransitiveBit = 0b01000000,
-    /// 32 = 0b00100000
-    PartialBit = 0b00100000,
-    /// 16 = 0b00010000
-    ExtendedLengthBit = 0b00010000,
+bitflags! {
+    /// The high-order bit (bit 0) of the Attribute Flags octet is the
+    /// Optional bit.  It defines whether the attribute is optional (if
+    /// set to 1) or well-known (if set to 0).
+    ///
+    /// The second high-order bit (bit 1) of the Attribute Flags octet
+    /// is the Transitive bit.  It defines whether an optional
+    /// attribute is transitive (if set to 1) or non-transitive (if set
+    /// to 0).
+    ///
+    /// For well-known attributes, the Transitive bit MUST be set to 1.
+    /// (See Section 5 for a discussion of transitive attributes.)
+    ///
+    /// The third high-order bit (bit 2) of the Attribute Flags octet
+    /// is the Partial bit.  It defines whether the information
+    /// contained in the optional transitive attribute is partial (if
+    /// set to 1) or complete (if set to 0).  For well-known attributes
+    /// and for optional non-transitive attributes, the Partial bit
+    /// MUST be set to 0.
+    ///
+    /// The fourth high-order bit (bit 3) of the Attribute Flags octet
+    /// is the Extended Length bit.  It defines whether the Attribute
+    /// Length is one octet (if set to 0) or two octets (if set to 1).
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+    pub struct AttrFlags: u8 {
+        const OPTIONAL   = 0b10000000;
+        const TRANSITIVE = 0b01000000;
+        const PARTIAL    = 0b00100000;
+        const EXTENDED   = 0b00010000;
+    }
 }
 
 /// Attribute types.
@@ -58,48 +58,126 @@ pub enum AttributeFlagsBit {
 /// To see the full list, check out IANA at:
 /// <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-2>
 #[allow(non_camel_case_types)]
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
 pub enum AttrType {
-    RESERVED = 0,
-    ORIGIN = 1,
-    AS_PATH = 2,
-    NEXT_HOP = 3,
-    MULTI_EXIT_DISCRIMINATOR = 4,
-    LOCAL_PREFERENCE = 5,
-    ATOMIC_AGGREGATE = 6,
-    AGGREGATOR = 7,
-    COMMUNITIES = 8,
+    RESERVED,
+    ORIGIN,
+    AS_PATH,
+    NEXT_HOP,
+    MULTI_EXIT_DISCRIMINATOR,
+    LOCAL_PREFERENCE,
+    ATOMIC_AGGREGATE,
+    AGGREGATOR,
+    COMMUNITIES,
     /// <https://tools.ietf.org/html/rfc4456>
-    ORIGINATOR_ID = 9,
-    CLUSTER_LIST = 10,
+    ORIGINATOR_ID,
+    CLUSTER_LIST,
     /// <https://tools.ietf.org/html/rfc4760>
-    CLUSTER_ID = 13,
-    MP_REACHABLE_NLRI = 14,
-    MP_UNREACHABLE_NLRI = 15,
+    CLUSTER_ID,
+    MP_REACHABLE_NLRI,
+    MP_UNREACHABLE_NLRI,
     /// <https://datatracker.ietf.org/doc/html/rfc4360>
-    EXTENDED_COMMUNITIES = 16,
-    AS4_PATH = 17,
-    AS4_AGGREGATOR = 18,
-    PMSI_TUNNEL = 22,
-    TUNNEL_ENCAPSULATION = 23,
-    TRAFFIC_ENGINEERING = 24,
-    IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES = 25,
-    AIGP = 26,
-    PE_DISTINGUISHER_LABELS = 27,
-    BGP_LS_ATTRIBUTE = 29,
-    LARGE_COMMUNITIES = 32,
-    BGPSEC_PATH = 33,
-    ONLY_TO_CUSTOMER = 35,
-    SFP_ATTRIBUTE = 37,
-    BFD_DISCRIMINATOR = 38,
-    BGP_PREFIX_SID = 40,
-    ATTR_SET = 128,
+    EXTENDED_COMMUNITIES,
+    AS4_PATH,
+    AS4_AGGREGATOR,
+    PMSI_TUNNEL,
+    TUNNEL_ENCAPSULATION,
+    TRAFFIC_ENGINEERING,
+    IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES,
+    AIGP,
+    PE_DISTINGUISHER_LABELS,
+    BGP_LS_ATTRIBUTE,
+    LARGE_COMMUNITIES,
+    BGPSEC_PATH,
+    ONLY_TO_CUSTOMER,
+    SFP_ATTRIBUTE,
+    BFD_DISCRIMINATOR,
+    BGP_PREFIX_SID,
+    ATTR_SET,
     /// <https://datatracker.ietf.org/doc/html/rfc2042>
-    DEVELOPMENT = 255,
+    DEVELOPMENT,
+    /// Catch all for any unknown attribute types
+    Unknown(u8),
+}
 
-    // TODO: How to handle deprecated and unassigned cases?
-    UNASSIGNED = 41,
-    DEPRECATED = 30,
+impl From<u8> for AttrType {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => AttrType::RESERVED,
+            1 => AttrType::ORIGIN,
+            2 => AttrType::AS_PATH,
+            3 => AttrType::NEXT_HOP,
+            4 => AttrType::MULTI_EXIT_DISCRIMINATOR,
+            5 => AttrType::LOCAL_PREFERENCE,
+            6 => AttrType::ATOMIC_AGGREGATE,
+            7 => AttrType::AGGREGATOR,
+            8 => AttrType::COMMUNITIES,
+            9 => AttrType::ORIGINATOR_ID,
+            10 => AttrType::CLUSTER_LIST,
+            13 => AttrType::CLUSTER_ID,
+            14 => AttrType::MP_REACHABLE_NLRI,
+            15 => AttrType::MP_UNREACHABLE_NLRI,
+            16 => AttrType::EXTENDED_COMMUNITIES,
+            17 => AttrType::AS4_PATH,
+            18 => AttrType::AS4_AGGREGATOR,
+            22 => AttrType::PMSI_TUNNEL,
+            23 => AttrType::TUNNEL_ENCAPSULATION,
+            24 => AttrType::TRAFFIC_ENGINEERING,
+            25 => AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES,
+            26 => AttrType::AIGP,
+            27 => AttrType::PE_DISTINGUISHER_LABELS,
+            29 => AttrType::BGP_LS_ATTRIBUTE,
+            32 => AttrType::LARGE_COMMUNITIES,
+            33 => AttrType::BGPSEC_PATH,
+            35 => AttrType::ONLY_TO_CUSTOMER,
+            37 => AttrType::SFP_ATTRIBUTE,
+            38 => AttrType::BFD_DISCRIMINATOR,
+            40 => AttrType::BGP_PREFIX_SID,
+            128 => AttrType::ATTR_SET,
+            255 => AttrType::DEVELOPMENT,
+            x => AttrType::Unknown(x),
+        }
+    }
+}
+
+impl From<AttrType> for u8 {
+    fn from(value: AttrType) -> Self {
+        match value {
+            AttrType::RESERVED => 0,
+            AttrType::ORIGIN => 1,
+            AttrType::AS_PATH => 2,
+            AttrType::NEXT_HOP => 3,
+            AttrType::MULTI_EXIT_DISCRIMINATOR => 4,
+            AttrType::LOCAL_PREFERENCE => 5,
+            AttrType::ATOMIC_AGGREGATE => 6,
+            AttrType::AGGREGATOR => 7,
+            AttrType::COMMUNITIES => 8,
+            AttrType::ORIGINATOR_ID => 9,
+            AttrType::CLUSTER_LIST => 10,
+            AttrType::CLUSTER_ID => 13,
+            AttrType::MP_REACHABLE_NLRI => 14,
+            AttrType::MP_UNREACHABLE_NLRI => 15,
+            AttrType::EXTENDED_COMMUNITIES => 16,
+            AttrType::AS4_PATH => 17,
+            AttrType::AS4_AGGREGATOR => 18,
+            AttrType::PMSI_TUNNEL => 22,
+            AttrType::TUNNEL_ENCAPSULATION => 23,
+            AttrType::TRAFFIC_ENGINEERING => 24,
+            AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => 25,
+            AttrType::AIGP => 26,
+            AttrType::PE_DISTINGUISHER_LABELS => 27,
+            AttrType::BGP_LS_ATTRIBUTE => 29,
+            AttrType::LARGE_COMMUNITIES => 32,
+            AttrType::BGPSEC_PATH => 33,
+            AttrType::ONLY_TO_CUSTOMER => 35,
+            AttrType::SFP_ATTRIBUTE => 37,
+            AttrType::BFD_DISCRIMINATOR => 38,
+            AttrType::BGP_PREFIX_SID => 40,
+            AttrType::ATTR_SET => 128,
+            AttrType::DEVELOPMENT => 255,
+            AttrType::Unknown(x) => x,
+        }
+    }
 }
 
 pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
@@ -120,7 +198,8 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 /// Convenience wrapper for a list of attributes
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Attributes {
-    // Black box type to allow for later changes/optimizations
+    // Black box type to allow for later changes/optimizations. The most common attributes could be
+    // added as fields to allow for easier lookup.
     inner: Vec<Attribute>,
 }
 
@@ -187,9 +266,9 @@ impl FromIterator<AttributeValue> for Attributes {
             inner: iter
                 .into_iter()
                 .map(|value| Attribute {
-                    attr_type: value.attr_type().to_u8().expect("TODO"),
+                    attr_type: value.attr_type(),
                     value,
-                    flag: 0,
+                    flag: AttrFlags::empty(),
                 })
                 .collect(),
         }
@@ -202,6 +281,15 @@ impl IntoIterator for Attributes {
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter().map(|x| x.value)
+    }
+}
+
+impl<'a> IntoIterator for &'a Attributes {
+    type Item = &'a AttributeValue;
+    type IntoIter = Map<Iter<'a, Attribute>, fn(&Attribute) -> &AttributeValue>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter().map(|x| &x.value)
     }
 }
 
@@ -225,9 +313,9 @@ impl Serialize for Attributes {
 /// BGP Attribute struct with attribute value and flag
 #[derive(Debug, PartialEq, Clone, Serialize, Eq)]
 pub struct Attribute {
-    pub attr_type: u8,
+    pub attr_type: AttrType,
     pub value: AttributeValue,
-    pub flag: u8,
+    pub flag: AttrFlags,
 }
 
 impl Deref for Attribute {
@@ -282,18 +370,13 @@ impl AttributeValue {
             AttributeValue::MpReachNlri(_) => AttrType::MP_REACHABLE_NLRI,
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
-            AttributeValue::Deprecated(_) => todo!("Maybe this could be handled by extending "),
-            AttributeValue::Unknown(_) => todo!(),
+            AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Eq)]
 pub struct AttrRaw {
-    pub attr_type: u8,
+    pub attr_type: AttrType,
     pub bytes: Vec<u8>,
 }
-
-///////////////////
-// DISPLAY IMPLS //
-///////////////////

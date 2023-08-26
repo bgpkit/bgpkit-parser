@@ -16,7 +16,6 @@ use bytes::{Buf, Bytes};
 use log::{debug, warn};
 
 use crate::models::*;
-use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
 use crate::parser::bgp::attributes::attr_01_origin::parse_origin;
@@ -66,15 +65,15 @@ impl AttributeParser {
             // thus the while loop condition is set to be at least 3 bytes to read.
 
             // has content to read
-            let flag = data.get_u8();
+            let flag = AttrFlags::from_bits_retain(data.get_u8());
             let attr_type = data.get_u8();
-            let attr_length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-                0 => data.get_u8() as usize,
-                _ => data.get_u16() as usize,
+            let attr_length = match flag.contains(AttrFlags::EXTENDED) {
+                false => data.get_u8() as usize,
+                true => data.get_u16() as usize,
             };
 
             let mut partial = false;
-            if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
+            if flag.contains(AttrFlags::PARTIAL) {
                 /*
                 https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
 
@@ -92,18 +91,17 @@ impl AttributeParser {
                 "reading attribute: type -- {:?}, length -- {}",
                 &attr_type, attr_length
             );
-            let attr_type = match AttrType::from_u8(attr_type) {
-                Some(t) => t,
-                None => {
+            let attr_type = match AttrType::from(attr_type) {
+                attr_type @ AttrType::Unknown(unknown_type) => {
                     // skip pass the remaining bytes of this attribute
                     let bytes = data.read_n_bytes(attr_length)?;
-                    let attr_value = match get_deprecated_attr_type(attr_type) {
+                    let attr_value = match get_deprecated_attr_type(unknown_type) {
                         Some(t) => {
-                            debug!("deprecated attribute type: {} - {}", attr_type, t);
+                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
                             AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
                         }
                         None => {
-                            debug!("unknown attribute type: {}", attr_type);
+                            debug!("unknown attribute type: {}", unknown_type);
                             AttributeValue::Unknown(AttrRaw { attr_type, bytes })
                         }
                     };
@@ -114,6 +112,7 @@ impl AttributeParser {
                     });
                     continue;
                 }
+                t => t,
             };
 
             let bytes_left = data.remaining();
@@ -187,7 +186,7 @@ impl AttributeParser {
                     attributes.push(Attribute {
                         value,
                         flag,
-                        attr_type: attr_type as u8,
+                        attr_type,
                     });
                 }
                 Err(e) => {
