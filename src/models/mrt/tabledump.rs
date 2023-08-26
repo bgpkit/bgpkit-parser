@@ -14,7 +14,7 @@ pub struct TableDumpMessage {
     pub originated_time: u64,
     pub peer_address: IpAddr,
     pub peer_asn: Asn,
-    pub attributes: Vec<Attribute>,
+    pub attributes: Attributes,
 }
 
 /// TableDump message version 2 enum
@@ -135,7 +135,7 @@ pub struct RibGenericEntries {
 pub struct RibEntry {
     pub peer_index: u16,
     pub originated_time: u32,
-    pub attributes: Vec<Attribute>,
+    pub attributes: Attributes,
 }
 
 /// peer index table.

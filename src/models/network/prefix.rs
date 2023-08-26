@@ -1,14 +1,34 @@
 use crate::models::BgpModelsError;
 use ipnet::IpNet;
 use serde::{Serialize, Serializer};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
+use std::ops::Deref;
 use std::str::FromStr;
 
 /// A representation of a IP prefix with optional path ID.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
     pub path_id: u32,
+}
+
+impl Deref for NetworkPrefix {
+    type Target = IpNet;
+
+    fn deref(&self) -> &Self::Target {
+        &self.prefix
+    }
+}
+
+// Attempt to reduce the size of the debug output
+impl Debug for NetworkPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.path_id == 0 {
+            write!(f, "{}", self.prefix)
+        } else {
+            write!(f, "{}#{}", self.prefix, self.path_id)
+        }
+    }
 }
 
 impl Serialize for NetworkPrefix {

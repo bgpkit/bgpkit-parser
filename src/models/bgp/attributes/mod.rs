@@ -5,8 +5,12 @@ mod nlri;
 mod origin;
 
 use crate::models::network::*;
-use serde::Serialize;
+use num_traits::ToPrimitive;
+use serde::{Serialize, Serializer};
+use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
+use std::ops::Deref;
+use std::vec::IntoIter;
 
 use crate::models::*;
 
@@ -92,6 +96,10 @@ pub enum AttrType {
     ATTR_SET = 128,
     /// <https://datatracker.ietf.org/doc/html/rfc2042>
     DEVELOPMENT = 255,
+
+    // TODO: How to handle deprecated and unassigned cases?
+    UNASSIGNED = 41,
+    DEPRECATED = 30,
 }
 
 pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
@@ -109,12 +117,125 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
     }
 }
 
+/// Convenience wrapper for a list of attributes
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Attributes {
+    // Black box type to allow for later changes/optimizations
+    inner: Vec<Attribute>,
+}
+
+impl Attributes {
+    pub fn has_attr(&self, ty: AttrType) -> bool {
+        self.inner.iter().any(|x| x.value.attr_type() == ty)
+    }
+
+    // These implementations are horribly inefficient, but they were super easy to write and use
+    pub fn as_path(&self) -> Option<&AsPath> {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::AsPath(x) | AttributeValue::As4Path(x) => Some(x),
+                _ => None,
+            })
+            .next()
+    }
+
+    pub fn get_reachable(&self) -> Option<&Nlri> {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::MpReachNlri(x) => Some(x),
+                _ => None,
+            })
+            .next()
+    }
+
+    pub fn get_unreachable(&self) -> Option<&Nlri> {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::MpUnreachNlri(x) => Some(x),
+                _ => None,
+            })
+            .next()
+    }
+}
+
+impl FromIterator<Attribute> for Attributes {
+    fn from_iter<T: IntoIterator<Item = Attribute>>(iter: T) -> Self {
+        Attributes {
+            inner: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl From<Vec<Attribute>> for Attributes {
+    fn from(value: Vec<Attribute>) -> Self {
+        Attributes { inner: value }
+    }
+}
+
+impl Extend<Attribute> for Attributes {
+    fn extend<T: IntoIterator<Item = Attribute>>(&mut self, iter: T) {
+        self.inner.extend(iter)
+    }
+}
+
+impl FromIterator<AttributeValue> for Attributes {
+    fn from_iter<T: IntoIterator<Item = AttributeValue>>(iter: T) -> Self {
+        Attributes {
+            inner: iter
+                .into_iter()
+                .map(|value| Attribute {
+                    attr_type: value.attr_type().to_u8().expect("TODO"),
+                    value,
+                    flag: 0,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl IntoIterator for Attributes {
+    type Item = AttributeValue;
+    type IntoIter = Map<IntoIter<Attribute>, fn(Attribute) -> AttributeValue>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter().map(|x| x.value)
+    }
+}
+
+impl Deref for Attributes {
+    type Target = Vec<Attribute>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl Serialize for Attributes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
+
 /// BGP Attribute struct with attribute value and flag
 #[derive(Debug, PartialEq, Clone, Serialize, Eq)]
 pub struct Attribute {
     pub attr_type: u8,
     pub value: AttributeValue,
     pub flag: u8,
+}
+
+impl Deref for Attribute {
+    type Target = AttributeValue;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
 /// The `AttributeValue` enum represents different kinds of Attribute values.
@@ -139,6 +260,32 @@ pub enum AttributeValue {
     Development(Vec<u8>),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
+}
+
+impl AttributeValue {
+    pub fn attr_type(&self) -> AttrType {
+        match self {
+            AttributeValue::Origin(_) => AttrType::ORIGIN,
+            AttributeValue::AsPath(_) => AttrType::AS_PATH,
+            AttributeValue::As4Path(_) => AttrType::AS4_PATH,
+            AttributeValue::NextHop(_) => AttrType::NEXT_HOP,
+            AttributeValue::MultiExitDiscriminator(_) => AttrType::MULTI_EXIT_DISCRIMINATOR,
+            AttributeValue::LocalPreference(_) => AttrType::LOCAL_PREFERENCE,
+            AttributeValue::OnlyToCustomer(_) => AttrType::ONLY_TO_CUSTOMER,
+            AttributeValue::AtomicAggregate(_) => AttrType::ATOMIC_AGGREGATE,
+            AttributeValue::Aggregator(_, _) => AttrType::AGGREGATOR,
+            AttributeValue::Communities(_) => AttrType::COMMUNITIES,
+            AttributeValue::ExtendedCommunities(_) => AttrType::EXTENDED_COMMUNITIES,
+            AttributeValue::LargeCommunities(_) => AttrType::LARGE_COMMUNITIES,
+            AttributeValue::OriginatorId(_) => AttrType::ORIGINATOR_ID,
+            AttributeValue::Clusters(_) => AttrType::CLUSTER_LIST,
+            AttributeValue::MpReachNlri(_) => AttrType::MP_REACHABLE_NLRI,
+            AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
+            AttributeValue::Development(_) => AttrType::DEVELOPMENT,
+            AttributeValue::Deprecated(_) => todo!("Maybe this could be handled by extending "),
+            AttributeValue::Unknown(_) => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Eq)]

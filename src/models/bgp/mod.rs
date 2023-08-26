@@ -96,7 +96,7 @@ pub struct Capability {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BgpUpdateMessage {
     pub withdrawn_prefixes: Vec<NetworkPrefix>,
-    pub attributes: Vec<Attribute>,
+    pub attributes: Attributes,
     pub announced_prefixes: Vec<NetworkPrefix>,
 }
 

@@ -29,7 +29,7 @@ macro_rules! get_attr_value {
 
 #[allow(clippy::type_complexity)]
 fn get_relevant_attributes(
-    attributes: Vec<Attribute>,
+    attributes: Attributes,
 ) -> (
     Option<AsPath>,
     Option<AsPath>,
@@ -63,7 +63,7 @@ fn get_relevant_attributes(
     let mut communities_vec: Vec<MetaCommunity> = vec![];
 
     for attr in attributes {
-        match attr.value {
+        match attr {
             AttributeValue::Origin(v) => origin = Some(v),
             AttributeValue::AsPath(v) => as_path = Some(v),
             AttributeValue::As4Path(v) => as4_path = Some(v),

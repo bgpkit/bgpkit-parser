@@ -58,7 +58,7 @@ impl AttributeParser {
         afi: Option<Afi>,
         safi: Option<Safi>,
         prefixes: Option<&[NetworkPrefix]>,
-    ) -> Result<Vec<Attribute>, ParserError> {
+    ) -> Result<Attributes, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
         while data.remaining() >= 3 {
@@ -202,6 +202,6 @@ impl AttributeParser {
             };
         }
 
-        Ok(attributes)
+        Ok(Attributes::from(attributes))
     }
 }
