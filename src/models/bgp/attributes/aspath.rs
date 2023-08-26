@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 
 /// Enum of AS path segment.
-#[derive(Debug, PartialEq, Clone, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum AsPathSegment {
     AsSequence(Vec<Asn>),
     AsSet(Vec<Asn>),
@@ -22,7 +22,9 @@ impl AsPathSegment {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Eq, Default)]
+// TODO(jmeggitt): Hash may need to be implemented manually for more consistent hashing of sets.
+// TODO(jmeggitt): Implement iterators for AsPath (both over elements and all sequence variants)
+#[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
 pub struct AsPath {
     pub segments: Vec<AsPathSegment>,
 }

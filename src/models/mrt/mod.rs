@@ -127,7 +127,7 @@ pub enum MrtMessage {
 ///     48   OSPFv3
 ///     49   OSPFv3_ET
 /// ```
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 #[allow(non_camel_case_types)]
 #[repr(u16)]
 pub enum EntryType {

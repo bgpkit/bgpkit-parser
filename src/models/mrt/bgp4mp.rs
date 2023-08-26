@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::net::IpAddr;
 
 /// BGP states enum.
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum BgpState {
     Idle = 1,
     Connect = 2,
@@ -26,7 +26,7 @@ pub enum Bgp4Mp {
 }
 
 /// BGP4MP message subtypes.
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum Bgp4MpType {
     Bgp4MpStateChange = 0,
     Bgp4MpMessage = 1,

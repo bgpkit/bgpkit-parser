@@ -5,13 +5,13 @@ mod nlri;
 mod origin;
 
 use crate::models::network::*;
+use bitflags::bitflags;
 use serde::{Serialize, Serializer};
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::slice::Iter;
 use std::vec::IntoIter;
-use bitflags::bitflags;
 
 use crate::models::*;
 
@@ -43,7 +43,7 @@ bitflags! {
     /// The fourth high-order bit (bit 3) of the Attribute Flags octet
     /// is the Extended Length bit.  It defines whether the Attribute
     /// Length is one octet (if set to 0) or two octets (if set to 1).
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Hash)]
     pub struct AttrFlags: u8 {
         const OPTIONAL   = 0b10000000;
         const TRANSITIVE = 0b01000000;

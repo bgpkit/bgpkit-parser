@@ -10,7 +10,7 @@ use std::str::FromStr;
 ///
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,

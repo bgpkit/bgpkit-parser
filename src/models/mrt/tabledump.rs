@@ -28,7 +28,7 @@ pub enum TableDumpV2Message {
 /// TableDump version 2 subtypes.
 ///
 /// <https://www.iana.org/assignments/mrt/mrt.xhtml#subtype-codes>
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum TableDumpV2Type {
     PeerIndexTable = 1,
     RibIpv4Unicast = 2,
@@ -159,8 +159,9 @@ pub struct PeerIndexTable {
 }
 
 /// Peer struct.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct Peer {
+    // TODO: Is there an existing enum which could be used in place of peer_type?
     pub peer_type: u8,
     pub peer_bgp_id: Ipv4Addr,
     pub peer_address: IpAddr,

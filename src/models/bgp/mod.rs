@@ -20,7 +20,7 @@ use error::BgpError;
 use serde::Serialize;
 use std::net::Ipv4Addr;
 
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq)]
+#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Hash)]
 pub enum BgpMessageType {
     OPEN = 1,
     UPDATE = 2,
@@ -109,4 +109,4 @@ pub struct BgpNotificationMessage {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BgpKeepAliveMessage {}
+pub struct BgpKeepAliveMessage;
