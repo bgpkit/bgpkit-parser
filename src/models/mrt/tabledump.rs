@@ -1,12 +1,12 @@
 //! MRT table dump version 1 and 2 structs
 use crate::models::*;
 use bitflags::bitflags;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 
 /// TableDump message version 1
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TableDumpMessage {
     pub view_number: u16,
     pub sequence_number: u16,
@@ -19,7 +19,8 @@ pub struct TableDumpMessage {
 }
 
 /// TableDump message version 2 enum
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TableDumpV2Message {
     PeerIndexTable(PeerIndexTable),
     RibAfi(RibAfiEntries),
@@ -39,7 +40,8 @@ impl TableDumpV2Message {
 /// TableDump version 2 subtypes.
 ///
 /// <https://www.iana.org/assignments/mrt/mrt.xhtml#subtype-codes>
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TableDumpV2Type {
     PeerIndexTable = 1,
     RibIpv4Unicast = 2,
@@ -83,7 +85,8 @@ pub enum TableDumpV2Type {
 ///        |         Entry Count           |  RIB Entries (variable)
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RibAfiEntries {
     pub rib_type: TableDumpV2Type,
     pub sequence_number: u32,
@@ -112,7 +115,8 @@ pub struct RibAfiEntries {
 ///        |         Entry Count           |  RIB Entries (variable)
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RibGenericEntries {
     pub sequence_number: u32,
     pub afi: Afi,
@@ -142,7 +146,8 @@ pub struct RibGenericEntries {
 ///        |                    BGP Attributes... (variable)
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RibEntry {
     pub peer_index: u16,
     pub originated_time: u32,
@@ -160,7 +165,8 @@ pub struct RibEntry {
 ///    itself and includes full MRT record headers.  The RIB entry MRT
 ///    records MUST immediately follow the PEER_INDEX_TABLE MRT record.
 /// ```
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerIndexTable {
     pub collector_bgp_id: Ipv4Addr,
     pub view_name_length: u16,
@@ -170,7 +176,8 @@ pub struct PeerIndexTable {
 }
 
 bitflags! {
-    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct PeerType: u8 {
         const AS_SIZE_32BIT = 0x2;
         const ADDRESS_FAMILY_IPV6 = 0x1;
@@ -178,7 +185,8 @@ bitflags! {
 }
 
 /// Peer struct.
-#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Peer {
     pub peer_type: PeerType,
     pub peer_bgp_id: Ipv4Addr,

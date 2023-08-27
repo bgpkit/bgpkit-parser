@@ -6,7 +6,6 @@ mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
-use serde::{Serialize, Serializer};
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
 use std::ops::Deref;
@@ -43,7 +42,8 @@ bitflags! {
     /// The fourth high-order bit (bit 3) of the Attribute Flags octet
     /// is the Extended Length bit.  It defines whether the Attribute
     /// Length is one octet (if set to 0) or two octets (if set to 1).
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Hash)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct AttrFlags: u8 {
         const OPTIONAL   = 0b10000000;
         const TRANSITIVE = 0b01000000;
@@ -58,7 +58,8 @@ bitflags! {
 /// To see the full list, check out IANA at:
 /// <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-2>
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttrType {
     RESERVED,
     ORIGIN,
@@ -301,17 +302,35 @@ impl Deref for Attributes {
     }
 }
 
-impl Serialize for Attributes {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner.serialize(serializer)
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for Attributes {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            self.inner.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Attributes {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Attributes {
+                inner: <Vec<Attribute>>::deserialize(deserializer)?,
+            })
+        }
     }
 }
 
 /// BGP Attribute struct with attribute value and flag
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Attribute {
     pub attr_type: AttrType,
     pub value: AttributeValue,
@@ -327,7 +346,8 @@ impl Deref for Attribute {
 }
 
 /// The `AttributeValue` enum represents different kinds of Attribute values.
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttributeValue {
     Origin(Origin),
     AsPath(AsPath),
@@ -375,7 +395,8 @@ impl AttributeValue {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttrRaw {
     pub attr_type: AttrType,
     pub bytes: Vec<u8>,

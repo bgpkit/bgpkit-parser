@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 /// AS number length: 16 or 32 bits.
-#[derive(Debug, Clone, Serialize, Copy, Deserialize, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AsnLength {
     Bits16,
     Bits32,
@@ -11,6 +11,8 @@ pub enum AsnLength {
 
 /// ASN -- Autonomous System Number
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub struct Asn {
     pub asn: u32,
     pub len: AsnLength,
@@ -138,15 +140,6 @@ impl From<Asn> for i32 {
 impl From<Asn> for u32 {
     fn from(value: Asn) -> Self {
         value.asn
-    }
-}
-
-impl Serialize for Asn {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u32(self.asn)
     }
 }
 

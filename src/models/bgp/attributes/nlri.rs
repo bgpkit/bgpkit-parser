@@ -1,6 +1,5 @@
 use crate::models::*;
 use ipnet::IpNet;
-use serde::Serialize;
 use std::fmt::Debug;
 use std::iter::Map;
 use std::net::IpAddr;
@@ -9,7 +8,8 @@ use std::slice::Iter;
 use std::vec::IntoIter;
 
 /// Network Layer Reachability Information
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Nlri {
     pub afi: Afi,
     pub safi: Safi,
@@ -70,7 +70,8 @@ impl<'a> IntoIterator for &'a Nlri {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpReachableNlri {
     afi: Afi,
     safi: Safi,
@@ -95,6 +96,7 @@ impl MpReachableNlri {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpUnreachableNlri {
     afi: Afi,
     safi: Safi,

@@ -1,10 +1,10 @@
 //! MRT BGP4MP structs
 use crate::models::*;
-use serde::Serialize;
 use std::net::IpAddr;
 
 /// BGP states enum.
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BgpState {
     Idle = 1,
     Connect = 2,
@@ -15,7 +15,8 @@ pub enum BgpState {
 }
 
 /// BGP4MP message types.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Bgp4Mp {
     StateChange(Bgp4MpStateChange),
     Message(Bgp4MpMessage),
@@ -31,7 +32,8 @@ impl Bgp4Mp {
 }
 
 /// BGP4MP message subtypes.
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Bgp4MpType {
     StateChange = 0,
     Message = 1,
@@ -46,7 +48,8 @@ pub enum Bgp4MpType {
 }
 
 /// BGP4MP state change message.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Bgp4MpStateChange {
     pub msg_type: Bgp4MpType,
     pub peer_asn: Asn,
@@ -60,7 +63,8 @@ pub struct Bgp4MpStateChange {
 }
 
 /// BGP4MP message.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Bgp4MpMessage {
     pub msg_type: Bgp4MpType,
     pub peer_asn: Asn,
