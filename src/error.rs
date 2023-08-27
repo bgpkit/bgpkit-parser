@@ -37,20 +37,19 @@ impl Error for ParserErrorWithBytes {}
 
 /// implement Display trait for Error which satistifies the std::error::Error
 /// trait's requirement (must implement Display and Debug traits, Debug already derived)
-impl fmt::Display for ParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let message = match self {
-            ParserError::IoError(e) => e.to_string(),
-            ParserError::EofError(e) => e.to_string(),
-            ParserError::ParseError(s) => s.to_owned(),
-            ParserError::TruncatedMsg(s) => s.to_owned(),
-            ParserError::Unsupported(s) => s.to_owned(),
-            ParserError::EofExpected => "reach end of file".to_string(),
-            ParserError::OneIoError(e) => e.to_string(),
-            ParserError::FilterError(e) => e.to_owned(),
-            ParserError::IoNotEnoughBytes() => "Not enough bytes to read".to_string(),
-        };
-        write!(f, "Error: {}", message)
+impl Display for ParserError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ParserError::IoError(e) => write!(f, "Error: {}", e),
+            ParserError::EofError(e) => write!(f, "Error: {}", e),
+            ParserError::ParseError(s) => write!(f, "Error: {}", s),
+            ParserError::TruncatedMsg(s) => write!(f, "Error: {}", s),
+            ParserError::Unsupported(s) => write!(f, "Error: {}", s),
+            ParserError::EofExpected => write!(f, "Error: reach end of file"),
+            ParserError::OneIoError(e) => write!(f, "Error: {}", e),
+            ParserError::FilterError(e) => write!(f, "Error: {}", e),
+            ParserError::IoNotEnoughBytes() => write!(f, "Error: Not enough bytes to read"),
+        }
     }
 }
 

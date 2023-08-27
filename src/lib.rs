@@ -131,6 +131,7 @@ we need to subscribe to a specific data stream. In this example, we subscribe to
 from on collector (`rrc21`). We can then loop and read messages from the websocket.
 
 ```no_run
+# #[cfg(feature = "rislive")]
 use bgpkit_parser::parse_ris_live_message;
 use serde_json::json;
 use tungstenite::{connect, Message};
@@ -153,6 +154,7 @@ fn main() {
 
     loop {
         let msg = socket.read_message().expect("Error reading message").to_string();
+#       #[cfg(feature = "rislive")]
         if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);

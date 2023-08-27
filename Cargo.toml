@@ -48,7 +48,6 @@ clap = {version= "4.0", features=["derive"], optional=true}
 [features]
 default = ["parser"]
 models = [
-    "serde",
     "enum-primitive-derive",
     "ipnet",
     "itertools",
@@ -58,17 +57,27 @@ parser = [
     "bytes",
     "chrono",
     "env_logger",
-    "hex",
     "log",
     "models",
     "oneio",
     "regex",
-    "serde_json",
 ]
 cli = [
     "clap",
     "parser",
-    "env_logger"
+    "env_logger",
+    "serde",
+    "serde_json"
+]
+rislive = [
+    "parser",
+    "serde",
+    "serde_json",
+    "hex",
+]
+serde = [
+    "dep:serde",
+    "ipnet/serde",
 ]
 
 [[bench]]
@@ -92,3 +101,18 @@ bzip2 = "0.4"
 flate2 = "1.0.25"
 md5 = "0.7.0"
 which = "4.4.0"
+serde_json = "1.0"
+hex = "0.4.3"
+
+# This list only includes examples which require additional features to run. These are more in the examples directory.
+[[example]]
+name = "real-time-ris-live-websocket"
+required-features = ["rislive"]
+
+[[example]]
+name = "peer_index_table"
+required-features = ["serde"]
+
+[[example]]
+name = "deprecated_attributes"
+required-features = ["serde"]

@@ -4,7 +4,6 @@ pub mod bgp4mp;
 pub mod tabledump;
 
 pub use bgp4mp::*;
-use serde::Serialize;
 use std::io;
 use std::io::Write;
 pub use tabledump::*;
@@ -24,7 +23,8 @@ pub use tabledump::*;
 ///
 /// See [CommonHeader] for the content in header, and [MrtMessage] for the
 /// message format.
-#[derive(Debug, Serialize, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MrtRecord {
     pub common_header: CommonHeader,
     pub message: MrtMessage,
@@ -70,7 +70,8 @@ pub struct MrtRecord {
 ///   `BGP4MP_ET`
 ///
 /// [header-link]: https://datatracker.ietf.org/doc/html/rfc6396#section-2
-#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommonHeader {
     pub timestamp: u32,
     pub microsecond_timestamp: Option<u32>,
@@ -98,7 +99,8 @@ impl CommonHeader {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),
     TableDumpV2Message(TableDumpV2Message),
@@ -127,7 +129,8 @@ pub enum MrtMessage {
 ///     48   OSPFv3
 ///     49   OSPFv3_ET
 /// ```
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(non_camel_case_types)]
 #[repr(u16)]
 pub enum EntryType {

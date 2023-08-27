@@ -1,7 +1,7 @@
 use crate::models::*;
-use serde::Serialize;
 
-#[derive(Debug, PartialEq, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Nlri {
     pub afi: Afi,
     pub safi: Safi,
@@ -9,7 +9,8 @@ pub struct Nlri {
     pub prefixes: Vec<NetworkPrefix>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpReachableNlri {
     afi: Afi,
     safi: Safi,
@@ -34,6 +35,7 @@ impl MpReachableNlri {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpUnreachableNlri {
     afi: Afi,
     safi: Safi,

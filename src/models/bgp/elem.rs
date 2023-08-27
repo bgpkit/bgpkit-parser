@@ -1,6 +1,5 @@
 use crate::models::*;
 use itertools::Itertools;
-use serde::{Serialize, Serializer};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
@@ -11,21 +10,11 @@ use std::str::FromStr;
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,
-}
-
-impl Serialize for ElemType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(match self {
-            ElemType::ANNOUNCE => "announce",
-            ElemType::WITHDRAW => "withdraw",
-        })
-    }
 }
 
 impl ElemType {
@@ -43,10 +32,11 @@ impl ElemType {
 ///
 /// Note: it consumes more memory to construct BGP elements due to duplicate information
 /// shared between multiple elements of one MRT record.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpElem {
     pub timestamp: f64,
-    #[serde(rename = "type")]
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
     pub elem_type: ElemType,
     pub peer_ip: IpAddr,
     pub peer_asn: Asn,
@@ -86,7 +76,8 @@ impl Ord for BgpElem {
 }
 
 /// Reference version of the [BgpElem] struct.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BgpElemRef<'a> {
     pub timestamp: &'a f64,
     pub elem_type: &'a ElemType,
@@ -155,7 +146,8 @@ impl Display for BgpElem {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
         };
-        let format = format!(
+        write!(
+            f,
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             t,
             &self.timestamp,
@@ -171,8 +163,7 @@ impl Display for BgpElem {
             option_to_string!(&self.atomic),
             option_to_string!(&self.aggr_asn),
             option_to_string!(&self.aggr_ip),
-        );
-        write!(f, "{}", format)
+        )
     }
 }
 
@@ -214,6 +205,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
+    #[cfg(feature = "serde")]
     fn test_default() {
         let elem = BgpElem {
             timestamp: 0.0,

@@ -1,11 +1,11 @@
-use serde::Serialize;
 use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// enum that represents the type of the next hop address.
 ///
 /// [NextHopAddress] is used when parsing for next hops in [Nlri](crate::models::Nlri).
-#[derive(Debug, PartialEq, Copy, Clone, Serialize, Eq)]
+#[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NextHopAddress {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),
@@ -14,20 +14,10 @@ pub enum NextHopAddress {
 
 impl Display for NextHopAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                NextHopAddress::Ipv4(v) => {
-                    v.to_string()
-                }
-                NextHopAddress::Ipv6(v) => {
-                    v.to_string()
-                }
-                NextHopAddress::Ipv6LinkLocal(v1, _v2) => {
-                    v1.to_string()
-                }
-            }
-        )
+        match self {
+            NextHopAddress::Ipv4(v) => write!(f, "{}", v),
+            NextHopAddress::Ipv6(v) => write!(f, "{}", v),
+            NextHopAddress::Ipv6LinkLocal(v, _) => write!(f, "{}", v),
+        }
     }
 }
