@@ -2,9 +2,11 @@ use crate::models::*;
 use itertools::Itertools;
 use serde::{Serialize, Serializer};
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
+use std::mem::discriminant;
 
 /// Enum of AS path segment.
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum AsPathSegment {
     AsSequence(Vec<Asn>),
     AsSet(Vec<Asn>),
@@ -22,7 +24,79 @@ impl AsPathSegment {
     }
 }
 
-// TODO(jmeggitt): Hash may need to be implemented manually for more consistent hashing of sets.
+impl Hash for AsPathSegment {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash the discriminant since we do not differentiate between confederation segments
+        discriminant(self).hash(state);
+
+        let set = match self {
+            AsPathSegment::AsSequence(x) | AsPathSegment::ConfedSequence(x) => {
+                return x.hash(state)
+            }
+            AsPathSegment::AsSet(x) | AsPathSegment::ConfedSet(x) => x,
+        };
+
+        // FIXME: Once is_sorted is stabilized, call it first to determine if sorting is required
+        if set.len() <= 32 {
+            let mut buffer = [Asn::new_32bit(0); 32];
+            set.iter()
+                .zip(&mut buffer)
+                .for_each(|(asn, buffer)| *buffer = *asn);
+
+            let slice = &mut buffer[..set.len()];
+            slice.sort_unstable();
+            Asn::hash_slice(slice, state);
+            return;
+        }
+
+        // Fallback to allocating a Vec on the heap to sort
+        set.iter().sorted().for_each(|x| x.hash(state));
+    }
+}
+
+impl PartialEq for AsPathSegment {
+    fn eq(&self, other: &Self) -> bool {
+        let (x, y) = match (self, other) {
+            (AsPathSegment::AsSequence(x), AsPathSegment::AsSequence(y))
+            | (AsPathSegment::ConfedSequence(x), AsPathSegment::ConfedSequence(y)) => {
+                return x == y
+            }
+            (AsPathSegment::AsSet(x), AsPathSegment::AsSet(y))
+            | (AsPathSegment::ConfedSet(x), AsPathSegment::ConfedSet(y)) => (x, y),
+            _ => return false,
+        };
+
+        // Attempt to exit early
+        if x.len() != y.len() {
+            return false;
+        } else if x == y {
+            return true;
+        }
+
+        if x.len() <= 32 {
+            let mut x_buffer = [Asn::new_32bit(0); 32];
+            let mut y_buffer = [Asn::new_32bit(0); 32];
+            x.iter()
+                .zip(&mut x_buffer)
+                .for_each(|(asn, buffer)| *buffer = *asn);
+            y.iter()
+                .zip(&mut y_buffer)
+                .for_each(|(asn, buffer)| *buffer = *asn);
+
+            x_buffer[..x.len()].sort_unstable();
+            y_buffer[..y.len()].sort_unstable();
+            return x_buffer[..x.len()] == y_buffer[..y.len()];
+        }
+
+        x.iter()
+            .sorted()
+            .zip(y.iter().sorted())
+            .all(|(a, b)| a == b)
+    }
+}
+
+impl Eq for AsPathSegment {}
+
 // TODO(jmeggitt): Implement iterators for AsPath (both over elements and all sequence variants)
 #[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
 pub struct AsPath {

@@ -99,7 +99,6 @@ pub enum ParamValue {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Capability {
     pub code: u8,
-    // TODO: Is length field a duplicate of the Vec's length?
     pub len: u8,
     pub value: Vec<u8>,
     pub capability_type: Option<BgpCapabilityType>,
@@ -114,7 +113,6 @@ pub struct BgpUpdateMessage {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BgpNotificationMessage {
-    // TODO: Do error code and error subcode have existing enums?
     pub error_code: u8,
     pub error_subcode: u8,
     pub error_type: Option<BgpError>,
