@@ -1,5 +1,6 @@
 //! MRT table dump version 1 and 2 structs
 use crate::models::*;
+use bitflags::bitflags;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -21,16 +22,16 @@ pub struct TableDumpMessage {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum TableDumpV2Message {
     PeerIndexTable(PeerIndexTable),
-    RibAfiEntries(RibAfiEntries),
-    RibGenericEntries(RibGenericEntries),
+    RibAfi(RibAfiEntries),
+    RibGeneric(RibGenericEntries),
 }
 
 impl TableDumpV2Message {
     pub const fn dump_type(&self) -> TableDumpV2Type {
         match self {
             TableDumpV2Message::PeerIndexTable(_) => TableDumpV2Type::PeerIndexTable,
-            TableDumpV2Message::RibAfiEntries(x) => x.rib_type,
-            TableDumpV2Message::RibGenericEntries(_) => TableDumpV2Type::RibGeneric,
+            TableDumpV2Message::RibAfi(x) => x.rib_type,
+            TableDumpV2Message::RibGeneric(_) => TableDumpV2Type::RibGeneric,
         }
     }
 }
@@ -168,12 +169,40 @@ pub struct PeerIndexTable {
     pub peers_map: HashMap<u32, Peer>,
 }
 
+bitflags! {
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
+    pub struct PeerType: u8 {
+        const AS_SIZE_32BIT = 0x2;
+        const ADDRESS_FAMILY_IPV6 = 0x1;
+    }
+}
+
 /// Peer struct.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct Peer {
-    // TODO: Is there an existing enum which could be used in place of peer_type?
-    pub peer_type: u8,
+    pub peer_type: PeerType,
     pub peer_bgp_id: Ipv4Addr,
     pub peer_address: IpAddr,
     pub peer_asn: Asn,
+}
+
+impl Peer {
+    pub fn new(peer_bgp_id: Ipv4Addr, peer_address: IpAddr, peer_asn: Asn) -> Self {
+        let mut peer_type = PeerType::empty();
+
+        if peer_asn.required_len() == AsnLength::Bits32 {
+            peer_type.insert(PeerType::AS_SIZE_32BIT);
+        }
+
+        if peer_address.is_ipv6() {
+            peer_type.insert(PeerType::ADDRESS_FAMILY_IPV6);
+        }
+
+        Peer {
+            peer_type,
+            peer_bgp_id,
+            peer_address,
+            peer_asn,
+        }
+    }
 }

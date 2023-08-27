@@ -19,38 +19,31 @@ pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> 
             )))
         }
     };
-    let msg: Bgp4Mp = match bgp4mp_type {
-        Bgp4MpType::Bgp4MpStateChange => Bgp4Mp::Bgp4MpStateChange(parse_bgp4mp_state_change(
-            input,
-            AsnLength::Bits16,
-            &bgp4mp_type,
-        )?),
-        Bgp4MpType::Bgp4MpStateChangeAs4 => Bgp4Mp::Bgp4MpStateChangeAs4(
-            parse_bgp4mp_state_change(input, AsnLength::Bits32, &bgp4mp_type)?,
-        ),
-        Bgp4MpType::Bgp4MpMessage | Bgp4MpType::Bgp4MpMessageLocal => Bgp4Mp::Bgp4MpMessage(
-            parse_bgp4mp_message(input, false, AsnLength::Bits16, &bgp4mp_type)?,
-        ),
-        Bgp4MpType::Bgp4MpMessageAs4 | Bgp4MpType::Bgp4MpMessageAs4Local => Bgp4Mp::Bgp4MpMessage(
-            parse_bgp4mp_message(input, false, AsnLength::Bits32, &bgp4mp_type)?,
-        ),
-        Bgp4MpType::Bgp4MpMessageAddpath | Bgp4MpType::Bgp4MpMessageLocalAddpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(
+    let msg: Bgp4Mp =
+        match bgp4mp_type {
+            Bgp4MpType::StateChange => Bgp4Mp::StateChange(parse_bgp4mp_state_change(
                 input,
-                true,
                 AsnLength::Bits16,
                 &bgp4mp_type,
-            )?)
-        }
-        Bgp4MpType::Bgp4MpMessageAs4Addpath | Bgp4MpType::Bgp4MpMessageLocalAs4Addpath => {
-            Bgp4Mp::Bgp4MpMessage(parse_bgp4mp_message(
+            )?),
+            Bgp4MpType::StateChangeAs4 => Bgp4Mp::StateChange(parse_bgp4mp_state_change(
                 input,
-                true,
                 AsnLength::Bits32,
                 &bgp4mp_type,
-            )?)
-        }
-    };
+            )?),
+            Bgp4MpType::Message | Bgp4MpType::MessageLocal => Bgp4Mp::Message(
+                parse_bgp4mp_message(input, false, AsnLength::Bits16, &bgp4mp_type)?,
+            ),
+            Bgp4MpType::MessageAs4 | Bgp4MpType::MessageAs4Local => Bgp4Mp::Message(
+                parse_bgp4mp_message(input, false, AsnLength::Bits32, &bgp4mp_type)?,
+            ),
+            Bgp4MpType::MessageAddpath | Bgp4MpType::MessageLocalAddpath => Bgp4Mp::Message(
+                parse_bgp4mp_message(input, true, AsnLength::Bits16, &bgp4mp_type)?,
+            ),
+            Bgp4MpType::MessageAs4Addpath | Bgp4MpType::MessageLocalAs4Addpath => Bgp4Mp::Message(
+                parse_bgp4mp_message(input, true, AsnLength::Bits32, &bgp4mp_type)?,
+            ),
+        };
 
     Ok(msg)
 }

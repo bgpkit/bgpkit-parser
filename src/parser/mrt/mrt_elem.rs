@@ -154,7 +154,7 @@ impl Elementor {
             BgpMessage::Update(msg) => {
                 Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
             }
-            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive(_) => {
+            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => {
                 vec![]
             }
         }
@@ -349,7 +349,7 @@ impl Elementor {
                     TableDumpV2Message::PeerIndexTable(p) => {
                         self.peer_table = Some(p);
                     }
-                    TableDumpV2Message::RibAfiEntries(t) => {
+                    TableDumpV2Message::RibAfi(t) => {
                         let prefix = t.prefix;
                         for e in t.rib_entries {
                             let pid = e.peer_index;
@@ -434,7 +434,7 @@ impl Elementor {
                             });
                         }
                     }
-                    TableDumpV2Message::RibGenericEntries(_t) => {
+                    TableDumpV2Message::RibGeneric(_t) => {
                         warn!(
                             "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
                         );
@@ -442,12 +442,8 @@ impl Elementor {
                 }
             }
             MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4Mp::Bgp4MpStateChange(_v) | Bgp4Mp::Bgp4MpStateChangeAs4(_v) => {}
-
-                Bgp4Mp::Bgp4MpMessage(v)
-                | Bgp4Mp::Bgp4MpMessageLocal(v)
-                | Bgp4Mp::Bgp4MpMessageAs4(v)
-                | Bgp4Mp::Bgp4MpMessageAs4Local(v) => {
+                Bgp4Mp::StateChange(_) => {}
+                Bgp4Mp::Message(v) => {
                     elems.extend(Elementor::bgp_to_elems(
                         v.bgp_message,
                         timestamp,

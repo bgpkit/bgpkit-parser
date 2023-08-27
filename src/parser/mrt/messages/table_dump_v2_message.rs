@@ -46,7 +46,7 @@ pub fn parse_table_dump_v2_message(
         | TableDumpV2Type::RibIpv4MulticastAddPath
         | TableDumpV2Type::RibIpv6UnicastAddPath
         | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            TableDumpV2Message::RibAfiEntries(parse_rib_afi_entries(&mut input, v2_type)?)
+            TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
         }
         TableDumpV2Type::RibGeneric
         | TableDumpV2Type::RibGenericAddPath
@@ -73,14 +73,14 @@ pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserE
     let peer_count = data.read_u16()?;
     let mut peers = vec![];
     for _index in 0..peer_count {
-        let peer_type = data.read_u8()?;
-        let afi = match peer_type & 1 {
-            1 => Afi::Ipv6,
-            _ => Afi::Ipv4,
+        let peer_type = PeerType::from_bits_retain(data.read_u8()?);
+        let afi = match peer_type.contains(PeerType::ADDRESS_FAMILY_IPV6) {
+            true => Afi::Ipv6,
+            false => Afi::Ipv4,
         };
-        let asn_len = match peer_type & 2 {
-            2 => AsnLength::Bits32,
-            _ => AsnLength::Bits16,
+        let asn_len = match peer_type.contains(PeerType::AS_SIZE_32BIT) {
+            true => AsnLength::Bits32,
+            false => AsnLength::Bits16,
         };
 
         let peer_bgp_id = Ipv4Addr::from(data.read_u32()?);

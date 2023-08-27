@@ -14,26 +14,18 @@ pub enum BgpState {
     Established = 6,
 }
 
-// TODO: Could the As4 variants be removed? That information can be gained through Bgp4MpType.
 /// BGP4MP message types.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Bgp4Mp {
-    Bgp4MpStateChange(Bgp4MpStateChange),
-    Bgp4MpStateChangeAs4(Bgp4MpStateChange),
-    Bgp4MpMessage(Bgp4MpMessage),
-    Bgp4MpMessageLocal(Bgp4MpMessage),
-    Bgp4MpMessageAs4(Bgp4MpMessage),
-    Bgp4MpMessageAs4Local(Bgp4MpMessage),
+    StateChange(Bgp4MpStateChange),
+    Message(Bgp4MpMessage),
 }
 
 impl Bgp4Mp {
     pub const fn msg_type(&self) -> Bgp4MpType {
         match self {
-            Bgp4Mp::Bgp4MpStateChange(x) | Bgp4Mp::Bgp4MpStateChangeAs4(x) => x.msg_type,
-            Bgp4Mp::Bgp4MpMessage(x)
-            | Bgp4Mp::Bgp4MpMessageLocal(x)
-            | Bgp4Mp::Bgp4MpMessageAs4(x)
-            | Bgp4Mp::Bgp4MpMessageAs4Local(x) => x.msg_type,
+            Bgp4Mp::StateChange(x) => x.msg_type,
+            Bgp4Mp::Message(x) => x.msg_type,
         }
     }
 }
@@ -41,16 +33,16 @@ impl Bgp4Mp {
 /// BGP4MP message subtypes.
 #[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum Bgp4MpType {
-    Bgp4MpStateChange = 0,
-    Bgp4MpMessage = 1,
-    Bgp4MpMessageAs4 = 4,
-    Bgp4MpStateChangeAs4 = 5,
-    Bgp4MpMessageLocal = 6,
-    Bgp4MpMessageAs4Local = 7,
-    Bgp4MpMessageAddpath = 8,
-    Bgp4MpMessageAs4Addpath = 9,
-    Bgp4MpMessageLocalAddpath = 10,
-    Bgp4MpMessageLocalAs4Addpath = 11,
+    StateChange = 0,
+    Message = 1,
+    MessageAs4 = 4,
+    StateChangeAs4 = 5,
+    MessageLocal = 6,
+    MessageAs4Local = 7,
+    MessageAddpath = 8,
+    MessageAs4Addpath = 9,
+    MessageLocalAddpath = 10,
+    MessageLocalAs4Addpath = 11,
 }
 
 /// BGP4MP state change message.
@@ -84,10 +76,10 @@ impl Bgp4MpMessage {
     pub const fn is_local(&self) -> bool {
         matches!(
             self.msg_type,
-            Bgp4MpType::Bgp4MpMessageLocal
-                | Bgp4MpType::Bgp4MpMessageAs4Local
-                | Bgp4MpType::Bgp4MpMessageLocalAddpath
-                | Bgp4MpType::Bgp4MpMessageLocalAs4Addpath
+            Bgp4MpType::MessageLocal
+                | Bgp4MpType::MessageAs4Local
+                | Bgp4MpType::MessageLocalAddpath
+                | Bgp4MpType::MessageLocalAs4Addpath
         )
     }
 }

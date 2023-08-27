@@ -104,12 +104,11 @@ pub struct BmpPerPeerHeader {
     pub asn_len: AsnLength,
 }
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Primitive)]
 pub enum PeerType {
-    GlobalInstancePeer = 0,
-    RDInstancePeer = 1,
-    LocalInstancePeer = 2,
+    Global = 0,
+    RD = 1,
+    Local = 2,
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {

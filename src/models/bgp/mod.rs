@@ -34,7 +34,7 @@ pub enum BgpMessage {
     Open(BgpOpenMessage),
     Update(BgpUpdateMessage),
     Notification(BgpNotificationMessage),
-    KeepAlive(BgpKeepAliveMessage),
+    KeepAlive,
 }
 
 impl BgpMessage {
@@ -43,7 +43,7 @@ impl BgpMessage {
             BgpMessage::Open(_) => BgpMessageType::OPEN,
             BgpMessage::Update(_) => BgpMessageType::UPDATE,
             BgpMessage::Notification(_) => BgpMessageType::NOTIFICATION,
-            BgpMessage::KeepAlive(_) => BgpMessageType::KEEPALIVE,
+            BgpMessage::KeepAlive => BgpMessageType::KEEPALIVE,
         }
     }
 }
@@ -120,7 +120,3 @@ pub struct BgpNotificationMessage {
     pub error_type: Option<BgpError>,
     pub data: Vec<u8>,
 }
-
-// TODO: Is this type necessary? It could probably be left as a unit enum variant.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BgpKeepAliveMessage;

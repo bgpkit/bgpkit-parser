@@ -33,6 +33,15 @@ impl Asn {
         }
     }
 
+    /// Gets the size required to store this ASN
+    pub const fn required_len(&self) -> AsnLength {
+        if self.asn <= u16::MAX as u32 {
+            return AsnLength::Bits16;
+        }
+
+        AsnLength::Bits32
+    }
+
     /// Checks if the given ASN is reserved for private use.
     ///
     /// <https://datatracker.ietf.org/doc/rfc7249/>

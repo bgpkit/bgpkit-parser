@@ -54,14 +54,14 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
         timestamp: t_sec,
         microsecond_timestamp: Some(t_msec),
         entry_type: EntryType::BGP4MP,
-        entry_subtype: 4, // Bgp4MpMessageAs4
+        entry_subtype: Bgp4MpType::MessageAs4 as u16,
         length: 0,
     };
 
     let record = MrtRecord {
         common_header: header,
-        message: MrtMessage::Bgp4Mp(Bgp4Mp::Bgp4MpMessage(Bgp4MpMessage {
-            msg_type: Bgp4MpType::Bgp4MpMessageAs4,
+        message: MrtMessage::Bgp4Mp(Bgp4Mp::Message(Bgp4MpMessage {
+            msg_type: Bgp4MpType::MessageAs4,
             peer_asn,
             local_asn: 0.into(),
             interface_index: 0,

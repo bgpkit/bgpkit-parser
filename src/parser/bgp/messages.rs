@@ -83,7 +83,7 @@ pub fn parse_bgp_message(
         BgpMessageType::NOTIFICATION => {
             BgpMessage::Notification(parse_bgp_notification_message(msg_data)?)
         }
-        BgpMessageType::KEEPALIVE => BgpMessage::KeepAlive(BgpKeepAliveMessage {}),
+        BgpMessageType::KEEPALIVE => BgpMessage::KeepAlive,
     })
 }
 
