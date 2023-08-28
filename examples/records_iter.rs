@@ -21,7 +21,7 @@ fn main() {
                         }
                     }
                     BgpMessage::Notification(_) => {}
-                    BgpMessage::KeepAlive(_) => {}
+                    BgpMessage::KeepAlive => {}
                 },
             },
         }
