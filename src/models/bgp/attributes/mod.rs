@@ -6,6 +6,7 @@ mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
+use num_enum::{FromPrimitive, IntoPrimitive};
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
 use std::ops::Deref;
@@ -58,127 +59,52 @@ bitflags! {
 /// To see the full list, check out IANA at:
 /// <https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-2>
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, FromPrimitive, IntoPrimitive)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum AttrType {
-    RESERVED,
-    ORIGIN,
-    AS_PATH,
-    NEXT_HOP,
-    MULTI_EXIT_DISCRIMINATOR,
-    LOCAL_PREFERENCE,
-    ATOMIC_AGGREGATE,
-    AGGREGATOR,
-    COMMUNITIES,
+    RESERVED = 0,
+    ORIGIN = 1,
+    AS_PATH = 2,
+    NEXT_HOP = 3,
+    MULTI_EXIT_DISCRIMINATOR = 4,
+    LOCAL_PREFERENCE = 5,
+    ATOMIC_AGGREGATE = 6,
+    AGGREGATOR = 7,
+    COMMUNITIES = 8,
     /// <https://tools.ietf.org/html/rfc4456>
-    ORIGINATOR_ID,
-    CLUSTER_LIST,
+    ORIGINATOR_ID = 9,
+    CLUSTER_LIST = 10,
     /// <https://tools.ietf.org/html/rfc4760>
-    CLUSTER_ID,
-    MP_REACHABLE_NLRI,
-    MP_UNREACHABLE_NLRI,
+    CLUSTER_ID = 13,
+    MP_REACHABLE_NLRI = 14,
+    MP_UNREACHABLE_NLRI = 15,
     /// <https://datatracker.ietf.org/doc/html/rfc4360>
-    EXTENDED_COMMUNITIES,
-    AS4_PATH,
-    AS4_AGGREGATOR,
-    PMSI_TUNNEL,
-    TUNNEL_ENCAPSULATION,
-    TRAFFIC_ENGINEERING,
-    IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES,
-    AIGP,
-    PE_DISTINGUISHER_LABELS,
-    BGP_LS_ATTRIBUTE,
-    LARGE_COMMUNITIES,
-    BGPSEC_PATH,
-    ONLY_TO_CUSTOMER,
-    SFP_ATTRIBUTE,
-    BFD_DISCRIMINATOR,
-    BGP_PREFIX_SID,
-    ATTR_SET,
+    EXTENDED_COMMUNITIES = 16,
+    AS4_PATH = 17,
+    AS4_AGGREGATOR = 18,
+    PMSI_TUNNEL = 22,
+    TUNNEL_ENCAPSULATION = 23,
+    TRAFFIC_ENGINEERING = 24,
+    IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES = 25,
+    AIGP = 26,
+    PE_DISTINGUISHER_LABELS = 27,
+    BGP_LS_ATTRIBUTE = 29,
+    LARGE_COMMUNITIES = 32,
+    BGPSEC_PATH = 33,
+    ONLY_TO_CUSTOMER = 35,
+    SFP_ATTRIBUTE = 37,
+    BFD_DISCRIMINATOR = 38,
+    BGP_PREFIX_SID = 40,
+    ATTR_SET = 128,
     /// <https://datatracker.ietf.org/doc/html/rfc2042>
-    DEVELOPMENT,
+    DEVELOPMENT = 255,
+
     /// Catch all for any unknown attribute types
-    Unknown(u8),
-}
-
-impl From<u8> for AttrType {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => AttrType::RESERVED,
-            1 => AttrType::ORIGIN,
-            2 => AttrType::AS_PATH,
-            3 => AttrType::NEXT_HOP,
-            4 => AttrType::MULTI_EXIT_DISCRIMINATOR,
-            5 => AttrType::LOCAL_PREFERENCE,
-            6 => AttrType::ATOMIC_AGGREGATE,
-            7 => AttrType::AGGREGATOR,
-            8 => AttrType::COMMUNITIES,
-            9 => AttrType::ORIGINATOR_ID,
-            10 => AttrType::CLUSTER_LIST,
-            13 => AttrType::CLUSTER_ID,
-            14 => AttrType::MP_REACHABLE_NLRI,
-            15 => AttrType::MP_UNREACHABLE_NLRI,
-            16 => AttrType::EXTENDED_COMMUNITIES,
-            17 => AttrType::AS4_PATH,
-            18 => AttrType::AS4_AGGREGATOR,
-            22 => AttrType::PMSI_TUNNEL,
-            23 => AttrType::TUNNEL_ENCAPSULATION,
-            24 => AttrType::TRAFFIC_ENGINEERING,
-            25 => AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES,
-            26 => AttrType::AIGP,
-            27 => AttrType::PE_DISTINGUISHER_LABELS,
-            29 => AttrType::BGP_LS_ATTRIBUTE,
-            32 => AttrType::LARGE_COMMUNITIES,
-            33 => AttrType::BGPSEC_PATH,
-            35 => AttrType::ONLY_TO_CUSTOMER,
-            37 => AttrType::SFP_ATTRIBUTE,
-            38 => AttrType::BFD_DISCRIMINATOR,
-            40 => AttrType::BGP_PREFIX_SID,
-            128 => AttrType::ATTR_SET,
-            255 => AttrType::DEVELOPMENT,
-            x => AttrType::Unknown(x),
-        }
-    }
-}
-
-impl From<AttrType> for u8 {
-    fn from(value: AttrType) -> Self {
-        match value {
-            AttrType::RESERVED => 0,
-            AttrType::ORIGIN => 1,
-            AttrType::AS_PATH => 2,
-            AttrType::NEXT_HOP => 3,
-            AttrType::MULTI_EXIT_DISCRIMINATOR => 4,
-            AttrType::LOCAL_PREFERENCE => 5,
-            AttrType::ATOMIC_AGGREGATE => 6,
-            AttrType::AGGREGATOR => 7,
-            AttrType::COMMUNITIES => 8,
-            AttrType::ORIGINATOR_ID => 9,
-            AttrType::CLUSTER_LIST => 10,
-            AttrType::CLUSTER_ID => 13,
-            AttrType::MP_REACHABLE_NLRI => 14,
-            AttrType::MP_UNREACHABLE_NLRI => 15,
-            AttrType::EXTENDED_COMMUNITIES => 16,
-            AttrType::AS4_PATH => 17,
-            AttrType::AS4_AGGREGATOR => 18,
-            AttrType::PMSI_TUNNEL => 22,
-            AttrType::TUNNEL_ENCAPSULATION => 23,
-            AttrType::TRAFFIC_ENGINEERING => 24,
-            AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => 25,
-            AttrType::AIGP => 26,
-            AttrType::PE_DISTINGUISHER_LABELS => 27,
-            AttrType::BGP_LS_ATTRIBUTE => 29,
-            AttrType::LARGE_COMMUNITIES => 32,
-            AttrType::BGPSEC_PATH => 33,
-            AttrType::ONLY_TO_CUSTOMER => 35,
-            AttrType::SFP_ATTRIBUTE => 37,
-            AttrType::BFD_DISCRIMINATOR => 38,
-            AttrType::BGP_PREFIX_SID => 40,
-            AttrType::ATTR_SET => 128,
-            AttrType::DEVELOPMENT => 255,
-            AttrType::Unknown(x) => x,
-        }
-    }
+    #[num_enum(catch_all)]
+    // We have to explicitly assign this variant a number, otherwise the compiler will attempt to
+    // assign it to 256 (previous + 1) and overflow the type.
+    Unknown(u8) = 254,
 }
 
 pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {

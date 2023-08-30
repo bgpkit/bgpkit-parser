@@ -1,4 +1,5 @@
 use crate::models::Asn;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -44,8 +45,9 @@ impl LargeCommunity {
 }
 
 /// Type definitions of extended communities
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum ExtendedCommunityType {
     // transitive types
     TransitiveTwoOctetAsSpecific = 0x00,

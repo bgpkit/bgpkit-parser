@@ -3,8 +3,8 @@ use crate::models::*;
 use crate::parser::{AttributeParser, ReadUtils};
 use bytes::{Buf, Bytes};
 use log::warn;
-use num_traits::FromPrimitive;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr};
 
 /// Parse TABLE_DUMP V2 format MRT message.
@@ -23,15 +23,7 @@ pub fn parse_table_dump_v2_message(
     sub_type: u16,
     mut input: Bytes,
 ) -> Result<TableDumpV2Message, ParserError> {
-    let v2_type: TableDumpV2Type = match TableDumpV2Type::from_u16(sub_type) {
-        Some(t) => t,
-        None => {
-            return Err(ParserError::ParseError(format!(
-                "cannot parse table dump v2 type: {}",
-                sub_type
-            )))
-        }
-    };
+    let v2_type: TableDumpV2Type = TableDumpV2Type::try_from(sub_type)?;
 
     let msg: TableDumpV2Message = match v2_type {
         TableDumpV2Type::PeerIndexTable => {

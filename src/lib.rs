@@ -368,10 +368,6 @@ We support normal communities, extended communities, and large communities.
 #![allow(clippy::new_without_default)]
 #![allow(clippy::needless_range_loop)]
 
-#[cfg(feature = "models")]
-#[macro_use]
-extern crate enum_primitive_derive;
-
 #[cfg(feature = "parser")]
 pub mod error;
 #[cfg(feature = "models")]

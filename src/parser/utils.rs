@@ -2,6 +2,7 @@
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use std::convert::TryFrom;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
@@ -10,7 +11,6 @@ use std::{
 use crate::models::*;
 use bytes::{Buf, Bytes};
 use log::debug;
-use num_traits::FromPrimitive;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
@@ -153,25 +153,11 @@ pub trait ReadUtils: Buf {
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
-        let afi = self.read_u16()?;
-        match Afi::from_i16(afi as i16) {
-            Some(afi) => Ok(afi),
-            None => Err(crate::error::ParserError::Unsupported(format!(
-                "Unknown AFI type: {}",
-                afi
-            ))),
-        }
+        Afi::try_from(self.read_u16()? as i16).map_err(ParserError::from)
     }
 
     fn read_safi(&mut self) -> Result<Safi, ParserError> {
-        let safi = self.read_u8()?;
-        match Safi::from_u8(safi) {
-            Some(safi) => Ok(safi),
-            None => Err(crate::error::ParserError::Unsupported(format!(
-                "Unknown SAFI type: {}",
-                safi
-            ))),
-        }
+        Safi::try_from(self.read_u8()?).map_err(ParserError::from)
     }
 
     /// Read announced/withdrawn prefix.

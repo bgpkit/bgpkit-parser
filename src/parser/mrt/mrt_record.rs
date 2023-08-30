@@ -4,7 +4,7 @@ use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
 };
 use bytes::{Buf, Bytes, BytesMut};
-use num_traits::{FromPrimitive, ToPrimitive};
+use std::convert::TryFrom;
 use std::io::Read;
 
 /// MRT common header
@@ -48,9 +48,7 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 
     let timestamp = data.get_u32();
     let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::from_u16(entry_type_raw).ok_or_else(|| {
-        ParserError::ParseError(format!("Failed to parse entry type: {}", entry_type_raw))
-    })?;
+    let entry_type = EntryType::try_from(entry_type_raw)?;
     let entry_subtype = data.get_u16();
     let mut length = data.get_u32();
 
@@ -107,7 +105,7 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
     }
 
     match parse_mrt_body(
-        common_header.entry_type.to_u16().unwrap(),
+        common_header.entry_type as u16,
         common_header.entry_subtype,
         buffer.freeze(), // freeze the BytesMute to Bytes
     ) {
@@ -145,13 +143,7 @@ fn parse_mrt_body(
     entry_subtype: u16,
     data: Bytes,
 ) -> Result<MrtMessage, ParserError> {
-    let etype = match EntryType::from_u16(entry_type) {
-        Some(t) => Ok(t),
-        None => Err(ParserError::ParseError(format!(
-            "Failed to parse entry type: {}",
-            entry_type
-        ))),
-    }?;
+    let etype = EntryType::try_from(entry_type)?;
 
     let message: MrtMessage = match &etype {
         EntryType::TABLE_DUMP => {

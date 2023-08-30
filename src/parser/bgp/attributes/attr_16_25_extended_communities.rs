@@ -6,7 +6,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use num_traits::FromPrimitive;
+use std::convert::TryFrom;
 
 use bytes::{Buf, Bytes};
 use std::net::Ipv4Addr;
@@ -16,9 +16,9 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
 
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
-        let ec_type: ExtendedCommunityType = match ExtendedCommunityType::from_u8(ec_type_u8) {
-            Some(t) => t,
-            None => {
+        let ec_type: ExtendedCommunityType = match ExtendedCommunityType::try_from(ec_type_u8) {
+            Ok(t) => t,
+            Err(_) => {
                 let mut buffer: [u8; 8] = [0; 8];
                 let mut i = 0;
                 buffer[i] = ec_type_u8;

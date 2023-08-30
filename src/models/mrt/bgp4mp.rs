@@ -1,10 +1,12 @@
 //! MRT BGP4MP structs
 use crate::models::*;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::IpAddr;
 
 /// BGP states enum.
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u16)]
 pub enum BgpState {
     Idle = 1,
     Connect = 2,
@@ -32,8 +34,9 @@ impl Bgp4Mp {
 }
 
 /// BGP4MP message subtypes.
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u16)]
 pub enum Bgp4MpType {
     StateChange = 0,
     Message = 1,

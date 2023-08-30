@@ -1,7 +1,8 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
-use num_traits::FromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct InitiationMessage {
@@ -18,7 +19,8 @@ pub struct InitiationTlv {
 ///Type-Length-Value Type
 ///
 /// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
-#[derive(Debug, Primitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u16)]
 pub enum InitiationTlvType {
     String = 0,
     SysDescr = 1,
@@ -29,7 +31,7 @@ pub fn parse_initiation_message(data: &mut Bytes) -> Result<InitiationMessage, P
     let mut tlvs = vec![];
 
     while data.remaining() > 4 {
-        let info_type: InitiationTlvType = InitiationTlvType::from_u16(data.get_u16()).unwrap();
+        let info_type: InitiationTlvType = InitiationTlvType::try_from(data.get_u16())?;
         let info_len = data.get_u16();
         if data.remaining() < info_len as usize {
             // not enough bytes to read

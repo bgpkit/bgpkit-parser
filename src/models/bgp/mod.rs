@@ -17,10 +17,12 @@ pub use role::*;
 use crate::models::network::*;
 use capabilities::BgpCapabilityType;
 use error::BgpError;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
 
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum BgpMessageType {
     OPEN = 1,
     UPDATE = 2,
@@ -103,10 +105,8 @@ pub enum ParamValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capability {
-    pub code: u8,
-    pub len: u8,
+    pub ty: BgpCapabilityType,
     pub value: Vec<u8>,
-    pub capability_type: Option<BgpCapabilityType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,8 +120,6 @@ pub struct BgpUpdateMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpNotificationMessage {
-    pub error_code: u8,
-    pub error_subcode: u8,
-    pub error_type: Option<BgpError>,
+    pub error: BgpError,
     pub data: Vec<u8>,
 }

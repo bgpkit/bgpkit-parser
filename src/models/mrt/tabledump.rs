@@ -1,6 +1,7 @@
 //! MRT table dump version 1 and 2 structs
 use crate::models::*;
 use bitflags::bitflags;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -40,8 +41,9 @@ impl TableDumpV2Message {
 /// TableDump version 2 subtypes.
 ///
 /// <https://www.iana.org/assignments/mrt/mrt.xhtml#subtype-codes>
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u16)]
 pub enum TableDumpV2Type {
     PeerIndexTable = 1,
     RibIpv4Unicast = 2,

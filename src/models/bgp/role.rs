@@ -1,20 +1,17 @@
-use num_traits::FromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 /// BGP Role
 ///
 /// Defined in [RFC9234](https://www.iana.org/go/rfc9234).
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum BgpRole {
     Provider = 0,
     RouteServer = 1,
     RouteServerClient = 2,
     Customer = 3,
     Peer = 4,
-}
-
-pub fn parse_bgp_role_value(value: &u8) -> Option<BgpRole> {
-    BgpRole::from_u8(*value)
 }
 
 /// Validate the local-remote BGP Role pairs.

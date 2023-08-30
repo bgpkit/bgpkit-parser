@@ -1,6 +1,8 @@
 /*!
 error module defines the error types used in bgpkit-parser.
 */
+use crate::models::{Afi, Bgp4MpType, BgpState, EntryType, Safi, TableDumpV2Type};
+use num_enum::TryFromPrimitiveError;
 use oneio::OneIoError;
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;
@@ -80,5 +82,41 @@ impl From<io::Error> for ParserError {
             ErrorKind::UnexpectedEof => ParserError::EofError(io_error),
             _ => ParserError::IoError(io_error),
         }
+    }
+}
+
+impl From<TryFromPrimitiveError<Bgp4MpType>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Bgp4MpType>) -> Self {
+        ParserError::ParseError(format!("cannot parse bgp4mp subtype: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<BgpState>> for ParserError {
+    fn from(value: TryFromPrimitiveError<BgpState>) -> Self {
+        ParserError::ParseError(format!("cannot parse bgp4mp state: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<TableDumpV2Type>> for ParserError {
+    fn from(value: TryFromPrimitiveError<TableDumpV2Type>) -> Self {
+        ParserError::ParseError(format!("cannot parse table dump v2 type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<EntryType>> for ParserError {
+    fn from(value: TryFromPrimitiveError<EntryType>) -> Self {
+        ParserError::ParseError(format!("cannot parse entry type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<Afi>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Afi>) -> Self {
+        ParserError::ParseError(format!("Unknown AFI type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<Safi>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Safi>) -> Self {
+        ParserError::ParseError(format!("Unknown SAFI type: {}", value.number))
     }
 }

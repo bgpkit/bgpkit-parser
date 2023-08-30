@@ -4,6 +4,7 @@ pub mod bgp4mp;
 pub mod tabledump;
 
 pub use bgp4mp::*;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io;
 use std::io::Write;
 pub use tabledump::*;
@@ -131,7 +132,7 @@ pub enum MrtMessage {
 ///     48   OSPFv3
 ///     49   OSPFv3_ET
 /// ```
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(non_camel_case_types)]
 #[repr(u16)]

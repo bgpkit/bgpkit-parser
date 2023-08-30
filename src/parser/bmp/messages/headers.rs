@@ -2,7 +2,8 @@ use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
-use num_traits::FromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::convert::TryFrom;
 use std::net::IpAddr;
 
 /// BMP message type enum.
@@ -20,7 +21,8 @@ use std::net::IpAddr;
 ///       *  Type = 5: Termination Message
 ///       *  Type = 6: Route Mirroring Message
 /// ```
-#[derive(Debug, Primitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum BmpMsgType {
     RouteMonitoring = 0,
     StatisticsReport = 1,
@@ -60,7 +62,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 
     let msg_len = data.read_u32()?;
 
-    let msg_type = BmpMsgType::from_u8(data.read_u8()?).unwrap();
+    let msg_type = BmpMsgType::try_from(data.read_u8()?)?;
     Ok(BmpCommonHeader {
         version,
         msg_len,
@@ -104,7 +106,8 @@ pub struct BmpPerPeerHeader {
     pub asn_len: AsnLength,
 }
 
-#[derive(Debug, Primitive)]
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u8)]
 pub enum PeerType {
     Global = 0,
     RD = 1,
@@ -112,7 +115,7 @@ pub enum PeerType {
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
-    let peer_type = PeerType::from_u8(data.read_u8()?).unwrap();
+    let peer_type = PeerType::try_from(data.read_u8()?)?;
 
     let peer_flags = data.read_u8()?;
 
