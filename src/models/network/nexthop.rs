@@ -38,7 +38,6 @@ impl Debug for NextHopAddress {
         match self {
             NextHopAddress::Ipv4(x) => write!(f, "{}", x),
             NextHopAddress::Ipv6(x) => write!(f, "{}", x),
-            // Is there a better notation for link local?
             NextHopAddress::Ipv6LinkLocal(x, y) => write!(f, "Ipv6LinkLocal({}, {})", x, y),
         }
     }

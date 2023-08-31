@@ -36,7 +36,7 @@ impl Nlri {
     /// Get the address of the next hop indicated by this NLRI.
     ///
     /// Panics if used on a unreachable NLRI message (ie. there is no next hop).
-    pub const fn addr(&self) -> IpAddr {
+    pub const fn next_hop_addr(&self) -> IpAddr {
         match self.next_hop {
             Some(next_hop) => next_hop.addr(),
             None => panic!("unreachable NLRI "),

@@ -101,7 +101,6 @@ impl CommonHeader {
     }
 }
 
-// TODO: Why isn't there an option for an unknown message?
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
