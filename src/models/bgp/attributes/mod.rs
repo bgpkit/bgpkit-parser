@@ -138,41 +138,33 @@ impl Attributes {
     pub fn get_attr(&self, ty: AttrType) -> Option<Attribute> {
         self.inner
             .iter()
-            .filter(|x| x.value.attr_type() == ty)
+            .find(|x| x.value.attr_type() == ty)
             .cloned()
-            .next()
     }
 
     pub fn origin(&self) -> Origin {
         self.inner
             .iter()
-            .filter_map(|x| match &x.value {
+            .find_map(|x| match &x.value {
                 AttributeValue::Origin(x) => Some(*x),
                 _ => None,
             })
-            .next()
             .unwrap_or(Origin::INCOMPLETE)
     }
 
     pub fn origin_id(&self) -> Option<IpAddr> {
-        self.inner
-            .iter()
-            .filter_map(|x| match &x.value {
-                AttributeValue::OriginatorId(x) => Some(*x),
-                _ => None,
-            })
-            .next()
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::OriginatorId(x) => Some(*x),
+            _ => None,
+        })
     }
 
     // TODO: Why would the attribute be used instead of the reach NLRI? Should this check both?
     pub fn next_hop(&self) -> Option<IpAddr> {
-        self.inner
-            .iter()
-            .filter_map(|x| match &x.value {
-                AttributeValue::NextHop(x) => Some(*x),
-                _ => None,
-            })
-            .next()
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::NextHop(x) => Some(*x),
+            _ => None,
+        })
     }
 
     // TODO: Add functions for these attributes:
@@ -191,33 +183,24 @@ impl Attributes {
 
     // These implementations are horribly inefficient, but they were super easy to write and use
     pub fn as_path(&self) -> Option<&AsPath> {
-        self.inner
-            .iter()
-            .filter_map(|x| match &x.value {
-                AttributeValue::AsPath(x) | AttributeValue::As4Path(x) => Some(x),
-                _ => None,
-            })
-            .next()
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::AsPath(x) | AttributeValue::As4Path(x) => Some(x),
+            _ => None,
+        })
     }
 
     pub fn get_reachable(&self) -> Option<&Nlri> {
-        self.inner
-            .iter()
-            .filter_map(|x| match &x.value {
-                AttributeValue::MpReachNlri(x) => Some(x),
-                _ => None,
-            })
-            .next()
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::MpReachNlri(x) => Some(x),
+            _ => None,
+        })
     }
 
     pub fn get_unreachable(&self) -> Option<&Nlri> {
-        self.inner
-            .iter()
-            .filter_map(|x| match &x.value {
-                AttributeValue::MpUnreachNlri(x) => Some(x),
-                _ => None,
-            })
-            .next()
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::MpUnreachNlri(x) => Some(x),
+            _ => None,
+        })
     }
 
     pub fn iter_communities(&self) -> MetaCommunitiesIter<'_> {

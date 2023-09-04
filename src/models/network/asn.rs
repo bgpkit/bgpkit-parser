@@ -57,7 +57,7 @@ impl Asn {
         }
     }
 
-    /// Checks if the given ASN is public. This is done by checking that the asn is not included
+    /// Checks if the given ASN is reserved. This is done by checking if the asn is included
     /// within IANA's "Special-Purpose AS Numbers" registry. This includes checking against private
     /// ASN ranges, ASNs reserved for documentation, and ASNs reserved for specific uses by various
     /// RFCs.
@@ -67,18 +67,18 @@ impl Asn {
     /// For additional details see:
     ///  - <https://datatracker.ietf.org/doc/rfc7249/>
     ///  - <https://www.iana.org/assignments/iana-as-numbers-special-registry/iana-as-numbers-special-registry.xhtml>
-    pub const fn is_public(&self) -> bool {
+    pub const fn is_reserved(&self) -> bool {
         match self.asn {
-            0 => false,                       // reserved by RFC7607
-            112 => false,                     // reserved by RFC7534
-            23456 => false,                   // reserved by RFC6793
-            64496..=64511 => false,           // reserved by RFC5398
-            64512..=65534 => false,           // reserved by RFC6996
-            65535 => false,                   // reserved by RFC7300
-            65536..=65551 => false,           // reserved by RFC5398
-            4200000000..=4294967294 => false, // reserved by RFC6996
-            4294967295 => false,              // reserved by RFC7300
-            _ => true,
+            0 => true,                       // reserved by RFC7607
+            112 => true,                     // reserved by RFC7534
+            23456 => true,                   // reserved by RFC6793
+            64496..=64511 => true,           // reserved by RFC5398
+            64512..=65534 => true,           // reserved by RFC6996
+            65535 => true,                   // reserved by RFC7300
+            65536..=65551 => true,           // reserved by RFC5398
+            4200000000..=4294967294 => true, // reserved by RFC6996
+            4294967295 => true,              // reserved by RFC7300
+            _ => false,
         }
     }
 

@@ -153,7 +153,7 @@ pub trait ReadUtils: Buf {
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
-        Afi::try_from(self.read_u16()? as i16).map_err(ParserError::from)
+        Afi::try_from(self.read_u16()?).map_err(ParserError::from)
     }
 
     fn read_safi(&mut self) -> Result<Safi, ParserError> {

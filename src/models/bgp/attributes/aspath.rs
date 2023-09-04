@@ -33,6 +33,11 @@ impl AsPathSegment {
         self.as_ref().len()
     }
 
+    /// Returns true if this segment has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.as_ref().is_empty()
+    }
+
     /// Get an iterator over the ASNs within this path segment
     pub fn iter(&self) -> <&'_ Self as IntoIterator>::IntoIter {
         self.into_iter()
@@ -96,12 +101,11 @@ impl<'a> IntoIterator for &'a mut AsPathSegment {
 
 impl AsRef<[Asn]> for AsPathSegment {
     fn as_ref(&self) -> &[Asn] {
-        match self {
-            AsPathSegment::AsSequence(x) => &x,
-            AsPathSegment::AsSet(x) => &x,
-            AsPathSegment::ConfedSequence(x) => &x,
-            AsPathSegment::ConfedSet(x) => &x,
-        }
+        let (AsPathSegment::AsSequence(x)
+        | AsPathSegment::AsSet(x)
+        | AsPathSegment::ConfedSequence(x)
+        | AsPathSegment::ConfedSet(x)) = self;
+        x
     }
 }
 

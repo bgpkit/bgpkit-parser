@@ -5,7 +5,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 /// <https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml>
 #[derive(Debug, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[repr(i16)]
+#[repr(u16)]
 pub enum Afi {
     Ipv4 = 1,
     Ipv6 = 2,
