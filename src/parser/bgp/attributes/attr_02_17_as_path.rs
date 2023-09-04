@@ -81,12 +81,7 @@ mod tests {
             0, 3, // AS3
         ]);
         let path = parse_as_path(data, &AsnLength::Bits16).unwrap();
-        let expected_sequence =
-            AsPathSegment::AsSequence(vec![Asn::from(1), Asn::from(2), Asn::from(3)]);
-
-        let mut segment_iter = path.iter_segments();
-        assert_eq!(segment_iter.next(), Some(&expected_sequence));
-        assert_eq!(segment_iter.next(), None);
+        assert_eq!(path, AsPath::from_sequence([1, 2, 3]));
     }
 
     #[test]
@@ -102,14 +97,7 @@ mod tests {
             0, 3, // AS3
         ]);
         let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
-
-        assert!(matches!(res, AsPathSegment::AsSequence(_)));
-        if let AsPathSegment::AsSequence(p) = res {
-            let asns: Vec<u32> = p.into_iter().map(|a| a.asn).collect();
-            assert_eq!(asns, vec![1, 2, 3]);
-        } else {
-            panic!("not a as sequence")
-        }
+        assert_eq!(res, AsPathSegment::sequence([1, 2, 3]));
 
         //////////////////////
         // 16 bits sequence //
@@ -122,13 +110,7 @@ mod tests {
             0, 0, 0, 3, // AS3
         ]);
         let res = parse_as_path_segment(&mut data, &AsnLength::Bits32).unwrap();
-        assert!(matches!(res, AsPathSegment::AsSequence(_)));
-        if let AsPathSegment::AsSequence(p) = res {
-            let asns: Vec<u32> = p.into_iter().map(|a| a.asn).collect();
-            assert_eq!(asns, vec![1, 2, 3]);
-        } else {
-            panic!("not a as sequence")
-        }
+        assert_eq!(res, AsPathSegment::sequence([1, 2, 3]));
 
         /////////////////
         // other types //
@@ -139,7 +121,7 @@ mod tests {
             0, 1,
         ]);
         let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
-        assert!(matches!(res, AsPathSegment::AsSet(_)));
+        assert_eq!(res, AsPathSegment::set([1]));
 
         let mut data = Bytes::from(vec![
             3, // Confed Sequence

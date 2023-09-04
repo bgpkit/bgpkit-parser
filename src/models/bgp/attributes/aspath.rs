@@ -17,6 +17,16 @@ pub enum AsPathSegment {
 }
 
 impl AsPathSegment {
+    /// Shorthand for creating an `AsSequence` segment.
+    pub fn sequence<S: AsRef<[u32]>>(seq: S) -> Self {
+        AsPathSegment::AsSequence(seq.as_ref().iter().copied().map_into().collect())
+    }
+
+    /// Shorthand for creating an `AsSet` segment.
+    pub fn set<S: AsRef<[u32]>>(seq: S) -> Self {
+        AsPathSegment::AsSet(seq.as_ref().iter().copied().map_into().collect())
+    }
+
     /// Get the number of ASNs this segment adds to the route. For the number of ASNs within the
     /// segment use [AsPathSegment::len] instead.
     pub fn route_len(&self) -> usize {
@@ -275,6 +285,15 @@ pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment>;
 impl AsPath {
     pub fn new() -> AsPath {
         AsPath { segments: vec![] }
+    }
+
+    /// Shorthand for creating an `AsPath` consisting of a single `AsSequence` segment.
+    pub fn from_sequence<S: AsRef<[u32]>>(seq: S) -> Self {
+        let segment = AsPathSegment::AsSequence(seq.as_ref().iter().copied().map_into().collect());
+
+        AsPath {
+            segments: vec![segment],
+        }
     }
 
     pub fn from_segments(segments: Vec<AsPathSegment>) -> AsPath {
@@ -741,39 +760,22 @@ mod tests {
 
     #[test]
     fn test_aspath_as4path_merge() {
-        let aspath = AsPath {
-            segments: vec![AsPathSegment::AsSequence(
-                [1, 2, 3, 5].map(|i| i.into()).to_vec(),
-            )],
-        };
-        let as4path = AsPath {
-            segments: vec![AsPathSegment::AsSequence(
-                [2, 3, 7].map(|i| i.into()).to_vec(),
-            )],
-        };
+        let aspath = AsPath::from_sequence([1, 2, 3, 5]);
+        let as4path = AsPath::from_sequence([2, 3, 7]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
-        assert_eq!(
-            newpath.segments[0],
-            AsPathSegment::AsSequence([1, 2, 3, 7].map(|i| { i.into() }).to_vec())
-        );
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2, 3, 7]));
     }
 
     #[test]
     fn test_get_origin() {
-        let aspath = AsPath {
-            segments: vec![AsPathSegment::AsSequence(
-                [1, 2, 3, 5].map(|i| i.into()).to_vec(),
-            )],
-        };
+        let aspath = AsPath::from_sequence([1, 2, 3, 5]);
         let origins = aspath.get_singular_origin();
         assert_eq!(origins.unwrap(), Asn::from(5));
 
-        let aspath = AsPath {
-            segments: vec![
-                AsPathSegment::AsSequence([1, 2, 3, 5].map(|i| i.into()).to_vec()),
-                AsPathSegment::AsSet([7, 8].map(|i| i.into()).to_vec()),
-            ],
-        };
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2, 3, 5]),
+            AsPathSegment::set([7, 8]),
+        ]);
         let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
         assert_eq!(origins, vec![7, 8]);
     }
@@ -781,9 +783,9 @@ mod tests {
     #[test]
     fn test_aspath_route_iter() {
         let path = AsPath::from_segments(vec![
-            AsPathSegment::AsSet(vec![Asn::from(3), Asn::from(4)]),
-            AsPathSegment::AsSet(vec![Asn::from(5), Asn::from(6)]),
-            AsPathSegment::AsSequence(vec![Asn::from(7), Asn::from(8)]),
+            AsPathSegment::set([3, 4]),
+            AsPathSegment::set([5, 6]),
+            AsPathSegment::sequence([7, 8]),
         ]);
         assert_eq!(path.route_len(), 4);
 
