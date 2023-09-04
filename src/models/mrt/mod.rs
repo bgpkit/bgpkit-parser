@@ -4,12 +4,12 @@ pub mod bgp4mp;
 pub mod tabledump;
 
 pub use bgp4mp::*;
+use chrono::{DateTime, TimeZone, Utc};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io;
 use std::io::Write;
 pub use tabledump::*;
 
-// TODO(jmeggitt): Add function to get the timestamp as chrono type
 /// MrtRecord is a wrapper struct that contains a header and a message.
 ///
 /// A MRT record is constructed as the following:
@@ -98,6 +98,14 @@ impl CommonHeader {
                 writer.write_all(&microseconds.to_be_bytes())
             }
         }
+    }
+
+    pub fn get_datetime(&self) -> DateTime<Utc> {
+        let nanos = self
+            .microsecond_timestamp
+            .map(|x| 1000 * x)
+            .unwrap_or_default();
+        Utc.timestamp_nanos(1_000_000_000 * (self.timestamp as i64) + nanos as i64)
     }
 }
 

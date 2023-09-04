@@ -167,19 +167,50 @@ impl Attributes {
         })
     }
 
-    // TODO: Add functions for these attributes:
-    // multi exit discriminator
-    // local preference
-    // only to customer
-    // atomic aggregate
-    // aggregator
-    // clusters
-    // development
+    pub fn multi_exit_discriminator(&self) -> Option<u32> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::MultiExitDiscriminator(x) => Some(*x),
+            _ => None,
+        })
+    }
 
-    // Semi-completed:
-    // originator id
-    // reach/unreach
-    // communities/extended communities/large communities
+    pub fn local_preference(&self) -> Option<u32> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::LocalPreference(x) => Some(*x),
+            _ => None,
+        })
+    }
+
+    pub fn only_to_customer(&self) -> Option<u32> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::OnlyToCustomer(x) => Some(*x),
+            _ => None,
+        })
+    }
+
+    pub fn atomic_aggregate(&self) -> Option<AtomicAggregate> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::AtomicAggregate(x) => Some(*x),
+            // TODO(jmeggitt): Does this default to a specific variant of AtomicAggregate?
+            _ => None,
+        })
+    }
+
+    pub fn aggregator(&self) -> Option<(Asn, IpAddr)> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::Aggregator(asn, addr) | AttributeValue::As4Aggregator(asn, addr) => {
+                Some((*asn, *addr))
+            }
+            _ => None,
+        })
+    }
+
+    pub fn clusters(&self) -> Option<&[IpAddr]> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::Clusters(x) => Some(x.as_ref()),
+            _ => None,
+        })
+    }
 
     // These implementations are horribly inefficient, but they were super easy to write and use
     pub fn as_path(&self) -> Option<&AsPath> {
@@ -264,8 +295,8 @@ impl Extend<Attribute> for Attributes {
 }
 
 impl Extend<AttributeValue> for Attributes {
-    fn extend<T: IntoIterator<Item = AttributeValue>>(&mut self, _iter: T) {
-        todo!()
+    fn extend<T: IntoIterator<Item = AttributeValue>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(Attribute::from))
     }
 }
 
@@ -389,6 +420,8 @@ pub enum AttributeValue {
     AsPath(AsPath),
     As4Path(AsPath),
     NextHop(IpAddr),
+    // TODO(jmeggitt): Are MultiExitDiscriminator, LocalPreference, and OnlyToCustomer really all
+    // u32? They sound like they might be ASNs.
     MultiExitDiscriminator(u32),
     LocalPreference(u32),
     OnlyToCustomer(u32),

@@ -5,19 +5,17 @@
 use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-// TODO(jmeggitt): Come back to review file and reduce type/variant name lengths
-
 #[derive(Copy, Clone, Debug, FromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum BgpErrorCode {
     Reserved = 0,
     MessageHeaderError = 1,
-    OpenMessageError = 2,
-    UpdateMessageError = 3,
+    OpenError = 2,
+    UpdateError = 3,
     HoldTimerExpired = 4,
-    BgpFiniteStateMachineError = 5,
-    BgpCeaseNotification = 6,
-    BgpRouteFreshMessageError = 7,
+    FiniteStateMachineError = 5,
+    CeaseNotification = 6,
+    RouteFreshError = 7,
     #[num_enum(catch_all)]
     Unknown(u8),
 }
@@ -31,14 +29,14 @@ pub enum BgpErrorCode {
 pub enum BgpError {
     /// Includes subcode. Currently, no subcodes have been assigned.
     Reserved(u8),
-    MessageHeaderError(MessageHeaderErrorSubcode),
-    OpenMessageError(OpenMessageErrorSubcode),
-    UpdateMessageError(UpdateMessageErrorSubcode),
+    MessageHeaderError(MessageHeaderError),
+    OpenError(OpenError),
+    UpdateError(UpdateError),
     /// Includes subcode. Currently, no subcodes have been assigned.
     HoldTimerExpired(u8),
-    BgpFiniteStateMachineError(BgpFiniteStateMachineErrorSubcode),
-    BgpCeaseNotification(BgpCeaseNotificationMessageSubcode),
-    BgpRouteFreshMessageError(BgpRouteRefreshMessageErrorSubcode),
+    FiniteStateMachineError(FiniteStateMachineError),
+    CeaseNotification(CeaseNotification),
+    RouteFreshError(RouteRefreshError),
     Unknown(u8, u8),
 }
 
@@ -47,24 +45,20 @@ impl BgpError {
         match BgpErrorCode::from(code) {
             BgpErrorCode::Reserved => BgpError::Reserved(subcode),
             BgpErrorCode::MessageHeaderError => {
-                BgpError::MessageHeaderError(MessageHeaderErrorSubcode::from(subcode))
+                BgpError::MessageHeaderError(MessageHeaderError::from(subcode))
             }
-            BgpErrorCode::OpenMessageError => {
-                BgpError::OpenMessageError(OpenMessageErrorSubcode::from(subcode))
-            }
-            BgpErrorCode::UpdateMessageError => {
-                BgpError::UpdateMessageError(UpdateMessageErrorSubcode::from(subcode))
-            }
+            BgpErrorCode::OpenError => BgpError::OpenError(OpenError::from(subcode)),
+            BgpErrorCode::UpdateError => BgpError::UpdateError(UpdateError::from(subcode)),
             BgpErrorCode::HoldTimerExpired => BgpError::HoldTimerExpired(subcode),
-            BgpErrorCode::BgpFiniteStateMachineError => BgpError::BgpFiniteStateMachineError(
-                BgpFiniteStateMachineErrorSubcode::from(subcode),
-            ),
-            BgpErrorCode::BgpCeaseNotification => {
-                BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::from(subcode))
+            BgpErrorCode::FiniteStateMachineError => {
+                BgpError::FiniteStateMachineError(FiniteStateMachineError::from(subcode))
             }
-            BgpErrorCode::BgpRouteFreshMessageError => BgpError::BgpRouteFreshMessageError(
-                BgpRouteRefreshMessageErrorSubcode::from(subcode),
-            ),
+            BgpErrorCode::CeaseNotification => {
+                BgpError::CeaseNotification(CeaseNotification::from(subcode))
+            }
+            BgpErrorCode::RouteFreshError => {
+                BgpError::RouteFreshError(RouteRefreshError::from(subcode))
+            }
             BgpErrorCode::Unknown(_) => {
                 warn!(
                     "error parsing BGP notification error code: {}, subcode: {}",
@@ -85,7 +79,7 @@ impl BgpError {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum MessageHeaderErrorSubcode {
+pub enum MessageHeaderError {
     UNSPECIFIC = 0,
     CONNECTION_NOT_SYNCHRONIZED = 1,
     BAD_MESSAGE_LENGTH = 2,
@@ -104,7 +98,7 @@ pub enum MessageHeaderErrorSubcode {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum OpenMessageErrorSubcode {
+pub enum OpenError {
     UNSPECIFIC = 0,
     UNSUPPORTED_VERSION_NUMBER = 1,
     BAD_PEER_AS = 2,
@@ -122,9 +116,9 @@ pub enum OpenMessageErrorSubcode {
     Unknown(u8),
 }
 
-impl OpenMessageErrorSubcode {
+impl OpenError {
     pub const fn is_deprecated(&self) -> bool {
-        matches!(self, OpenMessageErrorSubcode::Unknown(5 | 8 | 9 | 10))
+        matches!(self, OpenError::Unknown(5 | 8 | 9 | 10))
     }
 }
 
@@ -137,7 +131,7 @@ impl OpenMessageErrorSubcode {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum UpdateMessageErrorSubcode {
+pub enum UpdateError {
     UNSPECIFIC = 0,
     MALFORMED_ATTRIBUTE_LIST = 1,
     UNRECOGNIZED_WELL_KNOWN_ATTRIBUTE = 2,
@@ -155,9 +149,9 @@ pub enum UpdateMessageErrorSubcode {
     Unknown(u8),
 }
 
-impl UpdateMessageErrorSubcode {
+impl UpdateError {
     pub const fn is_deprecated(&self) -> bool {
-        matches!(self, UpdateMessageErrorSubcode::Unknown(7))
+        matches!(self, UpdateError::Unknown(7))
     }
 }
 
@@ -170,7 +164,7 @@ impl UpdateMessageErrorSubcode {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum BgpFiniteStateMachineErrorSubcode {
+pub enum FiniteStateMachineError {
     UNSPECIFIED = 0,
     RECEIVE_UNEXPECTED_MESSAGE_IN_OPENSENT_State = 1,
     RECEIVE_UNEXPECTED_MESSAGE_IN_OPENCONFIRM_STATE = 2,
@@ -189,7 +183,7 @@ pub enum BgpFiniteStateMachineErrorSubcode {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum BgpCeaseNotificationMessageSubcode {
+pub enum CeaseNotification {
     RESERVED = 0,
     MAXIMUM_NUMBER_OF_PREFIXES_REACHED = 1,
     ADMINISTRATIVE_SHUTDOWN = 2,
@@ -215,7 +209,7 @@ pub enum BgpCeaseNotificationMessageSubcode {
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
-pub enum BgpRouteRefreshMessageErrorSubcode {
+pub enum RouteRefreshError {
     RESERVED = 0,
     INVALID_MESSAGE_LENGTH = 1,
     // 2 - 255: unassigned
@@ -233,127 +227,125 @@ mod tests {
 
         assert_eq!(
             BgpError::new(1, 0),
-            BgpError::MessageHeaderError(MessageHeaderErrorSubcode::UNSPECIFIC)
+            BgpError::MessageHeaderError(MessageHeaderError::UNSPECIFIC)
         );
         assert_eq!(
             BgpError::new(1, 1),
-            BgpError::MessageHeaderError(MessageHeaderErrorSubcode::CONNECTION_NOT_SYNCHRONIZED)
+            BgpError::MessageHeaderError(MessageHeaderError::CONNECTION_NOT_SYNCHRONIZED)
         );
         assert_eq!(
             BgpError::new(1, 2),
-            BgpError::MessageHeaderError(MessageHeaderErrorSubcode::BAD_MESSAGE_LENGTH)
+            BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH)
         );
         assert_eq!(
             BgpError::new(1, 3),
-            BgpError::MessageHeaderError(MessageHeaderErrorSubcode::BAD_MESSAGE_TYPE)
+            BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_TYPE)
         );
         assert_eq!(
             BgpError::new(1, 4),
-            BgpError::MessageHeaderError(MessageHeaderErrorSubcode::Unknown(4)),
+            BgpError::MessageHeaderError(MessageHeaderError::Unknown(4)),
         );
 
         assert_eq!(
             BgpError::new(2, 0),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::UNSPECIFIC)
+            BgpError::OpenError(OpenError::UNSPECIFIC)
         );
         assert_eq!(
             BgpError::new(2, 1),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::UNSUPPORTED_VERSION_NUMBER)
+            BgpError::OpenError(OpenError::UNSUPPORTED_VERSION_NUMBER)
         );
         assert_eq!(
             BgpError::new(2, 2),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::BAD_PEER_AS)
+            BgpError::OpenError(OpenError::BAD_PEER_AS)
         );
         assert_eq!(
             BgpError::new(2, 3),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::BAD_BGP_IDENTIFIER)
+            BgpError::OpenError(OpenError::BAD_BGP_IDENTIFIER)
         );
         assert_eq!(
             BgpError::new(2, 4),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::UNSUPPORTED_OPTIONAL_PARAMETER)
+            BgpError::OpenError(OpenError::UNSUPPORTED_OPTIONAL_PARAMETER)
         );
         assert_eq!(
             BgpError::new(2, 6),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::UNACCEPTABLE_HOLD_TIME)
+            BgpError::OpenError(OpenError::UNACCEPTABLE_HOLD_TIME)
         );
         assert_eq!(
             BgpError::new(2, 7),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::UNSUPPORTED_CAPACITY)
+            BgpError::OpenError(OpenError::UNSUPPORTED_CAPACITY)
         );
         assert_eq!(
             BgpError::new(2, 11),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::ROLE_MISMATCH)
+            BgpError::OpenError(OpenError::ROLE_MISMATCH)
         );
         // deprecated subcodes
         for n in [5, 8, 9, 10] {
             assert_eq!(
                 BgpError::new(2, n),
-                BgpError::OpenMessageError(OpenMessageErrorSubcode::Unknown(n))
+                BgpError::OpenError(OpenError::Unknown(n))
             );
-            assert!(OpenMessageErrorSubcode::Unknown(n).is_deprecated());
+            assert!(OpenError::Unknown(n).is_deprecated());
         }
         assert_eq!(
             BgpError::new(2, 12),
-            BgpError::OpenMessageError(OpenMessageErrorSubcode::Unknown(12))
+            BgpError::OpenError(OpenError::Unknown(12))
         );
 
         assert_eq!(
             BgpError::new(3, 0),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::UNSPECIFIC)
+            BgpError::UpdateError(UpdateError::UNSPECIFIC)
         );
         assert_eq!(
             BgpError::new(3, 1),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::MALFORMED_ATTRIBUTE_LIST)
+            BgpError::UpdateError(UpdateError::MALFORMED_ATTRIBUTE_LIST)
         );
         assert_eq!(
             BgpError::new(3, 2),
-            BgpError::UpdateMessageError(
-                UpdateMessageErrorSubcode::UNRECOGNIZED_WELL_KNOWN_ATTRIBUTE
-            )
+            BgpError::UpdateError(UpdateError::UNRECOGNIZED_WELL_KNOWN_ATTRIBUTE)
         );
         assert_eq!(
             BgpError::new(3, 3),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::MISSING_WELL_KNOWN_ATTRIBUTE)
+            BgpError::UpdateError(UpdateError::MISSING_WELL_KNOWN_ATTRIBUTE)
         );
         assert_eq!(
             BgpError::new(3, 4),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::ATTRIBUTE_FLAGS_ERROR)
+            BgpError::UpdateError(UpdateError::ATTRIBUTE_FLAGS_ERROR)
         );
         assert_eq!(
             BgpError::new(3, 5),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::ATTRIBUTE_LENGTH_ERROR)
+            BgpError::UpdateError(UpdateError::ATTRIBUTE_LENGTH_ERROR)
         );
         assert_eq!(
             BgpError::new(3, 6),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::INVALID_ORIGIN_ERROR)
+            BgpError::UpdateError(UpdateError::INVALID_ORIGIN_ERROR)
         );
         assert_eq!(
             BgpError::new(3, 8),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::INVALID_NEXT_HOP_ATTRIBUTE)
+            BgpError::UpdateError(UpdateError::INVALID_NEXT_HOP_ATTRIBUTE)
         );
         assert_eq!(
             BgpError::new(3, 9),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::OPTIONAL_ATTRIBUTE_ERROR)
+            BgpError::UpdateError(UpdateError::OPTIONAL_ATTRIBUTE_ERROR)
         );
         assert_eq!(
             BgpError::new(3, 10),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::INVALID_NETWORK_FIELD)
+            BgpError::UpdateError(UpdateError::INVALID_NETWORK_FIELD)
         );
         assert_eq!(
             BgpError::new(3, 11),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::MALFORMED_AS_PATH)
+            BgpError::UpdateError(UpdateError::MALFORMED_AS_PATH)
         );
         // deprecated subcodes
         for n in [7] {
             assert_eq!(
                 BgpError::new(3, n),
-                BgpError::UpdateMessageError(UpdateMessageErrorSubcode::Unknown(n))
+                BgpError::UpdateError(UpdateError::Unknown(n))
             );
-            assert!(UpdateMessageErrorSubcode::Unknown(n).is_deprecated());
+            assert!(UpdateError::Unknown(n).is_deprecated());
         }
         assert_eq!(
             BgpError::new(3, 12),
-            BgpError::UpdateMessageError(UpdateMessageErrorSubcode::Unknown(12))
+            BgpError::UpdateError(UpdateError::Unknown(12))
         );
 
         assert_eq!(BgpError::new(4, 0), BgpError::HoldTimerExpired(0));
@@ -362,103 +354,91 @@ mod tests {
 
         assert_eq!(
             BgpError::new(5, 0),
-            BgpError::BgpFiniteStateMachineError(BgpFiniteStateMachineErrorSubcode::UNSPECIFIED)
+            BgpError::FiniteStateMachineError(FiniteStateMachineError::UNSPECIFIED)
         );
         assert_eq!(
             BgpError::new(5, 1),
-            BgpError::BgpFiniteStateMachineError(
-                BgpFiniteStateMachineErrorSubcode::RECEIVE_UNEXPECTED_MESSAGE_IN_OPENSENT_State
+            BgpError::FiniteStateMachineError(
+                FiniteStateMachineError::RECEIVE_UNEXPECTED_MESSAGE_IN_OPENSENT_State
             )
         );
         assert_eq!(
             BgpError::new(5, 2),
-            BgpError::BgpFiniteStateMachineError(
-                BgpFiniteStateMachineErrorSubcode::RECEIVE_UNEXPECTED_MESSAGE_IN_OPENCONFIRM_STATE
+            BgpError::FiniteStateMachineError(
+                FiniteStateMachineError::RECEIVE_UNEXPECTED_MESSAGE_IN_OPENCONFIRM_STATE
             )
         );
         assert_eq!(
             BgpError::new(5, 3),
-            BgpError::BgpFiniteStateMachineError(
-                BgpFiniteStateMachineErrorSubcode::RECEIVE_UNEXPECTED_MESSAGE_IN_ESTABLISHED_STATE
+            BgpError::FiniteStateMachineError(
+                FiniteStateMachineError::RECEIVE_UNEXPECTED_MESSAGE_IN_ESTABLISHED_STATE
             )
         );
         assert_eq!(
             BgpError::new(5, 4),
-            BgpError::BgpFiniteStateMachineError(BgpFiniteStateMachineErrorSubcode::Unknown(4))
+            BgpError::FiniteStateMachineError(FiniteStateMachineError::Unknown(4))
         );
 
         assert_eq!(
             BgpError::new(6, 0),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::RESERVED)
+            BgpError::CeaseNotification(CeaseNotification::RESERVED)
         );
         assert_eq!(
             BgpError::new(6, 1),
-            BgpError::BgpCeaseNotification(
-                BgpCeaseNotificationMessageSubcode::MAXIMUM_NUMBER_OF_PREFIXES_REACHED
-            )
+            BgpError::CeaseNotification(CeaseNotification::MAXIMUM_NUMBER_OF_PREFIXES_REACHED)
         );
         assert_eq!(
             BgpError::new(6, 2),
-            BgpError::BgpCeaseNotification(
-                BgpCeaseNotificationMessageSubcode::ADMINISTRATIVE_SHUTDOWN
-            )
+            BgpError::CeaseNotification(CeaseNotification::ADMINISTRATIVE_SHUTDOWN)
         );
         assert_eq!(
             BgpError::new(6, 3),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::PEER_DE_CONFIGURED)
+            BgpError::CeaseNotification(CeaseNotification::PEER_DE_CONFIGURED)
         );
         assert_eq!(
             BgpError::new(6, 4),
-            BgpError::BgpCeaseNotification(
-                BgpCeaseNotificationMessageSubcode::ADMINISTRATIVE_RESET
-            )
+            BgpError::CeaseNotification(CeaseNotification::ADMINISTRATIVE_RESET)
         );
         assert_eq!(
             BgpError::new(6, 5),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::CONNECTION_REJECTED)
+            BgpError::CeaseNotification(CeaseNotification::CONNECTION_REJECTED)
         );
         assert_eq!(
             BgpError::new(6, 6),
-            BgpError::BgpCeaseNotification(
-                BgpCeaseNotificationMessageSubcode::OTHER_CONFIGURATION_CHANGE
-            )
+            BgpError::CeaseNotification(CeaseNotification::OTHER_CONFIGURATION_CHANGE)
         );
         assert_eq!(
             BgpError::new(6, 7),
-            BgpError::BgpCeaseNotification(
-                BgpCeaseNotificationMessageSubcode::CONNECTION_COLLISION_RESOLUTION
-            )
+            BgpError::CeaseNotification(CeaseNotification::CONNECTION_COLLISION_RESOLUTION)
         );
         assert_eq!(
             BgpError::new(6, 8),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::OUT_OF_RESOURCES)
+            BgpError::CeaseNotification(CeaseNotification::OUT_OF_RESOURCES)
         );
         assert_eq!(
             BgpError::new(6, 9),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::HARD_RESET)
+            BgpError::CeaseNotification(CeaseNotification::HARD_RESET)
         );
         assert_eq!(
             BgpError::new(6, 10),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::BFD_DOWN)
+            BgpError::CeaseNotification(CeaseNotification::BFD_DOWN)
         );
         assert_eq!(
             BgpError::new(6, 11),
-            BgpError::BgpCeaseNotification(BgpCeaseNotificationMessageSubcode::Unknown(11))
+            BgpError::CeaseNotification(CeaseNotification::Unknown(11))
         );
 
         assert_eq!(
             BgpError::new(7, 0),
-            BgpError::BgpRouteFreshMessageError(BgpRouteRefreshMessageErrorSubcode::RESERVED)
+            BgpError::RouteFreshError(RouteRefreshError::RESERVED)
         );
         assert_eq!(
             BgpError::new(7, 1),
-            BgpError::BgpRouteFreshMessageError(
-                BgpRouteRefreshMessageErrorSubcode::INVALID_MESSAGE_LENGTH
-            )
+            BgpError::RouteFreshError(RouteRefreshError::INVALID_MESSAGE_LENGTH)
         );
         assert_eq!(
             BgpError::new(7, 2),
-            BgpError::BgpRouteFreshMessageError(BgpRouteRefreshMessageErrorSubcode::Unknown(2))
+            BgpError::RouteFreshError(RouteRefreshError::Unknown(2))
         );
 
         assert_eq!(BgpError::new(8, 2), BgpError::Unknown(8, 2));

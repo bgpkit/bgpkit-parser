@@ -138,7 +138,7 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
 /// The entry type and subtype are parsed from the common header. The message body is parsed
 /// according to the entry type and subtype. The message body is the remaining bytes after the
 /// common header. The length of the message body is also parsed from the common header.
-fn parse_mrt_body(
+pub fn parse_mrt_body(
     entry_type: u16,
     entry_subtype: u16,
     data: Bytes,
