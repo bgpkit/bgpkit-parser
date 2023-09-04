@@ -13,6 +13,12 @@ pub enum MetaCommunity {
     LargeCommunity(LargeCommunity),
 }
 
+impl MetaCommunity {
+    pub const fn is_transitive(&self) -> bool {
+        todo!()
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Community {
@@ -61,6 +67,7 @@ pub enum ExtendedCommunityType {
     NonTransitiveFourOctetAsSpecific = 0x42,
     NonTransitiveOpaque = 0x43,
     // the rest are either draft or experimental
+    // TODO: Add unknown variant
 }
 
 /// Extended Communities.

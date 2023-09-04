@@ -170,31 +170,17 @@ impl Display for BgpElem {
 impl BgpElem {
     /// Returns true if the element is an announcement.
     ///
-    /// Most of the time, users do not really need to get the type out, only needs to know if it is an announcement or a withdrawal.
+    /// Most of the time, users do not really need to get the type out, only needs to know if it is
+    /// an announcement or a withdrawal.
     pub fn is_announcement(&self) -> bool {
         self.elem_type == ElemType::ANNOUNCE
     }
 
-    /// Returns the AS path as a vector of ASNs in u32 format. Returns None if the AS path is not present or it contains AS set or confederated segments.
-    pub fn get_as_path_opt(&self) -> Option<Vec<u32>> {
-        match &self.as_path {
-            Some(as_path) => as_path.to_u32_vec(),
-            None => None,
-        }
-    }
-
-    /// Returns the origin AS number as u32. Returns None if the origin AS number is not present or it's a AS set.
+    /// Returns the origin AS number as u32. Returns None if the origin AS number is not present or
+    /// it's a AS set.
     pub fn get_origin_asn_opt(&self) -> Option<u32> {
-        match &self.origin_asns {
-            Some(origin_asns) => {
-                if origin_asns.len() == 1 {
-                    Some(origin_asns[0].asn)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        }
+        let origin_asns = self.origin_asns.as_ref()?;
+        (origin_asns.len() == 1).then(|| origin_asns[0].into())
     }
 }
 

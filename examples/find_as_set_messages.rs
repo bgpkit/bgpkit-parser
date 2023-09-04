@@ -22,7 +22,7 @@ fn main() {
             if !elem.elem_type.is_announce() {
                 continue;
             }
-            for seg in elem.as_path.as_ref().unwrap().segments() {
+            for seg in elem.as_path.as_ref().unwrap().iter_segments() {
                 match seg {
                     AsPathSegment::AsSet(p) | AsPathSegment::ConfedSet(p) => {
                         // println!("{elem}");

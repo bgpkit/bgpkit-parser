@@ -1,7 +1,10 @@
 use crate::models::*;
 use itertools::Itertools;
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::iter::FromIterator;
+use std::marker::PhantomData;
 use std::mem::discriminant;
 
 /// Enum of AS path segment.
@@ -14,12 +17,30 @@ pub enum AsPathSegment {
 }
 
 impl AsPathSegment {
-    pub fn count_asns(&self) -> usize {
+    /// Get the number of ASNs this segment adds to the route. For the number of ASNs within the
+    /// segment use [AsPathSegment::len] instead.
+    pub fn route_len(&self) -> usize {
         match self {
             AsPathSegment::AsSequence(v) => v.len(),
             AsPathSegment::AsSet(_) => 1,
             AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => 0,
         }
+    }
+
+    /// Ge the total number of ASNs within this segment. For the number of ASNs this segment adds to
+    /// a packet's route, use [AsPathSegment::route_len] instead.
+    pub fn len(&self) -> usize {
+        self.as_ref().len()
+    }
+
+    /// Get an iterator over the ASNs within this path segment
+    pub fn iter(&self) -> <&'_ Self as IntoIterator>::IntoIter {
+        self.into_iter()
+    }
+
+    /// Get a mutable iterator over the ASNs within this path segment
+    pub fn iter_mut(&mut self) -> <&'_ mut Self as IntoIterator>::IntoIter {
+        self.into_iter()
     }
 
     /// Gets if a segment represents the local members of an autonomous system confederation.
@@ -31,6 +52,56 @@ impl AsPathSegment {
             self,
             AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_)
         )
+    }
+}
+
+impl IntoIterator for AsPathSegment {
+    type Item = Asn;
+    type IntoIter = std::vec::IntoIter<Asn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let (AsPathSegment::AsSequence(x)
+        | AsPathSegment::AsSet(x)
+        | AsPathSegment::ConfedSequence(x)
+        | AsPathSegment::ConfedSet(x)) = self;
+        x.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a AsPathSegment {
+    type Item = &'a Asn;
+    type IntoIter = std::slice::Iter<'a, Asn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let (AsPathSegment::AsSequence(x)
+        | AsPathSegment::AsSet(x)
+        | AsPathSegment::ConfedSequence(x)
+        | AsPathSegment::ConfedSet(x)) = self;
+        x.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut AsPathSegment {
+    type Item = &'a mut Asn;
+    type IntoIter = std::slice::IterMut<'a, Asn>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let (AsPathSegment::AsSequence(x)
+        | AsPathSegment::AsSet(x)
+        | AsPathSegment::ConfedSequence(x)
+        | AsPathSegment::ConfedSet(x)) = self;
+        x.iter_mut()
+    }
+}
+
+impl AsRef<[Asn]> for AsPathSegment {
+    fn as_ref(&self) -> &[Asn] {
+        match self {
+            AsPathSegment::AsSequence(x) => &x,
+            AsPathSegment::AsSet(x) => &x,
+            AsPathSegment::ConfedSequence(x) => &x,
+            AsPathSegment::ConfedSet(x) => &x,
+        }
     }
 }
 
@@ -107,11 +178,95 @@ impl PartialEq for AsPathSegment {
 
 impl Eq for AsPathSegment {}
 
-// TODO(jmeggitt): Implement iterators for AsPath (both over elements and all sequence variants)
+/// This is not a perfect solution since it is theoretically possible that a path could be created
+/// with more variations than a u64. That being said, the chances of such a thing occurring are
+/// essentially non-existent unless a BGP peer begins announcing maliciously constructed paths.
+struct AsPathNumberedRouteIter<'a> {
+    path: &'a [AsPathSegment],
+    index: usize,
+    route_num: u64,
+}
+
+impl<'a> Iterator for AsPathNumberedRouteIter<'a> {
+    type Item = Asn;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.path.first()? {
+                AsPathSegment::AsSequence(x) => match x.get(self.index) {
+                    None => {
+                        self.index = 0;
+                        self.path = &self.path[1..];
+                    }
+                    Some(asn) => {
+                        self.index += 1;
+                        return Some(*asn);
+                    }
+                },
+                AsPathSegment::AsSet(x) => {
+                    self.path = &self.path[1..];
+                    if x.is_empty() {
+                        return Some(Asn::RESERVED);
+                    }
+
+                    let asn = x[(self.route_num % x.len() as u64) as usize];
+                    self.route_num /= x.len() as u64;
+                    return Some(asn);
+                }
+                _ => self.path = &self.path[1..],
+            }
+        }
+    }
+}
+
+pub struct AsPathRouteIter<'a, D> {
+    path: Cow<'a, [AsPathSegment]>,
+    route_num: u64,
+    total_routes: u64,
+    _phantom: PhantomData<D>,
+}
+
+impl<'a, D> Iterator for AsPathRouteIter<'a, D>
+where
+    D: FromIterator<Asn>,
+{
+    type Item = D;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.route_num >= self.total_routes {
+            return None;
+        }
+
+        // Attempt to speed up what is by far the most common case (a path of a single sequence)
+        if self.route_num == 0 && self.path.len() == 1 {
+            if let AsPathSegment::AsSequence(sequence) = &self.path[0] {
+                let route = D::from_iter(sequence.iter().copied());
+                self.route_num += 1;
+                return Some(route);
+            }
+        }
+
+        let route_asn_iter = AsPathNumberedRouteIter {
+            path: self.path.as_ref(),
+            index: 0,
+            route_num: self.route_num,
+        };
+
+        self.route_num += 1;
+        Some(D::from_iter(route_asn_iter))
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
 pub struct AsPath {
     pub segments: Vec<AsPathSegment>,
 }
+
+// Define iterator type aliases. The storage mechanism and by extension the iterator types may
+// change later, but these types should remain consistent.
+pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment>;
+pub type SegmentIterMut<'a> = std::slice::IterMut<'a, AsPathSegment>;
+pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment>;
 
 impl AsPath {
     pub fn new() -> AsPath {
@@ -122,16 +277,88 @@ impl AsPath {
         AsPath { segments }
     }
 
-    pub fn add_segment(&mut self, segment: AsPathSegment) {
+    // TODO: Would it make more sense to prepend the segment instead of pushing to the end?
+    // Semantically, it feels like it would make more sense to get further from the origin when
+    // pushing a new segment.
+    pub fn push_segment(&mut self, segment: AsPathSegment) {
         self.segments.push(segment);
     }
 
-    pub fn segments(&self) -> &Vec<AsPathSegment> {
-        &self.segments
+    /// Check if the path is empty. Note that a non-empty path may have a route length of 0 due to
+    /// empty segments or confederation segments.
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
     }
 
-    pub fn count_asns(&self) -> usize {
-        self.segments.iter().map(AsPathSegment::count_asns).sum()
+    /// Get the total length of the routes this path represents. For example, if this route
+    /// contained a sequence of 5 ASNs followed by a set of 3 ASNs, the total route length would be
+    /// 6.
+    ///
+    /// Confederation segments do not count towards the total route length. This means it is
+    /// possible to have a non-empty AsPath with a length of 0.
+    pub fn route_len(&self) -> usize {
+        self.segments.iter().map(AsPathSegment::route_len).sum()
+    }
+
+    /// Get the number of segments that make up this path. For the number of ASNs in routes
+    /// represented by this path, use [AsPath::route_len].
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// Get the total number of routes this path represents. This function assumes the total number
+    /// of route variations can be represented by a u64.
+    pub fn num_route_variations(&self) -> u64 {
+        let mut variations: u64 = 1;
+
+        for segment in &self.segments {
+            if let AsPathSegment::AsSet(x) = segment {
+                variations *= x.len() as u64;
+            }
+        }
+
+        variations
+    }
+
+    /// Checks if any segments of this AsPath contain the following ASN.
+    pub fn contains_asn(&self, x: Asn) -> bool {
+        self.iter_segments().flatten().contains(&x)
+    }
+
+    /// Get the length of ASN required to store all of the ASNs within this path
+    pub fn required_asn_length(&self) -> AsnLength {
+        self.iter_segments().flatten().map(Asn::required_len).fold(
+            AsnLength::Bits16,
+            |a, b| match (a, b) {
+                (AsnLength::Bits16, AsnLength::Bits16) => AsnLength::Bits16,
+                _ => AsnLength::Bits32,
+            },
+        )
+    }
+
+    pub fn iter_segments(&self) -> SegmentIter<'_> {
+        self.segments.iter()
+    }
+
+    pub fn iter_segments_mut(&mut self) -> SegmentIterMut<'_> {
+        self.segments.iter_mut()
+    }
+
+    pub fn into_segments_iter(self) -> SegmentIntoIter {
+        self.segments.into_iter()
+    }
+
+    /// Gets an iterator over all possible routes this path represents.
+    pub fn iter_routes<D>(&self) -> AsPathRouteIter<'_, D>
+    where
+        D: FromIterator<Asn>,
+    {
+        AsPathRouteIter {
+            path: Cow::Borrowed(&self.segments),
+            route_num: 0,
+            total_routes: self.num_route_variations(),
+            _phantom: PhantomData,
+        }
     }
 
     /// Construct AsPath from AS_PATH and AS4_PATH
@@ -156,7 +383,7 @@ impl AsPath {
     ///    segment that is prepended.
     /// ```
     pub fn merge_aspath_as4path(aspath: &AsPath, as4path: &AsPath) -> Option<AsPath> {
-        if aspath.count_asns() < as4path.count_asns() {
+        if aspath.route_len() < as4path.route_len() {
             return Some(aspath.clone());
         }
 
@@ -187,45 +414,59 @@ impl AsPath {
         Some(AsPath { segments: new_segs })
     }
 
-    pub fn get_origin(&self) -> Option<Vec<Asn>> {
-        if let Some(seg) = self.segments.last() {
-            match seg {
-                AsPathSegment::AsSequence(v) => v.last().map(|n| vec![*n]),
-                AsPathSegment::AsSet(v) => Some(v.clone()),
-                AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_) => None,
-            }
-        } else {
-            None
-        }
+    /// Iterate through the originating ASNs of this path. This functionality is provided for
+    /// completeness, but in almost all cases this iterator should only contain a single element.
+    /// Alternatively, [AsPath::get_singular_origin] can be used if
+    pub fn iter_origins(&self) -> impl '_ + Iterator<Item = Asn> {
+        let origin_slice = match self.segments.last() {
+            Some(AsPathSegment::AsSequence(v)) => v.last().map(std::slice::from_ref).unwrap_or(&[]),
+            Some(AsPathSegment::AsSet(v)) => v.as_ref(),
+            _ => &[],
+        };
+
+        origin_slice.iter().copied()
     }
 
-    pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
-        if !self
-            .segments
-            .iter()
-            .all(|seg| matches!(seg, AsPathSegment::AsSequence(_v)))
-        {
-            // as path contains AS set or confederated sequence/set
-            return None;
+    /// This function serves as a alternative to [AsPath::iter_origins] which attempts to make the
+    /// assumption that a path can only have exactly one origin. If a path does not have exactly 1
+    /// origin (such as when empty or ending in a set), then `None` will be returned instead.
+    pub fn get_singular_origin(&self) -> Option<Asn> {
+        match self.segments.last() {
+            Some(AsPathSegment::AsSequence(v)) => v.last().copied(),
+            Some(AsPathSegment::AsSet(v)) if v.len() == 1 => Some(v[0]),
+            _ => None,
         }
-        let mut path = vec![];
-        for s in &self.segments {
-            if let AsPathSegment::AsSequence(seg) = s {
-                for asn in seg {
-                    path.push(asn.asn);
-                }
-            } else {
-                // this won't happen
-                return None;
-            }
+    }
+}
+
+/// Iterates over all route variations the given `AsPath` represents.
+impl<'a> IntoIterator for &'a AsPath {
+    type Item = Vec<Asn>;
+    type IntoIter = AsPathRouteIter<'a, Vec<Asn>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_routes()
+    }
+}
+
+/// Iterates over all route variations the given `AsPath` represents.
+impl IntoIterator for AsPath {
+    type Item = Vec<Asn>;
+    type IntoIter = AsPathRouteIter<'static, Vec<Asn>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        AsPathRouteIter {
+            total_routes: self.num_route_variations(),
+            path: Cow::Owned(self.segments),
+            route_num: 0,
+            _phantom: PhantomData,
         }
-        Some(path)
     }
 }
 
 impl Display for AsPath {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        for (index, segment) in self.segments().iter().enumerate() {
+        for (index, segment) in self.iter_segments().enumerate() {
             if index != 0 {
                 write!(f, " ")?;
             }
@@ -491,6 +732,8 @@ mod serde_impl {
 #[cfg(test)]
 mod tests {
     use crate::models::*;
+    use itertools::Itertools;
+    use std::collections::HashSet;
 
     #[test]
     fn test_aspath_as4path_merge() {
@@ -518,9 +761,8 @@ mod tests {
                 [1, 2, 3, 5].map(|i| i.into()).to_vec(),
             )],
         };
-        let origins = aspath.get_origin();
-        assert!(origins.is_some());
-        assert_eq!(origins.unwrap(), vec![5]);
+        let origins = aspath.get_singular_origin();
+        assert_eq!(origins.unwrap(), Asn::from(5));
 
         let aspath = AsPath {
             segments: vec![
@@ -528,31 +770,48 @@ mod tests {
                 AsPathSegment::AsSet([7, 8].map(|i| i.into()).to_vec()),
             ],
         };
-        let origins = aspath.get_origin();
-        assert!(origins.is_some());
-        assert_eq!(origins.unwrap(), vec![7, 8]);
+        let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
+        assert_eq!(origins, vec![7, 8]);
     }
 
     #[test]
-    fn test_aspath_to_vec() {
-        let as4path = AsPath {
-            segments: vec![AsPathSegment::AsSequence(
-                [2, 3, 4].map(|i| i.into()).to_vec(),
-            )],
-        };
-        assert_eq!(as4path.to_u32_vec(), Some(vec![2, 3, 4]));
+    fn test_aspath_route_iter() {
+        let path = AsPath::from_segments(vec![
+            AsPathSegment::AsSet(vec![Asn::from(3), Asn::from(4)]),
+            AsPathSegment::AsSet(vec![Asn::from(5), Asn::from(6)]),
+            AsPathSegment::AsSequence(vec![Asn::from(7), Asn::from(8)]),
+        ]);
+        assert_eq!(path.route_len(), 4);
 
-        let as4path = AsPath {
-            segments: vec![
-                AsPathSegment::AsSequence([2, 3, 4].map(|i| i.into()).to_vec()),
-                AsPathSegment::AsSequence([5, 6, 7].map(|i| i.into()).to_vec()),
-            ],
-        };
-        assert_eq!(as4path.to_u32_vec(), Some(vec![2, 3, 4, 5, 6, 7]));
+        let mut routes = HashSet::new();
+        for route in &path {
+            assert!(routes.insert(route));
+        }
 
-        let as4path = AsPath {
-            segments: vec![AsPathSegment::AsSet([2, 3, 4].map(|i| i.into()).to_vec())],
-        };
-        assert_eq!(as4path.to_u32_vec(), None);
+        assert_eq!(routes.len(), 4);
+        assert!(routes.contains(&vec![
+            Asn::from(3),
+            Asn::from(5),
+            Asn::from(7),
+            Asn::from(8)
+        ]));
+        assert!(routes.contains(&vec![
+            Asn::from(3),
+            Asn::from(6),
+            Asn::from(7),
+            Asn::from(8)
+        ]));
+        assert!(routes.contains(&vec![
+            Asn::from(4),
+            Asn::from(5),
+            Asn::from(7),
+            Asn::from(8)
+        ]));
+        assert!(routes.contains(&vec![
+            Asn::from(4),
+            Asn::from(6),
+            Asn::from(7),
+            Asn::from(8)
+        ]));
     }
 }

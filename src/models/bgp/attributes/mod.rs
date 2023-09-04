@@ -135,6 +135,60 @@ impl Attributes {
         self.inner.iter().any(|x| x.value.attr_type() == ty)
     }
 
+    pub fn get_attr(&self, ty: AttrType) -> Option<Attribute> {
+        self.inner
+            .iter()
+            .filter(|x| x.value.attr_type() == ty)
+            .cloned()
+            .next()
+    }
+
+    pub fn origin(&self) -> Origin {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::Origin(x) => Some(*x),
+                _ => None,
+            })
+            .next()
+            .unwrap_or(Origin::INCOMPLETE)
+    }
+
+    pub fn origin_id(&self) -> Option<IpAddr> {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::OriginatorId(x) => Some(*x),
+                _ => None,
+            })
+            .next()
+    }
+
+    // TODO: Why would the attribute be used instead of the reach NLRI? Should this check both?
+    pub fn next_hop(&self) -> Option<IpAddr> {
+        self.inner
+            .iter()
+            .filter_map(|x| match &x.value {
+                AttributeValue::NextHop(x) => Some(*x),
+                _ => None,
+            })
+            .next()
+    }
+
+    // TODO: Add functions for these attributes:
+    // multi exit discriminator
+    // local preference
+    // only to customer
+    // atomic aggregate
+    // aggregator
+    // clusters
+    // development
+
+    // Semi-completed:
+    // originator id
+    // reach/unreach
+    // communities/extended communities/large communities
+
     // These implementations are horribly inefficient, but they were super easy to write and use
     pub fn as_path(&self) -> Option<&AsPath> {
         self.inner
@@ -165,6 +219,45 @@ impl Attributes {
             })
             .next()
     }
+
+    pub fn iter_communities(&self) -> MetaCommunitiesIter<'_> {
+        MetaCommunitiesIter {
+            attributes: &self.inner,
+            index: 0,
+        }
+    }
+}
+
+pub struct MetaCommunitiesIter<'a> {
+    attributes: &'a [Attribute],
+    index: usize,
+}
+
+impl Iterator for MetaCommunitiesIter<'_> {
+    type Item = MetaCommunity;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match &self.attributes.first()?.value {
+                AttributeValue::Communities(x) if self.index < x.len() => {
+                    self.index += 1;
+                    return Some(MetaCommunity::Community(x[self.index - 1]));
+                }
+                AttributeValue::ExtendedCommunities(x) if self.index < x.len() => {
+                    self.index += 1;
+                    return Some(MetaCommunity::ExtendedCommunity(x[self.index - 1]));
+                }
+                AttributeValue::LargeCommunities(x) if self.index < x.len() => {
+                    self.index += 1;
+                    return Some(MetaCommunity::LargeCommunity(x[self.index - 1]));
+                }
+                _ => {
+                    self.attributes = &self.attributes[1..];
+                    self.index = 0;
+                }
+            }
+        }
+    }
 }
 
 impl FromIterator<Attribute> for Attributes {
@@ -187,13 +280,18 @@ impl Extend<Attribute> for Attributes {
     }
 }
 
+impl Extend<AttributeValue> for Attributes {
+    fn extend<T: IntoIterator<Item = AttributeValue>>(&mut self, _iter: T) {
+        todo!()
+    }
+}
+
 impl FromIterator<AttributeValue> for Attributes {
     fn from_iter<T: IntoIterator<Item = AttributeValue>>(iter: T) -> Self {
         Attributes {
             inner: iter
                 .into_iter()
                 .map(|value| Attribute {
-                    attr_type: value.attr_type(),
                     value,
                     flag: AttrFlags::empty(),
                 })
@@ -220,6 +318,7 @@ impl<'a> IntoIterator for &'a Attributes {
     }
 }
 
+// TODO: This may need to be removed when different underlying storages are added
 impl Deref for Attributes {
     type Target = Vec<Attribute>;
 
@@ -258,9 +357,35 @@ mod serde_impl {
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Attribute {
-    pub attr_type: AttrType,
     pub value: AttributeValue,
     pub flag: AttrFlags,
+}
+
+impl Attribute {
+    pub const fn is_optional(&self) -> bool {
+        self.flag.contains(AttrFlags::OPTIONAL)
+    }
+
+    pub const fn is_transitive(&self) -> bool {
+        self.flag.contains(AttrFlags::TRANSITIVE)
+    }
+
+    pub const fn is_partial(&self) -> bool {
+        self.flag.contains(AttrFlags::PARTIAL)
+    }
+
+    pub const fn is_extended(&self) -> bool {
+        self.flag.contains(AttrFlags::EXTENDED)
+    }
+}
+
+impl From<AttributeValue> for Attribute {
+    fn from(value: AttributeValue) -> Self {
+        Attribute {
+            flag: value.default_flags().unwrap_or_else(AttrFlags::empty),
+            value,
+        }
+    }
 }
 
 impl Deref for Attribute {
@@ -271,6 +396,8 @@ impl Deref for Attribute {
     }
 }
 
+// TODO: Some of these IP addresses are actually just IPv4 addresses
+// TODO: Can we go from As/As4 to singular variants?
 /// The `AttributeValue` enum represents different kinds of Attribute values.
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -284,6 +411,7 @@ pub enum AttributeValue {
     OnlyToCustomer(u32),
     AtomicAggregate(AtomicAggregate),
     Aggregator(Asn, IpAddr),
+    As4Aggregator(Asn, IpAddr),
     Communities(Vec<Community>),
     ExtendedCommunities(Vec<ExtendedCommunity>),
     LargeCommunities(Vec<LargeCommunity>),
@@ -296,8 +424,23 @@ pub enum AttributeValue {
     Unknown(AttrRaw),
 }
 
+impl From<Origin> for AttributeValue {
+    fn from(value: Origin) -> Self {
+        AttributeValue::Origin(value)
+    }
+}
+
+impl From<AsPath> for AttributeValue {
+    fn from(value: AsPath) -> Self {
+        match value.required_asn_length() {
+            AsnLength::Bits16 => AttributeValue::AsPath(value),
+            AsnLength::Bits32 => AttributeValue::As4Path(value),
+        }
+    }
+}
+
 impl AttributeValue {
-    pub fn attr_type(&self) -> AttrType {
+    pub const fn attr_type(&self) -> AttrType {
         match self {
             AttributeValue::Origin(_) => AttrType::ORIGIN,
             AttributeValue::AsPath(_) => AttrType::AS_PATH,
@@ -308,6 +451,7 @@ impl AttributeValue {
             AttributeValue::OnlyToCustomer(_) => AttrType::ONLY_TO_CUSTOMER,
             AttributeValue::AtomicAggregate(_) => AttrType::ATOMIC_AGGREGATE,
             AttributeValue::Aggregator(_, _) => AttrType::AGGREGATOR,
+            AttributeValue::As4Aggregator(_, _) => AttrType::AS4_AGGREGATOR,
             AttributeValue::Communities(_) => AttrType::COMMUNITIES,
             AttributeValue::ExtendedCommunities(_) => AttrType::EXTENDED_COMMUNITIES,
             AttributeValue::LargeCommunities(_) => AttrType::LARGE_COMMUNITIES,
@@ -318,6 +462,10 @@ impl AttributeValue {
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
         }
+    }
+
+    pub fn default_flags(&self) -> Option<AttrFlags> {
+        todo!()
     }
 }
 

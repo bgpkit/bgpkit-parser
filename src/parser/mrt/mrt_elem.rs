@@ -86,7 +86,9 @@ fn get_relevant_attributes(
                     .map(MetaCommunity::LargeCommunity)
                     .collect::<Vec<MetaCommunity>>(),
             ),
-            AttributeValue::Aggregator(v, v2) => aggregator = Some((v, v2)),
+            AttributeValue::Aggregator(v, v2) | AttributeValue::As4Aggregator(v, v2) => {
+                aggregator = Some((v, v2))
+            }
             AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),
@@ -193,10 +195,9 @@ impl Elementor {
             (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap()),
         };
 
-        let origin_asns = match &path {
-            None => None,
-            Some(p) => p.get_origin(),
-        };
+        let origin_asns = path
+            .as_ref()
+            .map(|as_path| as_path.iter_origins().collect());
 
         elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
             timestamp,
@@ -317,10 +318,9 @@ impl Elementor {
                     deprecated,
                 ) = get_relevant_attributes(msg.attributes);
 
-                let origin_asns = match &as_path {
-                    None => None,
-                    Some(p) => p.get_origin(),
-                };
+                let origin_asns = as_path
+                    .as_ref()
+                    .map(|as_path| as_path.iter_origins().collect());
 
                 elems.push(BgpElem {
                     timestamp,
@@ -407,10 +407,9 @@ impl Elementor {
                                 Some(v) => Some(v),
                             };
 
-                            let origin_asns = match &path {
-                                None => None,
-                                Some(p) => p.get_origin(),
-                            };
+                            let origin_asns = path
+                                .as_ref()
+                                .map(|as_path| as_path.iter_origins().collect());
 
                             elems.push(BgpElem {
                                 timestamp,

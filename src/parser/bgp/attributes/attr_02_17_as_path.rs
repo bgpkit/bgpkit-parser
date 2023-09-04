@@ -1,4 +1,3 @@
-use crate::models::attributes::AttributeValue;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -10,15 +9,16 @@ const AS_PATH_AS_SEQUENCE: u8 = 2;
 const AS_PATH_CONFED_SEQUENCE: u8 = 3;
 const AS_PATH_CONFED_SET: u8 = 4;
 
-pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AttributeValue, ParserError> {
+pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
         segments: Vec::with_capacity(5),
     };
     while input.remaining() > 0 {
         let segment = parse_as_path_segment(&mut input, asn_len)?;
-        output.add_segment(segment);
+        output.push_segment(segment);
     }
-    Ok(AttributeValue::AsPath(output))
+
+    Ok(output)
 }
 
 fn parse_as_path_segment(
@@ -43,7 +43,6 @@ fn parse_as_path_segment(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AttributeValue::AsPath;
 
     ///
     /// ```text
@@ -81,14 +80,13 @@ mod tests {
             0, 2, // AS2
             0, 3, // AS3
         ]);
-        let res = parse_as_path(data, &AsnLength::Bits16).unwrap();
+        let path = parse_as_path(data, &AsnLength::Bits16).unwrap();
+        let expected_sequence =
+            AsPathSegment::AsSequence(vec![Asn::from(1), Asn::from(2), Asn::from(3)]);
 
-        assert!(matches!(res, AsPath(_)));
-        if let AsPath(path) = res {
-            assert_eq!(vec![1, 2, 3], path.to_u32_vec().unwrap())
-        } else {
-            panic!("cannot parse the path")
-        }
+        let mut segment_iter = path.iter_segments();
+        assert_eq!(segment_iter.next(), Some(&expected_sequence));
+        assert_eq!(segment_iter.next(), None);
     }
 
     #[test]

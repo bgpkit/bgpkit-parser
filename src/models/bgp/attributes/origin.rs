@@ -6,7 +6,10 @@ use std::fmt::{Display, Formatter};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum Origin {
+    /// Interior Gateway Protocol
     IGP = 0,
+    /// Exterior Gateway Protocol
+    /// <https://datatracker.ietf.org/doc/html/rfc904>
     EGP = 1,
     INCOMPLETE = 2,
 }

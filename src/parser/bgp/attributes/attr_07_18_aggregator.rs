@@ -3,6 +3,7 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
 use log::warn;
+use std::net::IpAddr;
 
 /// Parse aggregator attribute.
 ///
@@ -18,7 +19,7 @@ use log::warn;
 pub fn parse_aggregator(
     mut input: Bytes,
     asn_len: &AsnLength,
-) -> Result<AttributeValue, ParserError> {
+) -> Result<(Asn, IpAddr), ParserError> {
     let asn_len_found = match input.remaining() {
         8 => AsnLength::Bits32,
         6 => AsnLength::Bits16,
@@ -39,7 +40,7 @@ pub fn parse_aggregator(
 
     // the BGP identifier is always 4 bytes or IPv4 address
     let identifier = input.read_address(&Afi::Ipv4)?;
-    Ok(AttributeValue::Aggregator(asn, identifier))
+    Ok((asn, identifier))
 }
 
 #[cfg(test)]
@@ -56,8 +57,7 @@ mod tests {
         data.extend(identifier.octets());
         let bytes = Bytes::from(data);
 
-        if let Ok(AttributeValue::Aggregator(asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16)
-        {
+        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16) {
             assert_eq!(n, identifier);
             assert_eq!(
                 asn,
@@ -75,8 +75,7 @@ mod tests {
         data.extend(identifier.octets());
         let bytes = Bytes::from(data);
 
-        if let Ok(AttributeValue::Aggregator(asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32)
-        {
+        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32) {
             assert_eq!(n, identifier);
             assert_eq!(
                 asn,

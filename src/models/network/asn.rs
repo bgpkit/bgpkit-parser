@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 /// AS number length: 16 or 32 bits.
@@ -10,7 +10,7 @@ pub enum AsnLength {
 }
 
 /// ASN -- Autonomous System Number
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub struct Asn {
@@ -19,6 +19,8 @@ pub struct Asn {
 }
 
 impl Asn {
+    pub const RESERVED: Self = Asn::new_32bit(0);
+
     /// Constructs a new 2-octet `Asn` with `AsnLength::Bits16`.
     pub const fn new_16bit(asn: u16) -> Self {
         Asn {
@@ -144,6 +146,12 @@ impl From<Asn> for u32 {
 }
 
 impl Display for Asn {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.asn)
+    }
+}
+
+impl Debug for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
     }

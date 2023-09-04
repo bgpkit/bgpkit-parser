@@ -105,8 +105,9 @@ impl AttributeParser {
                             AttributeValue::Unknown(AttrRaw { attr_type, bytes })
                         }
                     };
+
+                    assert_eq!(attr_type, attr_value.attr_type());
                     attributes.push(Attribute {
-                        attr_type,
                         value: attr_value,
                         flag,
                     });
@@ -131,14 +132,15 @@ impl AttributeParser {
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => parse_as_path(attr_data, asn_len),
+                AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(AttributeValue::AsPath),
                 AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
                 AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
                 AttrType::ATOMIC_AGGREGATE => {
                     Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
                 }
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
+                    .map(|(asn, addr)| AttributeValue::Aggregator(asn, addr)),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
@@ -157,8 +159,11 @@ impl AttributeParser {
                     false,
                     self.additional_paths,
                 ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
+                AttrType::AS4_PATH => {
+                    parse_as_path(attr_data, &AsnLength::Bits32).map(AttributeValue::As4Path)
+                }
+                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32)
+                    .map(|(asn, addr)| AttributeValue::As4Aggregator(asn, addr)),
 
                 // communities
                 AttrType::COMMUNITIES => parse_regular_communities(attr_data),
@@ -183,11 +188,8 @@ impl AttributeParser {
 
             match attr {
                 Ok(value) => {
-                    attributes.push(Attribute {
-                        value,
-                        flag,
-                        attr_type,
-                    });
+                    assert_eq!(attr_type, value.attr_type());
+                    attributes.push(Attribute { value, flag });
                 }
                 Err(e) => {
                     if partial {
