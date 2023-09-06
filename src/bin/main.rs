@@ -1,10 +1,11 @@
-use itertools::Itertools;
 use serde_json::json;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use bgpkit_parser::{BgpkitParser, Elementor};
+use bgpkit_parser::filter::Filter;
+use bgpkit_parser::models::ElemType;
+use bgpkit_parser::{BgpkitParser, Elementor, PrefixMatchType};
 use clap::Parser;
 use ipnet::IpNet;
 
@@ -104,43 +105,39 @@ fn main() {
     };
 
     if let Some(v) = opts.filters.as_path {
-        parser = parser.add_filter("as_path", v.as_str()).unwrap();
+        parser = parser.add_filter(Filter::as_path(v.as_str()).unwrap());
     }
     if let Some(v) = opts.filters.origin_asn {
-        parser = parser
-            .add_filter("origin_asn", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::OriginAsn(v));
     }
     if let Some(v) = opts.filters.prefix {
         let filter_type = match (opts.filters.include_super, opts.filters.include_sub) {
-            (false, false) => "prefix",
-            (true, false) => "prefix_super",
-            (false, true) => "prefix_sub",
-            (true, true) => "prefix_super_sub",
+            (false, false) => PrefixMatchType::Exact,
+            (true, false) => PrefixMatchType::IncludeSuper,
+            (false, true) => PrefixMatchType::IncludeSub,
+            (true, true) => PrefixMatchType::IncludeSuperSub,
         };
-        parser = parser
-            .add_filter(filter_type, v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::Prefix(v, filter_type));
     }
     if !opts.filters.peer_ip.is_empty() {
-        let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",");
-        parser = parser.add_filter("peer_ips", v.as_str()).unwrap();
+        parser = parser.add_filter(Filter::PeerIps(opts.filters.peer_ip.to_owned()));
     }
     if let Some(v) = opts.filters.peer_asn {
-        parser = parser
-            .add_filter("peer_asn", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::PeerAsn(v));
     }
     if let Some(v) = opts.filters.elem_type {
-        parser = parser.add_filter("type", v.as_str()).unwrap();
+        let filter_type = match v.as_str() {
+            "w" | "withdraw" | "withdrawal" => ElemType::WITHDRAW,
+            "a" | "announce" | "announcement" => ElemType::ANNOUNCE,
+            x => panic!("cannot parse elem type from {}", x),
+        };
+        parser = parser.add_filter(Filter::Type(filter_type));
     }
     if let Some(v) = opts.filters.start_ts {
-        parser = parser
-            .add_filter("start_ts", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::TsStart(v));
     }
     if let Some(v) = opts.filters.end_ts {
-        parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
+        parser = parser.add_filter(Filter::TsEnd(v));
     }
 
     match (opts.elems_count, opts.records_count) {

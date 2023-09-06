@@ -24,14 +24,16 @@ and returns a new parser with specified filter added. See the example below.
 
 ```no_run
 use bgpkit_parser::BgpkitParser;
+use bgpkit_parser::filter::Filter;
+use bgpkit_parser::models::ElemType::ANNOUNCE;
 
 /// This example shows how to parse a MRT file and filter by prefix.
 env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
 log::info!("downloading updates file");
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-    .add_filter("prefix", "211.98.251.0/24").unwrap()
-    .add_filter("type", "a").unwrap();
+    .add_filter(Filter::prefix("211.98.251.0/24").unwrap())
+    .add_filter(Filter::Type(ANNOUNCE));
 
 // iterating through the parser. the iterator returns `BgpElem` one at a time.
 log::info!("parsing updates file");
@@ -52,8 +54,7 @@ later releases.
 
 */
 use crate::models::*;
-use crate::ParserError;
-use crate::ParserError::FilterError;
+use chrono::DateTime;
 use ipnet::IpNet;
 use regex::Regex;
 use std::net::IpAddr;
@@ -89,114 +90,31 @@ pub enum PrefixMatchType {
     IncludeSuperSub,
 }
 
-fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
-    if let Ok(t) = time_str.parse::<f64>() {
-        return chrono::NaiveDateTime::from_timestamp_opt(t as i64, 0);
+fn parse_time_str(time_str: &str) -> chrono::ParseResult<f64> {
+    if let Ok(unix_timestamp) = time_str.parse::<f64>() {
+        return Ok(unix_timestamp);
     }
-    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(time_str) {
-        return Some(t.naive_utc());
-    }
-    None
+
+    DateTime::parse_from_rfc3339(time_str).map(|x| x.naive_utc().timestamp() as f64)
 }
 
+/// Constructors provided for some backwards compatability with the removed `Filter::new`.
 impl Filter {
-    pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
-        match filter_type {
-            "origin_asn" => match u32::from_str(filter_value) {
-                Ok(v) => Ok(Filter::OriginAsn(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse origin asn from {}",
-                    filter_value
-                ))),
-            },
-            "prefix" => match IpNet::from_str(filter_value) {
-                Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::Exact)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
-                ))),
-            },
-            "prefix_super" => match IpNet::from_str(filter_value) {
-                Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSuper)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
-                ))),
-            },
-            "prefix_sub" => match IpNet::from_str(filter_value) {
-                Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSub)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
-                ))),
-            },
-            "prefix_super_sub" => match IpNet::from_str(filter_value) {
-                Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSuperSub)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
-                ))),
-            },
-            "peer_ip" => match IpAddr::from_str(filter_value) {
-                Ok(v) => Ok(Filter::PeerIp(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse peer IP from {}",
-                    filter_value
-                ))),
-            },
-            "peer_ips" => {
-                let mut ips = vec![];
-                for ip_str in filter_value.replace(' ', "").split(',') {
-                    match IpAddr::from_str(ip_str) {
-                        Ok(v) => ips.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse peer IP from {}",
-                                ip_str
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::PeerIps(ips))
-            }
-            "peer_asn" => match u32::from_str(filter_value) {
-                Ok(v) => Ok(Filter::PeerAsn(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse peer asn from {}",
-                    filter_value
-                ))),
-            },
-            "type" => match filter_value {
-                "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
-                "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
-                _ => Err(FilterError(format!(
-                    "cannot parse elem type from {}",
-                    filter_value
-                ))),
-            },
-            "ts_start" | "start_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsStart(t.timestamp() as f64)),
-                None => Err(FilterError(format!(
-                    "cannot parse TsStart filter from {}",
-                    filter_value
-                ))),
-            },
-            "ts_end" | "end_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsEnd(t.timestamp() as f64)),
-                None => Err(FilterError(format!(
-                    "cannot parse TsEnd filter from {}",
-                    filter_value
-                ))),
-            },
-            "as_path" => match Regex::from_str(filter_value) {
-                Ok(v) => Ok(Filter::AsPath(v)),
-                Err(_) => Err(FilterError(format!(
-                    "cannot parse AS path regex from {}",
-                    filter_value
-                ))),
-            },
-            _ => Err(FilterError(format!("unknown filter type: {}", filter_type))),
-        }
+    pub fn ts_start(time_str: &str) -> chrono::ParseResult<Self> {
+        parse_time_str(time_str).map(Filter::TsStart)
+    }
+
+    pub fn ts_end(time_str: &str) -> chrono::ParseResult<Self> {
+        parse_time_str(time_str).map(Filter::TsEnd)
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    pub fn as_path(regex: &str) -> Result<Self, regex::Error> {
+        Regex::new(regex).map(Filter::AsPath)
+    }
+
+    pub fn prefix(prefix: &str) -> Result<Self, ipnet::AddrParseError> {
+        IpNet::from_str(prefix).map(|prefix| Filter::Prefix(prefix, PrefixMatchType::Exact))
     }
 }
 
@@ -205,54 +123,17 @@ pub trait Filterable {
     fn match_filters(&self, filters: &[Filter]) -> bool;
 }
 
-const fn same_family(prefix_1: &IpNet, prefix_2: &IpNet) -> bool {
-    matches!(
-        (prefix_1, prefix_2),
-        (IpNet::V4(_), IpNet::V4(_)) | (IpNet::V6(_), IpNet::V6(_))
-    )
-}
-
 fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType) -> bool {
-    let exact = input_prefix.eq(match_prefix);
+    if input_prefix == match_prefix {
+        return true;
+    }
+
     match t {
-        PrefixMatchType::Exact => exact,
-        PrefixMatchType::IncludeSuper => {
-            if exact {
-                exact
-            } else if !same_family(match_prefix, input_prefix) {
-                // version not match
-                false
-            } else {
-                // input_prefix is super prefix of match_prefix
-                match_prefix.addr() >= input_prefix.addr()
-                    && match_prefix.broadcast() <= input_prefix.broadcast()
-            }
-        }
-        PrefixMatchType::IncludeSub => {
-            if exact {
-                exact
-            } else if !same_family(match_prefix, input_prefix) {
-                // version not match
-                false
-            } else {
-                // input_prefix is sub prefix of match_prefix
-                match_prefix.addr() <= input_prefix.addr()
-                    && match_prefix.broadcast() >= input_prefix.broadcast()
-            }
-        }
+        PrefixMatchType::Exact => false,
+        PrefixMatchType::IncludeSuper => input_prefix.contains(match_prefix),
+        PrefixMatchType::IncludeSub => match_prefix.contains(input_prefix),
         PrefixMatchType::IncludeSuperSub => {
-            if exact {
-                exact
-            } else if !same_family(match_prefix, input_prefix) {
-                // version not match
-                false
-            } else {
-                // input_prefix is super prefix of match_prefix
-                (match_prefix.addr() >= input_prefix.addr()
-                    && match_prefix.broadcast() <= input_prefix.broadcast())
-                    || (match_prefix.addr() <= input_prefix.addr()
-                        && match_prefix.broadcast() >= input_prefix.broadcast())
-            }
+            input_prefix.contains(match_prefix) || match_prefix.contains(input_prefix)
         }
     }
 }
@@ -295,6 +176,8 @@ mod tests {
     use super::*;
     use crate::BgpkitParser;
     use anyhow::Result;
+    use chrono::NaiveDateTime;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     #[test]
@@ -383,29 +266,31 @@ mod tests {
 
     #[test]
     fn test_parsing_time_str() {
-        let ts = chrono::NaiveDateTime::from_str("2021-11-20T19:49:58").unwrap();
-        assert_eq!(parse_time_str("1637437798"), Some(ts));
-        assert_eq!(parse_time_str("2021-11-20T19:49:58Z"), Some(ts));
-        assert_eq!(parse_time_str("2021-11-20T19:49:58+00:00"), Some(ts));
+        let ts = NaiveDateTime::from_str("2021-11-20T19:49:58")
+            .unwrap()
+            .timestamp() as f64;
+        assert_eq!(parse_time_str("1637437798").ok(), Some(ts));
+        assert_eq!(parse_time_str("2021-11-20T19:49:58Z").ok(), Some(ts));
+        assert_eq!(parse_time_str("2021-11-20T19:49:58+00:00").ok(), Some(ts));
 
-        assert_eq!(parse_time_str("2021-11-20T19:49:58"), None);
-        assert_eq!(parse_time_str("2021-11-20T19:49:58ZDXV"), None);
-        assert_eq!(parse_time_str("2021-11-20 19:49:58"), None);
-        assert_eq!(parse_time_str("2021-11-20"), None);
+        assert_eq!(parse_time_str("2021-11-20T19:49:58").ok(), None);
+        assert_eq!(parse_time_str("2021-11-20T19:49:58ZDXV").ok(), None);
+        assert_eq!(parse_time_str("2021-11-20 19:49:58").ok(), None);
+        assert_eq!(parse_time_str("2021-11-20").ok(), None);
     }
 
     #[test]
     fn test_filter_iter() -> Result<()> {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url)?
-            .add_filter("peer_ip", "185.1.8.50")?
-            .add_filter("type", "w")?;
+            .add_filter(Filter::PeerIp(Ipv4Addr::new(185, 1, 8, 50).into()))
+            .add_filter(Filter::Type(ElemType::WITHDRAW));
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 39);
 
         let parser = BgpkitParser::new(url)?
-            .add_filter("ts_start", "1637437798")?
-            .add_filter("ts_end", "2021-11-20T19:49:58Z")?;
+            .add_filter(Filter::ts_start("1637437798")?)
+            .add_filter(Filter::ts_end("2021-11-20T19:49:58Z")?);
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 13);
         Ok(())
@@ -416,8 +301,10 @@ mod tests {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url)
             .unwrap()
-            .add_filter("peer_ips", "185.1.8.65, 2001:7f8:73:0:3:fa4:0:1")
-            .unwrap();
+            .add_filter(Filter::PeerIps(vec![
+                Ipv4Addr::new(185, 1, 8, 65).into(),
+                Ipv6Addr::from([0x2001, 0x7f8, 0x73, 0x0, 0x3, 0xfa4, 0x0, 0x1]).into(),
+            ]));
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 3393 + 834);
     }

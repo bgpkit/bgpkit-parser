@@ -114,12 +114,11 @@ impl<R: Read> Iterator for RecordIterator<R> {
                             }
                             None
                         }
-                        ParserError::OneIoError(_)
-                        | ParserError::FilterError(_)
-                        | ParserError::IoNotEnoughBytes() => {
+                        ParserError::IoNotEnoughBytes() => {
                             // this should not happen at this stage
                             None
                         }
+                        _ => todo!(),
                     }
                 }
             };

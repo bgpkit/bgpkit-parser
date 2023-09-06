@@ -1,3 +1,4 @@
+use bgpkit_parser::filter::Filter;
 use bgpkit_parser::BgpkitParser;
 
 /// This example shows how to parse a MRT file and filter by prefix.
@@ -27,8 +28,7 @@ fn main() {
         "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2",
     )
     .unwrap()
-    .add_filter("prefix", "211.98.251.0/24")
-    .unwrap();
+    .add_filter(Filter::prefix("211.98.251.0/24").unwrap());
 
     log::info!("parsing updates file");
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
