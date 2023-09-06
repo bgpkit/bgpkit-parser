@@ -38,7 +38,7 @@ fn get_relevant_attributes(
     Option<u32>,
     Option<u32>,
     Option<Vec<MetaCommunity>>,
-    Option<AtomicAggregate>,
+    bool,
     Option<(Asn, IpAddr)>,
     Option<Nlri>,
     Option<Nlri>,
@@ -52,7 +52,7 @@ fn get_relevant_attributes(
     let mut next_hop = None;
     let mut local_pref = Some(0);
     let mut med = Some(0);
-    let mut atomic = Some(AtomicAggregate::NAG);
+    let mut atomic = false;
     let mut aggregator = None;
     let mut announced = None;
     let mut withdrawn = None;
@@ -70,7 +70,7 @@ fn get_relevant_attributes(
             AttributeValue::NextHop(v) => next_hop = Some(v),
             AttributeValue::MultiExitDiscriminator(v) => med = Some(v),
             AttributeValue::LocalPreference(v) => local_pref = Some(v),
-            AttributeValue::AtomicAggregate(v) => atomic = Some(v),
+            AttributeValue::AtomicAggregate => atomic = true,
             AttributeValue::Communities(v) => communities_vec.extend(
                 v.into_iter()
                     .map(MetaCommunity::Community)
@@ -256,7 +256,7 @@ impl Elementor {
             local_pref: None,
             med: None,
             communities: None,
-            atomic: None,
+            atomic: false,
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer,
@@ -277,7 +277,7 @@ impl Elementor {
                 local_pref: None,
                 med: None,
                 communities: None,
-                atomic: None,
+                atomic: false,
                 aggr_asn: None,
                 aggr_ip: None,
                 only_to_customer,

@@ -186,7 +186,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                     local_pref: None,
                                     med: bgp_med,
                                     communities: communities.clone(),
-                                    atomic: None,
+                                    atomic: false,
                                     aggr_asn: bgp_aggregator.0,
                                     aggr_ip: bgp_aggregator.1,
                                     only_to_customer: None,

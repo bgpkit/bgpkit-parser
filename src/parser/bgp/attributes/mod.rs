@@ -136,9 +136,7 @@ impl AttributeParser {
                 AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
                 AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
-                AttrType::ATOMIC_AGGREGATE => {
-                    Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
-                }
+                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
                 AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
                     .map(|(asn, addr)| AttributeValue::Aggregator(asn, addr)),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),

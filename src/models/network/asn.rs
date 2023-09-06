@@ -19,7 +19,7 @@ pub struct Asn {
 }
 
 impl Asn {
-    pub const RESERVED: Self = Asn::new_32bit(0);
+    pub const RESERVED: Self = Asn::new_16bit(0);
 
     /// Constructs a new 2-octet `Asn` with `AsnLength::Bits16`.
     pub const fn new_16bit(asn: u16) -> Self {
@@ -91,6 +91,13 @@ impl Asn {
             65536..=65551 => true, // reserved by RFC5398
             _ => false,
         }
+    }
+}
+
+/// Creates an ASN with a value of 0. This is equivalent to [Asn::RESERVED].
+impl Default for Asn {
+    fn default() -> Self {
+        Asn::RESERVED
     }
 }
 

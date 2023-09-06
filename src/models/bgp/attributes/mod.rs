@@ -1,6 +1,5 @@
 //! BGP attribute structs
 mod aspath;
-mod atomic_aggregate;
 mod nlri;
 mod origin;
 
@@ -16,7 +15,6 @@ use std::vec::IntoIter;
 use crate::models::*;
 
 pub use aspath::*;
-pub use atomic_aggregate::*;
 pub use nlri::*;
 pub use origin::*;
 
@@ -194,12 +192,10 @@ impl Attributes {
         })
     }
 
-    pub fn atomic_aggregate(&self) -> Option<AtomicAggregate> {
-        self.inner.iter().find_map(|x| match &x.value {
-            AttributeValue::AtomicAggregate(x) => Some(*x),
-            // TODO(jmeggitt): Does this default to a specific variant of AtomicAggregate?
-            _ => None,
-        })
+    pub fn atomic_aggregate(&self) -> bool {
+        self.inner
+            .iter()
+            .any(|x| matches!(&x.value, AttributeValue::AtomicAggregate))
     }
 
     pub fn aggregator(&self) -> Option<(Asn, IpAddr)> {
@@ -431,7 +427,7 @@ pub enum AttributeValue {
     MultiExitDiscriminator(u32),
     LocalPreference(u32),
     OnlyToCustomer(u32),
-    AtomicAggregate(AtomicAggregate),
+    AtomicAggregate,
     Aggregator(Asn, IpAddr),
     As4Aggregator(Asn, IpAddr),
     Communities(Vec<Community>),
@@ -471,7 +467,7 @@ impl AttributeValue {
             AttributeValue::MultiExitDiscriminator(_) => AttrType::MULTI_EXIT_DISCRIMINATOR,
             AttributeValue::LocalPreference(_) => AttrType::LOCAL_PREFERENCE,
             AttributeValue::OnlyToCustomer(_) => AttrType::ONLY_TO_CUSTOMER,
-            AttributeValue::AtomicAggregate(_) => AttrType::ATOMIC_AGGREGATE,
+            AttributeValue::AtomicAggregate => AttrType::ATOMIC_AGGREGATE,
             AttributeValue::Aggregator(_, _) => AttrType::AGGREGATOR,
             AttributeValue::As4Aggregator(_, _) => AttrType::AS4_AGGREGATOR,
             AttributeValue::Communities(_) => AttrType::COMMUNITIES,
