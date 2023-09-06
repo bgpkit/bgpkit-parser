@@ -6,7 +6,7 @@ use bytes::Bytes;
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-// FIXME: This function heavily will panic if the values are now what it expects
+// FIXME: This function will panic on any unexpected values
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
     let msg_type = match msg.get("type") {

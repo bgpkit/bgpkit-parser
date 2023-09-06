@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-// TODO(jmeggitt): BgpElem can be converted to an enum so `ElemType` is no longer necessary.
+// TODO(jmeggitt): BgpElem can be converted to an enum. Apply this change during performance PR.
 
 /// Element type.
 ///
