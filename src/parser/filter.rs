@@ -38,7 +38,7 @@ let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UP
 // iterating through the parser. the iterator returns `BgpElem` one at a time.
 log::info!("parsing updates file");
 for elem in parser {
-    log::info!("{}", &elem);
+    log::info!("{}", elem.unwrap());
 }
 log::info!("done");
 ```
@@ -177,6 +177,7 @@ mod tests {
     use crate::BgpkitParser;
     use anyhow::Result;
     use chrono::NaiveDateTime;
+    use itertools::Itertools;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
@@ -184,7 +185,7 @@ mod tests {
     fn test_filter() {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url).unwrap();
-        let elems = parser.into_elem_iter().collect::<Vec<BgpElem>>();
+        let elems: Vec<BgpElem> = parser.into_elem_iter().try_collect().unwrap();
 
         let filters = vec![Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap())];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();

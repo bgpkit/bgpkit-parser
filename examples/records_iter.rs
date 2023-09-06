@@ -6,7 +6,7 @@ fn main() {
     let url = "http://archive.routeviews.org/route-views.amsix/bgpdata/2023.02/UPDATES/updates.20230222.0430.bz2";
     let parser = BgpkitParser::new(url).unwrap();
     for record in parser.into_record_iter() {
-        match record.message {
+        match record.unwrap().message {
             MrtMessage::TableDumpMessage(_) => {}
             MrtMessage::TableDumpV2Message(_) => {}
             MrtMessage::Bgp4Mp(msg) => match msg {

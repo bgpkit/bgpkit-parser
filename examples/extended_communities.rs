@@ -16,6 +16,7 @@ fn main() {
     log::info!("parsing updates file");
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
     for elem in parser {
+        let elem = elem.unwrap();
         if let Some(cs) = &elem.communities {
             for c in cs {
                 match c {

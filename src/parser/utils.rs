@@ -3,10 +3,7 @@ Provides IO utility functions for read bytes of different length and converting 
 */
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use std::convert::TryFrom;
-use std::{
-    io,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::models::*;
 use bytes::{Buf, Bytes};
@@ -59,22 +56,10 @@ pub trait ReadUtils: Buf {
         Ok(())
     }
 
-    fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
+    fn read_address(&mut self, afi: &Afi) -> Result<IpAddr, ParserError> {
         match afi {
-            Afi::Ipv4 => match self.read_ipv4_address() {
-                Ok(ip) => Ok(IpAddr::V4(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv4 address".to_string(),
-                )),
-            },
-            Afi::Ipv6 => match self.read_ipv6_address() {
-                Ok(ip) => Ok(IpAddr::V6(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv6 address".to_string(),
-                )),
-            },
+            Afi::Ipv4 => self.read_ipv4_address().map(IpAddr::V4),
+            Afi::Ipv6 => self.read_ipv6_address().map(IpAddr::V6),
         }
     }
 
@@ -92,19 +77,13 @@ pub trait ReadUtils: Buf {
     fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
         let addr = self.read_ipv4_address()?;
         let mask = self.read_u8()?;
-        match Ipv4Net::new(addr, mask) {
-            Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
-        }
+        Ipv4Net::new(addr, mask).map_err(ParserError::from)
     }
 
     fn read_ipv6_prefix(&mut self) -> Result<Ipv6Net, ParserError> {
         let addr = self.read_ipv6_address()?;
         let mask = self.read_u8()?;
-        match Ipv6Net::new(addr, mask) {
-            Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
-        }
+        Ipv6Net::new(addr, mask).map_err(ParserError::from)
     }
 
     #[inline]

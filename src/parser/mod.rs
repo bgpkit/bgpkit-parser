@@ -108,8 +108,8 @@ impl<R: Read> BgpkitParser<R> {
     }
 
     /// This is used in for loop `for item in parser{}`
-    pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
-        parse_mrt_record(&mut self.reader)
+    pub fn next_record(&mut self) -> Result<Option<MrtRecord>, ParserError> {
+        try_parse_mrt_record(&mut self.reader)
     }
 }
 
