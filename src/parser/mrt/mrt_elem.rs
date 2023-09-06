@@ -42,7 +42,7 @@ fn get_relevant_attributes(
     Option<(Asn, IpAddr)>,
     Option<Nlri>,
     Option<Nlri>,
-    Option<u32>,
+    Option<Asn>,
     Option<Vec<AttrRaw>>,
     Option<Vec<AttrRaw>>,
 ) {

@@ -185,7 +185,7 @@ impl Attributes {
         })
     }
 
-    pub fn only_to_customer(&self) -> Option<u32> {
+    pub fn only_to_customer(&self) -> Option<Asn> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::OnlyToCustomer(x) => Some(*x),
             _ => None,
@@ -398,7 +398,7 @@ impl Attribute {
 impl From<AttributeValue> for Attribute {
     fn from(value: AttributeValue) -> Self {
         Attribute {
-            flag: value.default_flags().unwrap_or_else(AttrFlags::empty),
+            flag: value.default_flags(),
             value,
         }
     }
@@ -422,11 +422,9 @@ pub enum AttributeValue {
     AsPath(AsPath),
     As4Path(AsPath),
     NextHop(IpAddr),
-    // TODO(jmeggitt): Are MultiExitDiscriminator, LocalPreference, and OnlyToCustomer really all
-    // u32? They sound like they might be ASNs.
     MultiExitDiscriminator(u32),
     LocalPreference(u32),
-    OnlyToCustomer(u32),
+    OnlyToCustomer(Asn),
     AtomicAggregate,
     Aggregator(Asn, IpAddr),
     As4Aggregator(Asn, IpAddr),
@@ -457,6 +455,18 @@ impl From<AsPath> for AttributeValue {
     }
 }
 
+/// Category of an attribute.
+///
+/// <https://datatracker.ietf.org/doc/html/rfc4271#section-5>
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AttributeCategory {
+    WellKnownMandatory,
+    WellKnownDiscretionary,
+    OptionalTransitive,
+    OptionalNonTransitive,
+}
+
 impl AttributeValue {
     pub const fn attr_type(&self) -> AttrType {
         match self {
@@ -482,8 +492,44 @@ impl AttributeValue {
         }
     }
 
-    pub fn default_flags(&self) -> Option<AttrFlags> {
-        todo!()
+    pub fn attr_category(&self) -> Option<AttributeCategory> {
+        use AttributeCategory::*;
+
+        match self {
+            AttributeValue::Origin(_) => Some(WellKnownMandatory),
+            AttributeValue::AsPath(_) => Some(WellKnownMandatory),
+            AttributeValue::As4Path(_) => Some(OptionalTransitive),
+            AttributeValue::NextHop(_) => Some(WellKnownMandatory),
+            AttributeValue::MultiExitDiscriminator(_) => Some(OptionalNonTransitive),
+            // If we receive this attribute we must be in IBGP so it is required
+            AttributeValue::LocalPreference(_) => Some(WellKnownMandatory),
+            AttributeValue::OnlyToCustomer(_) => Some(OptionalTransitive),
+            AttributeValue::AtomicAggregate => Some(WellKnownDiscretionary),
+            AttributeValue::Aggregator(_, _) => Some(OptionalTransitive),
+            AttributeValue::As4Aggregator(_, _) => Some(OptionalTransitive),
+            AttributeValue::Communities(_) => Some(OptionalTransitive),
+            AttributeValue::ExtendedCommunities(_) => Some(OptionalTransitive),
+            AttributeValue::LargeCommunities(_) => Some(OptionalTransitive),
+            AttributeValue::OriginatorId(_) => Some(OptionalNonTransitive),
+            AttributeValue::Clusters(_) => Some(OptionalNonTransitive),
+            AttributeValue::MpReachNlri(_) => Some(OptionalNonTransitive),
+            AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
+            _ => None,
+        }
+    }
+
+    /// Get flags based on the attribute type. The [AttrFlags::EXTENDED] is not taken into account
+    /// when determining the correct flags.
+    pub fn default_flags(&self) -> AttrFlags {
+        match self.attr_category() {
+            None => AttrFlags::OPTIONAL | AttrFlags::PARTIAL | AttrFlags::TRANSITIVE,
+            Some(AttributeCategory::WellKnownMandatory) => AttrFlags::TRANSITIVE,
+            Some(AttributeCategory::WellKnownDiscretionary) => AttrFlags::TRANSITIVE,
+            Some(AttributeCategory::OptionalTransitive) => {
+                AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE
+            }
+            Some(AttributeCategory::OptionalNonTransitive) => AttrFlags::OPTIONAL,
+        }
     }
 }
 

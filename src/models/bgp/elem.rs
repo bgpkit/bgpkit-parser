@@ -53,7 +53,7 @@ pub struct BgpElem {
     pub atomic: bool,
     pub aggr_asn: Option<Asn>,
     pub aggr_ip: Option<IpAddr>,
-    pub only_to_customer: Option<u32>,
+    pub only_to_customer: Option<Asn>,
     /// unknown attributes formatted as (TYPE, RAW_BYTES)
     pub unknown: Option<Vec<AttrRaw>>,
     /// deprecated attributes formatted as (TYPE, RAW_BYTES)
