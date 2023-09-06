@@ -6,6 +6,7 @@ use bytes::Bytes;
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+// FIXME: This function heavily will panic if the values are now what it expects
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
     let msg_type = match msg.get("type") {
@@ -36,7 +37,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let peer_asn_str = data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
 
-    let peer_asn = peer_asn_str.parse::<i32>().unwrap().into();
+    let peer_asn = peer_asn_str.parse::<Asn>().unwrap();
 
     let bgp_msg = match parse_bgp_message(&mut bytes, false, &AsnLength::Bits32) {
         Ok(m) => m,
@@ -62,7 +63,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
         message: MrtMessage::Bgp4Mp(Bgp4Mp::Message(Bgp4MpMessage {
             msg_type: Bgp4MpType::MessageAs4,
             peer_asn,
-            local_asn: 0.into(),
+            local_asn: Asn::RESERVED,
             interface_index: 0,
             peer_ip,
             local_ip,

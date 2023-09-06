@@ -77,7 +77,7 @@ pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserE
 
         let peer_bgp_id = Ipv4Addr::from(data.read_u32()?);
         let peer_address: IpAddr = data.read_address(&afi)?;
-        let peer_asn = data.read_asn(&asn_len)?;
+        let peer_asn = data.read_asn(asn_len)?;
         peers.push(Peer {
             peer_type,
             peer_bgp_id,

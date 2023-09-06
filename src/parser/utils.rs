@@ -101,55 +101,33 @@ pub trait ReadUtils: Buf {
         }
     }
 
-    fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserError> {
+    #[inline]
+    fn read_asn(&mut self, as_length: AsnLength) -> Result<Asn, ParserError> {
         match as_length {
-            AsnLength::Bits16 => {
-                let asn = self.read_u16()? as u32;
-                Ok(Asn {
-                    asn,
-                    len: AsnLength::Bits16,
-                })
-            }
-            AsnLength::Bits32 => {
-                let asn = self.read_u32()?;
-                Ok(Asn {
-                    asn,
-                    len: AsnLength::Bits32,
-                })
-            }
+            AsnLength::Bits16 => self.read_u16().map(Asn::new_16bit),
+            AsnLength::Bits32 => self.read_u32().map(Asn::new_32bit),
         }
     }
 
     fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
-        let mut path = [0; 255];
-        Ok(match as_length {
+        let mut path = Vec::with_capacity(count);
+
+        match as_length {
             AsnLength::Bits16 => {
                 self.has_n_remaining(count * 2)?; // 2 bytes for 16-bit ASN
-                for i in 0..count {
-                    path[i] = self.get_u16() as u32;
+                for _ in 0..count {
+                    path.push(Asn::new_16bit(self.read_u16()?));
                 }
-                path[..count]
-                    .iter()
-                    .map(|asn| Asn {
-                        asn: *asn,
-                        len: *as_length,
-                    })
-                    .collect::<Vec<Asn>>()
             }
             AsnLength::Bits32 => {
                 self.has_n_remaining(count * 4)?; // 4 bytes for 32-bit ASN
-                for i in 0..count {
-                    path[i] = self.get_u32();
+                for _ in 0..count {
+                    path.push(Asn::new_32bit(self.read_u32()?));
                 }
-                path[..count]
-                    .iter()
-                    .map(|asn| Asn {
-                        asn: *asn,
-                        len: *as_length,
-                    })
-                    .collect::<Vec<Asn>>()
             }
-        })
+        }
+
+        Ok(path)
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {

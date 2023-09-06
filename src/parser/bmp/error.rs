@@ -52,7 +52,6 @@ impl From<ParserError> for ParserBmpError {
 
 impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<BmpMsgType>) -> Self {
-        // TODO: Should this get its own error variant?
         ParserBmpError::InvalidOpenBmpHeader
     }
 }

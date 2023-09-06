@@ -35,7 +35,7 @@ pub fn parse_aggregator(
             asn_len, asn_len_found
         );
     }
-    let asn = input.read_asn(&asn_len_found)?;
+    let asn = input.read_asn(asn_len_found)?;
 
     // the BGP identifier is always 4 bytes or IPv4 address
     let identifier = input.read_ipv4_address()?;
@@ -58,13 +58,7 @@ mod tests {
 
         if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16) {
             assert_eq!(n, identifier);
-            assert_eq!(
-                asn,
-                Asn {
-                    asn: 258,
-                    len: AsnLength::Bits16
-                }
-            )
+            assert_eq!(asn, Asn::new_16bit(258))
         } else {
             panic!()
         }
@@ -76,13 +70,7 @@ mod tests {
 
         if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32) {
             assert_eq!(n, identifier);
-            assert_eq!(
-                asn,
-                Asn {
-                    asn: 258,
-                    len: AsnLength::Bits32
-                }
-            )
+            assert_eq!(asn, Asn::new_16bit(258))
         } else {
             panic!()
         }

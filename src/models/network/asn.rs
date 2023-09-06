@@ -1,5 +1,4 @@
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 /// AS number length: 16 or 32 bits.
@@ -11,31 +10,27 @@ pub enum AsnLength {
 }
 
 /// ASN -- Autonomous System Number
-#[derive(Clone, Copy, Eq, Ord, PartialOrd)]
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub struct Asn {
-    pub asn: u32,
-    pub len: AsnLength,
+    asn: u32,
 }
 
 impl Asn {
     pub const RESERVED: Self = Asn::new_16bit(0);
 
-    /// Constructs a new 2-octet `Asn` with `AsnLength::Bits16`.
+    /// Constructs a new 2-octet `Asn`.
+    #[inline]
     pub const fn new_16bit(asn: u16) -> Self {
-        Asn {
-            asn: asn as u32,
-            len: AsnLength::Bits16,
-        }
+        Asn { asn: asn as u32 }
     }
 
-    /// Constructs a new 4-octet `Asn` with `AsnLength::Bits32`.
+    /// Constructs a new 4-octet `Asn`.
+    #[inline]
     pub const fn new_32bit(asn: u32) -> Self {
-        Asn {
-            asn,
-            len: AsnLength::Bits32,
-        }
+        Asn { asn }
     }
 
     /// Gets the size required to store this ASN
@@ -50,6 +45,7 @@ impl Asn {
     /// Checks if the given ASN is reserved for private use.
     ///
     /// <https://datatracker.ietf.org/doc/rfc7249/>
+    #[inline]
     pub const fn is_private(&self) -> bool {
         match self.asn {
             64512..=65534 => true,           // reserved by RFC6996
@@ -68,6 +64,7 @@ impl Asn {
     /// For additional details see:
     ///  - <https://datatracker.ietf.org/doc/rfc7249/>
     ///  - <https://www.iana.org/assignments/iana-as-numbers-special-registry/iana-as-numbers-special-registry.xhtml>
+    #[inline]
     pub const fn is_reserved(&self) -> bool {
         match self.asn {
             0 => true,                       // reserved by RFC7607
@@ -86,6 +83,7 @@ impl Asn {
     /// Checks if the given ASN is reserved for use in documentation and sample code.
     ///
     /// <https://datatracker.ietf.org/doc/rfc7249/>
+    #[inline]
     pub const fn is_reserved_for_documentation(&self) -> bool {
         match self.asn {
             64496..=64511 => true, // reserved by RFC5398
@@ -97,63 +95,40 @@ impl Asn {
 
 /// Creates an ASN with a value of 0. This is equivalent to [Asn::RESERVED].
 impl Default for Asn {
+    #[inline]
     fn default() -> Self {
         Asn::RESERVED
     }
 }
 
-impl PartialEq for Asn {
-    fn eq(&self, other: &Self) -> bool {
-        self.asn == other.asn
-    }
-}
-
-impl Hash for Asn {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.asn.hash(state);
-    }
-}
-
-impl PartialEq<i32> for Asn {
-    fn eq(&self, other: &i32) -> bool {
-        self.asn as i32 == *other
-    }
-}
-
 impl PartialEq<u32> for Asn {
+    #[inline]
     fn eq(&self, other: &u32) -> bool {
         self.asn == *other
     }
 }
 
 impl From<u32> for Asn {
+    #[inline]
     fn from(v: u32) -> Self {
         Asn::new_32bit(v)
     }
 }
 
-impl From<i32> for Asn {
-    fn from(v: i32) -> Self {
-        Asn {
-            asn: v as u32,
-            len: AsnLength::Bits32,
-        }
-    }
-}
-
-impl From<Asn> for i32 {
-    fn from(val: Asn) -> Self {
-        val.asn as i32
-    }
-}
-
 impl From<Asn> for u32 {
+    #[inline]
     fn from(value: Asn) -> Self {
         value.asn
     }
 }
 
 impl Display for Asn {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.asn)
+    }
+}
+
+impl Debug for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
     }
@@ -170,11 +145,5 @@ impl FromStr for Asn {
         }
 
         Ok(Asn::new_32bit(u32::from_str(s)?))
-    }
-}
-
-impl Debug for Asn {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.asn)
     }
 }

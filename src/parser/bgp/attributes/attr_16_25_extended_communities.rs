@@ -42,10 +42,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                 ExtendedCommunity::TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
-                    global_administrator: Asn {
-                        asn: global as u32,
-                        len: AsnLength::Bits16,
-                    },
+                    global_administrator: Asn::new_16bit(global),
                     local_administrator: local,
                 })
             }
@@ -59,10 +56,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                 ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
-                    global_administrator: Asn {
-                        asn: global as u32,
-                        len: AsnLength::Bits16,
-                    },
+                    global_administrator: Asn::new_16bit(global),
                     local_administrator: local,
                 })
             }
@@ -102,10 +96,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                 ExtendedCommunity::TransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
-                    global_administrator: Asn {
-                        asn: global,
-                        len: AsnLength::Bits32,
-                    },
+                    global_administrator: Asn::new_32bit(global),
                     local_administrator: local,
                 })
             }
@@ -118,10 +109,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                 ExtendedCommunity::NonTransitiveFourOctetAsSpecific(FourOctetAsSpecific {
                     ec_type: ec_type_u8,
                     ec_subtype: sub_type,
-                    global_administrator: Asn {
-                        asn: global,
-                        len: AsnLength::Bits32,
-                    },
+                    global_administrator: Asn::new_32bit(global),
                     local_administrator: local,
                 })
             }
@@ -202,7 +190,7 @@ mod tests {
             if let ExtendedCommunity::TransitiveTwoOctetAsSpecific(community) = &communities[0] {
                 assert_eq!(community.ec_type, 0x00);
                 assert_eq!(community.ec_subtype, 0x02);
-                assert_eq!(community.global_administrator.asn, 1);
+                assert_eq!(community.global_administrator, Asn::new_16bit(1));
                 assert_eq!(community.local_administrator, [0x00, 0x00, 0x00, 0x01]);
             } else {
                 panic!("Unexpected community type");
@@ -254,7 +242,7 @@ mod tests {
             if let ExtendedCommunity::TransitiveFourOctetAsSpecific(community) = &communities[0] {
                 assert_eq!(community.ec_type, 0x02);
                 assert_eq!(community.ec_subtype, 0x02);
-                assert_eq!(community.global_administrator.asn, 1);
+                assert_eq!(community.global_administrator, Asn::new_16bit(1));
                 assert_eq!(community.local_administrator, [0x00, 0x01]);
             } else {
                 panic!("Unexpected community type");

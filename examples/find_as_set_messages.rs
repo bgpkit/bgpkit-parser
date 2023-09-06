@@ -1,5 +1,5 @@
 use bgpkit_broker::BgpkitBroker;
-use bgpkit_parser::models::AsPathSegment;
+use bgpkit_parser::models::{AsPathSegment, Asn};
 use bgpkit_parser::BgpkitParser;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ fn main() {
     items.par_iter().for_each(|item| {
         let parser = BgpkitParser::new(item.url.as_str()).unwrap();
         let collector = item.collector_id.clone();
-        let mut origins: HashSet<u32> = HashSet::new();
+        let mut origins: HashSet<Asn> = HashSet::new();
         for elem in parser {
             if !elem.elem_type.is_announce() {
                 continue;
@@ -26,7 +26,7 @@ fn main() {
                 match seg {
                     AsPathSegment::AsSet(p) | AsPathSegment::ConfedSet(p) => {
                         // println!("{elem}");
-                        origins.insert(p.last().unwrap().asn);
+                        origins.insert(*p.last().unwrap());
                     }
                     _ => {}
                 }

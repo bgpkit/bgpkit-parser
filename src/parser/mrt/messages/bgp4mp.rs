@@ -74,8 +74,8 @@ pub fn parse_bgp4mp_message(
 ) -> Result<Bgp4MpMessage, ParserError> {
     let total_size = data.len();
 
-    let peer_asn: Asn = data.read_asn(&asn_len)?;
-    let local_asn: Asn = data.read_asn(&asn_len)?;
+    let peer_asn: Asn = data.read_asn(asn_len)?;
+    let local_asn: Asn = data.read_asn(asn_len)?;
     let interface_index: u16 = data.read_u16()?;
     let afi: Afi = data.read_afi()?;
     let peer_ip = data.read_address(&afi)?;
@@ -138,8 +138,8 @@ pub fn parse_bgp4mp_state_change(
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpStateChange, ParserError> {
-    let peer_asn: Asn = input.read_asn(&asn_len)?;
-    let local_asn: Asn = input.read_asn(&asn_len)?;
+    let peer_asn: Asn = input.read_asn(asn_len)?;
+    let local_asn: Asn = input.read_asn(asn_len)?;
     let interface_index: u16 = input.read_u16()?;
     let address_family: Afi = input.read_afi()?;
     let peer_addr = input.read_address(&address_family)?;

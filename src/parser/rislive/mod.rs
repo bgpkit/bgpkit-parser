@@ -90,19 +90,17 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     let mut elems: Vec<BgpElem> = vec![];
 
                     // parse community
-                    let communities = match community {
-                        None => None,
-                        Some(cs) => {
-                            let mut comms: Vec<MetaCommunity> = vec![];
-                            for c in cs {
-                                comms.push(MetaCommunity::Community(Community::Custom(
-                                    (c.0 as i32).into(),
-                                    c.1,
-                                )));
-                            }
-                            Some(comms)
-                        }
-                    };
+                    let communities = community.map(|values| {
+                        values
+                            .into_iter()
+                            .map(|(asn, data)| {
+                                MetaCommunity::Community(Community::Custom(
+                                    Asn::new_32bit(asn),
+                                    data,
+                                ))
+                            })
+                            .collect()
+                    });
 
                     // parse origin
                     let bgp_origin = match origin {

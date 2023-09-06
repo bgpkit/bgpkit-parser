@@ -113,10 +113,7 @@ pub fn parse_bgp_notification_message(
 pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
     input.has_n_remaining(10)?;
     let version = input.get_u8();
-    let asn = Asn {
-        asn: input.get_u16() as u32,
-        len: AsnLength::Bits16,
-    };
+    let asn = Asn::new_16bit(input.get_u16());
     let hold_time = input.get_u16();
 
     let sender_ip = input.read_ipv4_address()?;
