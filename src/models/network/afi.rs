@@ -1,4 +1,5 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::net::IpAddr;
 
 /// AFI -- Address Family Identifier
 ///
@@ -9,6 +10,16 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub enum Afi {
     Ipv4 = 1,
     Ipv6 = 2,
+}
+
+impl From<IpAddr> for Afi {
+    #[inline]
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V4(_) => Afi::Ipv4,
+            IpAddr::V6(_) => Afi::Ipv6,
+        }
+    }
 }
 
 /// SAFI -- Subsequent Address Family Identifier

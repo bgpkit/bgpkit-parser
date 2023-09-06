@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 
 /// AS number length: 16 or 32 bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -155,6 +156,20 @@ impl From<Asn> for u32 {
 impl Display for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
+    }
+}
+
+/// Parse an ASN matching the pattern `(AS)?[0-9]+`.
+impl FromStr for Asn {
+    type Err = <u32 as FromStr>::Err;
+
+    #[inline]
+    fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+        if let Some(number) = s.strip_prefix("AS") {
+            s = number;
+        }
+
+        Ok(Asn::new_32bit(u32::from_str(s)?))
     }
 }
 

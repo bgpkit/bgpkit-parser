@@ -39,7 +39,7 @@ fn get_relevant_attributes(
     Option<u32>,
     Option<Vec<MetaCommunity>>,
     bool,
-    Option<(Asn, IpAddr)>,
+    Option<(Asn, BgpIdentifier)>,
     Option<Nlri>,
     Option<Nlri>,
     Option<Asn>,

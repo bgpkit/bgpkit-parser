@@ -4,8 +4,7 @@ use crate::parser::rislive::error::ParserRisliveError;
 use crate::Elementor;
 use bytes::Bytes;
 use serde_json::Value;
-use std::net::IpAddr;
-use std::str::FromStr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
@@ -30,9 +29,9 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
     let peer_str = data.get("peer").unwrap().as_str().unwrap().to_owned();
 
     let peer_ip = peer_str.parse::<IpAddr>().unwrap();
-    let afi = match peer_ip.is_ipv4() {
-        true => Afi::Ipv4,
-        false => Afi::Ipv6,
+    let local_ip = match peer_ip.is_ipv4() {
+        true => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        false => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
     };
 
     let peer_asn_str = data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
@@ -65,9 +64,8 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
             peer_asn,
             local_asn: 0.into(),
             interface_index: 0,
-            afi,
             peer_ip,
-            local_ip: IpAddr::from_str("0.0.0.0").unwrap(),
+            local_ip,
             bgp_message: bgp_msg,
         })),
     };

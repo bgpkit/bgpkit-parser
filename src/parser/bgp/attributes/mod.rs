@@ -139,8 +139,8 @@ impl AttributeParser {
                 AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
                 AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
                     .map(|(asn, addr)| AttributeValue::Aggregator(asn, addr)),
-                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
-                AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
+                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
+                AttrType::CLUSTER_LIST => parse_clusters(attr_data),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
                     attr_data,
                     &afi,

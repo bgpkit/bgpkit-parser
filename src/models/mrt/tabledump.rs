@@ -3,7 +3,7 @@ use crate::models::*;
 use bitflags::bitflags;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 /// TableDump message version 1
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,7 +170,7 @@ pub struct RibEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerIndexTable {
-    pub collector_bgp_id: Ipv4Addr,
+    pub collector_bgp_id: BgpIdentifier,
     pub view_name_length: u16,
     pub view_name: String,
     pub peer_count: u16,
@@ -191,13 +191,13 @@ bitflags! {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Peer {
     pub peer_type: PeerType,
-    pub peer_bgp_id: Ipv4Addr,
+    pub peer_bgp_id: BgpIdentifier,
     pub peer_address: IpAddr,
     pub peer_asn: Asn,
 }
 
 impl Peer {
-    pub fn new(peer_bgp_id: Ipv4Addr, peer_address: IpAddr, peer_asn: Asn) -> Self {
+    pub fn new(peer_bgp_id: BgpIdentifier, peer_address: IpAddr, peer_asn: Asn) -> Self {
         let mut peer_type = PeerType::empty();
 
         if peer_asn.required_len() == AsnLength::Bits32 {

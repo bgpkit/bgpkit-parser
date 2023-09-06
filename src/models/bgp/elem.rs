@@ -52,7 +52,7 @@ pub struct BgpElem {
     pub communities: Option<Vec<MetaCommunity>>,
     pub atomic: bool,
     pub aggr_asn: Option<Asn>,
-    pub aggr_ip: Option<IpAddr>,
+    pub aggr_ip: Option<BgpIdentifier>,
     pub only_to_customer: Option<Asn>,
     /// unknown attributes formatted as (TYPE, RAW_BYTES)
     pub unknown: Option<Vec<AttrRaw>>,
@@ -183,7 +183,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
             ..Default::default()
         };
-        println!("{}", serde_json::json!(elem).to_string());
+        println!("{}", serde_json::json!(elem));
     }
 
     #[test]
@@ -213,7 +213,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(elem1 < elem2, true);
-        assert_eq!(elem2 < elem3, true);
+        assert!(elem1 < elem2);
+        assert!(elem2 < elem3);
     }
 }

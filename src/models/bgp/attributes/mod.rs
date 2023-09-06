@@ -153,7 +153,7 @@ impl Attributes {
     }
 
     /// Get the `ORIGINATOR_ID` attribute if present.
-    pub fn origin_id(&self) -> Option<IpAddr> {
+    pub fn origin_id(&self) -> Option<BgpIdentifier> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::OriginatorId(x) => Some(*x),
             _ => None,
@@ -198,7 +198,7 @@ impl Attributes {
             .any(|x| matches!(&x.value, AttributeValue::AtomicAggregate))
     }
 
-    pub fn aggregator(&self) -> Option<(Asn, IpAddr)> {
+    pub fn aggregator(&self) -> Option<(Asn, BgpIdentifier)> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::Aggregator(asn, addr) | AttributeValue::As4Aggregator(asn, addr) => {
                 Some((*asn, *addr))
@@ -207,7 +207,7 @@ impl Attributes {
         })
     }
 
-    pub fn clusters(&self) -> Option<&[IpAddr]> {
+    pub fn clusters(&self) -> Option<&[u32]> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::Clusters(x) => Some(x.as_ref()),
             _ => None,
@@ -412,7 +412,6 @@ impl Deref for Attribute {
     }
 }
 
-// TODO: Some of these IP addresses are actually just IPv4 addresses
 // TODO: Can we go from As/As4 to singular variants?
 /// The `AttributeValue` enum represents different kinds of Attribute values.
 #[derive(Debug, PartialEq, Clone, Eq)]
@@ -426,13 +425,13 @@ pub enum AttributeValue {
     LocalPreference(u32),
     OnlyToCustomer(Asn),
     AtomicAggregate,
-    Aggregator(Asn, IpAddr),
-    As4Aggregator(Asn, IpAddr),
+    Aggregator(Asn, BgpIdentifier),
+    As4Aggregator(Asn, BgpIdentifier),
     Communities(Vec<Community>),
     ExtendedCommunities(Vec<ExtendedCommunity>),
     LargeCommunities(Vec<LargeCommunity>),
-    OriginatorId(IpAddr),
-    Clusters(Vec<IpAddr>),
+    OriginatorId(BgpIdentifier),
+    Clusters(Vec<u32>),
     MpReachNlri(Nlri),
     MpUnreachNlri(Nlri),
     Development(Vec<u8>),

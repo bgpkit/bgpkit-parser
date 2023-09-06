@@ -75,37 +75,37 @@ mod tests {
 
         local = Provider;
         remote = Customer;
-        assert_eq!(validate_role_pairs(&local, &remote), true);
+        assert!(validate_role_pairs(&local, &remote));
         for remote in [Provider, Peer, RouteServer, RouteServerClient] {
-            assert_eq!(validate_role_pairs(&local, &remote), false);
+            assert!(!validate_role_pairs(&local, &remote));
         }
 
         local = Customer;
         remote = Provider;
-        assert_eq!(validate_role_pairs(&local, &remote), true);
+        assert!(validate_role_pairs(&local, &remote));
         for remote in [Customer, Peer, RouteServer, RouteServerClient] {
-            assert_eq!(validate_role_pairs(&local, &remote), false);
+            assert!(!validate_role_pairs(&local, &remote));
         }
 
         local = RouteServer;
         remote = RouteServerClient;
-        assert_eq!(validate_role_pairs(&local, &remote), true);
+        assert!(validate_role_pairs(&local, &remote));
         for remote in [Provider, Customer, Peer, RouteServer] {
-            assert_eq!(validate_role_pairs(&local, &remote), false);
+            assert!(!validate_role_pairs(&local, &remote));
         }
 
         local = RouteServerClient;
         remote = RouteServer;
-        assert_eq!(validate_role_pairs(&local, &remote), true);
+        assert!(validate_role_pairs(&local, &remote));
         for remote in [Provider, Customer, Peer, RouteServerClient] {
-            assert_eq!(validate_role_pairs(&local, &remote), false);
+            assert!(!validate_role_pairs(&local, &remote));
         }
 
         local = Peer;
         remote = Peer;
-        assert_eq!(validate_role_pairs(&local, &remote), true);
+        assert!(validate_role_pairs(&local, &remote));
         for remote in [Provider, Customer, RouteServer, RouteServerClient] {
-            assert_eq!(validate_role_pairs(&local, &remote), false);
+            assert!(!validate_role_pairs(&local, &remote));
         }
     }
 }

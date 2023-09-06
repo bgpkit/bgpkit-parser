@@ -20,6 +20,8 @@ use error::BgpError;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
 
+pub type BgpIdentifier = Ipv4Addr;
+
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
