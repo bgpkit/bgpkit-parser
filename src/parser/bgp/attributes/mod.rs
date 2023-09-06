@@ -132,13 +132,23 @@ impl AttributeParser {
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(AttributeValue::AsPath),
+                AttrType::AS_PATH => {
+                    parse_as_path(attr_data, asn_len).map(|path| AttributeValue::AsPath {
+                        path,
+                        is_as4: false,
+                    })
+                }
                 AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
                 AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
                 AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
-                    .map(|(asn, addr)| AttributeValue::Aggregator(asn, addr)),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len).map(|(asn, id)| {
+                    AttributeValue::Aggregator {
+                        asn,
+                        id,
+                        is_as4: false,
+                    }
+                }),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
@@ -157,11 +167,17 @@ impl AttributeParser {
                     false,
                     self.additional_paths,
                 ),
-                AttrType::AS4_PATH => {
-                    parse_as_path(attr_data, &AsnLength::Bits32).map(AttributeValue::As4Path)
+                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
+                    .map(|path| AttributeValue::AsPath { path, is_as4: true }),
+                AttrType::AS4_AGGREGATOR => {
+                    parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
+                        AttributeValue::Aggregator {
+                            asn,
+                            id,
+                            is_as4: true,
+                        }
+                    })
                 }
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32)
-                    .map(|(asn, addr)| AttributeValue::As4Aggregator(asn, addr)),
 
                 // communities
                 AttrType::COMMUNITIES => parse_regular_communities(attr_data),

@@ -65,8 +65,11 @@ fn get_relevant_attributes(
     for attr in attributes {
         match attr {
             AttributeValue::Origin(v) => origin = Some(v),
-            AttributeValue::AsPath(v) => as_path = Some(v),
-            AttributeValue::As4Path(v) => as4_path = Some(v),
+            AttributeValue::AsPath {
+                path,
+                is_as4: false,
+            } => as_path = Some(path),
+            AttributeValue::AsPath { path, is_as4: true } => as4_path = Some(path),
             AttributeValue::NextHop(v) => next_hop = Some(v),
             AttributeValue::MultiExitDiscriminator(v) => med = Some(v),
             AttributeValue::LocalPreference(v) => local_pref = Some(v),
@@ -86,9 +89,7 @@ fn get_relevant_attributes(
                     .map(MetaCommunity::LargeCommunity)
                     .collect::<Vec<MetaCommunity>>(),
             ),
-            AttributeValue::Aggregator(v, v2) | AttributeValue::As4Aggregator(v, v2) => {
-                aggregator = Some((v, v2))
-            }
+            AttributeValue::Aggregator { asn, id, .. } => aggregator = Some((asn, id)),
             AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),

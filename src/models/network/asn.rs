@@ -20,6 +20,8 @@ pub struct Asn {
 
 impl Asn {
     pub const RESERVED: Self = Asn::new_16bit(0);
+    #[doc(alias("AS_TRANS"))]
+    pub const TRANSITION: Self = Asn::new_16bit(23456);
 
     /// Constructs a new 2-octet `Asn`.
     #[inline]

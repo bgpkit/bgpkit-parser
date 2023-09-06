@@ -199,10 +199,10 @@ impl Attributes {
     }
 
     pub fn aggregator(&self) -> Option<(Asn, BgpIdentifier)> {
-        self.inner.iter().find_map(|x| match &x.value {
-            AttributeValue::Aggregator(asn, addr) | AttributeValue::As4Aggregator(asn, addr) => {
-                Some((*asn, *addr))
-            }
+        // Begin searching at the end of the attributes to increase the odds of finding an AS4
+        // attribute first.
+        self.inner.iter().rev().find_map(|x| match &x.value {
+            AttributeValue::Aggregator { asn, id, .. } => Some((*asn, *id)),
             _ => None,
         })
     }
@@ -216,8 +216,10 @@ impl Attributes {
 
     // These implementations are horribly inefficient, but they were super easy to write and use
     pub fn as_path(&self) -> Option<&AsPath> {
-        self.inner.iter().find_map(|x| match &x.value {
-            AttributeValue::AsPath(x) | AttributeValue::As4Path(x) => Some(x),
+        // Begin searching at the end of the attributes to increase the odds of finding an AS4
+        // attribute first.
+        self.inner.iter().rev().find_map(|x| match &x.value {
+            AttributeValue::AsPath { path, .. } => Some(path),
             _ => None,
         })
     }
@@ -412,21 +414,25 @@ impl Deref for Attribute {
     }
 }
 
-// TODO: Can we go from As/As4 to singular variants?
 /// The `AttributeValue` enum represents different kinds of Attribute values.
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttributeValue {
     Origin(Origin),
-    AsPath(AsPath),
-    As4Path(AsPath),
+    AsPath {
+        path: AsPath,
+        is_as4: bool,
+    },
     NextHop(IpAddr),
     MultiExitDiscriminator(u32),
     LocalPreference(u32),
     OnlyToCustomer(Asn),
     AtomicAggregate,
-    Aggregator(Asn, BgpIdentifier),
-    As4Aggregator(Asn, BgpIdentifier),
+    Aggregator {
+        asn: Asn,
+        id: BgpIdentifier,
+        is_as4: bool,
+    },
     Communities(Vec<Community>),
     ExtendedCommunities(Vec<ExtendedCommunity>),
     LargeCommunities(Vec<LargeCommunity>),
@@ -445,11 +451,12 @@ impl From<Origin> for AttributeValue {
     }
 }
 
+/// Defaults to using `AS_PATH` (as opposed to `AS4_PATH`) when choosing attribute type.
 impl From<AsPath> for AttributeValue {
-    fn from(value: AsPath) -> Self {
-        match value.required_asn_length() {
-            AsnLength::Bits16 => AttributeValue::AsPath(value),
-            AsnLength::Bits32 => AttributeValue::As4Path(value),
+    fn from(path: AsPath) -> Self {
+        AttributeValue::AsPath {
+            path,
+            is_as4: false,
         }
     }
 }
@@ -470,15 +477,15 @@ impl AttributeValue {
     pub const fn attr_type(&self) -> AttrType {
         match self {
             AttributeValue::Origin(_) => AttrType::ORIGIN,
-            AttributeValue::AsPath(_) => AttrType::AS_PATH,
-            AttributeValue::As4Path(_) => AttrType::AS4_PATH,
+            AttributeValue::AsPath { is_as4: false, .. } => AttrType::AS_PATH,
+            AttributeValue::AsPath { is_as4: true, .. } => AttrType::AS4_PATH,
             AttributeValue::NextHop(_) => AttrType::NEXT_HOP,
             AttributeValue::MultiExitDiscriminator(_) => AttrType::MULTI_EXIT_DISCRIMINATOR,
             AttributeValue::LocalPreference(_) => AttrType::LOCAL_PREFERENCE,
             AttributeValue::OnlyToCustomer(_) => AttrType::ONLY_TO_CUSTOMER,
             AttributeValue::AtomicAggregate => AttrType::ATOMIC_AGGREGATE,
-            AttributeValue::Aggregator(_, _) => AttrType::AGGREGATOR,
-            AttributeValue::As4Aggregator(_, _) => AttrType::AS4_AGGREGATOR,
+            AttributeValue::Aggregator { is_as4: false, .. } => AttrType::AGGREGATOR,
+            AttributeValue::Aggregator { is_as4: true, .. } => AttrType::AS4_AGGREGATOR,
             AttributeValue::Communities(_) => AttrType::COMMUNITIES,
             AttributeValue::ExtendedCommunities(_) => AttrType::EXTENDED_COMMUNITIES,
             AttributeValue::LargeCommunities(_) => AttrType::LARGE_COMMUNITIES,
@@ -496,16 +503,15 @@ impl AttributeValue {
 
         match self {
             AttributeValue::Origin(_) => Some(WellKnownMandatory),
-            AttributeValue::AsPath(_) => Some(WellKnownMandatory),
-            AttributeValue::As4Path(_) => Some(OptionalTransitive),
+            AttributeValue::AsPath { is_as4: false, .. } => Some(WellKnownMandatory),
+            AttributeValue::AsPath { is_as4: true, .. } => Some(OptionalTransitive),
             AttributeValue::NextHop(_) => Some(WellKnownMandatory),
             AttributeValue::MultiExitDiscriminator(_) => Some(OptionalNonTransitive),
             // If we receive this attribute we must be in IBGP so it is required
             AttributeValue::LocalPreference(_) => Some(WellKnownMandatory),
             AttributeValue::OnlyToCustomer(_) => Some(OptionalTransitive),
             AttributeValue::AtomicAggregate => Some(WellKnownDiscretionary),
-            AttributeValue::Aggregator(_, _) => Some(OptionalTransitive),
-            AttributeValue::As4Aggregator(_, _) => Some(OptionalTransitive),
+            AttributeValue::Aggregator { .. } => Some(OptionalTransitive),
             AttributeValue::Communities(_) => Some(OptionalTransitive),
             AttributeValue::ExtendedCommunities(_) => Some(OptionalTransitive),
             AttributeValue::LargeCommunities(_) => Some(OptionalTransitive),
