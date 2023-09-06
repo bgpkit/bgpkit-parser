@@ -19,8 +19,8 @@ fn main() {
         if let Some(cs) = &elem.communities {
             for c in cs {
                 match c {
-                    MetaCommunity::Community(_) => {}
-                    MetaCommunity::ExtendedCommunity(_) | MetaCommunity::LargeCommunity(_) => {
+                    MetaCommunity::Plain(_) => {}
+                    MetaCommunity::Extended(_) | MetaCommunity::Large(_) => {
                         log::info!("{}", &elem);
                     }
                 }

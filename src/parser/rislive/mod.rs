@@ -94,10 +94,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                         values
                             .into_iter()
                             .map(|(asn, data)| {
-                                MetaCommunity::Community(Community::Custom(
-                                    Asn::new_32bit(asn),
-                                    data,
-                                ))
+                                MetaCommunity::Plain(Community::Custom(Asn::new_32bit(asn), data))
                             })
                             .collect()
                     });

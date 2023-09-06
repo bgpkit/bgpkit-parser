@@ -53,6 +53,12 @@ pub trait ReadUtils: Buf {
         Ok(self.get_u64())
     }
 
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParserError> {
+        self.has_n_remaining(buf.len())?;
+        self.copy_to_slice(buf);
+        Ok(())
+    }
+
     fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
         match afi {
             Afi::Ipv4 => match self.read_ipv4_address() {

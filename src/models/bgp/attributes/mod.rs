@@ -6,6 +6,7 @@ mod origin;
 use crate::models::network::*;
 use bitflags::bitflags;
 use num_enum::{FromPrimitive, IntoPrimitive};
+use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
 use std::ops::Deref;
@@ -103,6 +104,18 @@ pub enum AttrType {
     // We have to explicitly assign this variant a number, otherwise the compiler will attempt to
     // assign it to 256 (previous + 1) and overflow the type.
     Unknown(u8) = 254,
+}
+
+impl PartialOrd for AttrType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AttrType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        u8::from(*self).cmp(&u8::from(*other))
+    }
 }
 
 pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
@@ -244,6 +257,18 @@ impl Attributes {
             index: 0,
         }
     }
+
+    /// Get an iterator over the held [AttributeValue]s. If you also need attribute flags, consider
+    /// using [Attributes::into_attributes_iter] instead.
+    pub fn iter(&self) -> <&'_ Self as IntoIterator>::IntoIter {
+        self.into_iter()
+    }
+
+    /// Get an iterator over the held [Attribute]s. If you do no not need attribute flags, consider
+    /// using [Attributes::iter] instead.
+    pub fn into_attributes_iter(self) -> impl Iterator<Item = Attribute> {
+        self.inner.into_iter()
+    }
 }
 
 pub struct MetaCommunitiesIter<'a> {
@@ -259,15 +284,15 @@ impl Iterator for MetaCommunitiesIter<'_> {
             match &self.attributes.first()?.value {
                 AttributeValue::Communities(x) if self.index < x.len() => {
                     self.index += 1;
-                    return Some(MetaCommunity::Community(x[self.index - 1]));
+                    return Some(MetaCommunity::Plain(x[self.index - 1]));
                 }
                 AttributeValue::ExtendedCommunities(x) if self.index < x.len() => {
                     self.index += 1;
-                    return Some(MetaCommunity::ExtendedCommunity(x[self.index - 1]));
+                    return Some(MetaCommunity::Extended(x[self.index - 1]));
                 }
                 AttributeValue::LargeCommunities(x) if self.index < x.len() => {
                     self.index += 1;
-                    return Some(MetaCommunity::LargeCommunity(x[self.index - 1]));
+                    return Some(MetaCommunity::Large(x[self.index - 1]));
                 }
                 _ => {
                     self.attributes = &self.attributes[1..];
@@ -333,15 +358,6 @@ impl<'a> IntoIterator for &'a Attributes {
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.iter().map(|x| &x.value)
-    }
-}
-
-// TODO: This may need to be removed when different underlying storages are added
-impl Deref for Attributes {
-    type Target = Vec<Attribute>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

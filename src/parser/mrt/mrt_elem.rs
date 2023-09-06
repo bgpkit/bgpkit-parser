@@ -76,17 +76,17 @@ fn get_relevant_attributes(
             AttributeValue::AtomicAggregate => atomic = true,
             AttributeValue::Communities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::Community)
+                    .map(MetaCommunity::Plain)
                     .collect::<Vec<MetaCommunity>>(),
             ),
             AttributeValue::ExtendedCommunities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::ExtendedCommunity)
+                    .map(MetaCommunity::Extended)
                     .collect::<Vec<MetaCommunity>>(),
             ),
             AttributeValue::LargeCommunities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::LargeCommunity)
+                    .map(MetaCommunity::Large)
                     .collect::<Vec<MetaCommunity>>(),
             ),
             AttributeValue::Aggregator { asn, id, .. } => aggregator = Some((asn, id)),
