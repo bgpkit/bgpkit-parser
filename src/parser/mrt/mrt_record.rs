@@ -141,41 +141,25 @@ pub fn parse_mrt_body(
     entry_subtype: u16,
     data: Bytes,
 ) -> Result<MrtMessage, ParserError> {
-    let message: MrtMessage = match entry_type {
+    match entry_type {
         EntryType::TABLE_DUMP => {
-            let msg = parse_table_dump_message(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::TableDumpMessage(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+            let msg = parse_table_dump_message(entry_subtype, data)?;
+            Ok(MrtMessage::TableDumpMessage(msg))
         }
         EntryType::TABLE_DUMP_V2 => {
-            let msg = parse_table_dump_v2_message(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::TableDumpV2Message(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+            let msg = parse_table_dump_v2_message(entry_subtype, data)?;
+            Ok(MrtMessage::TableDumpV2Message(msg))
         }
         EntryType::BGP4MP | EntryType::BGP4MP_ET => {
-            let msg = parse_bgp4mp(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::Bgp4Mp(msg),
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+            let msg = parse_bgp4mp(entry_subtype, data)?;
+            Ok(MrtMessage::Bgp4Mp(msg))
         }
-        v => {
+        mrt_type => {
             // deprecated
-            return Err(ParserError::Unsupported(format!(
-                "unsupported MRT type: {:?}",
-                v
-            )));
+            Err(ParserError::UnsupportedMrtType {
+                mrt_type,
+                subtype: entry_subtype,
+            })
         }
-    };
-    Ok(message)
+    }
 }

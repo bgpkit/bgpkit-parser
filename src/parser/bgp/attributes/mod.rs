@@ -194,10 +194,8 @@ impl AttributeParser {
                     Ok(AttributeValue::Development(value))
                 }
                 AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
-                _ => Err(ParserError::Unsupported(format!(
-                    "unsupported attribute type: {:?}",
-                    attr_type
-                ))),
+                // TODO: Should it be treated as a raw attribute instead?
+                _ => Err(ParserError::UnsupportedAttributeType(attr_type)),
             };
 
             match attr {

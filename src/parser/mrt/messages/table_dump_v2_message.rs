@@ -43,9 +43,10 @@ pub fn parse_table_dump_v2_message(
         TableDumpV2Type::RibGeneric
         | TableDumpV2Type::RibGenericAddPath
         | TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
-            ))
+            return Err(ParserError::UnsupportedMrtType {
+                mrt_type: EntryType::TABLE_DUMP_V2,
+                subtype: sub_type,
+            });
         }
     };
 

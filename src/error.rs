@@ -1,6 +1,7 @@
 /*!
 error module defines the error types used in bgpkit-parser.
 */
+use crate::models::{AttrType, EntryType};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::fmt::{Display, Formatter};
 use std::{error::Error, fmt, io};
@@ -36,20 +37,18 @@ pub enum ParserError {
     ///  - Buffering of an MRT record body before parsing
     #[error(transparent)]
     IoError(#[from] io::Error),
+    #[error("unable to parse unsupported MRT type {mrt_type:?} subtype {subtype}")]
+    UnsupportedMrtType { mrt_type: EntryType, subtype: u16 },
+    #[error("unable to parse unsupported attribute type {0:?}")]
+    UnsupportedAttributeType(AttrType),
 
     // TODO: Investigate usages of remaining error variants:
     #[error("todo")]
     IoNotEnoughBytes(),
     #[error("todo")]
-    EofError(io::Error),
-    #[error("todo")]
-    EofExpected,
-    #[error("todo")]
     ParseError(String),
     #[error("todo")]
     TruncatedMsg(String),
-    #[error("todo")]
-    Unsupported(String),
 }
 
 impl<T> From<TryFromPrimitiveError<T>> for ParserError
