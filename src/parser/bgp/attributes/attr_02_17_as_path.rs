@@ -15,7 +15,7 @@ pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Pa
     };
     while input.remaining() > 0 {
         let segment = parse_as_path_segment(&mut input, asn_len)?;
-        output.push_segment(segment);
+        output.append_segment(segment);
     }
 
     Ok(output)

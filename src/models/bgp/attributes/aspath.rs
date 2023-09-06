@@ -68,6 +68,73 @@ impl AsPathSegment {
             AsPathSegment::ConfedSequence(_) | AsPathSegment::ConfedSet(_)
         )
     }
+
+    /// Merge two [AsPathSegment]s in place and return if the merge was successful.
+    ///
+    /// See [AsPath::coalesce] for more information.
+    fn merge_in_place(&mut self, other: &mut Self) -> bool {
+        use AsPathSegment::*;
+
+        match (self, other) {
+            (AsSequence(x), AsSequence(y)) | (ConfedSequence(x), ConfedSequence(y)) => {
+                x.extend_from_slice(y);
+                true
+            }
+            (x @ (AsSequence(_) | ConfedSequence(_)), y) if x.is_empty() => {
+                std::mem::swap(x, y);
+                true
+            }
+            (_, AsSequence(y) | ConfedSequence(y)) if y.is_empty() => true,
+            _ => false,
+        }
+    }
+
+    /// A much more aggressive version of [AsPathSegment::merge_in_place] which de-duplicates and
+    /// converts sets with only 1 ASN to sequences.
+    ///
+    /// See [AsPath::dedup_coalesce] for more information.
+    fn dedup_merge_in_place(&mut self, other: &mut Self) -> bool {
+        use AsPathSegment::*;
+
+        other.dedup();
+        match (self, other) {
+            (AsSequence(x), AsSequence(y)) | (ConfedSequence(x), ConfedSequence(y)) => {
+                x.extend_from_slice(y);
+                x.dedup();
+                true
+            }
+            (x @ (AsSequence(_) | ConfedSequence(_)), y) if x.is_empty() => {
+                std::mem::swap(x, y);
+                true
+            }
+            (_, AsSequence(y) | ConfedSequence(y)) if y.is_empty() => true,
+            _ => false,
+        }
+    }
+
+    /// Deduplicate ASNs in this path segment. Additionally, sets are sorted and may be converted to
+    /// sequences if they only have a single element.
+    ///
+    /// See [AsPath::dedup_coalesce] for more information.
+    fn dedup(&mut self) {
+        match self {
+            AsPathSegment::AsSequence(x) | AsPathSegment::ConfedSequence(x) => x.dedup(),
+            AsPathSegment::AsSet(x) => {
+                x.sort_unstable();
+                x.dedup();
+                if x.len() == 1 {
+                    *self = AsPathSegment::AsSequence(std::mem::take(x));
+                }
+            }
+            AsPathSegment::ConfedSet(x) => {
+                x.sort_unstable();
+                x.dedup();
+                if x.len() == 1 {
+                    *self = AsPathSegment::ConfedSequence(std::mem::take(x));
+                }
+            }
+        }
+    }
 }
 
 impl IntoIterator for AsPathSegment {
@@ -149,6 +216,20 @@ impl Hash for AsPathSegment {
     }
 }
 
+/// Check for equality of two path segments.
+/// ```rust
+/// # use bgpkit_parser::models::AsPathSegment;
+/// let a = AsPathSegment::sequence([1, 2, 3]);
+/// let b = AsPathSegment::set([1, 2, 3]);
+///
+/// // Sequences must be identical to be considered equivalent
+/// assert_eq!(a, AsPathSegment::sequence([1, 2, 3]));
+/// assert_ne!(a, AsPathSegment::sequence([1, 2, 3, 3]));
+///
+/// // Sets may be reordered, but must contain exactly the same ASNs.
+/// assert_eq!(b, AsPathSegment::set([3, 1, 2]));
+/// assert_ne!(b, AsPathSegment::set([1, 2, 3, 3]));
+/// ```
 impl PartialEq for AsPathSegment {
     fn eq(&self, other: &Self) -> bool {
         let (x, y) = match (self, other) {
@@ -300,10 +381,9 @@ impl AsPath {
         AsPath { segments }
     }
 
-    // TODO: Would it make more sense to prepend the segment instead of pushing to the end?
-    // Semantically, it feels like it would make more sense to get further from the origin when
-    // pushing a new segment.
-    pub fn push_segment(&mut self, segment: AsPathSegment) {
+    /// Adds a new segment to the end of the path. This will change the origin of the path. No
+    /// validation or merging the segment is performed during this step.
+    pub fn append_segment(&mut self, segment: AsPathSegment) {
         self.segments.push(segment);
     }
 
@@ -343,9 +423,120 @@ impl AsPath {
         variations
     }
 
-    /// Checks if any segments of this AsPath contain the following ASN.
+    /// Checks if any segments of this [AsPath] contain the following ASN.
     pub fn contains_asn(&self, x: Asn) -> bool {
         self.iter_segments().flatten().contains(&x)
+    }
+
+    /// Coalesce this [AsPath] into the minimum number of segments required without changing the
+    /// values along the path. This can be helpful as some BGP servers will prepend additional
+    /// segments without coalescing sequences. For de-duplicating see [AsPath::dedup_coalesce].
+    ///
+    /// Changes applied by this function:
+    ///  - Merge adjacent AS_SEQUENCE segments
+    ///  - Merge adjacent AS_CONFED_SEQUENCE segments
+    ///  - Removing empty AS_SEQUENCE and AS_CONFED_SEQUENCE segments
+    ///
+    /// ```rust
+    /// # use bgpkit_parser::models::{AsPath, AsPathSegment};
+    /// let mut a = AsPath::from_segments(vec![
+    ///     AsPathSegment::sequence([1, 2]),
+    ///     AsPathSegment::sequence([]),
+    ///     AsPathSegment::sequence([2]),
+    ///     AsPathSegment::set([2]),
+    ///     AsPathSegment::set([5, 3, 3, 2]),
+    /// ]);
+    ///
+    /// let expected = AsPath::from_segments(vec![
+    ///     AsPathSegment::sequence([1, 2, 2]),
+    ///     AsPathSegment::set([2]),
+    ///     AsPathSegment::set([5, 3, 3, 2]),
+    /// ]);
+    ///
+    /// a.coalesce();
+    /// assert_eq!(a, expected);
+    /// ```
+    /// If there is only one segment, no changes will occur. This function will not attempt to
+    /// deduplicate sequences or alter sets.
+    pub fn coalesce(&mut self) {
+        let mut end_index = 0;
+        let mut scan_index = 1;
+
+        while scan_index < self.segments.len() {
+            let (a, b) = self.segments.split_at_mut(scan_index);
+            if !AsPathSegment::merge_in_place(&mut a[end_index], &mut b[0]) {
+                end_index += 1;
+                self.segments.swap(end_index, scan_index);
+            }
+            scan_index += 1;
+        }
+
+        self.segments.truncate(end_index + 1);
+    }
+
+    /// A more aggressive version of [AsPath::coalesce] which also de-duplicates ASNs within this
+    /// path and converts sets of a single ASN to sequences. Some BGP servers will prepend their own
+    /// ASN multiple times when announcing a path to artificially increase the route length and make
+    /// the route seem less less desirable to peers.This function is best suited for use-cases which
+    /// only care about transitions between ASes along the path.
+    ///
+    /// Changes applied by this function:
+    ///  - Merge adjacent AS_SEQUENCE segments
+    ///  - Merge adjacent AS_CONFED_SEQUENCE segments
+    ///  - Removing empty AS_SEQUENCE and AS_CONFED_SEQUENCE segments
+    ///  - De-duplicate ASNs in AS_SEQUENCE and AS_CONFED_SEQUENCE segments
+    ///  - Sort and de-duplicate ASNs in AS_SET and AS_CONFED_SET segments
+    ///  - Convert AS_SET and AS_CONFED_SET segments with exactly 1 element to sequences
+    ///
+    /// ```rust
+    /// # use bgpkit_parser::models::{AsPath, AsPathSegment};
+    /// let mut a = AsPath::from_segments(vec![
+    ///     AsPathSegment::sequence([1, 2]),
+    ///     AsPathSegment::sequence([]),
+    ///     AsPathSegment::sequence([2]),
+    ///     AsPathSegment::set([2]),
+    ///     AsPathSegment::set([5, 3, 3, 2]),
+    /// ]);
+    ///
+    /// let expected = AsPath::from_segments(vec![
+    ///     AsPathSegment::sequence([1, 2]),
+    ///     AsPathSegment::set([2, 3, 5]),
+    /// ]);
+    ///
+    /// a.dedup_coalesce();
+    /// assert_eq!(a, expected);
+    /// ```
+    pub fn dedup_coalesce(&mut self) {
+        if !self.segments.is_empty() {
+            self.segments[0].dedup();
+        }
+        let mut end_index = 0;
+        let mut scan_index = 1;
+
+        while scan_index < self.segments.len() {
+            let (a, b) = self.segments.split_at_mut(scan_index);
+            if !AsPathSegment::dedup_merge_in_place(&mut a[end_index], &mut b[0]) {
+                end_index += 1;
+                self.segments.swap(end_index, scan_index);
+            }
+            scan_index += 1;
+        }
+
+        self.segments.truncate(end_index + 1);
+    }
+
+    /// Checks if two paths correspond to equivalent routes. Unlike `a == b`, this function will
+    /// ignore duplicate ASNs by comparing the coalesced versions of each path.
+    ///
+    /// This is equivalent to [AsPath::eq] after calling [AsPath::dedup_coalesce] on both paths.
+    pub fn has_equivalent_routing(&self, other: &Self) -> bool {
+        let mut a = self.to_owned();
+        let mut b = other.to_owned();
+
+        a.dedup_coalesce();
+        b.dedup_coalesce();
+
+        a == b
     }
 
     /// Get the length of ASN required to store all of the ASNs within this path

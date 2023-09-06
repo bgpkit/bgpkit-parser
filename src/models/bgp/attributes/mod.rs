@@ -142,6 +142,8 @@ impl Attributes {
             .cloned()
     }
 
+    /// Get the `ORIGIN` attribute. In the event that this attribute is not present,
+    /// [Origin::INCOMPLETE] will be returned instead.
     pub fn origin(&self) -> Origin {
         self.inner
             .iter()
@@ -152,6 +154,7 @@ impl Attributes {
             .unwrap_or(Origin::INCOMPLETE)
     }
 
+    /// Get the `ORIGINATOR_ID` attribute if present.
     pub fn origin_id(&self) -> Option<IpAddr> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::OriginatorId(x) => Some(*x),
@@ -159,7 +162,10 @@ impl Attributes {
         })
     }
 
-    // TODO: Why would the attribute be used instead of the reach NLRI? Should this check both?
+    /// Get the `NEXT_HOP` attribute if present.
+    ///
+    /// > **Note:** Even when this attribute is not present, the next hop address may still be
+    /// attainable from the `MP_REACH_NLRI` attribute.
     pub fn next_hop(&self) -> Option<IpAddr> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::NextHop(x) => Some(*x),
