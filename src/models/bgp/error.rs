@@ -336,13 +336,12 @@ mod tests {
             BgpError::UpdateError(UpdateError::MALFORMED_AS_PATH)
         );
         // deprecated subcodes
-        for n in [7] {
-            assert_eq!(
-                BgpError::new(3, n),
-                BgpError::UpdateError(UpdateError::Unknown(n))
-            );
-            assert!(UpdateError::Unknown(n).is_deprecated());
-        }
+        assert_eq!(
+            BgpError::new(3, 7),
+            BgpError::UpdateError(UpdateError::Unknown(7))
+        );
+        assert!(UpdateError::Unknown(7).is_deprecated());
+
         assert_eq!(
             BgpError::new(3, 12),
             BgpError::UpdateError(UpdateError::Unknown(12))
