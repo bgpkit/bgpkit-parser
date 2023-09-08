@@ -1,7 +1,7 @@
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{AttributeParser, ReadUtils};
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use log::warn;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -183,11 +183,9 @@ pub fn parse_rib_entry(
     safi: &Safi,
     prefixes: &[NetworkPrefix],
 ) -> Result<RibEntry, ParserError> {
-    if input.remaining() < 8 {
-        // total length - current position less than 16 --
-        // meaning less than 16 bytes available to read
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    // total length - current position less than 16 --
+    // meaning less than 16 bytes available to read
+    input.require_n_remaining(8, "rib entry")?;
 
     let peer_index = input.read_u16()?;
     let originated_time = input.read_u32()?;
@@ -196,9 +194,7 @@ pub fn parse_rib_entry(
     }
     let attribute_length = input.read_u16()? as usize;
 
-    if input.remaining() < attribute_length {
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    input.require_n_remaining(attribute_length, "rib entry attributes")?;
 
     let attr_parser = AttributeParser::new(add_path);
 

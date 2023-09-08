@@ -56,7 +56,7 @@ pub fn parse_nlri(
     let mut next_hop = None;
     if reachable {
         let next_hop_length = input.read_u8()? as usize;
-        input.has_n_remaining(next_hop_length)?;
+        input.require_n_remaining(next_hop_length, "mp next hop")?;
         let next_hop_bytes = input.split_to(next_hop_length);
         next_hop = match parse_mp_next_hop(next_hop_bytes) {
             Ok(x) => x,

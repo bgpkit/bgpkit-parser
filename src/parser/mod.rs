@@ -23,7 +23,7 @@ use filter::Filter;
 pub use mrt::mrt_elem::Elementor;
 use oneio::{get_cache_reader, get_reader, OneIoError};
 
-pub use crate::error::{ParserError, ParserErrorWithBytes};
+pub use crate::error::ParserError;
 pub use bmp::{parse_bmp_msg, parse_openbmp_header, parse_openbmp_msg};
 pub use filter::*;
 pub use iters::*;

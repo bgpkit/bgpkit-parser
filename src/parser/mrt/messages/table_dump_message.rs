@@ -90,7 +90,7 @@ pub fn parse_table_dump_message(
 
     let attr_parser = AttributeParser::new(false);
 
-    data.has_n_remaining(attribute_length)?;
+    data.require_n_remaining(attribute_length, "rib attributes")?;
     let attr_data_slice = data.split_to(attribute_length);
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.

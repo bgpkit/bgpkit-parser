@@ -1,7 +1,9 @@
 use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::{parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message};
-use bytes::{Buf, Bytes, BytesMut};
+use crate::parser::{
+    parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ReadUtils,
+};
+use bytes::{Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::io::Read;
 
@@ -44,21 +46,21 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
     input.read_exact(&mut raw_bytes)?;
     let mut data = BytesMut::from(&raw_bytes[..]);
 
-    let timestamp = data.get_u32();
-    let entry_type_raw = data.get_u16();
+    let timestamp = data.read_u32()?;
+    let entry_type_raw = data.read_u16()?;
     let entry_type = match EntryType::try_from(entry_type_raw) {
         Ok(v) => v,
         Err(_) => return Err(ParserError::UnrecognizedMrtType(entry_type_raw)),
     };
-    let entry_subtype = data.get_u16();
-    let mut length = data.get_u32();
+    let entry_subtype = data.read_u16()?;
+    let mut length = data.read_u32()?;
 
     let microsecond_timestamp = match &entry_type {
         EntryType::BGP4MP_ET => {
             length -= 4;
             let mut raw_bytes: [u8; 4] = [0; 4];
             input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).get_u32())
+            Some(BytesMut::from(&raw_bytes[..]).read_u32()?)
         }
         _ => None,
     };

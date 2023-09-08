@@ -2,7 +2,7 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use std::convert::TryFrom;
 
 /// Parse MRT BGP4MP type
@@ -82,13 +82,7 @@ pub fn parse_bgp4mp_message(
     let local_ip = data.read_address(&afi)?;
 
     let should_read = total_should_read(&afi, &asn_len, total_size);
-    if should_read != data.remaining() {
-        return Err(ParserError::TruncatedMsg(format!(
-            "truncated bgp4mp message: should read {} bytes, have {} bytes available",
-            should_read,
-            data.remaining()
-        )));
-    }
+    data.require_n_remaining(should_read, "bgp4mp message")?;
     let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, &asn_len)?;
 
     Ok(Bgp4MpMessage {

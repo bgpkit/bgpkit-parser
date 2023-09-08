@@ -3,8 +3,7 @@ error module defines the error types used in bgpkit-parser.
 */
 use crate::models::{AttrType, EntryType};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
-use std::fmt::{Display, Formatter};
-use std::{error::Error, fmt, io};
+use std::io;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -41,14 +40,23 @@ pub enum ParserError {
     UnsupportedMrtType { mrt_type: EntryType, subtype: u16 },
     #[error("unable to parse unsupported attribute type {0:?}")]
     UnsupportedAttributeType(AttrType),
+    /// Indicates internal length inconsistencies within an MRT message. This includes fixed-length
+    /// and length-prefixed data requiring more space than is available within the enclosing
+    /// container.
+    ///
+    /// This error is not caused by IO errors such as an unexpected EOF error.
+    #[error(
+        "encountered truncated value during {name}; expected {expected} bytes, but got {remaining}"
+    )]
+    TruncatedField {
+        name: &'static str,
+        expected: usize,
+        remaining: usize,
+    },
 
     // TODO: Investigate usages of remaining error variants:
     #[error("todo")]
-    IoNotEnoughBytes(),
-    #[error("todo")]
     ParseError(String),
-    #[error("todo")]
-    TruncatedMsg(String),
 }
 
 impl<T> From<TryFromPrimitiveError<T>> for ParserError
@@ -62,25 +70,5 @@ where
             type_name: T::NAME,
             value: value.number.into(),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct ParserErrorWithBytes {
-    pub error: ParserError,
-    pub bytes: Option<Vec<u8>>,
-}
-
-impl Display for ParserErrorWithBytes {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl Error for ParserErrorWithBytes {}
-
-impl From<ParserError> for ParserErrorWithBytes {
-    fn from(error: ParserError) -> Self {
-        ParserErrorWithBytes { error, bytes: None }
     }
 }
