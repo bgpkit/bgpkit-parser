@@ -1,7 +1,10 @@
+use crate::models::aspath::storage::{AsPathStorage, MixedStorage};
 use crate::models::{AsPath, AsPathSegment, Asn};
+use smallvec::smallvec;
 use std::borrow::Cow;
 use std::iter::Copied;
 use std::marker::PhantomData;
+use std::slice;
 
 impl AsPathSegment<'_> {
     /// Get an iterator over the ASNs within this path segment
@@ -116,7 +119,7 @@ impl<'a> Iterator for AsPathNumberedRouteIter<'a> {
 }
 
 pub struct AsPathRouteIter<'a, D> {
-    path: Cow<'a, [AsPathSegment<'a>]>,
+    path: Cow<'a, AsPathStorage>,
     route_num: u64,
     total_routes: u64,
     _phantom: PhantomData<D>,
@@ -133,43 +136,77 @@ where
             return None;
         }
 
-        // Attempt to speed up what is by far the most common case (a path of a single sequence)
-        if self.route_num == 0 && self.path.len() == 1 {
-            if let AsPathSegment::AsSequence(sequence) = &self.path[0] {
-                let route = D::from_iter(sequence.iter().copied());
+        match self.path.as_ref() {
+            AsPathStorage::SingleSequence(x) => {
                 self.route_num += 1;
-                return Some(route);
+                Some(D::from_iter(x.iter().copied()))
+            }
+            AsPathStorage::Mixed(path) => {
+                // Attempt to speed up what is by far the most common case (a path of a single sequence)
+                if self.route_num == 0 && path.len() == 1 {
+                    if let AsPathSegment::AsSequence(sequence) = &path[0] {
+                        let route = D::from_iter(sequence.iter().copied());
+                        self.route_num += 1;
+                        return Some(route);
+                    }
+                }
+
+                let route_asn_iter = AsPathNumberedRouteIter {
+                    path: path.as_ref(),
+                    index: 0,
+                    route_num: self.route_num,
+                };
+
+                self.route_num += 1;
+                Some(D::from_iter(route_asn_iter))
             }
         }
-
-        let route_asn_iter = AsPathNumberedRouteIter {
-            path: self.path.as_ref(),
-            index: 0,
-            route_num: self.route_num,
-        };
-
-        self.route_num += 1;
-        Some(D::from_iter(route_asn_iter))
     }
 }
 
-// Define iterator type aliases. The storage mechanism and by extension the iterator types may
-// change later, but these types should remain consistent.
-pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment<'static>>;
-pub type SegmentIterMut<'a> = std::slice::IterMut<'a, AsPathSegment<'static>>;
-pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment<'static>>;
+#[repr(transparent)]
+pub struct SegmentIter<'a> {
+    inner: SegmentIterInner<'a>,
+}
+
+enum SegmentIterInner<'a> {
+    Single(Option<&'a [Asn]>),
+    Mixed(slice::Iter<'a, AsPathSegment<'static>>),
+}
+
+impl<'a> Iterator for SegmentIter<'a> {
+    type Item = AsPathSegment<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            SegmentIterInner::Single(x) => {
+                x.take().map(Cow::Borrowed).map(AsPathSegment::AsSequence)
+            }
+            SegmentIterInner::Mixed(x) => x.next().map(|x| x.borrowed()),
+        }
+    }
+}
+
+pub type SegmentIntoIter = <MixedStorage as IntoIterator>::IntoIter;
 
 impl AsPath {
     pub fn iter_segments(&self) -> SegmentIter<'_> {
-        self.segments.iter()
-    }
+        let inner = match &self.storage {
+            AsPathStorage::SingleSequence(x) => SegmentIterInner::Single(Some(x)),
+            AsPathStorage::Mixed(x) => SegmentIterInner::Mixed(x.iter()),
+        };
 
-    pub fn iter_segments_mut(&mut self) -> SegmentIterMut<'_> {
-        self.segments.iter_mut()
+        SegmentIter { inner }
     }
 
     pub fn into_segments_iter(self) -> SegmentIntoIter {
-        self.segments.into_iter()
+        match self.storage {
+            AsPathStorage::SingleSequence(asns) => {
+                let segment = AsPathSegment::AsSequence(Cow::Owned(asns.to_vec()));
+                smallvec![segment].into_iter()
+            }
+            AsPathStorage::Mixed(segments) => segments.into_iter(),
+        }
     }
 
     /// Gets an iterator over all possible routes this path represents.
@@ -178,7 +215,7 @@ impl AsPath {
         D: FromIterator<Asn>,
     {
         AsPathRouteIter {
-            path: Cow::Borrowed(&self.segments),
+            path: Cow::Borrowed(&self.storage),
             route_num: 0,
             total_routes: self.num_route_variations(),
             _phantom: PhantomData,
@@ -189,10 +226,13 @@ impl AsPath {
     /// completeness, but in almost all cases this iterator should only contain a single element.
     /// Alternatively, [AsPath::get_singular_origin] can be used if
     pub fn iter_origins(&self) -> impl '_ + Iterator<Item = Asn> {
-        let origin_slice = match self.segments.last() {
-            Some(AsPathSegment::AsSequence(v)) => v.last().map(std::slice::from_ref).unwrap_or(&[]),
-            Some(AsPathSegment::AsSet(v)) => v.as_ref(),
-            _ => &[],
+        let origin_slice = match &self.storage {
+            AsPathStorage::SingleSequence(v) => v.last().map(slice::from_ref).unwrap_or(&[]),
+            AsPathStorage::Mixed(segments) => match segments.last() {
+                Some(AsPathSegment::AsSequence(v)) => v.last().map(slice::from_ref).unwrap_or(&[]),
+                Some(AsPathSegment::AsSet(v)) => v.as_ref(),
+                _ => &[],
+            },
         };
 
         origin_slice.iter().copied()
@@ -217,7 +257,7 @@ impl IntoIterator for AsPath {
     fn into_iter(self) -> Self::IntoIter {
         AsPathRouteIter {
             total_routes: self.num_route_variations(),
-            path: Cow::Owned(self.segments),
+            path: Cow::Owned(self.storage),
             route_num: 0,
             _phantom: PhantomData,
         }

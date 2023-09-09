@@ -63,24 +63,29 @@ impl<'de> Deserialize<'de> for AsPathSegment<'_> {
 /// Check if we can serialize an `AsPath` using the simplified format and get the number of
 /// elements to do so. The ambiguities that could prevent us from doing so are confederation
 /// segments and adjacent sequence segments.
-fn simplified_format_len(segments: &[AsPathSegment]) -> Option<usize> {
-    let mut elements = 0;
-    let mut prev_was_sequence = false;
-    for segment in segments {
-        match segment {
-            AsPathSegment::AsSequence(seq) if !prev_was_sequence => {
-                prev_was_sequence = true;
-                elements += seq.len();
+fn simplified_format_len(storage: &AsPathStorage) -> Option<usize> {
+    match storage {
+        AsPathStorage::SingleSequence(x) => Some(x.len()),
+        AsPathStorage::Mixed(segments) => {
+            let mut elements = 0;
+            let mut prev_was_sequence = false;
+            for segment in segments {
+                match segment {
+                    AsPathSegment::AsSequence(seq) if !prev_was_sequence => {
+                        prev_was_sequence = true;
+                        elements += seq.len();
+                    }
+                    AsPathSegment::AsSet(_) => {
+                        prev_was_sequence = false;
+                        elements += 1;
+                    }
+                    _ => return None,
+                }
             }
-            AsPathSegment::AsSet(_) => {
-                prev_was_sequence = false;
-                elements += 1;
-            }
-            _ => return None,
+
+            Some(elements)
         }
     }
-
-    Some(elements)
 }
 
 /// # Serialization format
@@ -136,18 +141,18 @@ impl Serialize for AsPath {
     where
         S: Serializer,
     {
-        if let Some(num_elements) = simplified_format_len(&self.segments) {
+        if let Some(num_elements) = simplified_format_len(&self.storage) {
             // Serialize simplified format
             let mut seq_serializer = serializer.serialize_seq(Some(num_elements))?;
 
-            for segment in &self.segments {
+            for segment in self.iter_segments() {
                 match segment {
                     AsPathSegment::AsSequence(elements) => {
                         elements
                             .iter()
                             .try_for_each(|x| seq_serializer.serialize_element(x))?;
                     }
-                    AsPathSegment::AsSet(x) => seq_serializer.serialize_element(x)?,
+                    AsPathSegment::AsSet(x) => seq_serializer.serialize_element(&*x)?,
                     _ => unreachable!("simplified_format_len checked for confed segments"),
                 }
             }
@@ -155,7 +160,7 @@ impl Serialize for AsPath {
         }
 
         // Serialize verbose format
-        serializer.collect_seq(&self.segments)
+        serializer.collect_seq(self.iter_segments())
     }
 }
 
@@ -172,44 +177,47 @@ impl<'de> Visitor<'de> for AsPathVisitor {
     where
         A: SeqAccess<'de>,
     {
-        // Technically, we can handle an input that mixes the simplified and verbose formats,
-        // but we do not want to document this behavior as it may change in future updates.
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum PathElement {
-            SequenceElement(Asn),
-            Set(Vec<Asn>),
-            Verbose(AsPathSegment<'static>),
-        }
+        // TODO: Implement this portion using the builder once added
 
-        let mut append_new_sequence = false;
-        let mut segments = Vec::new();
-        while let Some(element) = seq.next_element()? {
-            match element {
-                PathElement::SequenceElement(x) => {
-                    if append_new_sequence {
-                        // If the input is mixed between verbose and regular segments, this flag
-                        // is used to prevent appending to a verbose sequence.
-                        append_new_sequence = false;
-                        segments.push(AsPathSegment::AsSequence(Cow::Owned(Vec::new())));
-                    }
-
-                    if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut() {
-                        last_sequence.to_mut().push(x);
-                    } else {
-                        segments.push(AsPathSegment::AsSequence(Cow::Owned(vec![x])));
-                    }
-                }
-                PathElement::Set(values) => {
-                    segments.push(AsPathSegment::AsSet(Cow::Owned(values)));
-                }
-                PathElement::Verbose(verbose) => {
-                    segments.push(verbose);
-                }
-            }
-        }
-
-        Ok(AsPath { segments })
+        // // Technically, we can handle an input that mixes the simplified and verbose formats,
+        // // but we do not want to document this behavior as it may change in future updates.
+        // #[derive(Deserialize)]
+        // #[serde(untagged)]
+        // enum PathElement {
+        //     SequenceElement(Asn),
+        //     Set(Vec<Asn>),
+        //     Verbose(AsPathSegment<'static>),
+        // }
+        //
+        // let mut append_new_sequence = false;
+        // let mut segments = Vec::new();
+        // while let Some(element) = seq.next_element()? {
+        //     match element {
+        //         PathElement::SequenceElement(x) => {
+        //             if append_new_sequence {
+        //                 // If the input is mixed between verbose and regular segments, this flag
+        //                 // is used to prevent appending to a verbose sequence.
+        //                 append_new_sequence = false;
+        //                 segments.push(AsPathSegment::AsSequence(Cow::Owned(Vec::new())));
+        //             }
+        //
+        //             if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut() {
+        //                 last_sequence.to_mut().push(x);
+        //             } else {
+        //                 segments.push(AsPathSegment::AsSequence(Cow::Owned(vec![x])));
+        //             }
+        //         }
+        //         PathElement::Set(values) => {
+        //             segments.push(AsPathSegment::AsSet(Cow::Owned(values)));
+        //         }
+        //         PathElement::Verbose(verbose) => {
+        //             segments.push(verbose);
+        //         }
+        //     }
+        // }
+        //
+        // Ok(AsPath { segments })
+        todo!()
     }
 }
 

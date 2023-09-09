@@ -7,7 +7,10 @@ fn test_aspath_as4path_merge() {
     let aspath = AsPath::from_sequence([1, 2, 3, 5]);
     let as4path = AsPath::from_sequence([2, 3, 7]);
     let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
-    assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2, 3, 7]));
+    assert_eq!(
+        newpath.into_segments_iter().next().unwrap(),
+        AsPathSegment::sequence([1, 2, 3, 7])
+    );
 }
 
 #[test]
@@ -63,4 +66,9 @@ fn test_aspath_route_iter() {
         Asn::from(7),
         Asn::from(8)
     ]));
+}
+
+#[test]
+fn check_hash() {
+    // TODO: Check that storage have for a single sequence and mixed segments of a single sequence hash the same.
 }
