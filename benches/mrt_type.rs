@@ -1,4 +1,4 @@
-use bgpkit_parser::models::{EntryType, MrtRecord};
+use bgpkit_parser::models::EntryType;
 use bgpkit_parser::mrt_record::parse_common_header;
 use bgpkit_parser::BgpkitParser;
 use bzip2::bufread::BzDecoder;
@@ -32,7 +32,6 @@ fn select_mrt_records<R: Read>(mut input_reader: R, mrt_type: EntryType, subtype
         }
     }
 
-    println!("Found {} included records", included.len());
     included.sort_by_key(Vec::len);
 
     if included.is_empty() {
@@ -67,7 +66,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("BGP4MP Update", |b| {
         b.iter_with_large_drop(|| {
             let mut reader = black_box(&bgp4mp_updates[..]);
-            let mut holder: [Option<MrtRecord>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
+            let mut holder: [Option<_>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
 
             BgpkitParser::from_reader(&mut reader)
                 .into_record_iter()
@@ -81,7 +80,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("TABLE_DUMP_V2 IPv4 Unicast", |b| {
         b.iter_with_large_drop(|| {
             let mut reader = black_box(&rib_ipv4_unicast[..]);
-            let mut holder: [Option<MrtRecord>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
+            let mut holder: [Option<_>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
 
             BgpkitParser::from_reader(&mut reader)
                 .into_record_iter()
@@ -95,7 +94,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("TABLE_DUMP_V2 IPv6 Unicast", |b| {
         b.iter_with_large_drop(|| {
             let mut reader = black_box(&rib_ipv6_unicast[..]);
-            let mut holder: [Option<MrtRecord>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
+            let mut holder: [Option<_>; RECORDS_PER_TYPE] = std::array::from_fn(|_| None);
 
             BgpkitParser::from_reader(&mut reader)
                 .into_record_iter()
