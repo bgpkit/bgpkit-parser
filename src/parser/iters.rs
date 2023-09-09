@@ -3,6 +3,7 @@ Provides parser iterator implementation.
 */
 use crate::error::ParserError;
 use crate::models::*;
+use crate::mrt_record::try_parse_mrt_record_with_buffer;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use std::io::Read;
@@ -35,6 +36,7 @@ pub struct RecordIterator<R> {
     pub count: u64,
     elementor: Elementor,
     had_fatal_error: bool,
+    buffer: Vec<u8>,
 }
 
 impl<R> RecordIterator<R> {
@@ -44,6 +46,7 @@ impl<R> RecordIterator<R> {
             count: 0,
             elementor: Elementor::new(),
             had_fatal_error: false,
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -58,15 +61,16 @@ impl<R: Read> Iterator for RecordIterator<R> {
 
         loop {
             self.count += 1;
-            let record = match self.parser.next_record() {
-                Ok(None) => return None,
-                Ok(Some(v)) => v,
-                Err(err @ (ParserError::IoError(_) | ParserError::UnrecognizedMrtType(_))) => {
-                    self.had_fatal_error = true;
-                    return Some(Err(err));
-                }
-                Err(err) => return Some(Err(err)),
-            };
+            let record =
+                match try_parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
+                    Ok(None) => return None,
+                    Ok(Some(v)) => v,
+                    Err(err @ (ParserError::IoError(_) | ParserError::UnrecognizedMrtType(_))) => {
+                        self.had_fatal_error = true;
+                        return Some(Err(err));
+                    }
+                    Err(err) => return Some(Err(err)),
+                };
 
             if self.parser.filters.is_empty() {
                 return Some(Ok(record));
@@ -96,6 +100,7 @@ pub struct ElemIterator<R> {
     element_queue: Vec<BgpElem>,
     elementor: Elementor,
     had_fatal_error: bool,
+    buffer: Vec<u8>,
 }
 
 impl<R> ElemIterator<R> {
@@ -105,6 +110,7 @@ impl<R> ElemIterator<R> {
             element_queue: vec![],
             elementor: Elementor::new(),
             had_fatal_error: false,
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -122,15 +128,16 @@ impl<R: Read> Iterator for ElemIterator<R> {
                 return None;
             }
 
-            let record = match self.parser.next_record() {
-                Ok(None) => return None,
-                Ok(Some(v)) => v,
-                Err(err @ (ParserError::IoError(_) | ParserError::UnrecognizedMrtType(_))) => {
-                    self.had_fatal_error = true;
-                    return Some(Err(err));
-                }
-                Err(err) => return Some(Err(err)),
-            };
+            let record =
+                match try_parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
+                    Ok(None) => return None,
+                    Ok(Some(v)) => v,
+                    Err(err @ (ParserError::IoError(_) | ParserError::UnrecognizedMrtType(_))) => {
+                        self.had_fatal_error = true;
+                        return Some(Err(err));
+                    }
+                    Err(err) => return Some(Err(err)),
+                };
 
             let new_elements = self.elementor.record_to_elems(record);
             self.element_queue.extend(new_elements.into_iter().rev());

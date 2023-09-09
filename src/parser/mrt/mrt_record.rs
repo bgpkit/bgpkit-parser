@@ -91,6 +91,14 @@ pub fn try_parse_common_header<T: Read>(
 }
 
 pub fn try_parse_mrt_record<T: Read>(input: &mut T) -> Result<Option<MrtRecord>, ParserError> {
+    let mut buffer = Vec::new();
+    try_parse_mrt_record_with_buffer(input, &mut buffer)
+}
+
+pub fn try_parse_mrt_record_with_buffer<T: Read>(
+    input: &mut T,
+    buffer: &mut Vec<u8>,
+) -> Result<Option<MrtRecord>, ParserError> {
     // parse common header
     let common_header = match try_parse_common_header(input)? {
         Some(v) => v,
@@ -98,13 +106,15 @@ pub fn try_parse_mrt_record<T: Read>(input: &mut T) -> Result<Option<MrtRecord>,
     };
 
     // read the whole message bytes to buffer
-    let mut buffer = vec![0; common_header.length as usize];
-    input.read_exact(&mut buffer)?;
+    if buffer.len() < common_header.length as usize {
+        buffer.resize(common_header.length as usize, 0);
+    }
+    input.read_exact(&mut buffer[..common_header.length as usize])?;
 
     let message = parse_mrt_body(
         common_header.entry_type,
         common_header.entry_subtype,
-        &buffer,
+        &buffer[..common_header.length as usize],
     )?;
 
     Ok(Some(MrtRecord {
