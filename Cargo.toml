@@ -87,8 +87,16 @@ name = "internals"
 harness = false
 
 [[bench]]
+name = "mrt_type"
+harness = false
+
+[[bench]]
 name = "bench_main"
 harness = false
+
+# Enable debug symbols for benchmarks for easier profiling
+[profile.bench]
+debug = true
 
 [dev-dependencies]
 anyhow = "1"
