@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::builder::AsPathBuilder;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -102,10 +103,10 @@ fn simplified_format_len(storage: &AsPathStorage) -> Option<usize> {
 /// let a: AsPath = serde_json::from_str("[123, 942, 102]").unwrap();
 /// let b: AsPath = serde_json::from_str("[231, 432, [643, 836], 352]").unwrap();
 ///
-/// assert_eq!(&a.segments, &[
+/// assert_eq!(&a.iter_segments().collect::<Vec<_>>(), &[
 ///     AsPathSegment::sequence([123, 942, 102])
 /// ]);
-/// assert_eq!(&b.segments, &[
+/// assert_eq!(&b.iter_segments().collect::<Vec<_>>(), &[
 ///     AsPathSegment::sequence([231, 432]),
 ///     AsPathSegment::set([643, 836]),
 ///     AsPathSegment::sequence([352])
@@ -130,7 +131,7 @@ fn simplified_format_len(storage: &AsPathStorage) -> Option<usize> {
 /// ]"#;
 ///
 /// let parsed: AsPath = serde_json::from_str(a).unwrap();
-/// assert_eq!(&parsed.segments, &[
+/// assert_eq!(&parsed.iter_segments().collect::<Vec<_>>(), &[
 ///     ConfedSequence(Cow::Owned(vec![Asn::from(123), Asn::from(942)])),
 ///     AsSequence(Cow::Owned(vec![Asn::from(773)])),
 ///     AsSequence(Cow::Owned(vec![Asn::from(382), Asn::from(293)]))
@@ -177,47 +178,41 @@ impl<'de> Visitor<'de> for AsPathVisitor {
     where
         A: SeqAccess<'de>,
     {
-        // TODO: Implement this portion using the builder once added
+        // Technically, we can handle an input that mixes the simplified and verbose formats,
+        // but we do not want to document this behavior as it may change in future updates.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum PathElement {
+            SequenceElement(Asn),
+            Set(Vec<Asn>),
+            Verbose(AsPathSegment<'static>),
+        }
 
-        // // Technically, we can handle an input that mixes the simplified and verbose formats,
-        // // but we do not want to document this behavior as it may change in future updates.
-        // #[derive(Deserialize)]
-        // #[serde(untagged)]
-        // enum PathElement {
-        //     SequenceElement(Asn),
-        //     Set(Vec<Asn>),
-        //     Verbose(AsPathSegment<'static>),
-        // }
-        //
-        // let mut append_new_sequence = false;
-        // let mut segments = Vec::new();
-        // while let Some(element) = seq.next_element()? {
-        //     match element {
-        //         PathElement::SequenceElement(x) => {
-        //             if append_new_sequence {
-        //                 // If the input is mixed between verbose and regular segments, this flag
-        //                 // is used to prevent appending to a verbose sequence.
-        //                 append_new_sequence = false;
-        //                 segments.push(AsPathSegment::AsSequence(Cow::Owned(Vec::new())));
-        //             }
-        //
-        //             if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut() {
-        //                 last_sequence.to_mut().push(x);
-        //             } else {
-        //                 segments.push(AsPathSegment::AsSequence(Cow::Owned(vec![x])));
-        //             }
-        //         }
-        //         PathElement::Set(values) => {
-        //             segments.push(AsPathSegment::AsSet(Cow::Owned(values)));
-        //         }
-        //         PathElement::Verbose(verbose) => {
-        //             segments.push(verbose);
-        //         }
-        //     }
-        // }
-        //
-        // Ok(AsPath { segments })
-        todo!()
+        let mut append_new_sequence = false;
+        let mut builder = AsPathBuilder::default();
+        while let Some(element) = seq.next_element()? {
+            match element {
+                PathElement::SequenceElement(x) => {
+                    if append_new_sequence {
+                        // If the input is mixed between verbose and regular segments, this flag
+                        // is used to prevent appending to a verbose sequence.
+                        append_new_sequence = false;
+                        builder.push_segment(AsPathSegment::AsSequence(Cow::Owned(Vec::new())));
+                    }
+
+                    builder.push_sequence_asn(x);
+                }
+                PathElement::Set(values) => {
+                    builder.push_segment(AsPathSegment::AsSet(Cow::Owned(values)));
+                }
+                PathElement::Verbose(verbose) => {
+                    append_new_sequence = true;
+                    builder.push_segment(verbose);
+                }
+            }
+        }
+
+        Ok(builder.build())
     }
 }
 

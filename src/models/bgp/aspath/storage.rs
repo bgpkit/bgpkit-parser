@@ -7,6 +7,7 @@ use std::slice;
 
 const STORAGE_SIZE_LIMIT: usize = 64;
 
+pub type SingleSequenceStorage = SmallVec<[Asn; STORAGE_SIZE_LIMIT / size_of::<Asn>()]>;
 pub type MixedStorage =
     SmallVec<[AsPathSegment<'static>; STORAGE_SIZE_LIMIT / size_of::<AsPathSegment>()]>;
 
@@ -17,7 +18,7 @@ pub enum AsPathStorage {
     /// those ASNs before allocating to the heap. After checking a couple of RIB table dumps,
     /// roughly 75% of AS_PATHs consist of a single sequence with 5 ASNs. By expanding to 16, we
     /// can then hold roughly 99.5% of observed AS_PATH attributes on the stack without allocation.
-    SingleSequence(SmallVec<[Asn; STORAGE_SIZE_LIMIT / size_of::<Asn>()]>),
+    SingleSequence(SingleSequenceStorage),
     /// Fallback case where we defer to the typical list of generic segments
     Mixed(MixedStorage),
 }

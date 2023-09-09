@@ -5,10 +5,14 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::mem::discriminant;
 
-pub mod iters;
-mod storage;
 use crate::models::aspath::storage::{AsPathStorage, MixedStorage};
+use crate::models::builder::AsPathBuilder;
 pub use iters::*;
+
+pub mod builder;
+pub mod iters;
+
+mod storage;
 
 #[cfg(feature = "serde")]
 mod serde_impl;
@@ -176,7 +180,7 @@ impl Hash for AsPathSegment<'_> {
 
         let set = match self {
             AsPathSegment::AsSequence(x) | AsPathSegment::ConfedSequence(x) => {
-                return x.hash(state)
+                return x.hash(state);
             }
             AsPathSegment::AsSet(x) | AsPathSegment::ConfedSet(x) => x,
         };
@@ -218,7 +222,7 @@ impl PartialEq for AsPathSegment<'_> {
         let (x, y) = match (self, other) {
             (AsPathSegment::AsSequence(x), AsPathSegment::AsSequence(y))
             | (AsPathSegment::ConfedSequence(x), AsPathSegment::ConfedSequence(y)) => {
-                return x == y
+                return x == y;
             }
             (AsPathSegment::AsSet(x), AsPathSegment::AsSet(y))
             | (AsPathSegment::ConfedSet(x), AsPathSegment::ConfedSet(y)) => (x, y),
@@ -257,6 +261,7 @@ impl PartialEq for AsPathSegment<'_> {
 impl Eq for AsPathSegment<'_> {}
 
 #[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
+#[repr(transparent)]
 pub struct AsPath {
     storage: AsPathStorage,
 }
@@ -264,6 +269,11 @@ pub struct AsPath {
 impl AsPath {
     pub fn new() -> AsPath {
         AsPath::default()
+    }
+
+    #[inline]
+    pub fn builder() -> AsPathBuilder {
+        AsPathBuilder::default()
     }
 
     /// Shorthand for creating an `AsPath` consisting of a single `AsSequence` segment.
