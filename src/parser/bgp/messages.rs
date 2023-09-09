@@ -1,5 +1,4 @@
 use crate::models::*;
-use bytes::{Buf, Bytes};
 use std::convert::TryFrom;
 
 use crate::error::ParserError;
@@ -27,13 +26,13 @@ use log::warn;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 pub fn parse_bgp_message(
-    data: &mut Bytes,
+    data: &mut &[u8],
     add_path: bool,
     asn_len: &AsnLength,
 ) -> Result<BgpMessage, ParserError> {
     let total_size = data.len();
     data.require_n_remaining(19, "BGP message marker")?;
-    data.advance(16);
+    data.advance(16)?;
     /*
     This 2-octet unsigned integer indicates the total length of the
     message, including the header in octets.  Thus, it allows one
@@ -67,7 +66,7 @@ pub fn parse_bgp_message(
             data.remaining()
         );
     }
-    let mut msg_data = data.split_to(bgp_msg_length);
+    let mut msg_data = data.split_to(bgp_msg_length)?;
 
     Ok(match msg_type {
         BgpMessageType::OPEN => BgpMessage::Open(parse_bgp_open_message(&mut msg_data)?),
@@ -88,7 +87,7 @@ pub fn parse_bgp_message(
 /// messages, but not critical errors.
 ///
 pub fn parse_bgp_notification_message(
-    mut input: Bytes,
+    mut input: &[u8],
 ) -> Result<BgpNotificationMessage, ParserError> {
     let error_code = input.read_u8()?;
     let error_subcode = input.read_u8()?;
@@ -102,7 +101,7 @@ pub fn parse_bgp_notification_message(
 /// Parse BGP OPEN messages.
 ///
 /// The parsing of BGP OPEN messages also includes decoding the BGP capabilities.
-pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
+pub fn parse_bgp_open_message(input: &mut &[u8]) -> Result<BgpOpenMessage, ParserError> {
     input.require_n_remaining(10, "BGP open message header")?;
     let version = input.read_u8()?;
     let asn = Asn::new_16bit(input.read_u16()?);
@@ -180,7 +179,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
 
 /// read nlri portion of a bgp update message.
 fn read_nlri(
-    mut input: Bytes,
+    mut input: &[u8],
     afi: &Afi,
     add_path: bool,
 ) -> Result<Vec<NetworkPrefix>, ParserError> {
@@ -192,7 +191,7 @@ fn read_nlri(
         // TODO: Should this become a hard error?
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
-        input.advance(1); // skip the byte
+        input.advance(1)?; // skip the byte
         return Ok(vec![]);
     }
 
@@ -203,7 +202,7 @@ fn read_nlri(
 ///
 /// RFC: <https://tools.ietf.org/html/rfc4271#section-4.3>
 pub fn parse_bgp_update_message(
-    mut input: Bytes,
+    mut input: &[u8],
     add_path: bool,
     asn_len: &AsnLength,
 ) -> Result<BgpUpdateMessage, ParserError> {
@@ -212,7 +211,7 @@ pub fn parse_bgp_update_message(
 
     // parse withdrawn prefixes nlri
     let withdrawn_bytes_length = input.read_u16()? as usize;
-    let withdrawn_bytes = input.split_to(withdrawn_bytes_length);
+    let withdrawn_bytes = input.split_to(withdrawn_bytes_length)?;
     let withdrawn_prefixes = read_nlri(withdrawn_bytes, &afi, add_path)?;
 
     // parse attributes
@@ -220,7 +219,7 @@ pub fn parse_bgp_update_message(
     let attr_parser = AttributeParser::new(add_path);
 
     input.require_n_remaining(attribute_length, "update attributes")?;
-    let attr_data_slice = input.split_to(attribute_length);
+    let attr_data_slice = input.split_to(attribute_length)?;
     let attributes = attr_parser.parse_attributes(attr_data_slice, asn_len, None, None, None)?;
 
     // parse announced prefixes nlri.

@@ -2,7 +2,6 @@ use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
-use bytes::Bytes;
 use log::warn;
 
 ///
@@ -22,7 +21,7 @@ use log::warn;
 /// | Network Layer Reachability Information (variable)       |
 /// +---------------------------------------------------------+
 pub fn parse_nlri(
-    mut input: Bytes,
+    mut input: &[u8],
     afi: &Option<Afi>,
     safi: &Option<Safi>,
     prefixes: &Option<&[NetworkPrefix]>,
@@ -57,7 +56,7 @@ pub fn parse_nlri(
     if reachable {
         let next_hop_length = input.read_u8()? as usize;
         input.require_n_remaining(next_hop_length, "mp next hop")?;
-        let next_hop_bytes = input.split_to(next_hop_length);
+        let next_hop_bytes = input.split_to(next_hop_length)?;
         next_hop = match parse_mp_next_hop(next_hop_bytes) {
             Ok(x) => x,
             Err(e) => return Err(e),

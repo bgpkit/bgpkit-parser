@@ -12,7 +12,6 @@ mod attr_16_25_extended_communities;
 mod attr_32_large_communities;
 mod attr_35_otc;
 
-use bytes::{Buf, Bytes};
 use log::{debug, warn};
 
 use crate::models::*;
@@ -52,7 +51,7 @@ impl AttributeParser {
     /// the slice is the total byte length of the attributes section of the message.
     pub fn parse_attributes(
         &self,
-        mut data: Bytes,
+        mut data: &[u8],
         asn_len: &AsnLength,
         afi: Option<Afi>,
         safi: Option<Safi>,
@@ -118,7 +117,7 @@ impl AttributeParser {
 
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
             data.require_n_remaining(attr_length, "Attribute")?;
-            let mut attr_data = data.split_to(attr_length);
+            let mut attr_data = data.split_to(attr_length)?;
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),

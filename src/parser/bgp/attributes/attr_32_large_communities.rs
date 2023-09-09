@@ -1,9 +1,8 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 
-pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_large_communities(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
     while input.remaining() > 0 {
         input.require_n_remaining(12, "large community")?; // 12 bytes for large community (3x 32 bits integers)

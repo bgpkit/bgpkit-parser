@@ -1,6 +1,5 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
 
 #[derive(Debug)]
 pub struct StatsReport {
@@ -21,7 +20,7 @@ pub enum StatsData {
     Gauge(u64),
 }
 
-pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpError> {
+pub fn parse_stats_report(data: &mut &[u8]) -> Result<StatsReport, ParserBmpError> {
     let stats_count = data.read_u32()?;
     let mut counters = vec![];
     for _ in 0..stats_count {

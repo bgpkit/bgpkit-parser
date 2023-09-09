@@ -6,27 +6,120 @@ use std::convert::TryFrom;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::models::*;
-use bytes::{Buf, Bytes};
 use log::debug;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
 
-impl<B: Buf> ReadUtils for B {}
+#[cold]
+fn eof(name: &'static str, expected: usize, found: usize) -> ParserError {
+    ParserError::InconsistentFieldLength {
+        name,
+        expected,
+        found,
+    }
+}
+
+impl ReadUtils for &'_ [u8] {
+    #[inline]
+    fn remaining(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn advance(&mut self, x: usize) -> Result<(), ParserError> {
+        if self.len() >= x {
+            *self = &self[x..];
+            return Ok(());
+        }
+
+        Err(eof("advance", x, self.len()))
+    }
+
+    #[inline]
+    fn split_to(&mut self, n: usize) -> Result<Self, ParserError> {
+        if self.len() >= n {
+            let (a, b) = self.split_at(n);
+            *self = b;
+            return Ok(a);
+        }
+
+        Err(eof("split_to", n, self.len()))
+    }
+
+    #[inline]
+    fn read_u8(&mut self) -> Result<u8, ParserError> {
+        if !self.is_empty() {
+            let value = self[0];
+            *self = &self[1..];
+            return Ok(value);
+        }
+
+        Err(eof("read_u8", 1, 0))
+    }
+
+    #[inline]
+    fn read_u16(&mut self) -> Result<u16, ParserError> {
+        if self.len() >= 2 {
+            let (bytes, remaining) = self.split_at(2);
+            *self = remaining;
+            return Ok(u16::from_be_bytes(bytes.try_into().unwrap()));
+        }
+
+        Err(eof("read_u16", 2, self.len()))
+    }
+
+    #[inline]
+    fn read_u32(&mut self) -> Result<u32, ParserError> {
+        if self.len() >= 4 {
+            let (bytes, remaining) = self.split_at(4);
+            *self = remaining;
+            return Ok(u32::from_be_bytes(bytes.try_into().unwrap()));
+        }
+
+        Err(eof("read_u32", 4, self.len()))
+    }
+
+    #[inline]
+    fn read_u64(&mut self) -> Result<u64, ParserError> {
+        if self.len() >= 8 {
+            let (bytes, remaining) = self.split_at(8);
+            *self = remaining;
+            return Ok(u64::from_be_bytes(bytes.try_into().unwrap()));
+        }
+
+        Err(eof("read_u64", 8, self.len()))
+    }
+
+    #[inline]
+    fn read_exact(&mut self, buffer: &mut [u8]) -> Result<(), ParserError> {
+        match std::io::Read::read_exact(self, buffer) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(eof("read_exact", buffer.len(), self.len())),
+        }
+    }
+}
 
 // Allow reading IPs from Reads
-pub trait ReadUtils: Buf {
+pub trait ReadUtils: Sized {
+    fn remaining(&self) -> usize;
+    fn advance(&mut self, x: usize) -> Result<(), ParserError>;
+    fn split_to(&mut self, n: usize) -> Result<Self, ParserError>;
+    fn read_u8(&mut self) -> Result<u8, ParserError>;
+    fn read_u16(&mut self) -> Result<u16, ParserError>;
+    fn read_u32(&mut self) -> Result<u32, ParserError>;
+    fn read_u64(&mut self) -> Result<u64, ParserError>;
+    fn read_exact(&mut self, buffer: &mut [u8]) -> Result<(), ParserError>;
+
+    /// Check that the buffer has at least n bytes remaining. This can help the compiler optimize
+    /// away bounds checks.
     #[inline(always)]
     fn require_n_remaining(&self, n: usize, target: &'static str) -> Result<(), ParserError> {
         if self.remaining() >= n {
             return Ok(());
         }
 
-        Err(ParserError::InconsistentFieldLength {
-            name: target,
-            expected: n,
-            found: self.remaining(),
-        })
+        Err(eof(target, n, self.remaining()))
     }
 
     #[inline(always)]
@@ -40,42 +133,6 @@ pub trait ReadUtils: Buf {
             expected: n,
             found: self.remaining(),
         })
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_u8(&mut self) -> Result<u8, ParserError> {
-        self.require_n_remaining(1, file!())?;
-        Ok(self.get_u8())
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_u16(&mut self) -> Result<u16, ParserError> {
-        self.require_n_remaining(2, file!())?;
-        Ok(self.get_u16())
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_u32(&mut self) -> Result<u32, ParserError> {
-        self.require_n_remaining(4, file!())?;
-        Ok(self.get_u32())
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_u64(&mut self) -> Result<u64, ParserError> {
-        self.require_n_remaining(8, file!())?;
-        Ok(self.get_u64())
-    }
-
-    #[inline]
-    #[track_caller]
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParserError> {
-        self.require_n_remaining(buf.len(), file!())?;
-        self.copy_to_slice(buf);
-        Ok(())
     }
 
     fn read_address(&mut self, afi: &Afi) -> Result<IpAddr, ParserError> {
@@ -93,8 +150,9 @@ pub trait ReadUtils: Buf {
 
     fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserError> {
         self.require_n_remaining(16, "IPv6 Address")?;
-        let buf = self.get_u128();
-        Ok(Ipv6Addr::from(buf))
+        let mut buffer = [0; 16];
+        self.read_exact(&mut buffer)?;
+        Ok(Ipv6Addr::from(buffer))
     }
 
     fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
@@ -174,7 +232,7 @@ pub trait ReadUtils: Buf {
                 let mut buff = [0; 4];
                 self.require_n_remaining(byte_len, "IPv4 NLRI Prefix")?;
                 for i in 0..byte_len {
-                    buff[i] = self.get_u8();
+                    buff[i] = self.read_u8()?;
                 }
                 IpAddr::V4(Ipv4Addr::from(buff))
             }
@@ -186,7 +244,7 @@ pub trait ReadUtils: Buf {
                 self.require_n_remaining(byte_len, "IPv6 NLRI Prefix")?;
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
-                    buff[i] = self.get_u8();
+                    buff[i] = self.read_u8()?;
                 }
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
@@ -198,7 +256,9 @@ pub trait ReadUtils: Buf {
 
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
         self.require_n_remaining(n_bytes, "raw bytes")?;
-        Ok(self.copy_to_bytes(n_bytes).into())
+        let mut buffer = vec![0; n_bytes];
+        self.read_exact(&mut buffer)?;
+        Ok(buffer)
     }
 
     fn read_n_bytes_to_string(&mut self, n_bytes: usize) -> Result<String, ParserError> {
@@ -211,7 +271,7 @@ pub trait ReadUtils: Buf {
 }
 
 pub fn parse_nlri_list(
-    mut input: Bytes,
+    mut input: &[u8],
     add_path: bool,
     afi: &Afi,
 ) -> Result<Vec<NetworkPrefix>, ParserError> {

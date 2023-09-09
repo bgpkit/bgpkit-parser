@@ -7,10 +7,9 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 
-use bytes::{Buf, Bytes};
 use std::net::Ipv4Addr;
 
-pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_extended_community(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
 
     while input.remaining() > 0 {
@@ -115,7 +114,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
     Ok(AttributeValue::ExtendedCommunities(communities))
 }
 
-pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_ipv6_extended_community(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;

@@ -1,10 +1,9 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::Bytes;
 use std::net::IpAddr;
 
-pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+pub fn parse_next_hop(mut input: &[u8], afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
     match afi.unwrap_or(Afi::Ipv4) {
         Afi::Ipv4 => {
             input.expect_remaining_eq(4, "NEXT_HOP")?;
@@ -23,7 +22,7 @@ pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeVa
     }
 }
 
-pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, ParserError> {
+pub fn parse_mp_next_hop(mut input: &[u8]) -> Result<Option<NextHopAddress>, ParserError> {
     match input.len() {
         0 => Ok(None),
         4 => Ok(Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?)),

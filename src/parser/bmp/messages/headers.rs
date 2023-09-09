@@ -2,7 +2,6 @@ use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bitflags::bitflags;
-use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -54,7 +53,7 @@ pub struct BmpCommonHeader {
     pub msg_type: BmpMsgType,
 }
 
-pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, ParserBmpError> {
+pub fn parse_bmp_common_header(data: &mut &[u8]) -> Result<BmpCommonHeader, ParserBmpError> {
     let version = data.read_u8()?;
     if version != 3 {
         // has to be 3 per rfc7854
@@ -148,14 +147,14 @@ impl PeerFlags {
     }
 }
 
-pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
+pub fn parse_per_peer_header(data: &mut &[u8]) -> Result<BmpPerPeerHeader, ParserBmpError> {
     let peer_type = PeerType::try_from(data.read_u8()?)?;
     let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
 
     let peer_distinguisher = data.read_u64()?;
     let peer_ip = match peer_flags.address_family() {
         Afi::Ipv4 => {
-            data.advance(12);
+            data.advance(12)?;
             IpAddr::V4(data.read_ipv4_address()?)
         }
         Afi::Ipv6 => IpAddr::V6(data.read_ipv6_address()?),
@@ -163,7 +162,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
 
     let peer_asn = match peer_flags.asn_length() {
         AsnLength::Bits16 => {
-            data.advance(2);
+            data.advance(2)?;
             Asn::new_16bit(data.read_u16()?)
         }
         AsnLength::Bits32 => Asn::new_32bit(data.read_u32()?),

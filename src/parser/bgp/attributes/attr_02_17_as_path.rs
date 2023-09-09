@@ -1,7 +1,6 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::Bytes;
 use num_enum::TryFromPrimitive;
 
 #[allow(non_camel_case_types)]
@@ -15,7 +14,7 @@ enum AsSegmentType {
     AS_PATH_CONFED_SET = 4,
 }
 
-pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
+pub fn parse_as_path(mut input: &[u8], asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
         segments: Vec::with_capacity(5),
     };
@@ -28,7 +27,7 @@ pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Pa
 }
 
 fn parse_as_path_segment(
-    input: &mut Bytes,
+    input: &mut &[u8],
     asn_len: &AsnLength,
 ) -> Result<AsPathSegment, ParserError> {
     let segment_type = AsSegmentType::try_from(input.read_u8()?)?;

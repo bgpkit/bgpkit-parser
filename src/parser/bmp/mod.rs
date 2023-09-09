@@ -4,7 +4,6 @@ Provides parsing for BMP and OpenBMP binary-formatted messages.
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;
 pub use crate::parser::bmp::openbmp::parse_openbmp_header;
-use bytes::Bytes;
 
 pub mod error;
 pub mod messages;
@@ -15,13 +14,13 @@ pub mod openbmp;
 /// An OpenBMP `raw_bmp` message contains a [OpenBmpHeader][OpenBmpHeader] and a [BmpMessage].
 ///
 /// [OpenBmpHeader]: crate::parser::bmp::openbmp::OpenBmpHeader
-pub fn parse_openbmp_msg(mut data: Bytes) -> Result<BmpMessage, ParserBmpError> {
+pub fn parse_openbmp_msg(mut data: &[u8]) -> Result<BmpMessage, ParserBmpError> {
     let _header = parse_openbmp_header(&mut data)?;
     parse_bmp_msg(&mut data)
 }
 
 /// Parse a BMP message.
-pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
+pub fn parse_bmp_msg(data: &mut &[u8]) -> Result<BmpMessage, ParserBmpError> {
     let common_header = parse_bmp_common_header(data)?;
 
     // let mut buffer ;

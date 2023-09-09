@@ -2,14 +2,13 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
 use std::convert::TryFrom;
 
 /// Parse MRT BGP4MP type
 ///
 /// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.4>
 ///
-pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> {
+pub fn parse_bgp4mp(sub_type: u16, input: &[u8]) -> Result<Bgp4Mp, ParserError> {
     let bgp4mp_type: Bgp4MpType = Bgp4MpType::try_from(sub_type)?;
     let msg: Bgp4Mp =
         match bgp4mp_type {
@@ -67,7 +66,7 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_message(
-    mut data: Bytes,
+    mut data: &[u8],
     add_path: bool,
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
@@ -128,7 +127,7 @@ pub fn parse_bgp4mp_message(
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_state_change(
-    mut input: Bytes,
+    mut input: &[u8],
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpStateChange, ParserError> {

@@ -3,7 +3,6 @@ use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ReadUtils,
 };
-use bytes::{Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::io::Read;
 
@@ -44,7 +43,7 @@ use std::io::Read;
 pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
     let mut raw_bytes = [0u8; 12];
     input.read_exact(&mut raw_bytes)?;
-    let mut data = BytesMut::from(&raw_bytes[..]);
+    let mut data = &raw_bytes[..];
 
     let timestamp = data.read_u32()?;
     let entry_type_raw = data.read_u16()?;
@@ -61,7 +60,7 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
             length -= 4;
             let mut raw_bytes: [u8; 4] = [0; 4];
             input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).read_u32()?)
+            Some(u32::from_be_bytes(raw_bytes))
         }
         _ => None,
     };
@@ -99,13 +98,13 @@ pub fn try_parse_mrt_record<T: Read>(input: &mut T) -> Result<Option<MrtRecord>,
     };
 
     // read the whole message bytes to buffer
-    let mut buffer = BytesMut::zeroed(common_header.length as usize);
+    let mut buffer = vec![0; common_header.length as usize];
     input.read_exact(&mut buffer)?;
 
     let message = parse_mrt_body(
         common_header.entry_type,
         common_header.entry_subtype,
-        buffer.freeze(), // freeze the BytesMute to Bytes
+        &buffer,
     )?;
 
     Ok(Some(MrtRecord {
@@ -119,13 +118,13 @@ pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError
     let common_header = parse_common_header(input)?;
 
     // read the whole message bytes to buffer
-    let mut buffer = BytesMut::zeroed(common_header.length as usize);
+    let mut buffer = vec![0; common_header.length as usize];
     input.read_exact(&mut buffer)?;
 
     let message = parse_mrt_body(
         common_header.entry_type,
         common_header.entry_subtype,
-        buffer.freeze(), // freeze the BytesMute to Bytes
+        &buffer,
     )?;
 
     Ok(MrtRecord {
@@ -142,7 +141,7 @@ pub fn parse_mrt_record<T: Read>(input: &mut T) -> Result<MrtRecord, ParserError
 pub fn parse_mrt_body(
     entry_type: EntryType,
     entry_subtype: u16,
-    data: Bytes,
+    data: &[u8],
 ) -> Result<MrtMessage, ParserError> {
     match entry_type {
         EntryType::TABLE_DUMP => {

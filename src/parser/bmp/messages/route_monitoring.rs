@@ -1,7 +1,6 @@
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
-use bytes::Bytes;
 
 #[derive(Debug)]
 pub struct RouteMonitoring {
@@ -9,7 +8,7 @@ pub struct RouteMonitoring {
 }
 
 pub fn parse_route_monitoring(
-    data: &mut Bytes,
+    data: &mut &[u8],
     asn_len: &AsnLength,
 ) -> Result<RouteMonitoring, ParserBmpError> {
     // let bgp_update = parse_bgp_update_message(reader, false, afi, asn_len, total_len)?;

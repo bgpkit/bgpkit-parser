@@ -2,7 +2,6 @@ use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
 use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
@@ -36,7 +35,7 @@ use std::net::IpAddr;
 /// ```
 pub fn parse_table_dump_message(
     sub_type: u16,
-    mut data: Bytes,
+    mut data: &[u8],
 ) -> Result<TableDumpMessage, ParserError> {
     // ####
     // Step 0. prepare
@@ -82,7 +81,7 @@ pub fn parse_table_dump_message(
     let attr_parser = AttributeParser::new(false);
 
     data.require_n_remaining(attribute_length, "rib attributes")?;
-    let attr_data_slice = data.split_to(attribute_length);
+    let attr_data_slice = data.split_to(attribute_length)?;
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
     let attributes =

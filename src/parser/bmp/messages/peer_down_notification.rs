@@ -1,6 +1,5 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 #[derive(Debug, Hash, Eq, PartialEq, TryFromPrimitive, IntoPrimitive)]
@@ -34,7 +33,7 @@ pub struct PeerDownNotification {
 }
 
 pub fn parse_peer_down_notification(
-    data: &mut Bytes,
+    data: &mut &[u8],
 ) -> Result<PeerDownNotification, ParserBmpError> {
     let reason = PeerDownReason::try_from(data.read_u8()?)?;
     let bytes_left = data.remaining();

@@ -1,10 +1,9 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 
 /// <https://tools.ietf.org/html/rfc4456>
-pub fn parse_clusters(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_clusters(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     let mut clusters = Vec::with_capacity(input.remaining() / 4);
     while input.remaining() > 0 {
         clusters.push(input.read_u32()?);

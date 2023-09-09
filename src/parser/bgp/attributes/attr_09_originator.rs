@@ -1,9 +1,8 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::Bytes;
 
-pub fn parse_originator_id(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_originator_id(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     input.expect_remaining_eq(4, "ORIGINATOR_ID")?;
     Ok(AttributeValue::OriginatorId(input.read_ipv4_address()?))
 }

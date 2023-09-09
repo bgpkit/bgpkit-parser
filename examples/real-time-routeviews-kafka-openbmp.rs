@@ -3,7 +3,6 @@ extern crate core;
 use bgpkit_parser::parser::bmp::messages::MessageBody;
 use bgpkit_parser::Elementor;
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
-use bytes::Bytes;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
 use kafka::error::Error as KafkaError;
 use log::{error, info};

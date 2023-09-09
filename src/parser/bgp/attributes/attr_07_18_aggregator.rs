@@ -1,7 +1,6 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 use log::warn;
 
 /// Parse aggregator attribute.
@@ -16,7 +15,7 @@ use log::warn;
 ///    IP address SHOULD be the same as the BGP Identifier of the speaker.`
 /// ```
 pub fn parse_aggregator(
-    mut input: Bytes,
+    mut input: &[u8],
     asn_len: &AsnLength,
 ) -> Result<(Asn, BgpIdentifier), ParserError> {
     let asn_len_found = match input.remaining() {

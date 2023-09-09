@@ -1,9 +1,8 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 
-pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_regular_communities(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
     const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
     const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;

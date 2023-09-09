@@ -1,6 +1,5 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
 use std::net::IpAddr;
 
 ///
@@ -57,7 +56,7 @@ pub struct OpenBmpHeader {
     pub router_group: Option<String>,
 }
 
-pub fn parse_openbmp_header(data: &mut Bytes) -> Result<OpenBmpHeader, ParserBmpError> {
+pub fn parse_openbmp_header(data: &mut &[u8]) -> Result<OpenBmpHeader, ParserBmpError> {
     // read magic number
     let magic_number = data.read_n_bytes_to_string(4)?;
     if magic_number != "OBMP" {
@@ -94,7 +93,7 @@ pub fn parse_openbmp_header(data: &mut Bytes) -> Result<OpenBmpHeader, ParserBmp
     let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
 
     // read admin-id
-    data.advance(16);
+    data.advance(16)?;
     let mut name_len = data.read_u16()?;
     if name_len > 255 {
         name_len = 255;
@@ -102,12 +101,12 @@ pub fn parse_openbmp_header(data: &mut Bytes) -> Result<OpenBmpHeader, ParserBmp
     let admin_id = data.read_n_bytes_to_string(name_len as usize)?;
 
     // read router IP
-    data.advance(16);
+    data.advance(16)?;
     let ip: IpAddr = if is_router_ipv6 {
         data.read_ipv6_address()?.into()
     } else {
         let ip = data.read_ipv4_address()?;
-        data.advance(12);
+        data.advance(12)?;
         ip.into()
     };
 
