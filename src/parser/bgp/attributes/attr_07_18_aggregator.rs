@@ -48,9 +48,8 @@ mod tests {
         let mut data = vec![];
         data.extend([1u8, 2]);
         data.extend(identifier.octets());
-        let bytes = Bytes::from(data);
 
-        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16) {
+        if let Ok((asn, n)) = parse_aggregator(&data, &AsnLength::Bits16) {
             assert_eq!(n, identifier);
             assert_eq!(asn, Asn::new_16bit(258))
         } else {
@@ -60,9 +59,8 @@ mod tests {
         let mut data = vec![];
         data.extend([0u8, 0, 1, 2]);
         data.extend(identifier.octets());
-        let bytes = Bytes::from(data);
 
-        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32) {
+        if let Ok((asn, n)) = parse_aggregator(&data, &AsnLength::Bits32) {
             assert_eq!(n, identifier);
             assert_eq!(asn, Asn::new_16bit(258))
         } else {

@@ -28,9 +28,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x06, // local data
         ];
 
-        if let Ok(AttributeValue::LargeCommunities(communities)) =
-            parse_large_communities(Bytes::from(data))
-        {
+        if let Ok(AttributeValue::LargeCommunities(communities)) = parse_large_communities(&data) {
             assert_eq!(communities.len(), 2);
             assert_eq!(communities[0].global_admin, 1);
             assert_eq!(communities[0].local_data[0], 2);

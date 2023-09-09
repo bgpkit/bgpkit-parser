@@ -35,18 +35,18 @@ mod tests {
     fn test_parse_origin() {
         assert_eq!(
             AttributeValue::Origin(Origin::IGP),
-            parse_origin(Bytes::from_static(&[0u8])).unwrap()
+            parse_origin(&[0u8]).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::EGP),
-            parse_origin(Bytes::from_static(&[1u8])).unwrap()
+            parse_origin(&[1u8]).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::INCOMPLETE),
-            parse_origin(Bytes::from_static(&[2u8])).unwrap()
+            parse_origin(&[2u8]).unwrap()
         );
         assert!(matches!(
-            parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
+            parse_origin(&[3u8]).unwrap_err(),
             ParserError::UnrecognizedEnumVariant { .. }
         ));
     }

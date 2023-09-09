@@ -13,9 +13,7 @@ mod tests {
 
     #[test]
     fn test_parse_med() {
-        if let Ok(AttributeValue::LocalPreference(123)) =
-            parse_local_pref(Bytes::from(vec![0, 0, 0, 123]))
-        {
+        if let Ok(AttributeValue::LocalPreference(123)) = parse_local_pref(&[0, 0, 0, 123]) {
         } else {
             panic!()
         }

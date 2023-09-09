@@ -30,9 +30,7 @@ mod tests {
 
     #[test]
     fn test_parse_otc() {
-        if let Ok(AttributeValue::OnlyToCustomer(asn)) =
-            parse_only_to_customer(Bytes::from(vec![0, 0, 0, 123]))
-        {
+        if let Ok(AttributeValue::OnlyToCustomer(asn)) = parse_only_to_customer(&[0, 0, 0, 123]) {
             assert_eq!(asn, 123);
         } else {
             panic!("parsing error")

@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_parsing_nlri_simple() {
-        let test_bytes = Bytes::from(vec![
+        let test_bytes = &[
             0x00, 0x01, // address family: IPv4
             0x01, // safi: unicast
             0x04, // next hop length: 4
@@ -124,7 +124,7 @@ mod tests {
             // NLRI
             0x18, // 24 bits prefix length
             0xC0, 0x00, 0x02, // 192.0.2
-        ]);
+        ];
         let res = parse_nlri(test_bytes, &None, &None, &None, true, false);
 
         if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_parsing_nlri_add_path() {
-        let test_bytes = Bytes::from(vec![
+        let test_bytes = &[
             0x00, 0x01, // address family: IPv4
             0x01, // safi: unicast
             0x04, // next hop length: 4
@@ -157,7 +157,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x7B, // path_id: 123
             0x18, // 24 bits prefix length
             0xC0, 0x00, 0x02, // 192.0.2
-        ]);
+        ];
         let res = parse_nlri(test_bytes, &None, &None, &None, true, true);
 
         if let Ok(AttributeValue::MpReachNlri(nlri)) = res {

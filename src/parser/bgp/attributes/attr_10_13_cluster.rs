@@ -17,9 +17,9 @@ mod tests {
 
     #[test]
     fn test_parse_clusters() {
-        if let Ok(AttributeValue::Clusters(n)) = parse_clusters(Bytes::from(vec![
-            0xC0, 0x00, 0x02, 0x01, 0xC0, 0x00, 0x02, 0x02,
-        ])) {
+        if let Ok(AttributeValue::Clusters(n)) =
+            parse_clusters(&[0xC0, 0x00, 0x02, 0x01, 0xC0, 0x00, 0x02, 0x02])
+        {
             assert_eq!(n.len(), 2);
             assert_eq!(n[0], 0xC0000201);
             assert_eq!(n[1], 0xC0000202);

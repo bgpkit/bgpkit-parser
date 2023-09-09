@@ -29,7 +29,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
 
         for ms in mss.iter() {
             for m in ms.messages() {
-                let mut bytes = Bytes::from(m.value.to_vec());
+                let mut bytes = m.value;
                 let header = parse_openbmp_header(&mut bytes).unwrap();
                 let bmp_msg = parse_bmp_msg(&mut bytes);
                 match bmp_msg {

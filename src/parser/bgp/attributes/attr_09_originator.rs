@@ -16,9 +16,7 @@ mod tests {
     #[test]
     fn test_parse_originator_id() {
         let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
-        if let Ok(AttributeValue::OriginatorId(n)) =
-            parse_originator_id(Bytes::from(ipv4.octets().to_vec()))
-        {
+        if let Ok(AttributeValue::OriginatorId(n)) = parse_originator_id(&ipv4.octets()) {
             assert_eq!(n, ipv4);
         } else {
             panic!()

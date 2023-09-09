@@ -33,14 +33,12 @@ mod tests {
     /// Test parsing of communities values, as defined in RFC1997.
     #[test]
     fn test_parse_communities() {
-        if let Ok(AttributeValue::Communities(communities)) =
-            parse_regular_communities(Bytes::from(vec![
-                0xFF, 0xFF, 0xFF, 0x01, // NoExport
-                0xFF, 0xFF, 0xFF, 0x02, // NoAdvertise
-                0xFF, 0xFF, 0xFF, 0x03, // NoExportSubConfed
-                0x00, 0x7B, 0x01, 0xC8, // Custom(123, 456)
-            ]))
-        {
+        if let Ok(AttributeValue::Communities(communities)) = parse_regular_communities(&[
+            0xFF, 0xFF, 0xFF, 0x01, // NoExport
+            0xFF, 0xFF, 0xFF, 0x02, // NoAdvertise
+            0xFF, 0xFF, 0xFF, 0x03, // NoExportSubConfed
+            0x00, 0x7B, 0x01, 0xC8, // Custom(123, 456)
+        ]) {
             assert_eq!(communities.len(), 4);
             assert_eq!(communities[0], Community::NoExport);
             assert_eq!(communities[1], Community::NoAdvertise);
