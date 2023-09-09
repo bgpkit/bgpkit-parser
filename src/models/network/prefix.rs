@@ -1,5 +1,4 @@
-use crate::models::BgpModelsError;
-use ipnet::IpNet;
+use ipnet::{AddrParseError, IpNet};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -31,7 +30,7 @@ impl Debug for NetworkPrefix {
 }
 
 impl FromStr for NetworkPrefix {
-    type Err = BgpModelsError;
+    type Err = AddrParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let prefix = IpNet::from_str(s)?;
