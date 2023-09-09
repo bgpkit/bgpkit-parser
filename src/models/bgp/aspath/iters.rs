@@ -1,8 +1,9 @@
+use crate::models::{AsPath, AsPathSegment, Asn};
 use std::borrow::Cow;
+use std::iter::Copied;
 use std::marker::PhantomData;
-use crate::models::{Asn, AsPath, AsPathSegment};
 
-impl AsPathSegment {
+impl AsPathSegment<'_> {
     /// Get an iterator over the ASNs within this path segment
     pub fn iter(&self) -> <&'_ Self as IntoIterator>::IntoIter {
         self.into_iter()
@@ -14,20 +15,40 @@ impl AsPathSegment {
     }
 }
 
-impl IntoIterator for AsPathSegment {
+pub enum MaybeOwnedIntoIter<'a, T: Copy> {
+    Borrow(Copied<std::slice::Iter<'a, T>>),
+    Owned(std::vec::IntoIter<T>),
+}
+
+impl<'a, T: Copy> Iterator for MaybeOwnedIntoIter<'a, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            MaybeOwnedIntoIter::Borrow(x) => x.next(),
+            MaybeOwnedIntoIter::Owned(x) => x.next(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for AsPathSegment<'a> {
     type Item = Asn;
-    type IntoIter = std::vec::IntoIter<Asn>;
+    type IntoIter = MaybeOwnedIntoIter<'a, Asn>;
 
     fn into_iter(self) -> Self::IntoIter {
         let (AsPathSegment::AsSequence(x)
         | AsPathSegment::AsSet(x)
         | AsPathSegment::ConfedSequence(x)
         | AsPathSegment::ConfedSet(x)) = self;
-        x.into_iter()
+
+        match x {
+            Cow::Borrowed(y) => MaybeOwnedIntoIter::Borrow(y.iter().copied()),
+            Cow::Owned(y) => MaybeOwnedIntoIter::Owned(y.into_iter()),
+        }
     }
 }
 
-impl<'a> IntoIterator for &'a AsPathSegment {
+impl<'a, 'b: 'a> IntoIterator for &'a AsPathSegment<'b> {
     type Item = &'a Asn;
     type IntoIter = std::slice::Iter<'a, Asn>;
 
@@ -40,7 +61,7 @@ impl<'a> IntoIterator for &'a AsPathSegment {
     }
 }
 
-impl<'a> IntoIterator for &'a mut AsPathSegment {
+impl<'a, 'b: 'a> IntoIterator for &'a mut AsPathSegment<'b> {
     type Item = &'a mut Asn;
     type IntoIter = std::slice::IterMut<'a, Asn>;
 
@@ -49,7 +70,7 @@ impl<'a> IntoIterator for &'a mut AsPathSegment {
         | AsPathSegment::AsSet(x)
         | AsPathSegment::ConfedSequence(x)
         | AsPathSegment::ConfedSet(x)) = self;
-        x.iter_mut()
+        x.to_mut().iter_mut()
     }
 }
 
@@ -57,7 +78,7 @@ impl<'a> IntoIterator for &'a mut AsPathSegment {
 /// with more variations than a u64. That being said, the chances of such a thing occurring are
 /// essentially non-existent unless a BGP peer begins announcing maliciously constructed paths.
 struct AsPathNumberedRouteIter<'a> {
-    path: &'a [AsPathSegment],
+    path: &'a [AsPathSegment<'a>],
     index: usize,
     route_num: u64,
 }
@@ -95,15 +116,15 @@ impl<'a> Iterator for AsPathNumberedRouteIter<'a> {
 }
 
 pub struct AsPathRouteIter<'a, D> {
-    path: Cow<'a, [AsPathSegment]>,
+    path: Cow<'a, [AsPathSegment<'a>]>,
     route_num: u64,
     total_routes: u64,
     _phantom: PhantomData<D>,
 }
 
 impl<'a, D> Iterator for AsPathRouteIter<'a, D>
-    where
-        D: FromIterator<Asn>,
+where
+    D: FromIterator<Asn>,
 {
     type Item = D;
 
@@ -134,9 +155,9 @@ impl<'a, D> Iterator for AsPathRouteIter<'a, D>
 
 // Define iterator type aliases. The storage mechanism and by extension the iterator types may
 // change later, but these types should remain consistent.
-pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment>;
-pub type SegmentIterMut<'a> = std::slice::IterMut<'a, AsPathSegment>;
-pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment>;
+pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment<'static>>;
+pub type SegmentIterMut<'a> = std::slice::IterMut<'a, AsPathSegment<'static>>;
+pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment<'static>>;
 
 impl AsPath {
     pub fn iter_segments(&self) -> SegmentIter<'_> {
@@ -153,8 +174,8 @@ impl AsPath {
 
     /// Gets an iterator over all possible routes this path represents.
     pub fn iter_routes<D>(&self) -> AsPathRouteIter<'_, D>
-        where
-            D: FromIterator<Asn>,
+    where
+        D: FromIterator<Asn>,
     {
         AsPathRouteIter {
             path: Cow::Borrowed(&self.segments),
@@ -202,4 +223,3 @@ impl IntoIterator for AsPath {
         }
     }
 }
-

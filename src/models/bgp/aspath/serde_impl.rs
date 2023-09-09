@@ -22,10 +22,10 @@ struct VerboseSegment<'s> {
     values: Cow<'s, [Asn]>,
 }
 
-impl Serialize for AsPathSegment {
+impl Serialize for AsPathSegment<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         let (ty, elements) = match self {
             AsPathSegment::AsSequence(x) => (SegmentType::AS_SEQUENCE, x.as_ref()),
@@ -43,14 +43,14 @@ impl Serialize for AsPathSegment {
     }
 }
 
-impl<'de> Deserialize<'de> for AsPathSegment {
+impl<'de> Deserialize<'de> for AsPathSegment<'_> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let verbose = VerboseSegment::deserialize(deserializer)?;
 
-        let values = verbose.values.into_owned();
+        let values = verbose.values;
         match verbose.ty {
             SegmentType::AS_SET => Ok(AsPathSegment::AsSet(values)),
             SegmentType::AS_SEQUENCE => Ok(AsPathSegment::AsSequence(values)),
@@ -92,19 +92,18 @@ fn simplified_format_len(segments: &[AsPathSegment]) -> Option<usize> {
 /// cover confederation segments and involves a single list of ASNs within the path sequence.
 /// For sets, a list of set members is used in place of an ASN.
 /// ```rust
-/// # use bgpkit_parser::models::{Asn, AsPath};
-/// # use bgpkit_parser::models::AsPathSegment::*;
+/// # use bgpkit_parser::models::{Asn, AsPath, AsPathSegment};
 ///
 /// let a: AsPath = serde_json::from_str("[123, 942, 102]").unwrap();
 /// let b: AsPath = serde_json::from_str("[231, 432, [643, 836], 352]").unwrap();
 ///
 /// assert_eq!(&a.segments, &[
-///     AsSequence(vec![Asn::from(123), Asn::from(942), Asn::from(102)])
+///     AsPathSegment::sequence([123, 942, 102])
 /// ]);
 /// assert_eq!(&b.segments, &[
-///     AsSequence(vec![Asn::from(231), Asn::from(432)]),
-///     AsSet(vec![Asn::from(643), Asn::from(836)]),
-///     AsSequence(vec![Asn::from(352)])
+///     AsPathSegment::sequence([231, 432]),
+///     AsPathSegment::set([643, 836]),
+///     AsPathSegment::sequence([352])
 /// ]);
 /// ```
 ///
@@ -115,7 +114,8 @@ fn simplified_format_len(segments: &[AsPathSegment]) -> Option<usize> {
 /// Segment types, denoted by the `ty` field, correspond to the names used within RFC3065
 /// (`AS_SET`, `AS_SEQUENCE`, `AS_CONFED_SEQUENCE`, `AS_CONFED_SET`).
 /// ```rust
-/// # use bgpkit_parser::models::{Asn, AsPath};
+/// # use std::borrow::Cow;
+/// use bgpkit_parser::models::{Asn, AsPath};
 /// # use bgpkit_parser::models::AsPathSegment::*;
 ///
 /// let a = r#"[
@@ -126,15 +126,15 @@ fn simplified_format_len(segments: &[AsPathSegment]) -> Option<usize> {
 ///
 /// let parsed: AsPath = serde_json::from_str(a).unwrap();
 /// assert_eq!(&parsed.segments, &[
-///     ConfedSequence(vec![Asn::from(123), Asn::from(942)]),
-///     AsSequence(vec![Asn::from(773)]),
-///     AsSequence(vec![Asn::from(382), Asn::from(293)])
+///     ConfedSequence(Cow::Owned(vec![Asn::from(123), Asn::from(942)])),
+///     AsSequence(Cow::Owned(vec![Asn::from(773)])),
+///     AsSequence(Cow::Owned(vec![Asn::from(382), Asn::from(293)]))
 /// ]);
 /// ```
 impl Serialize for AsPath {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         if let Some(num_elements) = simplified_format_len(&self.segments) {
             // Serialize simplified format
@@ -169,8 +169,8 @@ impl<'de> Visitor<'de> for AsPathVisitor {
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
+    where
+        A: SeqAccess<'de>,
     {
         // Technically, we can handle an input that mixes the simplified and verbose formats,
         // but we do not want to document this behavior as it may change in future updates.
@@ -179,7 +179,7 @@ impl<'de> Visitor<'de> for AsPathVisitor {
         enum PathElement {
             SequenceElement(Asn),
             Set(Vec<Asn>),
-            Verbose(AsPathSegment),
+            Verbose(AsPathSegment<'static>),
         }
 
         let mut append_new_sequence = false;
@@ -191,18 +191,17 @@ impl<'de> Visitor<'de> for AsPathVisitor {
                         // If the input is mixed between verbose and regular segments, this flag
                         // is used to prevent appending to a verbose sequence.
                         append_new_sequence = false;
-                        segments.push(AsPathSegment::AsSequence(Vec::new()));
+                        segments.push(AsPathSegment::AsSequence(Cow::Owned(Vec::new())));
                     }
 
-                    if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut()
-                    {
-                        last_sequence.push(x);
+                    if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut() {
+                        last_sequence.to_mut().push(x);
                     } else {
-                        segments.push(AsPathSegment::AsSequence(vec![x]));
+                        segments.push(AsPathSegment::AsSequence(Cow::Owned(vec![x])));
                     }
                 }
                 PathElement::Set(values) => {
-                    segments.push(AsPathSegment::AsSet(values));
+                    segments.push(AsPathSegment::AsSet(Cow::Owned(values)));
                 }
                 PathElement::Verbose(verbose) => {
                     segments.push(verbose);
@@ -216,8 +215,8 @@ impl<'de> Visitor<'de> for AsPathVisitor {
 
 impl<'de> Deserialize<'de> for AsPath {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_seq(AsPathVisitor)
     }

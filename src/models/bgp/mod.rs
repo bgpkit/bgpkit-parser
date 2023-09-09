@@ -1,20 +1,20 @@
 //! BGP messages and relevant structs.
 
+pub mod aspath;
 pub mod attributes;
 pub mod capabilities;
 pub mod community;
 pub mod elem;
 pub mod error;
 pub mod role;
-pub mod aspath;
 
+pub use aspath::*;
 pub use attributes::*;
 pub use capabilities::*;
 pub use community::*;
 pub use elem::*;
 pub use error::*;
 pub use role::*;
-pub use aspath::*;
 
 use crate::models::network::*;
 use capabilities::BgpCapabilityType;

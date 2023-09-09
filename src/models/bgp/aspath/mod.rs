@@ -1,5 +1,6 @@
 use crate::models::*;
 use itertools::Itertools;
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::mem::discriminant;
@@ -15,14 +16,34 @@ mod tests;
 
 /// Enum of AS path segment.
 #[derive(Debug, Clone)]
-pub enum AsPathSegment {
-    AsSequence(Vec<Asn>),
-    AsSet(Vec<Asn>),
-    ConfedSequence(Vec<Asn>),
-    ConfedSet(Vec<Asn>),
+pub enum AsPathSegment<'a> {
+    AsSequence(Cow<'a, [Asn]>),
+    AsSet(Cow<'a, [Asn]>),
+    ConfedSequence(Cow<'a, [Asn]>),
+    ConfedSet(Cow<'a, [Asn]>),
 }
 
-impl AsPathSegment {
+impl AsPathSegment<'_> {
+    pub fn borrowed(&self) -> AsPathSegment {
+        match self {
+            AsPathSegment::AsSequence(x) => AsPathSegment::AsSequence(Cow::Borrowed(&**x)),
+            AsPathSegment::AsSet(x) => AsPathSegment::AsSet(Cow::Borrowed(&**x)),
+            AsPathSegment::ConfedSequence(x) => AsPathSegment::ConfedSequence(Cow::Borrowed(&**x)),
+            AsPathSegment::ConfedSet(x) => AsPathSegment::ConfedSet(Cow::Borrowed(&**x)),
+        }
+    }
+
+    pub fn to_static_owned(&self) -> AsPathSegment<'static> {
+        match self {
+            AsPathSegment::AsSequence(x) => AsPathSegment::AsSequence(Cow::Owned(x.to_vec())),
+            AsPathSegment::AsSet(x) => AsPathSegment::AsSet(Cow::Owned(x.to_vec())),
+            AsPathSegment::ConfedSequence(x) => {
+                AsPathSegment::ConfedSequence(Cow::Owned(x.to_vec()))
+            }
+            AsPathSegment::ConfedSet(x) => AsPathSegment::ConfedSet(Cow::Owned(x.to_vec())),
+        }
+    }
+
     /// Shorthand for creating an `AsSequence` segment.
     pub fn sequence<S: AsRef<[u32]>>(seq: S) -> Self {
         AsPathSegment::AsSequence(seq.as_ref().iter().copied().map_into().collect())
@@ -73,7 +94,7 @@ impl AsPathSegment {
 
         match (self, other) {
             (AsSequence(x), AsSequence(y)) | (ConfedSequence(x), ConfedSequence(y)) => {
-                x.extend_from_slice(y);
+                x.to_mut().extend_from_slice(y);
                 true
             }
             (x @ (AsSequence(_) | ConfedSequence(_)), y) if x.is_empty() => {
@@ -95,8 +116,9 @@ impl AsPathSegment {
         other.dedup();
         match (self, other) {
             (AsSequence(x), AsSequence(y)) | (ConfedSequence(x), ConfedSequence(y)) => {
-                x.extend_from_slice(y);
-                x.dedup();
+                let x_mut = x.to_mut();
+                x_mut.extend_from_slice(y);
+                x_mut.dedup();
                 true
             }
             (x @ (AsSequence(_) | ConfedSequence(_)), y) if x.is_empty() => {
@@ -114,17 +136,19 @@ impl AsPathSegment {
     /// See [AsPath::dedup_coalesce] for more information.
     fn dedup(&mut self) {
         match self {
-            AsPathSegment::AsSequence(x) | AsPathSegment::ConfedSequence(x) => x.dedup(),
+            AsPathSegment::AsSequence(x) | AsPathSegment::ConfedSequence(x) => x.to_mut().dedup(),
             AsPathSegment::AsSet(x) => {
-                x.sort_unstable();
-                x.dedup();
+                let x_mut = x.to_mut();
+                x_mut.sort_unstable();
+                x_mut.dedup();
                 if x.len() == 1 {
                     *self = AsPathSegment::AsSequence(std::mem::take(x));
                 }
             }
             AsPathSegment::ConfedSet(x) => {
-                x.sort_unstable();
-                x.dedup();
+                let x_mut = x.to_mut();
+                x_mut.sort_unstable();
+                x_mut.dedup();
                 if x.len() == 1 {
                     *self = AsPathSegment::ConfedSequence(std::mem::take(x));
                 }
@@ -133,7 +157,7 @@ impl AsPathSegment {
     }
 }
 
-impl AsRef<[Asn]> for AsPathSegment {
+impl AsRef<[Asn]> for AsPathSegment<'_> {
     fn as_ref(&self) -> &[Asn] {
         let (AsPathSegment::AsSequence(x)
         | AsPathSegment::AsSet(x)
@@ -143,7 +167,7 @@ impl AsRef<[Asn]> for AsPathSegment {
     }
 }
 
-impl Hash for AsPathSegment {
+impl Hash for AsPathSegment<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash the discriminant since we do not differentiate between confederation segments
         discriminant(self).hash(state);
@@ -187,7 +211,7 @@ impl Hash for AsPathSegment {
 /// assert_eq!(b, AsPathSegment::set([3, 1, 2]));
 /// assert_ne!(b, AsPathSegment::set([1, 2, 3, 3]));
 /// ```
-impl PartialEq for AsPathSegment {
+impl PartialEq for AsPathSegment<'_> {
     fn eq(&self, other: &Self) -> bool {
         let (x, y) = match (self, other) {
             (AsPathSegment::AsSequence(x), AsPathSegment::AsSequence(y))
@@ -228,11 +252,11 @@ impl PartialEq for AsPathSegment {
     }
 }
 
-impl Eq for AsPathSegment {}
+impl Eq for AsPathSegment<'_> {}
 
 #[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
 pub struct AsPath {
-    pub segments: Vec<AsPathSegment>,
+    pub segments: Vec<AsPathSegment<'static>>,
 }
 
 impl AsPath {
@@ -249,13 +273,13 @@ impl AsPath {
         }
     }
 
-    pub fn from_segments(segments: Vec<AsPathSegment>) -> AsPath {
+    pub fn from_segments(segments: Vec<AsPathSegment<'static>>) -> AsPath {
         AsPath { segments }
     }
 
     /// Adds a new segment to the end of the path. This will change the origin of the path. No
     /// validation or merging the segment is performed during this step.
-    pub fn append_segment(&mut self, segment: AsPathSegment) {
+    pub fn append_segment(&mut self, segment: AsPathSegment<'static>) {
         self.segments.push(segment);
     }
 
@@ -464,8 +488,8 @@ impl AsPath {
                 let diff_len = seq.len() - seq4.len();
                 let mut new_seq: Vec<Asn> = vec![];
                 new_seq.extend(seq.iter().take(diff_len));
-                new_seq.extend(seq4);
-                new_segs.push(AsPathSegment::AsSequence(new_seq));
+                new_seq.extend(seq4.iter());
+                new_segs.push(AsPathSegment::AsSequence(Cow::Owned(new_seq)));
             } else {
                 new_segs.push(as4seg_unwrapped.clone());
             }

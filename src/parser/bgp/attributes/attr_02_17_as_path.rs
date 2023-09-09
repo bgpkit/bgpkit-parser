@@ -2,6 +2,7 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use num_enum::TryFromPrimitive;
+use std::borrow::Cow;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, TryFromPrimitive)]
@@ -29,10 +30,10 @@ pub fn parse_as_path(mut input: &[u8], asn_len: &AsnLength) -> Result<AsPath, Pa
 fn parse_as_path_segment(
     input: &mut &[u8],
     asn_len: &AsnLength,
-) -> Result<AsPathSegment, ParserError> {
+) -> Result<AsPathSegment<'static>, ParserError> {
     let segment_type = AsSegmentType::try_from(input.read_u8()?)?;
     let count = input.read_u8()? as usize;
-    let path = input.read_asns(asn_len, count)?;
+    let path = Cow::Owned(input.read_asns(asn_len, count)?);
     match segment_type {
         AsSegmentType::AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
         AsSegmentType::AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
