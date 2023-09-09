@@ -139,7 +139,6 @@ pub fn parse_rib_afi_entries(
     // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
     //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
     let prefix = data.read_nlri_prefix(&afi, false)?;
-    let prefixes = vec![prefix];
 
     let entry_count = data.read_u16()?;
     let mut rib_entries = Vec::with_capacity((entry_count * 2) as usize);
@@ -148,7 +147,13 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        rib_entries.push(parse_rib_entry(data, add_path, &afi, &safi, &prefixes)?);
+        rib_entries.push(parse_rib_entry(
+            data,
+            add_path,
+            &afi,
+            &safi,
+            std::slice::from_ref(&prefix),
+        )?);
     }
 
     Ok(RibAfiEntries {
