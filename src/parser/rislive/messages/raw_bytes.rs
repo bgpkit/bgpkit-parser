@@ -10,16 +10,20 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
     let msg_type = match msg.get("type") {
-        None => return Err(ParserRisliveError::IrregularRisLiveFormat),
+        None => return Err(ParserRisliveError::UnknownMessageType(None)),
         Some(t) => t.as_str().unwrap(),
     };
 
     match msg_type {
         "ris_message" => {}
         "ris_error" | "ris_rrc_list" | "ris_subscribe_ok" | "pong" => {
-            return Err(ParserRisliveError::UnsupportedMessage)
+            return Err(ParserRisliveError::UnsupportedMessage(msg_type.to_string()))
         }
-        _ => return Err(ParserRisliveError::IrregularRisLiveFormat),
+        _ => {
+            return Err(ParserRisliveError::UnknownMessageType(Some(
+                msg_type.to_string(),
+            )))
+        }
     }
 
     let data = msg.get("data").unwrap().as_object().unwrap();
@@ -43,7 +47,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
         Ok(m) => m,
         Err(_) => match parse_bgp_message(&mut bytes, false, &AsnLength::Bits16) {
             Ok(m) => m,
-            Err(_) => return Err(ParserRisliveError::IncorrectRawBytes),
+            Err(err) => return Err(ParserRisliveError::UnableToParseRawBytes(err)),
         },
     };
 
