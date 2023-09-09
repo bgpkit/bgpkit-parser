@@ -47,10 +47,7 @@ pub fn parse_bgp_message(
     */
     let length = data.read_u16()?;
     if !(19..=4096).contains(&length) {
-        return Err(ParserError::ParseError(format!(
-            "invalid BGP message length {}",
-            length
-        )));
+        return Err(ParserError::InvalidBgpMessageLength(length));
     }
 
     let bgp_msg_length = if (length as usize) > total_size {
@@ -59,14 +56,7 @@ pub fn parse_bgp_message(
         length as usize - 19
     };
 
-    let msg_type: BgpMessageType = match BgpMessageType::try_from(data.read_u8()?) {
-        Ok(t) => t,
-        Err(_) => {
-            return Err(ParserError::ParseError(
-                "Unknown BGP Message Type".to_string(),
-            ))
-        }
-    };
+    let msg_type: BgpMessageType = BgpMessageType::try_from(data.read_u8()?)?;
 
     if data.remaining() != bgp_msg_length {
         warn!(

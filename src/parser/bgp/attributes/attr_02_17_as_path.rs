@@ -2,12 +2,18 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
+use num_enum::TryFromPrimitive;
 
-const AS_PATH_AS_SET: u8 = 1;
-const AS_PATH_AS_SEQUENCE: u8 = 2;
-// https://datatracker.ietf.org/doc/html/rfc5065
-const AS_PATH_CONFED_SEQUENCE: u8 = 3;
-const AS_PATH_CONFED_SET: u8 = 4;
+#[allow(non_camel_case_types)]
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u8)]
+enum AsSegmentType {
+    AS_PATH_AS_SET = 1,
+    AS_PATH_AS_SEQUENCE = 2,
+    // https://datatracker.ietf.org/doc/html/rfc5065
+    AS_PATH_CONFED_SEQUENCE = 3,
+    AS_PATH_CONFED_SET = 4,
+}
 
 pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
@@ -25,18 +31,14 @@ fn parse_as_path_segment(
     input: &mut Bytes,
     asn_len: &AsnLength,
 ) -> Result<AsPathSegment, ParserError> {
-    let segment_type = input.read_u8()?;
+    let segment_type = AsSegmentType::try_from(input.read_u8()?)?;
     let count = input.read_u8()? as usize;
     let path = input.read_asns(asn_len, count)?;
     match segment_type {
-        AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
-        AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
-        AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
-        AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
-        _ => Err(ParserError::ParseError(format!(
-            "Invalid AS path segment type: {}",
-            segment_type
-        ))),
+        AsSegmentType::AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
+        AsSegmentType::AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
+        AsSegmentType::AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
+        AsSegmentType::AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
     }
 }
 
@@ -145,6 +147,6 @@ mod tests {
             0, 1,
         ]);
         let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap_err();
-        assert!(matches!(res, ParserError::ParseError(_)));
+        assert!(matches!(res, ParserError::UnrecognizedEnumVariant { .. }));
     }
 }

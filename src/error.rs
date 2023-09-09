@@ -41,22 +41,22 @@ pub enum ParserError {
     #[error("unable to parse unsupported attribute type {0:?}")]
     UnsupportedAttributeType(AttrType),
     /// Indicates internal length inconsistencies within an MRT message. This includes fixed-length
-    /// and length-prefixed data requiring more space than is available within the enclosing
+    /// and length-prefixed data requiring more or less space than is available within the enclosing
     /// container.
-    ///
-    /// This error is not caused by IO errors such as an unexpected EOF error.
     #[error(
-        "encountered truncated value during {name}; expected {expected} bytes, but got {remaining}"
+        "encountered truncated value during {name}; expected {expected} bytes, but found {found}"
     )]
-    TruncatedField {
+    InconsistentFieldLength {
         name: &'static str,
         expected: usize,
-        remaining: usize,
+        found: usize,
     },
-
-    // TODO: Investigate usages of remaining error variants:
-    #[error("todo")]
-    ParseError(String),
+    #[error("invalid BGP message length {0} (expected 19 <= length <= 4096)")]
+    InvalidBgpMessageLength(u16),
+    #[error("invalid length {0} for MP_NEXT_HOP")]
+    InvalidNextHopLength(usize),
+    #[error("invalid length {0} for AGGREGATOR attribute (should be 6 or 8)")]
+    InvalidAggregatorAttrLength(usize),
 }
 
 impl<T> From<TryFromPrimitiveError<T>> for ParserError

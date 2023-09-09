@@ -1,14 +1,10 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 
 pub fn parse_originator_id(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    if input.remaining() != 4 {
-        return Err(ParserError::ParseError(
-            "ORIGINATOR_ID attribute must be 4 bytes".to_string(),
-        ));
-    }
+    input.expect_remaining_eq(4, "ORIGINATOR_ID")?;
     Ok(AttributeValue::OriginatorId(input.read_ipv4_address()?))
 }
 

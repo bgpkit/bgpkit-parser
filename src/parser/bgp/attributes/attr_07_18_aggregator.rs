@@ -22,12 +22,7 @@ pub fn parse_aggregator(
     let asn_len_found = match input.remaining() {
         8 => AsnLength::Bits32,
         6 => AsnLength::Bits16,
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "Aggregator attribute length is invalid: found {}, should 6 or 8",
-                input.remaining()
-            )))
-        }
+        x => return Err(ParserError::InvalidAggregatorAttrLength(x)),
     };
     if asn_len_found != *asn_len {
         warn!(

@@ -109,31 +109,23 @@ pub fn parse_rib_afi_entries(
     data: &mut Bytes,
     rib_type: TableDumpV2Type,
 ) -> Result<RibAfiEntries, ParserError> {
-    let afi: Afi;
-    let safi: Safi;
-    match rib_type {
+    let (afi, safi) = match rib_type {
         TableDumpV2Type::RibIpv4Unicast | TableDumpV2Type::RibIpv4UnicastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Unicast
+            (Afi::Ipv4, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv4Multicast | TableDumpV2Type::RibIpv4MulticastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Multicast
+            (Afi::Ipv4, Safi::Multicast)
         }
         TableDumpV2Type::RibIpv6Unicast | TableDumpV2Type::RibIpv6UnicastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Unicast
+            (Afi::Ipv6, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv6Multicast | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Multicast
+            (Afi::Ipv6, Safi::Multicast)
         }
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "wrong RIB type for parsing: {:?}",
-                rib_type
-            )))
-        }
+        ty => panic!(
+            "Invalid TableDumpV2Type {:?} passed to parse_rib_afi_entries",
+            ty
+        ),
     };
 
     let add_path = matches!(

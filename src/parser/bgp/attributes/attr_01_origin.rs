@@ -5,12 +5,7 @@ use bytes::Bytes;
 use std::convert::TryFrom;
 
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    match Origin::try_from(input.read_u8()?) {
-        Ok(v) => Ok(AttributeValue::Origin(v)),
-        Err(_) => Err(ParserError::ParseError(
-            "Failed to parse attribute type: origin".to_string(),
-        )),
-    }
+    Ok(AttributeValue::Origin(Origin::try_from(input.read_u8()?)?))
 }
 
 #[cfg(test)]
@@ -52,7 +47,7 @@ mod tests {
         );
         assert!(matches!(
             parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
-            ParserError::ParseError(_)
+            ParserError::UnrecognizedEnumVariant { .. }
         ));
     }
 }

@@ -22,10 +22,23 @@ pub trait ReadUtils: Buf {
             return Ok(());
         }
 
-        Err(ParserError::TruncatedField {
+        Err(ParserError::InconsistentFieldLength {
             name: target,
             expected: n,
-            remaining: self.remaining(),
+            found: self.remaining(),
+        })
+    }
+
+    #[inline(always)]
+    fn expect_remaining_eq(&self, n: usize, target: &'static str) -> Result<(), ParserError> {
+        if self.remaining() == n {
+            return Ok(());
+        }
+
+        Err(ParserError::InconsistentFieldLength {
+            name: target,
+            expected: n,
+            found: self.remaining(),
         })
     }
 
@@ -156,10 +169,7 @@ pub trait ReadUtils: Buf {
             Afi::Ipv4 => {
                 // 4 bytes -- u32
                 if byte_len > 4 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
-                    )));
+                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
                 }
                 let mut buff = [0; 4];
                 self.require_n_remaining(byte_len, "IPv4 NLRI Prefix")?;
@@ -171,10 +181,7 @@ pub trait ReadUtils: Buf {
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len > 16 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
-                    )));
+                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
                 }
                 self.require_n_remaining(byte_len, "IPv6 NLRI Prefix")?;
                 let mut buff = [0; 16];
@@ -184,15 +191,7 @@ pub trait ReadUtils: Buf {
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
-        let prefix = match IpNet::new(addr, bit_len) {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(ParserError::ParseError(format!(
-                    "Invalid network prefix length: {}",
-                    bit_len
-                )))
-            }
-        };
+        let prefix = IpNet::new(addr, bit_len)?;
 
         Ok(NetworkPrefix::new(prefix, path_id))
     }

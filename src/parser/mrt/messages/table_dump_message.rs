@@ -45,16 +45,7 @@ pub fn parse_table_dump_message(
     //   - create data slice reader cursor
 
     // determine address family based on the sub_type value defined in the MRT [CommonHeader].
-    let afi = match sub_type {
-        1 => Afi::Ipv4,
-        2 => Afi::Ipv6,
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
-            )))
-        }
-    };
+    let afi = Afi::try_from(sub_type)?;
 
     // ####
     // Step 1. read simple fields

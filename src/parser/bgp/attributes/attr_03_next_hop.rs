@@ -14,22 +14,16 @@ pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeVa
 }
 
 pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, ParserError> {
-    let output = match input.len() {
-        0 => None,
-        4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
-        16 => Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
-        32 => Some(NextHopAddress::Ipv6LinkLocal(
+    match input.len() {
+        0 => Ok(None),
+        4 => Ok(Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?)),
+        16 => Ok(Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?)),
+        32 => Ok(Some(NextHopAddress::Ipv6LinkLocal(
             input.read_ipv6_address()?,
             input.read_ipv6_address()?,
-        )),
-        v => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid next hop length found: {}",
-                v
-            )));
-        }
-    };
-    Ok(output)
+        ))),
+        v => Err(ParserError::InvalidNextHopLength(v)),
+    }
 }
 
 #[cfg(test)]
