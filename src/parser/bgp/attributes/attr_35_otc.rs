@@ -20,6 +20,7 @@ use bytes::Bytes;
 /// 2. If a route already contains the OTC Attribute, it MUST NOT be propagated to Providers, Peers, or RSes.
 /// ```
 pub fn parse_only_to_customer(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    input.expect_remaining_eq(4, "ONLY_TO_CUSTOMER")?;
     let remote_asn = input.read_u32()?;
     Ok(AttributeValue::OnlyToCustomer(Asn::new_32bit(remote_asn)))
 }

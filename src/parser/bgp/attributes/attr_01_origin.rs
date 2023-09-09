@@ -5,6 +5,7 @@ use bytes::Bytes;
 use std::convert::TryFrom;
 
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    input.expect_remaining_eq(1, "ORIGIN")?;
     Ok(AttributeValue::Origin(Origin::try_from(input.read_u8()?)?))
 }
 

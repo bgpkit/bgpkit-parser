@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use num_enum::TryFromPrimitive;
 
 #[allow(non_camel_case_types)]
@@ -19,7 +19,7 @@ pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Pa
     let mut output = AsPath {
         segments: Vec::with_capacity(5),
     };
-    while input.remaining() > 0 {
+    while !input.is_empty() {
         let segment = parse_as_path_segment(&mut input, asn_len)?;
         output.append_segment(segment);
     }

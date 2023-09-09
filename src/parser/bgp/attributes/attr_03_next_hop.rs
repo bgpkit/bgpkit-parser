@@ -2,14 +2,24 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::Bytes;
+use std::net::IpAddr;
 
 pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
-    if let Some(afi) = afi {
-        Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
-    } else {
-        Ok(input
-            .read_address(&Afi::Ipv4)
-            .map(AttributeValue::NextHop)?)
+    match afi.unwrap_or(Afi::Ipv4) {
+        Afi::Ipv4 => {
+            input.expect_remaining_eq(4, "NEXT_HOP")?;
+            Ok(input
+                .read_ipv4_address()
+                .map(IpAddr::V4)
+                .map(AttributeValue::NextHop)?)
+        }
+        Afi::Ipv6 => {
+            input.expect_remaining_eq(16, "NEXT_HOP")?;
+            Ok(input
+                .read_ipv6_address()
+                .map(IpAddr::V6)
+                .map(AttributeValue::NextHop)?)
+        }
     }
 }
 
