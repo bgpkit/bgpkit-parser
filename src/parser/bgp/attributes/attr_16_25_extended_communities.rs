@@ -10,9 +10,9 @@ use crate::ParserError;
 use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    let mut communities = ExtendedCommunities::with_capacity(input.remaining() / 8);
 
-    while input.remaining() > 0 {
+    while !input.is_empty() {
         let ec_type_u8 = input.read_u8()?;
         let ec: ExtendedCommunity = match ExtendedCommunityType::from(ec_type_u8) {
             ExtendedCommunityType::TransitiveTwoOctetAs => {
@@ -115,7 +115,7 @@ pub fn parse_extended_community(mut input: &[u8]) -> Result<AttributeValue, Pars
 }
 
 pub fn parse_ipv6_extended_community(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    let mut communities = ExtendedCommunities::with_capacity(input.remaining() / 20);
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
         let sub_type = input.read_u8()?;

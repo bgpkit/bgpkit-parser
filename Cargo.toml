@@ -82,6 +82,7 @@ rislive = [
 serde = [
     "dep:serde",
     "ipnet/serde",
+    "smallvec/serde",
 ]
 
 [[bench]]

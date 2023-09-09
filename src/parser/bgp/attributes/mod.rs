@@ -13,6 +13,7 @@ mod attr_32_large_communities;
 mod attr_35_otc;
 
 use log::{debug, warn};
+use smallvec::smallvec;
 
 use crate::models::*;
 
@@ -176,11 +177,9 @@ impl AttributeParser {
                     parse_ipv6_extended_community(attr_data)
                 }
                 AttrType::DEVELOPMENT => {
-                    let mut value = vec![];
-                    for _i in 0..attr_length {
-                        value.push(attr_data.read_u8()?);
-                    }
-                    Ok(AttributeValue::Development(value))
+                    let mut buffer = smallvec![0; attr_length];
+                    attr_data.read_exact(&mut buffer)?;
+                    Ok(AttributeValue::Development(buffer))
                 }
                 AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
                 // TODO: Should it be treated as a raw attribute instead?

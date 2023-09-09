@@ -4,7 +4,7 @@ use crate::ParserError;
 
 /// <https://tools.ietf.org/html/rfc4456>
 pub fn parse_clusters(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
-    let mut clusters = Vec::with_capacity(input.remaining() / 4);
+    let mut clusters = ClusterList::with_capacity(input.remaining() / 4);
     while input.remaining() > 0 {
         clusters.push(input.read_u32()?);
     }

@@ -3,7 +3,7 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 
 pub fn parse_large_communities(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    let mut communities = LargeCommunities::with_capacity(input.remaining() / 12);
     while input.remaining() > 0 {
         input.require_n_remaining(12, "large community")?; // 12 bytes for large community (3x 32 bits integers)
         let global_administrator = input.read_u32()?;

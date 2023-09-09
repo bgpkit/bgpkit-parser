@@ -7,9 +7,9 @@ pub fn parse_regular_communities(mut input: &[u8]) -> Result<AttributeValue, Par
     const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
     const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
 
-    let mut communities = vec![];
+    let mut communities = Communities::with_capacity(input.remaining() / 4);
 
-    while input.remaining() > 0 {
+    while !input.is_empty() {
         let community_val = input.read_u32()?;
         communities.push(match community_val {
             COMMUNITY_NO_EXPORT => Community::NoExport,
