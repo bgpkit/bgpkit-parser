@@ -1,5 +1,4 @@
 //! BGP attribute structs
-mod aspath;
 mod nlri;
 mod origin;
 
@@ -15,7 +14,6 @@ use std::vec::IntoIter;
 
 use crate::models::*;
 
-pub use aspath::*;
 pub use nlri::*;
 pub use origin::*;
 
