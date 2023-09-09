@@ -116,18 +116,8 @@ impl AttributeParser {
                 t => t,
             };
 
-            let bytes_left = data.remaining();
-
-            if data.remaining() < attr_length {
-                warn!(
-                    "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                    bytes_left, attr_length
-                );
-                // break and return already parsed attributes
-                break;
-            }
-
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
+            data.require_n_remaining(attr_length, "Attribute")?;
             let mut attr_data = data.split_to(attr_length);
 
             let attr = match attr_type {
@@ -203,14 +193,14 @@ impl AttributeParser {
                     assert_eq!(attr_type, value.attr_type());
                     attributes.push(Attribute { value, flag });
                 }
+                Err(e) if partial => {
+                    // TODO: Is this correct? If we don't have enough bytes, split_to would panic.
+                    // it's ok to have errors when reading partial bytes
+                    warn!("PARTIAL: {}", e);
+                }
                 Err(e) => {
-                    if partial {
-                        // it's ok to have errors when reading partial bytes
-                        warn!("PARTIAL: {}", e.to_string());
-                    } else {
-                        warn!("{}", e.to_string());
-                    }
-                    continue;
+                    warn!("{}", e);
+                    return Err(e);
                 }
             };
         }

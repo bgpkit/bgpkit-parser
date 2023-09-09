@@ -50,6 +50,7 @@ pub fn parse_bgp_message(
         return Err(ParserError::InvalidBgpMessageLength(length));
     }
 
+    // TODO: Why do we sometimes change our length estimate?
     let bgp_msg_length = if (length as usize) > total_size {
         total_size - 19
     } else {
@@ -59,6 +60,7 @@ pub fn parse_bgp_message(
     let msg_type: BgpMessageType = BgpMessageType::try_from(data.read_u8()?)?;
 
     if data.remaining() != bgp_msg_length {
+        // TODO: Why is this not a hard error?
         warn!(
             "BGP message length {} does not match the actual length {}",
             bgp_msg_length,
@@ -111,6 +113,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
 
     // let pos_end = input.position() + opt_params_len as u64;
     if input.remaining() != opt_params_len as usize {
+        // TODO: This seems like it should become a hard error
         warn!(
             "BGP open message length {} does not match the actual length {}",
             opt_params_len,
@@ -186,6 +189,7 @@ fn read_nlri(
         return Ok(vec![]);
     }
     if length == 1 {
+        // TODO: Should this become a hard error?
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
         input.advance(1); // skip the byte

@@ -57,7 +57,7 @@ pub fn parse_table_dump_v2_message(
 ///
 /// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3.1
 pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserError> {
-    let collector_bgp_id = Ipv4Addr::from(data.read_u32()?);
+    let collector_bgp_id = data.read_ipv4_address()?;
     // read and ignore view name
     let view_name_length = data.read_u16()?;
     let view_name =
@@ -150,14 +150,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        let entry = match parse_rib_entry(data, add_path, &afi, &safi, &prefixes) {
-            Ok(entry) => entry,
-            Err(e) => {
-                warn!("early break due to error {}", e.to_string());
-                break;
-            }
-        };
-        rib_entries.push(entry);
+        rib_entries.push(parse_rib_entry(data, add_path, &afi, &safi, &prefixes)?);
     }
 
     Ok(RibAfiEntries {
@@ -182,6 +175,7 @@ pub fn parse_rib_entry(
     let peer_index = input.read_u16()?;
     let originated_time = input.read_u32()?;
     if add_path {
+        // TODO: Why is this value unused?
         let _path_id = input.read_u32()?;
     }
     let attribute_length = input.read_u16()? as usize;

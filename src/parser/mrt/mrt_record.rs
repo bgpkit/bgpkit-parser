@@ -57,6 +57,7 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 
     let microsecond_timestamp = match &entry_type {
         EntryType::BGP4MP_ET => {
+            // TODO: Error if length < 4
             length -= 4;
             let mut raw_bytes: [u8; 4] = [0; 4];
             input.read_exact(&mut raw_bytes)?;

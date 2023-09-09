@@ -82,7 +82,7 @@ pub fn parse_bgp4mp_message(
     let local_ip = data.read_address(&afi)?;
 
     let should_read = total_should_read(&afi, &asn_len, total_size);
-    data.require_n_remaining(should_read, "bgp4mp message")?;
+    data.expect_remaining_eq(should_read, "bgp4mp message")?;
     let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, &asn_len)?;
 
     Ok(Bgp4MpMessage {
