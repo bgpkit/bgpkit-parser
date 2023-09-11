@@ -237,14 +237,14 @@ impl Attributes {
         })
     }
 
-    pub fn get_reachable(&self) -> Option<&Nlri> {
+    pub fn get_reachable(&self) -> Option<&ReachableNlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpReachNlri(x) => Some(x),
             _ => None,
         })
     }
 
-    pub fn get_unreachable(&self) -> Option<&Nlri> {
+    pub fn get_unreachable(&self) -> Option<&UnreachableNlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpUnreachNlri(x) => Some(x),
             _ => None,
@@ -454,8 +454,8 @@ pub enum AttributeValue {
     LargeCommunities(LargeCommunities),
     OriginatorId(BgpIdentifier),
     Clusters(ClusterList),
-    MpReachNlri(Nlri),
-    MpUnreachNlri(Nlri),
+    MpReachNlri(ReachableNlri),
+    MpUnreachNlri(UnreachableNlri),
     Development(Development),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),

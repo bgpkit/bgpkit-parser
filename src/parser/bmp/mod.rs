@@ -39,7 +39,7 @@ pub fn parse_bmp_msg(data: &mut &[u8]) -> Result<BmpMessage, ParserBmpError> {
     match &common_header.msg_type {
         BmpMsgType::RouteMonitoring => {
             let per_peer_header = parse_per_peer_header(data)?;
-            let msg = parse_route_monitoring(data, &per_peer_header.peer_flags.asn_length())?;
+            let msg = parse_route_monitoring(data, per_peer_header.peer_flags.asn_length())?;
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
@@ -48,7 +48,7 @@ pub fn parse_bmp_msg(data: &mut &[u8]) -> Result<BmpMessage, ParserBmpError> {
         }
         BmpMsgType::RouteMirroringMessage => {
             let per_peer_header = parse_per_peer_header(data)?;
-            let msg = parse_route_mirroring(data, &per_peer_header.peer_flags.asn_length())?;
+            let msg = parse_route_mirroring(data, per_peer_header.peer_flags.asn_length())?;
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),

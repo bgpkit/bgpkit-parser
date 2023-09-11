@@ -9,7 +9,7 @@ pub struct RouteMonitoring {
 
 pub fn parse_route_monitoring(
     data: &mut &[u8],
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<RouteMonitoring, ParserBmpError> {
     // let bgp_update = parse_bgp_update_message(reader, false, afi, asn_len, total_len)?;
     let bgp_update = parse_bgp_message(data, false, asn_len)?;

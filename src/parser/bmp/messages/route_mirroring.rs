@@ -47,7 +47,7 @@ pub enum RouteMirroringInfo {
 
 pub fn parse_route_mirroring(
     data: &mut &[u8],
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
     while !data.is_empty() {

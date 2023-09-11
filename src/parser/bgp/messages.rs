@@ -28,7 +28,7 @@ use log::warn;
 pub fn parse_bgp_message(
     data: &mut &[u8],
     add_path: bool,
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<BgpMessage, ParserError> {
     let total_size = data.len();
     data.require_n_remaining(19, "BGP message marker")?;
@@ -178,24 +178,20 @@ pub fn parse_bgp_open_message(input: &mut &[u8]) -> Result<BgpOpenMessage, Parse
 }
 
 /// read nlri portion of a bgp update message.
-fn read_nlri(
-    mut input: &[u8],
-    afi: &Afi,
-    add_path: bool,
-) -> Result<Vec<NetworkPrefix>, ParserError> {
+fn read_nlri(mut input: &[u8], afi: &Afi, add_path: bool) -> Result<PrefixList, ParserError> {
     let length = input.len();
     if length == 0 {
-        return Ok(vec![]);
+        return Ok(PrefixList::new());
     }
     if length == 1 {
         // TODO: Should this become a hard error?
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
         input.advance(1)?; // skip the byte
-        return Ok(vec![]);
+        return Ok(PrefixList::new());
     }
 
-    parse_nlri_list(input, add_path, afi)
+    parse_nlri_list(input, add_path, *afi)
 }
 
 /// read bgp update message.
@@ -204,7 +200,7 @@ fn read_nlri(
 pub fn parse_bgp_update_message(
     mut input: &[u8],
     add_path: bool,
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<BgpUpdateMessage, ParserError> {
     // AFI for routes out side attributes are IPv4 ONLY.
     let afi = Afi::Ipv4;

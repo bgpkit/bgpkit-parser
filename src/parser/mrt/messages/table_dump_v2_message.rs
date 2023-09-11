@@ -147,13 +147,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        rib_entries.push(parse_rib_entry(
-            data,
-            add_path,
-            &afi,
-            &safi,
-            std::slice::from_ref(&prefix),
-        )?);
+        rib_entries.push(parse_rib_entry(data, add_path, afi, safi, &prefix)?);
     }
 
     Ok(RibAfiEntries {
@@ -167,9 +161,9 @@ pub fn parse_rib_afi_entries(
 pub fn parse_rib_entry(
     input: &mut &[u8],
     add_path: bool,
-    afi: &Afi,
-    safi: &Safi,
-    prefixes: &[NetworkPrefix],
+    afi: Afi,
+    safi: Safi,
+    prefix: &NetworkPrefix,
 ) -> Result<RibEntry, ParserError> {
     // total length - current position less than 16 --
     // meaning less than 16 bytes available to read
@@ -190,10 +184,10 @@ pub fn parse_rib_entry(
     let attr_data_slice = input.split_to(attribute_length)?;
     let attributes = attr_parser.parse_attributes(
         attr_data_slice,
-        &AsnLength::Bits32,
-        Some(*afi),
-        Some(*safi),
-        Some(prefixes),
+        AsnLength::Bits32,
+        Some(afi),
+        Some(safi),
+        Some(prefix),
     )?;
 
     Ok(RibEntry {

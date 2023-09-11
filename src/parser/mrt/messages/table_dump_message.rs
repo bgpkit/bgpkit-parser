@@ -85,7 +85,7 @@ pub fn parse_table_dump_message(
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
     let attributes =
-        attr_parser.parse_attributes(attr_data_slice, &AsnLength::Bits16, None, None, None)?;
+        attr_parser.parse_attributes(attr_data_slice, AsnLength::Bits16, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,

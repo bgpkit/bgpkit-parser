@@ -12,6 +12,7 @@ mod attr_16_25_extended_communities;
 mod attr_32_large_communities;
 mod attr_35_otc;
 
+use crate::bgp::attributes::attr_14_15_nlri::{parse_reach_nlri, parse_unreach_nlri};
 use log::{debug, warn};
 use smallvec::smallvec;
 
@@ -27,7 +28,6 @@ use crate::parser::bgp::attributes::attr_07_18_aggregator::parse_aggregator;
 use crate::parser::bgp::attributes::attr_08_communities::parse_regular_communities;
 use crate::parser::bgp::attributes::attr_09_originator::parse_originator_id;
 use crate::parser::bgp::attributes::attr_10_13_cluster::parse_clusters;
-use crate::parser::bgp::attributes::attr_14_15_nlri::parse_nlri;
 use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
     parse_extended_community, parse_ipv6_extended_community,
 };
@@ -53,10 +53,10 @@ impl AttributeParser {
     pub fn parse_attributes(
         &self,
         mut data: &[u8],
-        asn_len: &AsnLength,
+        asn_len: AsnLength,
         afi: Option<Afi>,
         safi: Option<Safi>,
-        prefixes: Option<&[NetworkPrefix]>,
+        prefixes: Option<&NetworkPrefix>,
     ) -> Result<Attributes, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
@@ -141,26 +141,16 @@ impl AttributeParser {
                 }),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data),
-                AttrType::MP_REACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    true,
-                    self.additional_paths,
-                ),
-                AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    false,
-                    self.additional_paths,
-                ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
+                AttrType::MP_REACHABLE_NLRI => {
+                    parse_reach_nlri(attr_data, afi, safi, prefixes, self.additional_paths)
+                }
+                AttrType::MP_UNREACHABLE_NLRI => {
+                    parse_unreach_nlri(attr_data, afi, safi, prefixes, self.additional_paths)
+                }
+                AttrType::AS4_PATH => parse_as_path(attr_data, AsnLength::Bits32)
                     .map(|path| AttributeValue::AsPath { path, is_as4: true }),
                 AttrType::AS4_AGGREGATOR => {
-                    parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
+                    parse_aggregator(attr_data, AsnLength::Bits32).map(|(asn, id)| {
                         AttributeValue::Aggregator {
                             asn,
                             id,

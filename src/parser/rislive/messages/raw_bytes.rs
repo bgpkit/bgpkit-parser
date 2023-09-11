@@ -42,9 +42,9 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let peer_asn = peer_asn_str.parse::<Asn>().unwrap();
 
-    let bgp_msg = match parse_bgp_message(&mut &bytes[..], false, &AsnLength::Bits32) {
+    let bgp_msg = match parse_bgp_message(&mut &bytes[..], false, AsnLength::Bits32) {
         Ok(m) => m,
-        Err(_) => match parse_bgp_message(&mut &bytes[..], false, &AsnLength::Bits16) {
+        Err(_) => match parse_bgp_message(&mut &bytes[..], false, AsnLength::Bits16) {
             Ok(m) => m,
             Err(err) => return Err(ParserRisliveError::UnableToParseRawBytes(err)),
         },

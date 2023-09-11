@@ -22,15 +22,15 @@ pub fn parse_next_hop(mut input: &[u8], afi: &Option<Afi>) -> Result<AttributeVa
     }
 }
 
-pub fn parse_mp_next_hop(mut input: &[u8]) -> Result<Option<NextHopAddress>, ParserError> {
+pub fn parse_mp_next_hop(mut input: &[u8]) -> Result<NextHopAddress, ParserError> {
     match input.len() {
-        0 => Ok(None),
-        4 => Ok(Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?)),
-        16 => Ok(Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?)),
-        32 => Ok(Some(NextHopAddress::Ipv6LinkLocal(
+        // 0 => Ok(None),
+        4 => Ok(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
+        16 => Ok(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
+        32 => Ok(NextHopAddress::Ipv6LinkLocal(
             input.read_ipv6_address()?,
             input.read_ipv6_address()?,
-        ))),
+        )),
         v => Err(ParserError::InvalidNextHopLength(v)),
     }
 }
@@ -69,13 +69,13 @@ mod tests {
         let ipv6 = Ipv6Addr::from_str("fc00::1").unwrap().octets();
         let ipv6_2 = Ipv6Addr::from_str("fc00::2").unwrap().octets();
 
-        if let Some(NextHopAddress::Ipv4(n)) = parse_mp_next_hop(&ipv4).unwrap() {
+        if let NextHopAddress::Ipv4(n) = parse_mp_next_hop(&ipv4).unwrap() {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
         } else {
             panic!();
         }
 
-        if let Some(NextHopAddress::Ipv6(n)) = parse_mp_next_hop(&ipv6).unwrap() {
+        if let NextHopAddress::Ipv6(n) = parse_mp_next_hop(&ipv6).unwrap() {
             assert_eq!(n.to_string(), "fc00::1".to_string())
         } else {
             panic!();
@@ -84,7 +84,7 @@ mod tests {
         let mut combined = ipv6.to_vec();
         combined.extend_from_slice(&ipv6_2);
 
-        if let Some(NextHopAddress::Ipv6LinkLocal(n, m)) = parse_mp_next_hop(&combined).unwrap() {
+        if let NextHopAddress::Ipv6LinkLocal(n, m) = parse_mp_next_hop(&combined).unwrap() {
             assert_eq!(n.to_string(), "fc00::1".to_string());
             assert_eq!(m.to_string(), "fc00::2".to_string());
         } else {

@@ -16,14 +16,14 @@ use log::warn;
 /// ```
 pub fn parse_aggregator(
     mut input: &[u8],
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<(Asn, BgpIdentifier), ParserError> {
     let asn_len_found = match input.remaining() {
         8 => AsnLength::Bits32,
         6 => AsnLength::Bits16,
         x => return Err(ParserError::InvalidAggregatorAttrLength(x)),
     };
-    if asn_len_found != *asn_len {
+    if asn_len_found != asn_len {
         warn!(
             "Aggregator attribute with ASN length set to {:?} but found {:?}",
             asn_len, asn_len_found
@@ -49,7 +49,7 @@ mod tests {
         data.extend([1u8, 2]);
         data.extend(identifier.octets());
 
-        if let Ok((asn, n)) = parse_aggregator(&data, &AsnLength::Bits16) {
+        if let Ok((asn, n)) = parse_aggregator(&data, AsnLength::Bits16) {
             assert_eq!(n, identifier);
             assert_eq!(asn, Asn::new_16bit(258))
         } else {
@@ -60,7 +60,7 @@ mod tests {
         data.extend([0u8, 0, 1, 2]);
         data.extend(identifier.octets());
 
-        if let Ok((asn, n)) = parse_aggregator(&data, &AsnLength::Bits32) {
+        if let Ok((asn, n)) = parse_aggregator(&data, AsnLength::Bits32) {
             assert_eq!(n, identifier);
             assert_eq!(asn, Asn::new_16bit(258))
         } else {

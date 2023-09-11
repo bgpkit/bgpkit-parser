@@ -116,9 +116,9 @@ pub struct Capability {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpUpdateMessage {
-    pub withdrawn_prefixes: Vec<NetworkPrefix>,
+    pub withdrawn_prefixes: PrefixList,
     pub attributes: Attributes,
-    pub announced_prefixes: Vec<NetworkPrefix>,
+    pub announced_prefixes: PrefixList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

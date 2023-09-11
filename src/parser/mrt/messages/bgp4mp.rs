@@ -39,7 +39,7 @@ pub fn parse_bgp4mp(sub_type: u16, input: &[u8]) -> Result<Bgp4Mp, ParserError> 
     Ok(msg)
 }
 
-fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize {
+fn total_should_read(afi: &Afi, asn_len: AsnLength, total_size: usize) -> usize {
     let ip_size = match afi {
         Afi::Ipv4 => 4 * 2,
         Afi::Ipv6 => 16 * 2,
@@ -80,9 +80,9 @@ pub fn parse_bgp4mp_message(
     let peer_ip = data.read_address(&afi)?;
     let local_ip = data.read_address(&afi)?;
 
-    let should_read = total_should_read(&afi, &asn_len, total_size);
+    let should_read = total_should_read(&afi, asn_len, total_size);
     data.expect_remaining_eq(should_read, "bgp4mp message")?;
-    let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, &asn_len)?;
+    let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, asn_len)?;
 
     Ok(Bgp4MpMessage {
         msg_type: *msg_type,

@@ -1,12 +1,11 @@
 /*!
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net, PrefixLenError};
 use std::convert::TryFrom;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::models::*;
-use log::debug;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
@@ -47,7 +46,7 @@ impl ReadUtils for &'_ [u8] {
         Err(eof("split_to", n, self.len()))
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_u8(&mut self) -> Result<u8, ParserError> {
         if !self.is_empty() {
             let value = self[0];
@@ -58,7 +57,7 @@ impl ReadUtils for &'_ [u8] {
         Err(eof("read_u8", 1, 0))
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_u16(&mut self) -> Result<u16, ParserError> {
         if self.len() >= 2 {
             let (bytes, remaining) = self.split_at(2);
@@ -69,7 +68,7 @@ impl ReadUtils for &'_ [u8] {
         Err(eof("read_u16", 2, self.len()))
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_u32(&mut self) -> Result<u32, ParserError> {
         if self.len() >= 4 {
             let (bytes, remaining) = self.split_at(4);
@@ -80,7 +79,7 @@ impl ReadUtils for &'_ [u8] {
         Err(eof("read_u32", 4, self.len()))
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_u64(&mut self) -> Result<u64, ParserError> {
         if self.len() >= 8 {
             let (bytes, remaining) = self.split_at(8);
@@ -177,7 +176,7 @@ pub trait ReadUtils: Sized {
         }
     }
 
-    fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
+    fn read_asns(&mut self, as_length: AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
         let mut path = Vec::with_capacity(count);
 
         match as_length {
@@ -198,12 +197,64 @@ pub trait ReadUtils: Sized {
         Ok(path)
     }
 
+    #[inline(always)]
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
         Afi::try_from(self.read_u16()?).map_err(ParserError::from)
     }
 
+    #[inline(always)]
     fn read_safi(&mut self) -> Result<Safi, ParserError> {
         Safi::try_from(self.read_u8()?).map_err(ParserError::from)
+    }
+
+    /// An alternative to [ReadUtils::read_nlri_prefix] which is easier for the compiler to
+    /// optimize. Calling `x.read_v4_nlri_prefix()` is functionally equivalent to
+    /// `x.read_nlri_prefix(&Afi::Ipv4, false)`.
+    #[inline(always)]
+    fn read_v4_nlri_prefix(&mut self) -> Result<NetworkPrefix, ParserError> {
+        // Length in bits and bytes
+        let bit_len = self.read_u8()?;
+
+        if bit_len > 32 {
+            return Err(ParserError::InvalidPrefixLength(PrefixLenError));
+        }
+
+        let byte_len: usize = (bit_len as usize + 7) / 8;
+
+        let mut buff = [0; 4];
+        self.read_exact(&mut buff[..byte_len])?;
+
+        let prefix = match Ipv4Net::new(Ipv4Addr::from(buff), bit_len) {
+            Ok(v) => IpNet::V4(v),
+            Err(_) => unreachable!("Bit length has already been checked"),
+        };
+
+        Ok(NetworkPrefix { prefix, path_id: 0 })
+    }
+
+    /// An alternative to [ReadUtils::read_nlri_prefix] which is easier for the compiler to
+    /// optimize. Calling `x.read_v6_nlri_prefix()` is functionally equivalent to
+    /// `x.read_nlri_prefix(&Afi::Ipv6, false)`.
+    #[inline(always)]
+    fn read_v6_nlri_prefix(&mut self) -> Result<NetworkPrefix, ParserError> {
+        // Length in bits and bytes
+        let bit_len = self.read_u8()?;
+
+        // 16 bytes
+        if bit_len > 128 {
+            return Err(ParserError::InvalidPrefixLength(PrefixLenError));
+        }
+        let byte_len: usize = (bit_len as usize + 7) / 8;
+
+        let mut buff = [0; 16];
+        self.read_exact(&mut buff[..byte_len])?;
+
+        let prefix = match Ipv6Net::new(Ipv6Addr::from(buff), bit_len) {
+            Ok(v) => IpNet::V6(v),
+            Err(_) => unreachable!("Bit length has already been checked"),
+        };
+
+        Ok(NetworkPrefix { prefix, path_id: 0 })
     }
 
     /// Read announced/withdrawn prefix.
@@ -218,38 +269,40 @@ pub trait ReadUtils: Sized {
     ) -> Result<NetworkPrefix, ParserError> {
         let path_id = if add_path { self.read_u32()? } else { 0 };
 
-        // Length in bits
+        // Length in bits and bytes
         let bit_len = self.read_u8()?;
-
-        // Convert to bytes
         let byte_len: usize = (bit_len as usize + 7) / 8;
-        let addr: IpAddr = match afi {
+
+        let prefix = match afi {
             Afi::Ipv4 => {
-                // 4 bytes -- u32
-                if byte_len > 4 {
-                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
+                // 4 bytes
+                if bit_len > 32 {
+                    return Err(ParserError::InvalidPrefixLength(PrefixLenError));
                 }
+
                 let mut buff = [0; 4];
-                self.require_n_remaining(byte_len, "IPv4 NLRI Prefix")?;
-                for i in 0..byte_len {
-                    buff[i] = self.read_u8()?;
+                self.read_exact(&mut buff[..byte_len])?;
+
+                match Ipv4Net::new(Ipv4Addr::from(buff), bit_len) {
+                    Ok(v) => IpNet::V4(v),
+                    Err(_) => unreachable!("Bit length has already been checked"),
                 }
-                IpAddr::V4(Ipv4Addr::from(buff))
             }
             Afi::Ipv6 => {
                 // 16 bytes
-                if byte_len > 16 {
-                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
+                if bit_len > 128 {
+                    return Err(ParserError::InvalidPrefixLength(PrefixLenError));
                 }
-                self.require_n_remaining(byte_len, "IPv6 NLRI Prefix")?;
+
                 let mut buff = [0; 16];
-                for i in 0..byte_len {
-                    buff[i] = self.read_u8()?;
+                self.read_exact(&mut buff[..byte_len])?;
+
+                match Ipv6Net::new(Ipv6Addr::from(buff), bit_len) {
+                    Ok(v) => IpNet::V6(v),
+                    Err(_) => unreachable!("Bit length has already been checked"),
                 }
-                IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
-        let prefix = IpNet::new(addr, bit_len)?;
 
         Ok(NetworkPrefix::new(prefix, path_id))
     }
@@ -270,54 +323,66 @@ pub trait ReadUtils: Sized {
     }
 }
 
-pub fn parse_nlri_list(
+#[cold]
+#[inline(never)]
+fn parse_nlri_list_fallback(
     mut input: &[u8],
+    afi: Afi,
     add_path: bool,
-    afi: &Afi,
-) -> Result<Vec<NetworkPrefix>, ParserError> {
-    let mut is_add_path = add_path;
-    let mut prefixes = vec![];
-
-    let mut retry = false;
-    let mut guessed = false;
-
-    let mut input_copy = None;
-
-    while input.remaining() > 0 {
-        if !is_add_path && input[0] == 0 {
-            // it's likely that this is a add-path wrongfully wrapped in non-add-path msg
-            debug!("not add-path but with NLRI size to be 0, likely add-path msg in wrong msg type, treat as add-path now");
-            // cloning the data bytes
-            is_add_path = true;
-            guessed = true;
-            input_copy = Some(input.clone());
-        }
-        let prefix = match input.read_nlri_prefix(afi, is_add_path) {
-            Ok(p) => p,
-            Err(e) => {
-                if guessed {
-                    retry = true;
-                    break;
-                } else {
-                    return Err(e);
-                }
-            }
-        };
-        prefixes.push(prefix);
-    }
-
-    if retry {
-        prefixes.clear();
-        // try again without attempt to guess add-path
-        // if we reach here (retry==true), input_copy must be Some
-        let mut input_2 = input_copy.unwrap();
-        while input_2.remaining() > 0 {
-            let prefix = input_2.read_nlri_prefix(afi, add_path)?;
-            prefixes.push(prefix);
-        }
+) -> Result<PrefixList, ParserError> {
+    let mut prefixes = PrefixList::with_capacity(input.len() / 4);
+    while !input.is_empty() {
+        prefixes.push((&mut input).read_nlri_prefix(&afi, add_path)?);
     }
 
     Ok(prefixes)
+}
+
+fn parse_nlri_list_v4(mut input: &[u8]) -> Result<PrefixList, ParserError> {
+    let retry_input = input;
+    let mut prefixes = PrefixList::with_capacity(input.len() / 3);
+
+    while !input.is_empty() {
+        if input[0] == 0 {
+            return match parse_nlri_list_fallback(retry_input, Afi::Ipv4, true) {
+                Ok(v) => Ok(v),
+                Err(_) => parse_nlri_list_fallback(retry_input, Afi::Ipv4, false),
+            };
+        }
+
+        prefixes.push((&mut input).read_v4_nlri_prefix()?);
+    }
+
+    Ok(prefixes)
+}
+
+fn parse_nlri_list_v6(mut input: &[u8]) -> Result<PrefixList, ParserError> {
+    let retry_input = input;
+    let mut prefixes = PrefixList::with_capacity(input.len() / 5);
+
+    while !input.is_empty() {
+        if input[0] == 0 {
+            return match parse_nlri_list_fallback(retry_input, Afi::Ipv6, true) {
+                Ok(v) => Ok(v),
+                Err(_) => parse_nlri_list_fallback(retry_input, Afi::Ipv6, false),
+            };
+        }
+
+        prefixes.push((&mut input).read_v6_nlri_prefix()?);
+    }
+
+    Ok(prefixes)
+}
+
+pub fn parse_nlri_list(input: &[u8], add_path: bool, afi: Afi) -> Result<PrefixList, ParserError> {
+    if add_path {
+        return parse_nlri_list_fallback(input, afi, true);
+    }
+
+    match afi {
+        Afi::Ipv4 => parse_nlri_list_v4(input),
+        Afi::Ipv6 => parse_nlri_list_v6(input),
+    }
 }
 
 /// A CRC32 implementation that converts a string to a hex string.
