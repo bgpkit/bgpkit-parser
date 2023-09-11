@@ -176,27 +176,6 @@ pub trait ReadUtils: Sized {
         }
     }
 
-    fn read_asns(&mut self, as_length: AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
-        let mut path = Vec::with_capacity(count);
-
-        match as_length {
-            AsnLength::Bits16 => {
-                self.require_n_remaining(count * 2, "16bit ASNs")?; // 2 bytes for 16-bit ASN
-                for _ in 0..count {
-                    path.push(Asn::new_16bit(self.read_u16()?));
-                }
-            }
-            AsnLength::Bits32 => {
-                self.require_n_remaining(count * 4, "32bit ASNs")?; // 4 bytes for 32-bit ASN
-                for _ in 0..count {
-                    path.push(Asn::new_32bit(self.read_u32()?));
-                }
-            }
-        }
-
-        Ok(path)
-    }
-
     #[inline(always)]
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
         Afi::try_from(self.read_u16()?).map_err(ParserError::from)
@@ -383,34 +362,4 @@ pub fn parse_nlri_list(input: &[u8], add_path: bool, afi: Afi) -> Result<PrefixL
         Afi::Ipv4 => parse_nlri_list_v4(input),
         Afi::Ipv6 => parse_nlri_list_v6(input),
     }
-}
-
-/// A CRC32 implementation that converts a string to a hex string.
-///
-/// CRC32 is a checksum algorithm that is used to verify the integrity of data. It is short in
-/// length and sufficient for generating unique file names based on remote URLs.
-pub fn crc32(input: &str) -> String {
-    let input_bytes = input.as_bytes();
-    let mut table = [0u32; 256];
-    let polynomial = 0xedb88320u32;
-
-    for i in 0..256 {
-        let mut crc = i as u32;
-        for _ in 0..8 {
-            if crc & 1 == 1 {
-                crc = (crc >> 1) ^ polynomial;
-            } else {
-                crc >>= 1;
-            }
-        }
-        table[i as usize] = crc;
-    }
-
-    let mut crc = !0u32;
-    for byte in input_bytes.iter() {
-        let index = ((crc ^ (*byte as u32)) & 0xff) as usize;
-        crc = (crc >> 8) ^ table[index];
-    }
-
-    format!("{:08x}", !crc)
 }

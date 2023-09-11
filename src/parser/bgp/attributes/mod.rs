@@ -13,7 +13,7 @@ mod attr_32_large_communities;
 mod attr_35_otc;
 
 use crate::bgp::attributes::attr_14_15_nlri::{parse_reach_nlri, parse_unreach_nlri};
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use smallvec::smallvec;
 
 use crate::models::*;
@@ -60,61 +60,19 @@ impl AttributeParser {
     ) -> Result<Attributes, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
-        while data.remaining() >= 3 {
-            // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
-            // thus the while loop condition is set to be at least 3 bytes to read.
-
-            // has content to read
+        while !data.is_empty() {
             let flag = AttrFlags::from_bits_retain(data.read_u8()?);
-            let attr_type = data.read_u8()?;
+            let attr_type = AttrType::from(data.read_u8()?);
             let attr_length = match flag.contains(AttrFlags::EXTENDED) {
                 false => data.read_u8()? as usize,
                 true => data.read_u16()? as usize,
             };
 
-            let mut partial = false;
-            if flag.contains(AttrFlags::PARTIAL) {
-                /*
-                https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-
-                > The third high-order bit (bit 2) of the Attribute Flags octet
-                > is the Partial bit.  It defines whether the information
-                > contained in the optional transitive attribute is partial (if
-                > set to 1) or complete (if set to 0).  For well-known attributes
-                > and for optional non-transitive attributes, the Partial bit
-                > MUST be set to 0.
-                */
-                partial = true;
-            }
-
-            debug!(
+            trace!(
                 "reading attribute: type -- {:?}, length -- {}",
-                &attr_type, attr_length
+                &attr_type,
+                attr_length
             );
-            let attr_type = match AttrType::from(attr_type) {
-                attr_type @ AttrType::Unknown(unknown_type) => {
-                    // skip pass the remaining bytes of this attribute
-                    let bytes = data.read_n_bytes(attr_length)?;
-                    let attr_value = match get_deprecated_attr_type(unknown_type) {
-                        Some(t) => {
-                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
-                            AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
-                        }
-                        None => {
-                            debug!("unknown attribute type: {}", unknown_type);
-                            AttributeValue::Unknown(AttrRaw { attr_type, bytes })
-                        }
-                    };
-
-                    assert_eq!(attr_type, attr_value.attr_type());
-                    attributes.push(Attribute {
-                        value: attr_value,
-                        flag,
-                    });
-                    continue;
-                }
-                t => t,
-            };
 
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
             data.require_n_remaining(attr_length, "Attribute")?;
@@ -172,6 +130,20 @@ impl AttributeParser {
                     Ok(AttributeValue::Development(buffer))
                 }
                 AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
+                AttrType::Unknown(unknown_type) => {
+                    // skip pass the remaining bytes of this attribute
+                    let bytes = data.read_n_bytes(attr_length)?;
+                    match get_deprecated_attr_type(unknown_type) {
+                        Some(t) => {
+                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
+                            Ok(AttributeValue::Deprecated(AttrRaw { attr_type, bytes }))
+                        }
+                        None => {
+                            debug!("unknown attribute type: {}", unknown_type);
+                            Ok(AttributeValue::Unknown(AttrRaw { attr_type, bytes }))
+                        }
+                    }
+                }
                 // TODO: Should it be treated as a raw attribute instead?
                 _ => Err(ParserError::UnsupportedAttributeType(attr_type)),
             };
@@ -181,8 +153,18 @@ impl AttributeParser {
                     assert_eq!(attr_type, value.attr_type());
                     attributes.push(Attribute { value, flag });
                 }
-                Err(e) if partial => {
-                    // TODO: Is this correct? If we don't have enough bytes, split_to would panic.
+                Err(e) if flag.contains(AttrFlags::PARTIAL) => {
+                    /*
+                    https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
+
+                    > The third high-order bit (bit 2) of the Attribute Flags octet
+                    > is the Partial bit.  It defines whether the information
+                    > contained in the optional transitive attribute is partial (if
+                    > set to 1) or complete (if set to 0).  For well-known attributes
+                    > and for optional non-transitive attributes, the Partial bit
+                    > MUST be set to 0.
+                    */
+
                     // it's ok to have errors when reading partial bytes
                     warn!("PARTIAL: {}", e);
                 }
