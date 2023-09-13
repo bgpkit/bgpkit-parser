@@ -18,7 +18,7 @@ use log::warn;
 pub fn parse_aggregator(
     mut input: Bytes,
     asn_len: &AsnLength,
-) -> Result<AttributeValue, ParserError> {
+) -> Result<(Asn, BgpIdentifier), ParserError> {
     let asn_len_found = match input.remaining() {
         8 => AsnLength::Bits32,
         6 => AsnLength::Bits16,
@@ -35,11 +35,11 @@ pub fn parse_aggregator(
             asn_len, asn_len_found
         );
     }
-    let asn = input.read_asn(&asn_len_found)?;
+    let asn = input.read_asn(asn_len_found)?;
 
     // the BGP identifier is always 4 bytes or IPv4 address
-    let identifier = input.read_address(&Afi::Ipv4)?;
-    Ok(AttributeValue::Aggregator(asn, identifier))
+    let identifier = input.read_ipv4_address()?;
+    Ok((asn, identifier))
 }
 
 #[cfg(test)]
@@ -56,16 +56,9 @@ mod tests {
         data.extend(identifier.octets());
         let bytes = Bytes::from(data);
 
-        if let Ok(AttributeValue::Aggregator(asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16)
-        {
+        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16) {
             assert_eq!(n, identifier);
-            assert_eq!(
-                asn,
-                Asn {
-                    asn: 258,
-                    len: AsnLength::Bits16
-                }
-            )
+            assert_eq!(asn, Asn::new_16bit(258))
         } else {
             panic!()
         }
@@ -75,16 +68,9 @@ mod tests {
         data.extend(identifier.octets());
         let bytes = Bytes::from(data);
 
-        if let Ok(AttributeValue::Aggregator(asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32)
-        {
+        if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32) {
             assert_eq!(n, identifier);
-            assert_eq!(
-                asn,
-                Asn {
-                    asn: 258,
-                    len: AsnLength::Bits32
-                }
-            )
+            assert_eq!(asn, Asn::new_16bit(258))
         } else {
             panic!()
         }

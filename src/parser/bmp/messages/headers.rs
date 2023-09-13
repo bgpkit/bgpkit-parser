@@ -1,8 +1,10 @@
 use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
+use bitflags::bitflags;
 use bytes::{Buf, Bytes};
-use num_traits::FromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::convert::TryFrom;
 use std::net::IpAddr;
 
 /// BMP message type enum.
@@ -20,7 +22,8 @@ use std::net::IpAddr;
 ///       *  Type = 5: Termination Message
 ///       *  Type = 6: Route Mirroring Message
 /// ```
-#[derive(Debug, Primitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u8)]
 pub enum BmpMsgType {
     RouteMonitoring = 0,
     StatisticsReport = 1,
@@ -60,7 +63,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 
     let msg_len = data.read_u32()?;
 
-    let msg_type = BmpMsgType::from_u8(data.read_u8()?).unwrap();
+    let msg_type = BmpMsgType::try_from(data.read_u8()?)?;
     Ok(BmpCommonHeader {
         version,
         msg_len,
@@ -94,59 +97,79 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 #[derive(Debug)]
 pub struct BmpPerPeerHeader {
     pub peer_type: PeerType,
-    pub peer_flags: u8,
+    pub peer_flags: PeerFlags,
     pub peer_distinguisher: u64,
     pub peer_ip: IpAddr,
-    pub peer_asn: u32,
-    pub peer_bgp_id: u32,
+    pub peer_asn: Asn,
+    pub peer_bgp_id: BgpIdentifier,
     pub timestamp: f64,
-    pub afi: Afi,
-    pub asn_len: AsnLength,
 }
 
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Primitive)]
+impl BmpPerPeerHeader {
+    #[inline]
+    pub fn afi(&self) -> Afi {
+        Afi::from(self.peer_ip)
+    }
+}
+
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u8)]
 pub enum PeerType {
-    GlobalInstancePeer = 0,
-    RDInstancePeer = 1,
-    LocalInstancePeer = 2,
+    Global = 0,
+    RD = 1,
+    Local = 2,
+}
+
+bitflags! {
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct PeerFlags: u8 {
+        const ADDRESS_FAMILY_IPV6 = 0x80;
+        const IS_POST_POLICY = 0x40;
+        const AS_SIZE_16BIT = 0x20;
+    }
+}
+
+impl PeerFlags {
+    pub const fn address_family(&self) -> Afi {
+        if self.contains(PeerFlags::ADDRESS_FAMILY_IPV6) {
+            return Afi::Ipv6;
+        }
+
+        Afi::Ipv4
+    }
+
+    pub fn asn_length(&self) -> AsnLength {
+        if self.contains(PeerFlags::AS_SIZE_16BIT) {
+            return AsnLength::Bits16;
+        }
+
+        AsnLength::Bits32
+    }
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
-    let peer_type = PeerType::from_u8(data.read_u8()?).unwrap();
-
-    let peer_flags = data.read_u8()?;
+    let peer_type = PeerType::try_from(data.read_u8()?)?;
+    let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
 
     let peer_distinguisher = data.read_u64()?;
-
-    let (is_router_ipv6, is_2byte_asn) = (peer_flags & 0x80 > 0, peer_flags & 0x20 > 0);
-
-    let afi = match is_router_ipv6 {
-        true => Afi::Ipv6,
-        false => Afi::Ipv4,
+    let peer_ip = match peer_flags.address_family() {
+        Afi::Ipv4 => {
+            data.advance(12);
+            IpAddr::V4(data.read_ipv4_address()?)
+        }
+        Afi::Ipv6 => IpAddr::V6(data.read_ipv6_address()?),
     };
 
-    let asn_len = match is_2byte_asn {
-        true => AsnLength::Bits16,
-        false => AsnLength::Bits32,
+    let peer_asn = match peer_flags.asn_length() {
+        AsnLength::Bits16 => {
+            data.advance(2);
+            Asn::new_16bit(data.read_u16()?)
+        }
+        AsnLength::Bits32 => Asn::new_32bit(data.read_u32()?),
     };
 
-    let peer_ip: IpAddr = if is_router_ipv6 {
-        data.read_ipv6_address()?.into()
-    } else {
-        data.advance(12);
-        let ip = data.read_ipv4_address()?;
-        ip.into()
-    };
-
-    let peer_asn: u32 = if is_2byte_asn {
-        data.advance(2);
-        data.read_u16()? as u32
-    } else {
-        data.read_u32()?
-    };
-
-    let peer_bgp_id = data.read_u32()?;
+    let peer_bgp_id = data.read_ipv4_address()?;
 
     let t_sec = data.read_u32()?;
     let t_usec = data.read_u32()?;
@@ -160,7 +183,5 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
         peer_asn,
         peer_bgp_id,
         timestamp,
-        afi,
-        asn_len,
     })
 }

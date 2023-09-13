@@ -5,11 +5,13 @@ use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use std::str::FromStr;
 
+// TODO(jmeggitt): BgpElem can be converted to an enum. Apply this change during performance PR.
+
 /// Element type.
 ///
 /// - ANNOUNCE: announcement/reachable prefix
 /// - WITHDRAW: withdrawn/unreachable prefix
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
 pub enum ElemType {
@@ -48,10 +50,10 @@ pub struct BgpElem {
     pub local_pref: Option<u32>,
     pub med: Option<u32>,
     pub communities: Option<Vec<MetaCommunity>>,
-    pub atomic: Option<AtomicAggregate>,
+    pub atomic: bool,
     pub aggr_asn: Option<Asn>,
-    pub aggr_ip: Option<IpAddr>,
-    pub only_to_customer: Option<u32>,
+    pub aggr_ip: Option<BgpIdentifier>,
+    pub only_to_customer: Option<Asn>,
     /// unknown attributes formatted as (TYPE, RAW_BYTES)
     pub unknown: Option<Vec<AttrRaw>>,
     /// deprecated attributes formatted as (TYPE, RAW_BYTES)
@@ -75,27 +77,6 @@ impl Ord for BgpElem {
     }
 }
 
-/// Reference version of the [BgpElem] struct.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct BgpElemRef<'a> {
-    pub timestamp: &'a f64,
-    pub elem_type: &'a ElemType,
-    pub peer_ip: &'a IpAddr,
-    pub peer_asn: &'a Asn,
-    pub prefix: &'a NetworkPrefix,
-    pub next_hop: &'a Option<IpAddr>,
-    pub as_path: &'a Option<AsPath>,
-    pub origin_asns: &'a Option<Vec<Asn>>,
-    pub origin: &'a Option<Origin>,
-    pub local_pref: &'a Option<u32>,
-    pub med: &'a Option<u32>,
-    pub communities: &'a Option<Vec<MetaCommunity>>,
-    pub atomic: &'a Option<AtomicAggregate>,
-    pub aggr_asn: &'a Option<Asn>,
-    pub aggr_ip: &'a Option<IpAddr>,
-}
-
 impl Default for BgpElem {
     fn default() -> Self {
         BgpElem {
@@ -111,7 +92,7 @@ impl Default for BgpElem {
             local_pref: None,
             med: None,
             communities: None,
-            atomic: None,
+            atomic: false,
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer: None,
@@ -121,14 +102,15 @@ impl Default for BgpElem {
     }
 }
 
-macro_rules! option_to_string {
-    ($a:expr) => {
-        if let Some(v) = $a {
-            v.to_string()
-        } else {
-            String::new()
+struct OptionToStr<'a, T>(&'a Option<T>);
+
+impl<'a, T: Display> Display for OptionToStr<'a, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            None => Ok(()),
+            Some(x) => write!(f, "{}", x),
         }
-    };
+    }
 }
 
 #[inline(always)]
@@ -154,15 +136,15 @@ impl Display for BgpElem {
             &self.peer_ip,
             &self.peer_asn,
             &self.prefix,
-            option_to_string!(&self.as_path),
-            option_to_string!(&self.origin),
-            option_to_string!(&self.next_hop),
-            option_to_string!(&self.local_pref),
-            option_to_string!(&self.med),
+            OptionToStr(&self.as_path),
+            OptionToStr(&self.origin),
+            OptionToStr(&self.next_hop),
+            OptionToStr(&self.local_pref),
+            OptionToStr(&self.med),
             option_to_string_communities(&self.communities),
-            option_to_string!(&self.atomic),
-            option_to_string!(&self.aggr_asn),
-            option_to_string!(&self.aggr_ip),
+            self.atomic,
+            OptionToStr(&self.aggr_asn),
+            OptionToStr(&self.aggr_ip),
         )
     }
 }
@@ -170,31 +152,17 @@ impl Display for BgpElem {
 impl BgpElem {
     /// Returns true if the element is an announcement.
     ///
-    /// Most of the time, users do not really need to get the type out, only needs to know if it is an announcement or a withdrawal.
+    /// Most of the time, users do not really need to get the type out, only needs to know if it is
+    /// an announcement or a withdrawal.
     pub fn is_announcement(&self) -> bool {
         self.elem_type == ElemType::ANNOUNCE
     }
 
-    /// Returns the AS path as a vector of ASNs in u32 format. Returns None if the AS path is not present or it contains AS set or confederated segments.
-    pub fn get_as_path_opt(&self) -> Option<Vec<u32>> {
-        match &self.as_path {
-            Some(as_path) => as_path.to_u32_vec(),
-            None => None,
-        }
-    }
-
-    /// Returns the origin AS number as u32. Returns None if the origin AS number is not present or it's a AS set.
+    /// Returns the origin AS number as u32. Returns None if the origin AS number is not present or
+    /// it's a AS set.
     pub fn get_origin_asn_opt(&self) -> Option<u32> {
-        match &self.origin_asns {
-            Some(origin_asns) => {
-                if origin_asns.len() == 1 {
-                    Some(origin_asns[0].asn)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        }
+        let origin_asns = self.origin_asns.as_ref()?;
+        (origin_asns.len() == 1).then(|| origin_asns[0].into())
     }
 }
 
@@ -215,7 +183,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
             ..Default::default()
         };
-        println!("{}", serde_json::json!(elem).to_string());
+        println!("{}", serde_json::json!(elem));
     }
 
     #[test]
@@ -245,7 +213,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(elem1 < elem2, true);
-        assert_eq!(elem2 < elem3, true);
+        assert!(elem1 < elem2);
+        assert!(elem2 < elem3);
     }
 }

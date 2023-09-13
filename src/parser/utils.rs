@@ -2,6 +2,7 @@
 Provides IO utility functions for read bytes of different length and converting to corresponding structs.
 */
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use std::convert::TryFrom;
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
@@ -10,7 +11,6 @@ use std::{
 use crate::models::*;
 use bytes::{Buf, Bytes};
 use log::debug;
-use num_traits::FromPrimitive;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
@@ -51,6 +51,12 @@ pub trait ReadUtils: Buf {
     fn read_u64(&mut self) -> Result<u64, ParserError> {
         self.has_n_remaining(8)?;
         Ok(self.get_u64())
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParserError> {
+        self.has_n_remaining(buf.len())?;
+        self.copy_to_slice(buf);
+        Ok(())
     }
 
     fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
@@ -101,77 +107,41 @@ pub trait ReadUtils: Buf {
         }
     }
 
-    fn read_asn(&mut self, as_length: &AsnLength) -> Result<Asn, ParserError> {
+    #[inline]
+    fn read_asn(&mut self, as_length: AsnLength) -> Result<Asn, ParserError> {
         match as_length {
-            AsnLength::Bits16 => {
-                let asn = self.read_u16()? as u32;
-                Ok(Asn {
-                    asn,
-                    len: AsnLength::Bits16,
-                })
-            }
-            AsnLength::Bits32 => {
-                let asn = self.read_u32()?;
-                Ok(Asn {
-                    asn,
-                    len: AsnLength::Bits32,
-                })
-            }
+            AsnLength::Bits16 => self.read_u16().map(Asn::new_16bit),
+            AsnLength::Bits32 => self.read_u32().map(Asn::new_32bit),
         }
     }
 
     fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
-        let mut path = [0; 255];
-        Ok(match as_length {
+        let mut path = Vec::with_capacity(count);
+
+        match as_length {
             AsnLength::Bits16 => {
                 self.has_n_remaining(count * 2)?; // 2 bytes for 16-bit ASN
-                for i in 0..count {
-                    path[i] = self.get_u16() as u32;
+                for _ in 0..count {
+                    path.push(Asn::new_16bit(self.read_u16()?));
                 }
-                path[..count]
-                    .iter()
-                    .map(|asn| Asn {
-                        asn: *asn,
-                        len: *as_length,
-                    })
-                    .collect::<Vec<Asn>>()
             }
             AsnLength::Bits32 => {
                 self.has_n_remaining(count * 4)?; // 4 bytes for 32-bit ASN
-                for i in 0..count {
-                    path[i] = self.get_u32();
+                for _ in 0..count {
+                    path.push(Asn::new_32bit(self.read_u32()?));
                 }
-                path[..count]
-                    .iter()
-                    .map(|asn| Asn {
-                        asn: *asn,
-                        len: *as_length,
-                    })
-                    .collect::<Vec<Asn>>()
             }
-        })
+        }
+
+        Ok(path)
     }
 
     fn read_afi(&mut self) -> Result<Afi, ParserError> {
-        let afi = self.read_u16()?;
-        match Afi::from_i16(afi as i16) {
-            Some(afi) => Ok(afi),
-            None => Err(crate::error::ParserError::Unsupported(format!(
-                "Unknown AFI type: {}",
-                afi
-            ))),
-        }
+        Afi::try_from(self.read_u16()?).map_err(ParserError::from)
     }
 
     fn read_safi(&mut self) -> Result<Safi, ParserError> {
-        let safi = self.read_u8()?;
-        match Safi::from_u8(safi) {
-            Some(safi) => Ok(safi),
-            None => Err(crate::error::ParserError::Unsupported(format!(
-                "Unknown SAFI type: {}",
-                safi
-            ))),
-        }
+        Safi::try_from(self.read_u8()?).map_err(ParserError::from)
     }
 
     /// Read announced/withdrawn prefix.

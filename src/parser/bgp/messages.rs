@@ -1,8 +1,10 @@
 use crate::models::*;
 use bytes::{Buf, Bytes};
-use num_traits::FromPrimitive;
+use std::convert::TryFrom;
 
 use crate::error::ParserError;
+use crate::models::capabilities::BgpCapabilityType;
+use crate::models::error::BgpError;
 use crate::parser::{parse_nlri_list, AttributeParser, ReadUtils};
 use log::warn;
 
@@ -57,9 +59,9 @@ pub fn parse_bgp_message(
         length as usize - 19
     };
 
-    let msg_type: BgpMessageType = match BgpMessageType::from_u8(data.get_u8()) {
-        Some(t) => t,
-        None => {
+    let msg_type: BgpMessageType = match BgpMessageType::try_from(data.get_u8()) {
+        Ok(t) => t,
+        Err(_) => {
             return Err(ParserError::ParseError(
                 "Unknown BGP Message Type".to_string(),
             ))
@@ -83,7 +85,7 @@ pub fn parse_bgp_message(
         BgpMessageType::NOTIFICATION => {
             BgpMessage::Notification(parse_bgp_notification_message(msg_data)?)
         }
-        BgpMessageType::KEEPALIVE => BgpMessage::KeepAlive(BgpKeepAliveMessage {}),
+        BgpMessageType::KEEPALIVE => BgpMessage::KeepAlive,
     })
 }
 
@@ -96,23 +98,12 @@ pub fn parse_bgp_message(
 pub fn parse_bgp_notification_message(
     mut input: Bytes,
 ) -> Result<BgpNotificationMessage, ParserError> {
-    let total_bytes = input.len();
     let error_code = input.read_u8()?;
     let error_subcode = input.read_u8()?;
-    let error_type = match parse_error_codes(&error_code, &error_subcode) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            warn!("error parsing BGP notification error code: {}", e);
-            None
-        }
-    };
 
-    let data = input.read_n_bytes(total_bytes - 2)?;
     Ok(BgpNotificationMessage {
-        error_code,
-        error_subcode,
-        error_type,
-        data,
+        error: BgpError::new(error_code, error_subcode),
+        data: input.read_n_bytes(input.len() - 2)?,
     })
 }
 
@@ -122,10 +113,7 @@ pub fn parse_bgp_notification_message(
 pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
     input.has_n_remaining(10)?;
     let version = input.get_u8();
-    let asn = Asn {
-        asn: input.get_u16() as u32,
-        len: AsnLength::Bits16,
-    };
+    let asn = Asn::new_16bit(input.get_u16());
     let hold_time = input.get_u16();
 
     let sender_ip = input.read_ipv4_address()?;
@@ -168,21 +156,10 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
                 let code = input.read_u8()?;
                 let len = input.read_u8()?;
-                let value = input.read_n_bytes(len as usize)?;
-
-                let capability_type = match parse_capability(&code) {
-                    Ok(t) => Some(t),
-                    Err(e) => {
-                        warn!("error parsing BGP capability code: {}", e.to_string());
-                        None
-                    }
-                };
 
                 ParamValue::Capability(Capability {
-                    code,
-                    len,
-                    value,
-                    capability_type,
+                    ty: BgpCapabilityType::from(code),
+                    value: input.read_n_bytes(len as usize)?,
                 })
             }
             _ => {

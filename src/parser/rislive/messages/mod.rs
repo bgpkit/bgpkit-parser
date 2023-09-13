@@ -34,19 +34,23 @@ pub enum RisLiveMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::rislive::messages::ris_message::{PathSeg, RisMessageEnum};
+    use crate::models::{AsPath, AsPathSegment, Asn};
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_serialize_update() {
         let msg = RisMessage {
             timestamp: 1.0,
-            peer: "1.1.1.1".to_string(),
-            peer_asn: "12345".to_string(),
+            peer: Ipv4Addr::new(1, 1, 1, 1).into(),
+            peer_asn: Asn::new_32bit(12345),
             id: "id1".to_string(),
             raw: None,
             host: "host1".to_string(),
             msg: Some(RisMessageEnum::UPDATE {
-                path: Some(vec![PathSeg::Asn(1), PathSeg::AsSet(vec![1, 2, 3])]),
+                path: Some(AsPath::from_segments(vec![
+                    AsPathSegment::sequence([1]),
+                    AsPathSegment::set([1, 2, 3]),
+                ])),
                 community: None,
                 origin: None,
                 med: None,

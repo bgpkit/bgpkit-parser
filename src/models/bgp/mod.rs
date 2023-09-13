@@ -17,10 +17,14 @@ pub use role::*;
 use crate::models::network::*;
 use capabilities::BgpCapabilityType;
 use error::BgpError;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
 
-#[derive(Debug, Primitive, Copy, Clone, PartialEq)]
+pub type BgpIdentifier = Ipv4Addr;
+
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum BgpMessageType {
     OPEN = 1,
     UPDATE = 2,
@@ -35,7 +39,18 @@ pub enum BgpMessage {
     Open(BgpOpenMessage),
     Update(BgpUpdateMessage),
     Notification(BgpNotificationMessage),
-    KeepAlive(BgpKeepAliveMessage),
+    KeepAlive,
+}
+
+impl BgpMessage {
+    pub const fn msg_type(&self) -> BgpMessageType {
+        match self {
+            BgpMessage::Open(_) => BgpMessageType::OPEN,
+            BgpMessage::Update(_) => BgpMessageType::UPDATE,
+            BgpMessage::Notification(_) => BgpMessageType::NOTIFICATION,
+            BgpMessage::KeepAlive => BgpMessageType::KEEPALIVE,
+        }
+    }
 }
 
 /// BGP Open Message
@@ -92,29 +107,21 @@ pub enum ParamValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capability {
-    pub code: u8,
-    pub len: u8,
+    pub ty: BgpCapabilityType,
     pub value: Vec<u8>,
-    pub capability_type: Option<BgpCapabilityType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpUpdateMessage {
     pub withdrawn_prefixes: Vec<NetworkPrefix>,
-    pub attributes: Vec<Attribute>,
+    pub attributes: Attributes,
     pub announced_prefixes: Vec<NetworkPrefix>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpNotificationMessage {
-    pub error_code: u8,
-    pub error_subcode: u8,
-    pub error_type: Option<BgpError>,
+    pub error: BgpError,
     pub data: Vec<u8>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BgpKeepAliveMessage {}

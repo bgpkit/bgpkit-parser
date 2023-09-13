@@ -16,7 +16,6 @@ use bytes::{Buf, Bytes};
 use log::{debug, warn};
 
 use crate::models::*;
-use num_traits::FromPrimitive;
 
 use crate::error::ParserError;
 use crate::parser::bgp::attributes::attr_01_origin::parse_origin;
@@ -58,7 +57,7 @@ impl AttributeParser {
         afi: Option<Afi>,
         safi: Option<Safi>,
         prefixes: Option<&[NetworkPrefix]>,
-    ) -> Result<Vec<Attribute>, ParserError> {
+    ) -> Result<Attributes, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
         while data.remaining() >= 3 {
@@ -66,15 +65,15 @@ impl AttributeParser {
             // thus the while loop condition is set to be at least 3 bytes to read.
 
             // has content to read
-            let flag = data.get_u8();
+            let flag = AttrFlags::from_bits_retain(data.get_u8());
             let attr_type = data.get_u8();
-            let attr_length = match flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-                0 => data.get_u8() as usize,
-                _ => data.get_u16() as usize,
+            let attr_length = match flag.contains(AttrFlags::EXTENDED) {
+                false => data.get_u8() as usize,
+                true => data.get_u16() as usize,
             };
 
             let mut partial = false;
-            if flag & AttributeFlagsBit::PartialBit as u8 != 0 {
+            if flag.contains(AttrFlags::PARTIAL) {
                 /*
                 https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
 
@@ -92,28 +91,29 @@ impl AttributeParser {
                 "reading attribute: type -- {:?}, length -- {}",
                 &attr_type, attr_length
             );
-            let attr_type = match AttrType::from_u8(attr_type) {
-                Some(t) => t,
-                None => {
+            let attr_type = match AttrType::from(attr_type) {
+                attr_type @ AttrType::Unknown(unknown_type) => {
                     // skip pass the remaining bytes of this attribute
                     let bytes = data.read_n_bytes(attr_length)?;
-                    let attr_value = match get_deprecated_attr_type(attr_type) {
+                    let attr_value = match get_deprecated_attr_type(unknown_type) {
                         Some(t) => {
-                            debug!("deprecated attribute type: {} - {}", attr_type, t);
+                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
                             AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
                         }
                         None => {
-                            debug!("unknown attribute type: {}", attr_type);
+                            debug!("unknown attribute type: {}", unknown_type);
                             AttributeValue::Unknown(AttrRaw { attr_type, bytes })
                         }
                     };
+
+                    assert_eq!(attr_type, attr_value.attr_type());
                     attributes.push(Attribute {
-                        attr_type,
                         value: attr_value,
                         flag,
                     });
                     continue;
                 }
+                t => t,
             };
 
             let bytes_left = data.remaining();
@@ -132,16 +132,25 @@ impl AttributeParser {
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => parse_as_path(attr_data, asn_len),
+                AttrType::AS_PATH => {
+                    parse_as_path(attr_data, asn_len).map(|path| AttributeValue::AsPath {
+                        path,
+                        is_as4: false,
+                    })
+                }
                 AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
                 AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
                 AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
-                AttrType::ATOMIC_AGGREGATE => {
-                    Ok(AttributeValue::AtomicAggregate(AtomicAggregate::AG))
-                }
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len),
-                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data, &afi),
-                AttrType::CLUSTER_LIST => parse_clusters(attr_data, &afi),
+                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len).map(|(asn, id)| {
+                    AttributeValue::Aggregator {
+                        asn,
+                        id,
+                        is_as4: false,
+                    }
+                }),
+                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
+                AttrType::CLUSTER_LIST => parse_clusters(attr_data),
                 AttrType::MP_REACHABLE_NLRI => parse_nlri(
                     attr_data,
                     &afi,
@@ -158,8 +167,17 @@ impl AttributeParser {
                     false,
                     self.additional_paths,
                 ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32),
-                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32),
+                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
+                    .map(|path| AttributeValue::AsPath { path, is_as4: true }),
+                AttrType::AS4_AGGREGATOR => {
+                    parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
+                        AttributeValue::Aggregator {
+                            asn,
+                            id,
+                            is_as4: true,
+                        }
+                    })
+                }
 
                 // communities
                 AttrType::COMMUNITIES => parse_regular_communities(attr_data),
@@ -184,11 +202,8 @@ impl AttributeParser {
 
             match attr {
                 Ok(value) => {
-                    attributes.push(Attribute {
-                        value,
-                        flag,
-                        attr_type: attr_type as u8,
-                    });
+                    assert_eq!(attr_type, value.attr_type());
+                    attributes.push(Attribute { value, flag });
                 }
                 Err(e) => {
                     if partial {
@@ -202,6 +217,6 @@ impl AttributeParser {
             };
         }
 
-        Ok(attributes)
+        Ok(Attributes::from(attributes))
     }
 }

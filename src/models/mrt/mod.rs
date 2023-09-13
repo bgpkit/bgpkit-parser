@@ -4,6 +4,8 @@ pub mod bgp4mp;
 pub mod tabledump;
 
 pub use bgp4mp::*;
+use chrono::{DateTime, TimeZone, Utc};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io;
 use std::io::Write;
 pub use tabledump::*;
@@ -97,6 +99,14 @@ impl CommonHeader {
             }
         }
     }
+
+    pub fn get_datetime(&self) -> DateTime<Utc> {
+        let nanos = self
+            .microsecond_timestamp
+            .map(|x| 1000 * x)
+            .unwrap_or_default();
+        Utc.timestamp_nanos(1_000_000_000 * (self.timestamp as i64) + nanos as i64)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -129,7 +139,7 @@ pub enum MrtMessage {
 ///     48   OSPFv3
 ///     49   OSPFv3_ET
 /// ```
-#[derive(Debug, Primitive, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(non_camel_case_types)]
 #[repr(u16)]
