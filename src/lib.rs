@@ -368,14 +368,14 @@ We support normal communities, extended communities, and large communities.
 #![allow(clippy::new_without_default)]
 #![allow(clippy::needless_range_loop)]
 
-#[cfg(feature = "parser")]
+#[cfg(any(feature = "parser", feature = "parser-rustls"))]
 pub mod error;
 #[cfg(feature = "models")]
 pub mod models;
-#[cfg(feature = "parser")]
+#[cfg(any(feature = "parser", feature = "parser-rustls"))]
 pub mod parser;
 
 #[cfg(feature = "models")]
 pub use models::BgpElem;
-#[cfg(feature = "parser")]
+#[cfg(any(feature = "parser", feature = "parser-rustls"))]
 pub use parser::*;
