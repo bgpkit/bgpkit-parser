@@ -81,8 +81,7 @@ serde = [
     "ipnet/serde",
 ]
 native-tls = [
-    "oneio/lib",
-    "oneio/native-tls"
+    "oneio/lib-native-tls",
 ]
 rustls = [
     "oneio/remote",
