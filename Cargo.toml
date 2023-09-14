@@ -84,12 +84,7 @@ native-tls = [
     "oneio/lib-native-tls",
 ]
 rustls = [
-    "oneio/remote",
-    "oneio/gz",
-    "oneio/bz",
-    "oneio/lz",
-    "oneio/json",
-    "oneio/rustls",
+    "oneio/lib-rustls",
 ]
 
 [[bench]]
