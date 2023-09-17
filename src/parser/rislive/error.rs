@@ -1,58 +1,22 @@
-use std::convert;
-use std::error::Error;
-use std::fmt::{Display, Formatter};
+use crate::ParserError;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ParserRisliveError {
-    IncorrectJson(String),
-    IncorrectRawBytes,
-    IrregularRisLiveFormat,
-    UnsupportedMessage,
+    #[error(transparent)]
+    IncorrectJson(#[from] serde_json::Error),
+    #[error("unable to parse aggregator attribute {0:?}")]
+    UnableToParseAggregator(String),
+    #[error("unable to parse raw bytes: {0}")]
+    UnableToParseRawBytes(ParserError),
+    #[error("unknown message type: {0:?}")]
+    UnknownMessageType(Option<String>),
+    #[error("unsupported message type: {0}")]
+    UnsupportedMessage(String),
+    #[error("found 'eor' (End of RIB) prefix")]
     ElemEndOfRibPrefix,
-    ElemUnknownOriginType(String),
-    ElemIncorrectAggregator(String),
-    ElemIncorrectPrefix(String),
-    ElemIncorrectIp(String),
+    #[error("unknown origin type: {0}")]
+    UnknownOriginType(String),
+    #[error("unable to parse prefix: {0:?}")]
+    UnableToParsePrefix(String),
 }
-
-impl Display for ParserRisliveError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParserRisliveError::IncorrectJson(msg) => {
-                write!(f, "incorrect json message: {}", msg)
-            }
-            ParserRisliveError::IncorrectRawBytes => {
-                write!(f, "incorrect raw bytes")
-            }
-            ParserRisliveError::UnsupportedMessage => {
-                write!(f, "unsupported message")
-            }
-            ParserRisliveError::IrregularRisLiveFormat => {
-                write!(f, "irregular ris live format")
-            }
-            ParserRisliveError::ElemIncorrectPrefix(msg) => {
-                write!(f, "incorrect prefix string: {}", msg)
-            }
-            ParserRisliveError::ElemUnknownOriginType(msg) => {
-                write!(f, "unknown origin type: {}", msg)
-            }
-            ParserRisliveError::ElemIncorrectAggregator(msg) => {
-                write!(f, "incorrect aggregator string: {}", msg)
-            }
-            ParserRisliveError::ElemIncorrectIp(msg) => {
-                write!(f, "incorrect IP string: {}", msg)
-            }
-            ParserRisliveError::ElemEndOfRibPrefix => {
-                write!(f, "found 'eor' (End of RIB) prefix")
-            }
-        }
-    }
-}
-
-impl convert::From<serde_json::Error> for ParserRisliveError {
-    fn from(_: serde_json::Error) -> Self {
-        ParserRisliveError::IncorrectJson("serde_json error".to_string())
-    }
-}
-
-impl Error for ParserRisliveError {}

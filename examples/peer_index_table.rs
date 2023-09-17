@@ -8,6 +8,6 @@ fn main() {
     let url = "https://data.ris.ripe.net/rrc03/2021.11/bview.20211128.1600.gz";
     let parser = bgpkit_parser::BgpkitParser::new(url).unwrap();
     for record in parser.into_record_iter().take(1) {
-        println!("{}", to_string_pretty(&json!(record)).unwrap());
+        println!("{}", to_string_pretty(&json!(record.unwrap())).unwrap());
     }
 }

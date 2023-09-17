@@ -1,5 +1,6 @@
 //! BGP messages and relevant structs.
 
+pub mod aspath;
 pub mod attributes;
 pub mod capabilities;
 pub mod community;
@@ -7,6 +8,7 @@ pub mod elem;
 pub mod error;
 pub mod role;
 
+pub use aspath::*;
 pub use attributes::*;
 pub use capabilities::*;
 pub use community::*;
@@ -114,9 +116,9 @@ pub struct Capability {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpUpdateMessage {
-    pub withdrawn_prefixes: Vec<NetworkPrefix>,
+    pub withdrawn_prefixes: PrefixList,
     pub attributes: Attributes,
-    pub announced_prefixes: Vec<NetworkPrefix>,
+    pub announced_prefixes: PrefixList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

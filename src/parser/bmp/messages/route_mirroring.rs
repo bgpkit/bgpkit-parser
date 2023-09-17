@@ -2,7 +2,6 @@ use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
@@ -23,7 +22,23 @@ pub enum RouteMirroringValue {
     Information(RouteMirroringInfo),
 }
 
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+impl RouteMirroringValue {
+    pub const fn mirroring_type(&self) -> RouteMirroringTlvType {
+        match self {
+            RouteMirroringValue::BgpMessage(_) => RouteMirroringTlvType::BgpMessage,
+            RouteMirroringValue::Information(_) => RouteMirroringTlvType::Information,
+        }
+    }
+}
+
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Hash, Eq, PartialEq)]
+#[repr(u16)]
+pub enum RouteMirroringTlvType {
+    BgpMessage = 0,
+    Information = 1,
+}
+
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Hash, Eq, PartialEq)]
 #[repr(u16)]
 pub enum RouteMirroringInfo {
     ErroredPdu = 0,
@@ -31,22 +46,22 @@ pub enum RouteMirroringInfo {
 }
 
 pub fn parse_route_mirroring(
-    data: &mut Bytes,
-    asn_len: &AsnLength,
+    data: &mut &[u8],
+    asn_len: AsnLength,
 ) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
-    while data.remaining() > 4 {
-        match data.read_u16()? {
-            0 => {
+    while !data.is_empty() {
+        match RouteMirroringTlvType::try_from(data.read_u16()?)? {
+            RouteMirroringTlvType::BgpMessage => {
                 let info_len = data.read_u16()?;
-                let bytes = data.split_to(info_len as usize);
+                let bytes = data.split_to(info_len as usize)?;
                 let value = parse_bgp_update_message(bytes, false, asn_len)?;
                 tlvs.push(RouteMirroringTlv {
                     info_len,
                     value: RouteMirroringValue::BgpMessage(value),
                 });
             }
-            1 => {
+            RouteMirroringTlvType::Information => {
                 let info_len = data.read_u16()?;
                 let value = RouteMirroringInfo::try_from(data.read_u16()?)?;
                 tlvs.push(RouteMirroringTlv {
@@ -54,7 +69,6 @@ pub fn parse_route_mirroring(
                     value: RouteMirroringValue::Information(value),
                 });
             }
-            _ => return Err(ParserBmpError::CorruptedBmpMessage),
         }
     }
     Ok(RouteMirroring { tlvs })

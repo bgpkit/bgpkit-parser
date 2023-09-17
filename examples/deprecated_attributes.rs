@@ -9,6 +9,7 @@ fn main() {
     )
     .unwrap()
     {
+        let elem = elem.unwrap();
         if elem.deprecated.is_some() {
             println!(
                 "{}",

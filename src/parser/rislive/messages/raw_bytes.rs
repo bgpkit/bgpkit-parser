@@ -2,7 +2,6 @@ use crate::models::*;
 use crate::parser::bgp::parse_bgp_message;
 use crate::parser::rislive::error::ParserRisliveError;
 use crate::Elementor;
-use bytes::Bytes;
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -10,21 +9,25 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: Value = serde_json::from_str(msg_str)?;
     let msg_type = match msg.get("type") {
-        None => return Err(ParserRisliveError::IrregularRisLiveFormat),
+        None => return Err(ParserRisliveError::UnknownMessageType(None)),
         Some(t) => t.as_str().unwrap(),
     };
 
     match msg_type {
         "ris_message" => {}
         "ris_error" | "ris_rrc_list" | "ris_subscribe_ok" | "pong" => {
-            return Err(ParserRisliveError::UnsupportedMessage)
+            return Err(ParserRisliveError::UnsupportedMessage(msg_type.to_string()))
         }
-        _ => return Err(ParserRisliveError::IrregularRisLiveFormat),
+        _ => {
+            return Err(ParserRisliveError::UnknownMessageType(Some(
+                msg_type.to_string(),
+            )))
+        }
     }
 
     let data = msg.get("data").unwrap().as_object().unwrap();
 
-    let mut bytes = Bytes::from(hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap());
+    let bytes = hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap();
 
     let timestamp = data.get("timestamp").unwrap().as_f64().unwrap();
     let peer_str = data.get("peer").unwrap().as_str().unwrap().to_owned();
@@ -39,11 +42,11 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let peer_asn = peer_asn_str.parse::<Asn>().unwrap();
 
-    let bgp_msg = match parse_bgp_message(&mut bytes, false, &AsnLength::Bits32) {
+    let bgp_msg = match parse_bgp_message(&mut &bytes[..], false, AsnLength::Bits32) {
         Ok(m) => m,
-        Err(_) => match parse_bgp_message(&mut bytes, false, &AsnLength::Bits16) {
+        Err(_) => match parse_bgp_message(&mut &bytes[..], false, AsnLength::Bits16) {
             Ok(m) => m,
-            Err(_) => return Err(ParserRisliveError::IncorrectRawBytes),
+            Err(err) => return Err(ParserRisliveError::UnableToParseRawBytes(err)),
         },
     };
 

@@ -1,16 +1,15 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 
-pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub fn parse_regular_communities(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
     const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
     const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
 
-    let mut communities = vec![];
+    let mut communities = Communities::with_capacity(input.remaining() / 4);
 
-    while input.remaining() > 0 {
+    while !input.is_empty() {
         let community_val = input.read_u32()?;
         communities.push(match community_val {
             COMMUNITY_NO_EXPORT => Community::NoExport,
@@ -34,14 +33,12 @@ mod tests {
     /// Test parsing of communities values, as defined in RFC1997.
     #[test]
     fn test_parse_communities() {
-        if let Ok(AttributeValue::Communities(communities)) =
-            parse_regular_communities(Bytes::from(vec![
-                0xFF, 0xFF, 0xFF, 0x01, // NoExport
-                0xFF, 0xFF, 0xFF, 0x02, // NoAdvertise
-                0xFF, 0xFF, 0xFF, 0x03, // NoExportSubConfed
-                0x00, 0x7B, 0x01, 0xC8, // Custom(123, 456)
-            ]))
-        {
+        if let Ok(AttributeValue::Communities(communities)) = parse_regular_communities(&[
+            0xFF, 0xFF, 0xFF, 0x01, // NoExport
+            0xFF, 0xFF, 0xFF, 0x02, // NoAdvertise
+            0xFF, 0xFF, 0xFF, 0x03, // NoExportSubConfed
+            0x00, 0x7B, 0x01, 0xC8, // Custom(123, 456)
+        ]) {
             assert_eq!(communities.len(), 4);
             assert_eq!(communities[0], Community::NoExport);
             assert_eq!(communities[1], Community::NoAdvertise);

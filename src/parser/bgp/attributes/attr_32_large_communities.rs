@@ -1,14 +1,13 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
 
-pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+pub fn parse_large_communities(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
+    let mut communities = LargeCommunities::with_capacity(input.remaining() / 12);
     while input.remaining() > 0 {
-        input.has_n_remaining(12)?; // 12 bytes for large community (3x 32 bits integers)
-        let global_administrator = input.get_u32();
-        let local_data = [input.get_u32(), input.get_u32()];
+        input.require_n_remaining(12, "large community")?; // 12 bytes for large community (3x 32 bits integers)
+        let global_administrator = input.read_u32()?;
+        let local_data = [input.read_u32()?, input.read_u32()?];
         communities.push(LargeCommunity::new(global_administrator, local_data));
     }
     Ok(AttributeValue::LargeCommunities(communities))
@@ -29,9 +28,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x06, // local data
         ];
 
-        if let Ok(AttributeValue::LargeCommunities(communities)) =
-            parse_large_communities(Bytes::from(data))
-        {
+        if let Ok(AttributeValue::LargeCommunities(communities)) = parse_large_communities(&data) {
             assert_eq!(communities.len(), 2);
             assert_eq!(communities[0].global_admin, 1);
             assert_eq!(communities[0].local_data[0], 2);

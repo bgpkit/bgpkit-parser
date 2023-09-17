@@ -40,8 +40,8 @@ fn get_relevant_attributes(
     Option<Vec<MetaCommunity>>,
     bool,
     Option<(Asn, BgpIdentifier)>,
-    Option<Nlri>,
-    Option<Nlri>,
+    Option<ReachableNlri>,
+    Option<UnreachableNlri>,
     Option<Asn>,
     Option<Vec<AttrRaw>>,
     Option<Vec<AttrRaw>>,
@@ -222,7 +222,7 @@ impl Elementor {
         }));
 
         if let Some(nlri) = announced {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
+            elems.extend(nlri.into_iter_with_path_id().map(|p| BgpElem {
                 timestamp,
                 elem_type: ElemType::ANNOUNCE,
                 peer_ip: *peer_ip,
@@ -265,7 +265,7 @@ impl Elementor {
             deprecated: None,
         }));
         if let Some(nlri) = withdrawn {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
+            elems.extend(nlri.into_iter_with_path_id().map(|p| BgpElem {
                 timestamp,
                 elem_type: ElemType::WITHDRAW,
                 peer_ip: *peer_ip,
@@ -388,23 +388,7 @@ impl Elementor {
                             };
 
                             let next = match next_hop {
-                                None => {
-                                    if let Some(v) = announced {
-                                        if let Some(h) = v.next_hop {
-                                            match h {
-                                                NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6LinkLocal(v, _) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
+                                None => announced.as_ref().map(ReachableNlri::next_hop_addr),
                                 Some(v) => Some(v),
                             };
 

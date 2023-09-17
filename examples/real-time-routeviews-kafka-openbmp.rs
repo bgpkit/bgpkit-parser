@@ -3,7 +3,6 @@ extern crate core;
 use bgpkit_parser::parser::bmp::messages::MessageBody;
 use bgpkit_parser::Elementor;
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
-use bytes::Bytes;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
 use kafka::error::Error as KafkaError;
 use log::{error, info};
@@ -30,7 +29,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
 
         for ms in mss.iter() {
             for m in ms.messages() {
-                let mut bytes = Bytes::from(m.value.to_vec());
+                let mut bytes = m.value;
                 let header = parse_openbmp_header(&mut bytes).unwrap();
                 let bmp_msg = parse_bmp_msg(&mut bytes);
                 match bmp_msg {

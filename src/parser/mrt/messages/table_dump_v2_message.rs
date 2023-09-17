@@ -1,8 +1,6 @@
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{AttributeParser, ReadUtils};
-use bytes::{Buf, Bytes};
-use log::warn;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr};
@@ -21,7 +19,7 @@ use std::net::{IpAddr, Ipv4Addr};
 ///
 pub fn parse_table_dump_v2_message(
     sub_type: u16,
-    mut input: Bytes,
+    mut input: &[u8],
 ) -> Result<TableDumpV2Message, ParserError> {
     let v2_type: TableDumpV2Type = TableDumpV2Type::try_from(sub_type)?;
 
@@ -43,9 +41,10 @@ pub fn parse_table_dump_v2_message(
         TableDumpV2Type::RibGeneric
         | TableDumpV2Type::RibGenericAddPath
         | TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
-            ))
+            return Err(ParserError::UnsupportedMrtType {
+                mrt_type: EntryType::TABLE_DUMP_V2,
+                subtype: sub_type,
+            });
         }
     };
 
@@ -55,8 +54,8 @@ pub fn parse_table_dump_v2_message(
 /// Peer index table
 ///
 /// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3.1
-pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserError> {
-    let collector_bgp_id = Ipv4Addr::from(data.read_u32()?);
+pub fn parse_peer_index_table(mut data: &[u8]) -> Result<PeerIndexTable, ParserError> {
+    let collector_bgp_id = data.read_ipv4_address()?;
     // read and ignore view name
     let view_name_length = data.read_u16()?;
     let view_name =
@@ -105,34 +104,26 @@ pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserE
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
 pub fn parse_rib_afi_entries(
-    data: &mut Bytes,
+    data: &mut &[u8],
     rib_type: TableDumpV2Type,
 ) -> Result<RibAfiEntries, ParserError> {
-    let afi: Afi;
-    let safi: Safi;
-    match rib_type {
+    let (afi, safi) = match rib_type {
         TableDumpV2Type::RibIpv4Unicast | TableDumpV2Type::RibIpv4UnicastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Unicast
+            (Afi::Ipv4, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv4Multicast | TableDumpV2Type::RibIpv4MulticastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Multicast
+            (Afi::Ipv4, Safi::Multicast)
         }
         TableDumpV2Type::RibIpv6Unicast | TableDumpV2Type::RibIpv6UnicastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Unicast
+            (Afi::Ipv6, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv6Multicast | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Multicast
+            (Afi::Ipv6, Safi::Multicast)
         }
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "wrong RIB type for parsing: {:?}",
-                rib_type
-            )))
-        }
+        ty => panic!(
+            "Invalid TableDumpV2Type {:?} passed to parse_rib_afi_entries",
+            ty
+        ),
     };
 
     let add_path = matches!(
@@ -148,7 +139,6 @@ pub fn parse_rib_afi_entries(
     // NOTE: here we parse the prefix as only length and prefix, the path identifier for add_path
     //       entry is not handled here. We follow RFC6396 here https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3.2
     let prefix = data.read_nlri_prefix(&afi, false)?;
-    let prefixes = vec![prefix];
 
     let entry_count = data.read_u16()?;
     let mut rib_entries = Vec::with_capacity((entry_count * 2) as usize);
@@ -157,14 +147,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        let entry = match parse_rib_entry(data, add_path, &afi, &safi, &prefixes) {
-            Ok(entry) => entry,
-            Err(e) => {
-                warn!("early break due to error {}", e.to_string());
-                break;
-            }
-        };
-        rib_entries.push(entry);
+        rib_entries.push(parse_rib_entry(data, add_path, afi, safi, &prefix)?);
     }
 
     Ok(RibAfiEntries {
@@ -176,38 +159,35 @@ pub fn parse_rib_afi_entries(
 }
 
 pub fn parse_rib_entry(
-    input: &mut Bytes,
+    input: &mut &[u8],
     add_path: bool,
-    afi: &Afi,
-    safi: &Safi,
-    prefixes: &[NetworkPrefix],
+    afi: Afi,
+    safi: Safi,
+    prefix: &NetworkPrefix,
 ) -> Result<RibEntry, ParserError> {
-    if input.remaining() < 8 {
-        // total length - current position less than 16 --
-        // meaning less than 16 bytes available to read
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    // total length - current position less than 16 --
+    // meaning less than 16 bytes available to read
+    input.require_n_remaining(8, "rib entry")?;
 
     let peer_index = input.read_u16()?;
     let originated_time = input.read_u32()?;
     if add_path {
+        // TODO: Why is this value unused?
         let _path_id = input.read_u32()?;
     }
     let attribute_length = input.read_u16()? as usize;
 
-    if input.remaining() < attribute_length {
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    input.require_n_remaining(attribute_length, "rib entry attributes")?;
 
     let attr_parser = AttributeParser::new(add_path);
 
-    let attr_data_slice = input.split_to(attribute_length);
+    let attr_data_slice = input.split_to(attribute_length)?;
     let attributes = attr_parser.parse_attributes(
         attr_data_slice,
-        &AsnLength::Bits32,
-        Some(*afi),
-        Some(*safi),
-        Some(prefixes),
+        AsnLength::Bits32,
+        Some(afi),
+        Some(safi),
+        Some(prefix),
     )?;
 
     Ok(RibEntry {

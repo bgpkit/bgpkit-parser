@@ -48,25 +48,10 @@ use std::net::Ipv4Addr;
 pub mod error;
 pub mod messages;
 
-// simple macro to make the code look a bit nicer
-macro_rules! unwrap_or_return {
-    ( $e:expr, $msg_string:expr ) => {
-        match $e {
-            Ok(x) => x,
-            Err(_) => return Err(ParserRisliveError::IncorrectJson($msg_string)),
-        }
-    };
-}
-
 /// This function parses one message and returns a result of a vector of [BgpElem]s or an error
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
-    let msg_string = msg_str.to_string();
-
     // parse RIS Live message to internal struct using serde.
-    let msg: RisLiveMessage = match serde_json::from_str(msg_str) {
-        Ok(m) => m,
-        Err(_e) => return Err(ParserRisliveError::IncorrectJson(msg_string)),
-    };
+    let msg: RisLiveMessage = serde_json::from_str(msg_str)?;
 
     match msg {
         RisLiveMessage::RisMessage(ris_msg) => {
@@ -107,7 +92,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                             "egp" | "EGP" => Origin::EGP,
                             "incomplete" | "INCOMPLETE" => Origin::INCOMPLETE,
                             other => {
-                                return Err(ParserRisliveError::ElemUnknownOriginType(
+                                return Err(ParserRisliveError::UnknownOriginType(
                                     other.to_string(),
                                 ));
                             }
@@ -120,15 +105,19 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                         Some(aggr_str) => {
                             let (asn_str, ip_str) = match aggr_str.split_once(':') {
                                 None => {
-                                    return Err(ParserRisliveError::ElemIncorrectAggregator(
+                                    return Err(ParserRisliveError::UnableToParseAggregator(
                                         aggr_str,
                                     ))
                                 }
                                 Some(v) => v,
                             };
 
-                            let asn = unwrap_or_return!(asn_str.parse::<Asn>(), msg_string);
-                            let ip = unwrap_or_return!(ip_str.parse::<Ipv4Addr>(), msg_string);
+                            let asn = asn_str.parse::<Asn>().map_err(|_| {
+                                ParserRisliveError::UnableToParseAggregator(aggr_str.to_owned())
+                            })?;
+                            let ip = ip_str.parse::<Ipv4Addr>().map_err(|_| {
+                                ParserRisliveError::UnableToParseAggregator(aggr_str)
+                            })?;
                             (Some(asn), Some(ip))
                         }
                     };
@@ -143,7 +132,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                         if prefix == "eor" {
                                             return Err(ParserRisliveError::ElemEndOfRibPrefix);
                                         }
-                                        return Err(ParserRisliveError::ElemIncorrectPrefix(
+                                        return Err(ParserRisliveError::UnableToParsePrefix(
                                             prefix.to_string(),
                                         ));
                                     }

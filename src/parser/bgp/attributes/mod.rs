@@ -12,8 +12,9 @@ mod attr_16_25_extended_communities;
 mod attr_32_large_communities;
 mod attr_35_otc;
 
-use bytes::{Buf, Bytes};
-use log::{debug, warn};
+use crate::bgp::attributes::attr_14_15_nlri::{parse_reach_nlri, parse_unreach_nlri};
+use log::{debug, trace, warn};
+use smallvec::smallvec;
 
 use crate::models::*;
 
@@ -27,7 +28,6 @@ use crate::parser::bgp::attributes::attr_07_18_aggregator::parse_aggregator;
 use crate::parser::bgp::attributes::attr_08_communities::parse_regular_communities;
 use crate::parser::bgp::attributes::attr_09_originator::parse_originator_id;
 use crate::parser::bgp::attributes::attr_10_13_cluster::parse_clusters;
-use crate::parser::bgp::attributes::attr_14_15_nlri::parse_nlri;
 use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
     parse_extended_community, parse_ipv6_extended_community,
 };
@@ -52,83 +52,31 @@ impl AttributeParser {
     /// the slice is the total byte length of the attributes section of the message.
     pub fn parse_attributes(
         &self,
-        mut data: Bytes,
-        asn_len: &AsnLength,
+        mut data: &[u8],
+        asn_len: AsnLength,
         afi: Option<Afi>,
         safi: Option<Safi>,
-        prefixes: Option<&[NetworkPrefix]>,
+        prefixes: Option<&NetworkPrefix>,
     ) -> Result<Attributes, ParserError> {
         let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
 
-        while data.remaining() >= 3 {
-            // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
-            // thus the while loop condition is set to be at least 3 bytes to read.
-
-            // has content to read
-            let flag = AttrFlags::from_bits_retain(data.get_u8());
-            let attr_type = data.get_u8();
+        while !data.is_empty() {
+            let flag = AttrFlags::from_bits_retain(data.read_u8()?);
+            let attr_type = AttrType::from(data.read_u8()?);
             let attr_length = match flag.contains(AttrFlags::EXTENDED) {
-                false => data.get_u8() as usize,
-                true => data.get_u16() as usize,
+                false => data.read_u8()? as usize,
+                true => data.read_u16()? as usize,
             };
 
-            let mut partial = false;
-            if flag.contains(AttrFlags::PARTIAL) {
-                /*
-                https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-
-                > The third high-order bit (bit 2) of the Attribute Flags octet
-                > is the Partial bit.  It defines whether the information
-                > contained in the optional transitive attribute is partial (if
-                > set to 1) or complete (if set to 0).  For well-known attributes
-                > and for optional non-transitive attributes, the Partial bit
-                > MUST be set to 0.
-                */
-                partial = true;
-            }
-
-            debug!(
+            trace!(
                 "reading attribute: type -- {:?}, length -- {}",
-                &attr_type, attr_length
+                &attr_type,
+                attr_length
             );
-            let attr_type = match AttrType::from(attr_type) {
-                attr_type @ AttrType::Unknown(unknown_type) => {
-                    // skip pass the remaining bytes of this attribute
-                    let bytes = data.read_n_bytes(attr_length)?;
-                    let attr_value = match get_deprecated_attr_type(unknown_type) {
-                        Some(t) => {
-                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
-                            AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
-                        }
-                        None => {
-                            debug!("unknown attribute type: {}", unknown_type);
-                            AttributeValue::Unknown(AttrRaw { attr_type, bytes })
-                        }
-                    };
-
-                    assert_eq!(attr_type, attr_value.attr_type());
-                    attributes.push(Attribute {
-                        value: attr_value,
-                        flag,
-                    });
-                    continue;
-                }
-                t => t,
-            };
-
-            let bytes_left = data.remaining();
-
-            if data.remaining() < attr_length {
-                warn!(
-                    "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                    bytes_left, attr_length
-                );
-                // break and return already parsed attributes
-                break;
-            }
 
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
-            let mut attr_data = data.split_to(attr_length);
+            data.require_n_remaining(attr_length, "Attribute")?;
+            let mut attr_data = data.split_to(attr_length)?;
 
             let attr = match attr_type {
                 AttrType::ORIGIN => parse_origin(attr_data),
@@ -151,26 +99,16 @@ impl AttributeParser {
                 }),
                 AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
                 AttrType::CLUSTER_LIST => parse_clusters(attr_data),
-                AttrType::MP_REACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    true,
-                    self.additional_paths,
-                ),
-                AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    false,
-                    self.additional_paths,
-                ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
+                AttrType::MP_REACHABLE_NLRI => {
+                    parse_reach_nlri(attr_data, afi, safi, prefixes, self.additional_paths)
+                }
+                AttrType::MP_UNREACHABLE_NLRI => {
+                    parse_unreach_nlri(attr_data, afi, safi, prefixes, self.additional_paths)
+                }
+                AttrType::AS4_PATH => parse_as_path(attr_data, AsnLength::Bits32)
                     .map(|path| AttributeValue::AsPath { path, is_as4: true }),
                 AttrType::AS4_AGGREGATOR => {
-                    parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
+                    parse_aggregator(attr_data, AsnLength::Bits32).map(|(asn, id)| {
                         AttributeValue::Aggregator {
                             asn,
                             id,
@@ -187,17 +125,27 @@ impl AttributeParser {
                     parse_ipv6_extended_community(attr_data)
                 }
                 AttrType::DEVELOPMENT => {
-                    let mut value = vec![];
-                    for _i in 0..attr_length {
-                        value.push(attr_data.get_u8());
-                    }
-                    Ok(AttributeValue::Development(value))
+                    let mut buffer = smallvec![0; attr_length];
+                    attr_data.read_exact(&mut buffer)?;
+                    Ok(AttributeValue::Development(buffer))
                 }
                 AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
-                _ => Err(ParserError::Unsupported(format!(
-                    "unsupported attribute type: {:?}",
-                    attr_type
-                ))),
+                AttrType::Unknown(unknown_type) => {
+                    // skip pass the remaining bytes of this attribute
+                    let bytes = data.read_n_bytes(attr_length)?;
+                    match get_deprecated_attr_type(unknown_type) {
+                        Some(t) => {
+                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
+                            Ok(AttributeValue::Deprecated(AttrRaw { attr_type, bytes }))
+                        }
+                        None => {
+                            debug!("unknown attribute type: {}", unknown_type);
+                            Ok(AttributeValue::Unknown(AttrRaw { attr_type, bytes }))
+                        }
+                    }
+                }
+                // TODO: Should it be treated as a raw attribute instead?
+                _ => Err(ParserError::UnsupportedAttributeType(attr_type)),
             };
 
             match attr {
@@ -205,14 +153,24 @@ impl AttributeParser {
                     assert_eq!(attr_type, value.attr_type());
                     attributes.push(Attribute { value, flag });
                 }
+                Err(e) if flag.contains(AttrFlags::PARTIAL) => {
+                    /*
+                    https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
+
+                    > The third high-order bit (bit 2) of the Attribute Flags octet
+                    > is the Partial bit.  It defines whether the information
+                    > contained in the optional transitive attribute is partial (if
+                    > set to 1) or complete (if set to 0).  For well-known attributes
+                    > and for optional non-transitive attributes, the Partial bit
+                    > MUST be set to 0.
+                    */
+
+                    // it's ok to have errors when reading partial bytes
+                    warn!("PARTIAL: {}", e);
+                }
                 Err(e) => {
-                    if partial {
-                        // it's ok to have errors when reading partial bytes
-                        warn!("PARTIAL: {}", e.to_string());
-                    } else {
-                        warn!("{}", e.to_string());
-                    }
-                    continue;
+                    warn!("{}", e);
+                    return Err(e);
                 }
             };
         }

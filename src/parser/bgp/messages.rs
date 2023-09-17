@@ -1,5 +1,4 @@
 use crate::models::*;
-use bytes::{Buf, Bytes};
 use std::convert::TryFrom;
 
 use crate::error::ParserError;
@@ -27,13 +26,13 @@ use log::warn;
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 pub fn parse_bgp_message(
-    data: &mut Bytes,
+    data: &mut &[u8],
     add_path: bool,
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<BgpMessage, ParserError> {
     let total_size = data.len();
-    data.has_n_remaining(19)?;
-    data.advance(16);
+    data.require_n_remaining(19, "BGP message marker")?;
+    data.advance(16)?;
     /*
     This 2-octet unsigned integer indicates the total length of the
     message, including the header in octets.  Thus, it allows one
@@ -45,37 +44,29 @@ pub fn parse_bgp_message(
     have the smallest value required, given the rest of the
     message.
     */
-    let length = data.get_u16();
+    let length = data.read_u16()?;
     if !(19..=4096).contains(&length) {
-        return Err(ParserError::ParseError(format!(
-            "invalid BGP message length {}",
-            length
-        )));
+        return Err(ParserError::InvalidBgpMessageLength(length));
     }
 
+    // TODO: Why do we sometimes change our length estimate?
     let bgp_msg_length = if (length as usize) > total_size {
         total_size - 19
     } else {
         length as usize - 19
     };
 
-    let msg_type: BgpMessageType = match BgpMessageType::try_from(data.get_u8()) {
-        Ok(t) => t,
-        Err(_) => {
-            return Err(ParserError::ParseError(
-                "Unknown BGP Message Type".to_string(),
-            ))
-        }
-    };
+    let msg_type: BgpMessageType = BgpMessageType::try_from(data.read_u8()?)?;
 
     if data.remaining() != bgp_msg_length {
+        // TODO: Why is this not a hard error?
         warn!(
             "BGP message length {} does not match the actual length {}",
             bgp_msg_length,
             data.remaining()
         );
     }
-    let mut msg_data = data.split_to(bgp_msg_length);
+    let mut msg_data = data.split_to(bgp_msg_length)?;
 
     Ok(match msg_type {
         BgpMessageType::OPEN => BgpMessage::Open(parse_bgp_open_message(&mut msg_data)?),
@@ -96,7 +87,7 @@ pub fn parse_bgp_message(
 /// messages, but not critical errors.
 ///
 pub fn parse_bgp_notification_message(
-    mut input: Bytes,
+    mut input: &[u8],
 ) -> Result<BgpNotificationMessage, ParserError> {
     let error_code = input.read_u8()?;
     let error_subcode = input.read_u8()?;
@@ -110,17 +101,18 @@ pub fn parse_bgp_notification_message(
 /// Parse BGP OPEN messages.
 ///
 /// The parsing of BGP OPEN messages also includes decoding the BGP capabilities.
-pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
-    input.has_n_remaining(10)?;
-    let version = input.get_u8();
-    let asn = Asn::new_16bit(input.get_u16());
-    let hold_time = input.get_u16();
+pub fn parse_bgp_open_message(input: &mut &[u8]) -> Result<BgpOpenMessage, ParserError> {
+    input.require_n_remaining(10, "BGP open message header")?;
+    let version = input.read_u8()?;
+    let asn = Asn::new_16bit(input.read_u16()?);
+    let hold_time = input.read_u16()?;
 
     let sender_ip = input.read_ipv4_address()?;
-    let opt_params_len = input.get_u8();
+    let opt_params_len = input.read_u8()?;
 
     // let pos_end = input.position() + opt_params_len as u64;
     if input.remaining() != opt_params_len as usize {
+        // TODO: This seems like it should become a hard error
         warn!(
             "BGP open message length {} does not match the actual length {}",
             opt_params_len,
@@ -133,7 +125,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
 
     let mut params: Vec<OptParam> = vec![];
     while input.remaining() >= 2 {
-        let param_type = input.get_u8();
+        let param_type = input.read_u8()?;
         if first {
             // first parameter, check if it is extended length message
             if opt_params_len == 255 && param_type == 255 {
@@ -146,7 +138,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
         }
         // reaching here means all the remain params are regular non-extended-length parameters
 
-        let parm_length = input.get_u8();
+        let parm_length = input.read_u8()?;
         // https://tools.ietf.org/html/rfc3392
         // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
 
@@ -186,47 +178,44 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
 }
 
 /// read nlri portion of a bgp update message.
-fn read_nlri(
-    mut input: Bytes,
-    afi: &Afi,
-    add_path: bool,
-) -> Result<Vec<NetworkPrefix>, ParserError> {
+fn read_nlri(mut input: &[u8], afi: &Afi, add_path: bool) -> Result<PrefixList, ParserError> {
     let length = input.len();
     if length == 0 {
-        return Ok(vec![]);
+        return Ok(PrefixList::new());
     }
     if length == 1 {
+        // TODO: Should this become a hard error?
         // 1 byte does not make sense
         warn!("seeing strange one-byte NLRI field");
-        input.advance(1); // skip the byte
-        return Ok(vec![]);
+        input.advance(1)?; // skip the byte
+        return Ok(PrefixList::new());
     }
 
-    parse_nlri_list(input, add_path, afi)
+    parse_nlri_list(input, add_path, *afi)
 }
 
 /// read bgp update message.
 ///
 /// RFC: <https://tools.ietf.org/html/rfc4271#section-4.3>
 pub fn parse_bgp_update_message(
-    mut input: Bytes,
+    mut input: &[u8],
     add_path: bool,
-    asn_len: &AsnLength,
+    asn_len: AsnLength,
 ) -> Result<BgpUpdateMessage, ParserError> {
     // AFI for routes out side attributes are IPv4 ONLY.
     let afi = Afi::Ipv4;
 
     // parse withdrawn prefixes nlri
     let withdrawn_bytes_length = input.read_u16()? as usize;
-    let withdrawn_bytes = input.split_to(withdrawn_bytes_length);
+    let withdrawn_bytes = input.split_to(withdrawn_bytes_length)?;
     let withdrawn_prefixes = read_nlri(withdrawn_bytes, &afi, add_path)?;
 
     // parse attributes
     let attribute_length = input.read_u16()? as usize;
     let attr_parser = AttributeParser::new(add_path);
 
-    input.has_n_remaining(attribute_length)?;
-    let attr_data_slice = input.split_to(attribute_length);
+    input.require_n_remaining(attribute_length, "update attributes")?;
+    let attr_data_slice = input.split_to(attribute_length)?;
     let attributes = attr_parser.parse_attributes(attr_data_slice, asn_len, None, None, None)?;
 
     // parse announced prefixes nlri.

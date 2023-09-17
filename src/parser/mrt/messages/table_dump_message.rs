@@ -2,7 +2,6 @@ use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::AttributeParser;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
 use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
@@ -36,7 +35,7 @@ use std::net::IpAddr;
 /// ```
 pub fn parse_table_dump_message(
     sub_type: u16,
-    mut data: Bytes,
+    mut data: &[u8],
 ) -> Result<TableDumpMessage, ParserError> {
     // ####
     // Step 0. prepare
@@ -45,16 +44,7 @@ pub fn parse_table_dump_message(
     //   - create data slice reader cursor
 
     // determine address family based on the sub_type value defined in the MRT [CommonHeader].
-    let afi = match sub_type {
-        1 => Afi::Ipv4,
-        2 => Afi::Ipv6,
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
-            )))
-        }
-    };
+    let afi = Afi::try_from(sub_type)?;
 
     // ####
     // Step 1. read simple fields
@@ -90,12 +80,12 @@ pub fn parse_table_dump_message(
 
     let attr_parser = AttributeParser::new(false);
 
-    data.has_n_remaining(attribute_length)?;
-    let attr_data_slice = data.split_to(attribute_length);
+    data.require_n_remaining(attribute_length, "rib attributes")?;
+    let attr_data_slice = data.split_to(attribute_length)?;
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
     let attributes =
-        attr_parser.parse_attributes(attr_data_slice, &AsnLength::Bits16, None, None, None)?;
+        attr_parser.parse_attributes(attr_data_slice, AsnLength::Bits16, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,

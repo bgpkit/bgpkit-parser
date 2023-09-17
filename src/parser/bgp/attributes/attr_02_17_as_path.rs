@@ -1,48 +1,88 @@
+use crate::models::builder::AsPathBuilder;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use num_enum::TryFromPrimitive;
 
-const AS_PATH_AS_SET: u8 = 1;
-const AS_PATH_AS_SEQUENCE: u8 = 2;
-// https://datatracker.ietf.org/doc/html/rfc5065
-const AS_PATH_CONFED_SEQUENCE: u8 = 3;
-const AS_PATH_CONFED_SET: u8 = 4;
-
-pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
-    let mut output = AsPath {
-        segments: Vec::with_capacity(5),
-    };
-    while input.remaining() > 0 {
-        let segment = parse_as_path_segment(&mut input, asn_len)?;
-        output.append_segment(segment);
-    }
-
-    Ok(output)
+#[allow(non_camel_case_types)]
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u8)]
+enum AsSegmentType {
+    AS_PATH_AS_SET = 1,
+    AS_PATH_AS_SEQUENCE = 2,
+    // https://datatracker.ietf.org/doc/html/rfc5065
+    AS_PATH_CONFED_SEQUENCE = 3,
+    AS_PATH_CONFED_SET = 4,
 }
 
-fn parse_as_path_segment(
-    input: &mut Bytes,
-    asn_len: &AsnLength,
-) -> Result<AsPathSegment, ParserError> {
-    let segment_type = input.read_u8()?;
-    let count = input.read_u8()? as usize;
-    let path = input.read_asns(asn_len, count)?;
-    match segment_type {
-        AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
-        AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
-        AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
-        AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
-        _ => Err(ParserError::ParseError(format!(
-            "Invalid AS path segment type: {}",
-            segment_type
-        ))),
+pub fn parse_as_path(input: &[u8], asn_len: AsnLength) -> Result<AsPath, ParserError> {
+    match asn_len {
+        AsnLength::Bits16 => read_as_path_16bit(input),
+        AsnLength::Bits32 => read_as_path_32bit(input),
     }
+}
+
+fn read_as_path_16bit(mut input: &[u8]) -> Result<AsPath, ParserError> {
+    let mut builder = AsPathBuilder::default();
+
+    while !input.is_empty() {
+        let segment_type = AsSegmentType::try_from(input.read_u8()?)?;
+        let count = input.read_u8()? as usize;
+        input.require_n_remaining(count * 2, "AS_PATH")?;
+
+        let mut segment_builder = match segment_type {
+            AsSegmentType::AS_PATH_AS_SEQUENCE => builder.begin_as_sequence(count),
+            AsSegmentType::AS_PATH_AS_SET => builder.begin_as_set(count),
+            AsSegmentType::AS_PATH_CONFED_SEQUENCE => builder.begin_confed_sequence(count),
+            AsSegmentType::AS_PATH_CONFED_SET => builder.begin_confed_set(count),
+        };
+
+        for _ in 0..count {
+            segment_builder.push(Asn::new_16bit(input.read_u16()?));
+        }
+    }
+
+    Ok(builder.build())
+}
+
+fn read_as_path_32bit(mut input: &[u8]) -> Result<AsPath, ParserError> {
+    let mut builder = AsPathBuilder::default();
+
+    while !input.is_empty() {
+        let segment_type = AsSegmentType::try_from(input.read_u8()?)?;
+        let count = input.read_u8()? as usize;
+        input.require_n_remaining(count * 4, "AS4_PATH")?;
+
+        let mut segment_builder = match segment_type {
+            AsSegmentType::AS_PATH_AS_SEQUENCE => builder.begin_as_sequence(count),
+            AsSegmentType::AS_PATH_AS_SET => builder.begin_as_set(count),
+            AsSegmentType::AS_PATH_CONFED_SEQUENCE => builder.begin_confed_sequence(count),
+            AsSegmentType::AS_PATH_CONFED_SET => builder.begin_confed_set(count),
+        };
+
+        for _ in 0..count {
+            segment_builder.push(Asn::new_32bit(input.read_u32()?));
+        }
+    }
+
+    Ok(builder.build())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_as_path_segment(
+        input: &mut &[u8],
+        asn_len: AsnLength,
+    ) -> Result<AsPathSegment<'static>, ParserError> {
+        let path = match asn_len {
+            AsnLength::Bits16 => read_as_path_16bit(input),
+            AsnLength::Bits32 => read_as_path_32bit(input),
+        }?;
+
+        Ok(path.into_segments_iter().next().unwrap())
+    }
 
     ///
     /// ```text
@@ -73,14 +113,14 @@ mod tests {
     /// ```
     #[test]
     fn test_parse_as_path() {
-        let data = Bytes::from(vec![
+        let data = &[
             2, // sequence
             3, // 3 ASes in path
             0, 1, // AS1
             0, 2, // AS2
             0, 3, // AS3
-        ]);
-        let path = parse_as_path(data, &AsnLength::Bits16).unwrap();
+        ];
+        let path = parse_as_path(data, AsnLength::Bits16).unwrap();
         assert_eq!(path, AsPath::from_sequence([1, 2, 3]));
     }
 
@@ -89,62 +129,62 @@ mod tests {
         //////////////////////
         // 16 bits sequence //
         //////////////////////
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             2, // sequence
             3, // 3 ASes in path
             0, 1, // AS1
             0, 2, // AS2
             0, 3, // AS3
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits16).unwrap();
         assert_eq!(res, AsPathSegment::sequence([1, 2, 3]));
 
         //////////////////////
         // 16 bits sequence //
         //////////////////////
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             2, // sequence
             3, // 3 ASes in path
             0, 0, 0, 1, // AS1
             0, 0, 0, 2, // AS2
             0, 0, 0, 3, // AS3
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits32).unwrap();
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits32).unwrap();
         assert_eq!(res, AsPathSegment::sequence([1, 2, 3]));
 
         /////////////////
         // other types //
         /////////////////
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             1, // AS Set
             1, // 1 AS in path
             0, 1,
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits16).unwrap();
         assert_eq!(res, AsPathSegment::set([1]));
 
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             3, // Confed Sequence
             1, // 1 AS in path
             0, 1,
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits16).unwrap();
         assert!(matches!(res, AsPathSegment::ConfedSequence(_)));
 
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             4, // Confed Set
             1, // 1 AS in path
             0, 1,
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap();
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits16).unwrap();
         assert!(matches!(res, AsPathSegment::ConfedSet(_)));
 
-        let mut data = Bytes::from(vec![
+        let mut data: &[u8] = &[
             5, // ERROR
             1, // 1 AS in path
             0, 1,
-        ]);
-        let res = parse_as_path_segment(&mut data, &AsnLength::Bits16).unwrap_err();
-        assert!(matches!(res, ParserError::ParseError(_)));
+        ];
+        let res = parse_as_path_segment(&mut data, AsnLength::Bits16).unwrap_err();
+        assert!(matches!(res, ParserError::UnrecognizedEnumVariant { .. }));
     }
 }

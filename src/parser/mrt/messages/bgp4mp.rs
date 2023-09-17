@@ -2,14 +2,13 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
 use std::convert::TryFrom;
 
 /// Parse MRT BGP4MP type
 ///
 /// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.4>
 ///
-pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> {
+pub fn parse_bgp4mp(sub_type: u16, input: &[u8]) -> Result<Bgp4Mp, ParserError> {
     let bgp4mp_type: Bgp4MpType = Bgp4MpType::try_from(sub_type)?;
     let msg: Bgp4Mp =
         match bgp4mp_type {
@@ -40,7 +39,7 @@ pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> 
     Ok(msg)
 }
 
-fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize {
+fn total_should_read(afi: &Afi, asn_len: AsnLength, total_size: usize) -> usize {
     let ip_size = match afi {
         Afi::Ipv4 => 4 * 2,
         Afi::Ipv6 => 16 * 2,
@@ -67,7 +66,7 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_message(
-    mut data: Bytes,
+    mut data: &[u8],
     add_path: bool,
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
@@ -81,15 +80,9 @@ pub fn parse_bgp4mp_message(
     let peer_ip = data.read_address(&afi)?;
     let local_ip = data.read_address(&afi)?;
 
-    let should_read = total_should_read(&afi, &asn_len, total_size);
-    if should_read != data.remaining() {
-        return Err(ParserError::TruncatedMsg(format!(
-            "truncated bgp4mp message: should read {} bytes, have {} bytes available",
-            should_read,
-            data.remaining()
-        )));
-    }
-    let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, &asn_len)?;
+    let should_read = total_should_read(&afi, asn_len, total_size);
+    data.expect_remaining_eq(should_read, "bgp4mp message")?;
+    let bgp_message: BgpMessage = parse_bgp_message(&mut data, add_path, asn_len)?;
 
     Ok(Bgp4MpMessage {
         msg_type: *msg_type,
@@ -134,7 +127,7 @@ pub fn parse_bgp4mp_message(
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 pub fn parse_bgp4mp_state_change(
-    mut input: Bytes,
+    mut input: &[u8],
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpStateChange, ParserError> {

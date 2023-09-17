@@ -1,13 +1,14 @@
 //! BGP attribute structs
-mod aspath;
 mod nlri;
 mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
 use num_enum::{FromPrimitive, IntoPrimitive};
+use smallvec::SmallVec;
 use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
+use std::mem::size_of;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::slice::Iter;
@@ -15,7 +16,6 @@ use std::vec::IntoIter;
 
 use crate::models::*;
 
-pub use aspath::*;
 pub use nlri::*;
 pub use origin::*;
 
@@ -237,14 +237,14 @@ impl Attributes {
         })
     }
 
-    pub fn get_reachable(&self) -> Option<&Nlri> {
+    pub fn get_reachable(&self) -> Option<&ReachableNlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpReachNlri(x) => Some(x),
             _ => None,
         })
     }
 
-    pub fn get_unreachable(&self) -> Option<&Nlri> {
+    pub fn get_unreachable(&self) -> Option<&UnreachableNlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpUnreachNlri(x) => Some(x),
             _ => None,
@@ -449,17 +449,27 @@ pub enum AttributeValue {
         id: BgpIdentifier,
         is_as4: bool,
     },
-    Communities(Vec<Community>),
-    ExtendedCommunities(Vec<ExtendedCommunity>),
-    LargeCommunities(Vec<LargeCommunity>),
+    Communities(Communities),
+    ExtendedCommunities(ExtendedCommunities),
+    LargeCommunities(LargeCommunities),
     OriginatorId(BgpIdentifier),
-    Clusters(Vec<u32>),
-    MpReachNlri(Nlri),
-    MpUnreachNlri(Nlri),
-    Development(Vec<u8>),
+    Clusters(ClusterList),
+    MpReachNlri(ReachableNlri),
+    MpUnreachNlri(UnreachableNlri),
+    Development(Development),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
 }
+
+const STORAGE_SIZE_LIMIT: usize = 64;
+
+pub type Communities = SmallVec<[Community; STORAGE_SIZE_LIMIT / size_of::<Community>()]>;
+pub type ExtendedCommunities =
+    SmallVec<[ExtendedCommunity; STORAGE_SIZE_LIMIT / size_of::<ExtendedCommunity>()]>;
+pub type LargeCommunities =
+    SmallVec<[LargeCommunity; STORAGE_SIZE_LIMIT / size_of::<LargeCommunity>()]>;
+pub type ClusterList = SmallVec<[u32; STORAGE_SIZE_LIMIT / size_of::<u32>()]>;
+pub type Development = SmallVec<[u8; STORAGE_SIZE_LIMIT]>;
 
 impl From<Origin> for AttributeValue {
     fn from(value: Origin) -> Self {
