@@ -651,6 +651,13 @@ impl AsPath {
             _ => None,
         }
     }
+
+    pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
+        match self.segments.last() {
+            Some(AsPathSegment::AsSequence(v)) => Some(v.iter().map(|asn| (*asn).into()).collect()),
+            _ => None,
+        }
+    }
 }
 
 /// Iterates over all route variations the given `AsPath` represents.

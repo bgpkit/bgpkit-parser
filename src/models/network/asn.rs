@@ -124,6 +124,13 @@ impl From<Asn> for u32 {
     }
 }
 
+impl From<&Asn> for u32 {
+    #[inline]
+    fn from(value: &Asn) -> Self {
+        value.asn
+    }
+}
+
 impl Display for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
