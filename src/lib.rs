@@ -20,7 +20,7 @@ Here is an example that does so.
 use bgpkit_parser::BgpkitParser;
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap();
 for elem in parser {
-    println!("{}", elem)
+    println!("{}", elem.unwrap())
 }
 ```
 
@@ -72,6 +72,7 @@ for item in broker.into_iter().take(2) {
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
     let elems = parser
         .into_elem_iter()
+        .filter_map(Result::ok)
         .filter_map(|elem| {
             if let Some(origins) = &elem.origin_asns {
                 if origins.contains(&13335.into()) {
@@ -100,6 +101,7 @@ For all types of filters, check out the [Filter][filter] enum documentation.
 
 ```no_run
 use bgpkit_parser::BgpkitParser;
+use bgpkit_parser::filter::Filter;
 
 /// This example shows how to parse a MRT file and filter by prefix.
 env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -108,12 +110,12 @@ log::info!("downloading updates file");
 
 // create a parser that takes the buffered reader
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-    .add_filter("prefix", "211.98.251.0/24").unwrap();
+    .add_filter(Filter::prefix("211.98.251.0/24").unwrap());
 
 log::info!("parsing updates file");
 // iterating through the parser. the iterator returns `BgpElem` one at a time.
 for elem in parser {
-    log::info!("{}", &elem);
+    log::info!("{}", elem.unwrap());
 }
 log::info!("done");
 ```

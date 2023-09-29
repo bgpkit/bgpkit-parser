@@ -15,7 +15,7 @@ fn main() {
     log::info!("parsing updates file");
     // iterating through the parser. the iterator returns `BgpElem` one at a time.
     for elem in parser {
-        log::info!("{}", &elem);
+        log::info!("{}", elem.unwrap());
     }
     log::info!("done");
 }

@@ -4,6 +4,7 @@ use crate::ParserError;
 use bytes::Bytes;
 
 pub fn parse_med(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    input.expect_remaining_eq(4, "MULTI_EXIT_DISCRIMINATOR")?;
     Ok(AttributeValue::MultiExitDiscriminator(input.read_u32()?))
 }
 

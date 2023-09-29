@@ -58,7 +58,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
     let version = data.read_u8()?;
     if version != 3 {
         // has to be 3 per rfc7854
-        return Err(ParserBmpError::CorruptedBmpMessage);
+        return Err(ParserBmpError::InvalidOpenBmpHeader);
     }
 
     let msg_len = data.read_u32()?;

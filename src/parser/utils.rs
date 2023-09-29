@@ -3,10 +3,7 @@ Provides IO utility functions for read bytes of different length and converting 
 */
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use std::convert::TryFrom;
-use std::{
-    io,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::models::*;
 use bytes::{Buf, Bytes};
@@ -14,97 +11,104 @@ use log::debug;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
-use crate::ParserError::IoNotEnoughBytes;
 
-impl ReadUtils for Bytes {}
+impl<B: Buf> ReadUtils for B {}
 
 // Allow reading IPs from Reads
 pub trait ReadUtils: Buf {
-    #[inline]
-    fn has_n_remaining(&self, n: usize) -> Result<(), ParserError> {
-        if self.remaining() < n {
-            Err(IoNotEnoughBytes())
-        } else {
-            Ok(())
+    #[inline(always)]
+    fn require_n_remaining(&self, n: usize, target: &'static str) -> Result<(), ParserError> {
+        if self.remaining() >= n {
+            return Ok(());
         }
+
+        Err(ParserError::InconsistentFieldLength {
+            name: target,
+            expected: n,
+            found: self.remaining(),
+        })
+    }
+
+    #[inline(always)]
+    fn expect_remaining_eq(&self, n: usize, target: &'static str) -> Result<(), ParserError> {
+        if self.remaining() == n {
+            return Ok(());
+        }
+
+        Err(ParserError::InconsistentFieldLength {
+            name: target,
+            expected: n,
+            found: self.remaining(),
+        })
     }
 
     #[inline]
+    #[track_caller]
     fn read_u8(&mut self) -> Result<u8, ParserError> {
-        self.has_n_remaining(1)?;
+        self.require_n_remaining(1, file!())?;
         Ok(self.get_u8())
     }
 
     #[inline]
+    #[track_caller]
     fn read_u16(&mut self) -> Result<u16, ParserError> {
-        self.has_n_remaining(2)?;
+        self.require_n_remaining(2, file!())?;
         Ok(self.get_u16())
     }
 
     #[inline]
+    #[track_caller]
     fn read_u32(&mut self) -> Result<u32, ParserError> {
-        self.has_n_remaining(4)?;
+        self.require_n_remaining(4, file!())?;
         Ok(self.get_u32())
     }
 
     #[inline]
+    #[track_caller]
     fn read_u64(&mut self) -> Result<u64, ParserError> {
-        self.has_n_remaining(8)?;
+        self.require_n_remaining(8, file!())?;
         Ok(self.get_u64())
     }
 
+    #[inline]
+    #[track_caller]
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParserError> {
-        self.has_n_remaining(buf.len())?;
+        self.require_n_remaining(buf.len(), file!())?;
         self.copy_to_slice(buf);
         Ok(())
     }
 
-    fn read_address(&mut self, afi: &Afi) -> io::Result<IpAddr> {
+    fn read_address(&mut self, afi: &Afi) -> Result<IpAddr, ParserError> {
         match afi {
-            Afi::Ipv4 => match self.read_ipv4_address() {
-                Ok(ip) => Ok(IpAddr::V4(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv4 address".to_string(),
-                )),
-            },
-            Afi::Ipv6 => match self.read_ipv6_address() {
-                Ok(ip) => Ok(IpAddr::V6(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv6 address".to_string(),
-                )),
-            },
+            Afi::Ipv4 => self.read_ipv4_address().map(IpAddr::V4),
+            Afi::Ipv6 => self.read_ipv6_address().map(IpAddr::V6),
         }
     }
 
     fn read_ipv4_address(&mut self) -> Result<Ipv4Addr, ParserError> {
+        self.require_n_remaining(4, "IPv4 Address")?;
         let addr = self.read_u32()?;
         Ok(Ipv4Addr::from(addr))
     }
 
     fn read_ipv6_address(&mut self) -> Result<Ipv6Addr, ParserError> {
-        self.has_n_remaining(16)?;
+        self.require_n_remaining(16, "IPv6 Address")?;
         let buf = self.get_u128();
         Ok(Ipv6Addr::from(buf))
     }
 
     fn read_ipv4_prefix(&mut self) -> Result<Ipv4Net, ParserError> {
+        self.require_n_remaining(5, "IPv4 Prefix")?;
         let addr = self.read_ipv4_address()?;
         let mask = self.read_u8()?;
-        match Ipv4Net::new(addr, mask) {
-            Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
-        }
+        Ipv4Net::new(addr, mask).map_err(ParserError::from)
     }
 
     fn read_ipv6_prefix(&mut self) -> Result<Ipv6Net, ParserError> {
+        self.require_n_remaining(17, "IPv6 Prefix")?;
         let addr = self.read_ipv6_address()?;
         let mask = self.read_u8()?;
-        match Ipv6Net::new(addr, mask) {
-            Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
-        }
+        Ipv6Net::new(addr, mask).map_err(ParserError::from)
     }
 
     #[inline]
@@ -120,13 +124,13 @@ pub trait ReadUtils: Buf {
 
         match as_length {
             AsnLength::Bits16 => {
-                self.has_n_remaining(count * 2)?; // 2 bytes for 16-bit ASN
+                self.require_n_remaining(count * 2, "16bit ASNs")?; // 2 bytes for 16-bit ASN
                 for _ in 0..count {
                     path.push(Asn::new_16bit(self.read_u16()?));
                 }
             }
             AsnLength::Bits32 => {
-                self.has_n_remaining(count * 4)?; // 4 bytes for 32-bit ASN
+                self.require_n_remaining(count * 4, "32bit ASNs")?; // 4 bytes for 32-bit ASN
                 for _ in 0..count {
                     path.push(Asn::new_32bit(self.read_u32()?));
                 }
@@ -165,13 +169,10 @@ pub trait ReadUtils: Buf {
             Afi::Ipv4 => {
                 // 4 bytes -- u32
                 if byte_len > 4 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
-                    )));
+                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
                 }
                 let mut buff = [0; 4];
-                self.has_n_remaining(byte_len)?;
+                self.require_n_remaining(byte_len, "IPv4 NLRI Prefix")?;
                 for i in 0..byte_len {
                     buff[i] = self.get_u8();
                 }
@@ -180,12 +181,9 @@ pub trait ReadUtils: Buf {
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len > 16 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
-                    )));
+                    return Err(ParserError::InvalidPrefixLength(ipnet::PrefixLenError));
                 }
-                self.has_n_remaining(byte_len)?;
+                self.require_n_remaining(byte_len, "IPv6 NLRI Prefix")?;
                 let mut buff = [0; 16];
                 for i in 0..byte_len {
                     buff[i] = self.get_u8();
@@ -193,21 +191,13 @@ pub trait ReadUtils: Buf {
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
-        let prefix = match IpNet::new(addr, bit_len) {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(ParserError::ParseError(format!(
-                    "Invalid network prefix length: {}",
-                    bit_len
-                )))
-            }
-        };
+        let prefix = IpNet::new(addr, bit_len)?;
 
         Ok(NetworkPrefix::new(prefix, path_id))
     }
 
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
-        self.has_n_remaining(n_bytes)?;
+        self.require_n_remaining(n_bytes, "raw bytes")?;
         Ok(self.copy_to_bytes(n_bytes).into())
     }
 

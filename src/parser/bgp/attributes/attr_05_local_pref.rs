@@ -4,6 +4,7 @@ use crate::ParserError;
 use bytes::Bytes;
 
 pub fn parse_local_pref(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    input.expect_remaining_eq(4, "LOCAL_PREFERENCE")?;
     Ok(AttributeValue::LocalPreference(input.read_u32()?))
 }
 

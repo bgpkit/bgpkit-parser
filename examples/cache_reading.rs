@@ -15,7 +15,10 @@ fn main() {
         let parser =
             BgpkitParser::new_cached(item.url.as_str(), "/tmp/bgpkit-cache-example/").unwrap();
         // iterating through the parser. the iterator returns `BgpElem` one at a time.
-        let elems = parser.into_elem_iter().collect::<Vec<BgpElem>>();
+        let elems = parser
+            .into_elem_iter()
+            .filter_map(Result::ok)
+            .collect::<Vec<BgpElem>>();
         log::info!("{} {} {}", item.collector_id, item.url, elems.len());
     }
 }

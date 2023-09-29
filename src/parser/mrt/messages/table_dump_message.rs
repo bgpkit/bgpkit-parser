@@ -45,16 +45,7 @@ pub fn parse_table_dump_message(
     //   - create data slice reader cursor
 
     // determine address family based on the sub_type value defined in the MRT [CommonHeader].
-    let afi = match sub_type {
-        1 => Afi::Ipv4,
-        2 => Afi::Ipv6,
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
-            )))
-        }
-    };
+    let afi = Afi::try_from(sub_type)?;
 
     // ####
     // Step 1. read simple fields
@@ -90,7 +81,7 @@ pub fn parse_table_dump_message(
 
     let attr_parser = AttributeParser::new(false);
 
-    data.has_n_remaining(attribute_length)?;
+    data.require_n_remaining(attribute_length, "rib attributes")?;
     let attr_data_slice = data.split_to(attribute_length);
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.

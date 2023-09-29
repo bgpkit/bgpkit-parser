@@ -6,9 +6,9 @@ use bytes::{Buf, Bytes};
 pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     let mut communities = Vec::new();
     while input.remaining() > 0 {
-        input.has_n_remaining(12)?; // 12 bytes for large community (3x 32 bits integers)
-        let global_administrator = input.get_u32();
-        let local_data = [input.get_u32(), input.get_u32()];
+        input.require_n_remaining(12, "large community")?; // 12 bytes for large community (3x 32 bits integers)
+        let global_administrator = input.read_u32()?;
+        let local_data = [input.read_u32()?, input.read_u32()?];
         communities.push(LargeCommunity::new(global_administrator, local_data));
     }
     Ok(AttributeValue::LargeCommunities(communities))

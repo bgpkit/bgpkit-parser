@@ -19,6 +19,7 @@ fn main() {
         let collector = item.collector_id.clone();
         let mut origins: HashSet<Asn> = HashSet::new();
         for elem in parser {
+            let elem = elem.unwrap();
             if !elem.elem_type.is_announce() {
                 continue;
             }

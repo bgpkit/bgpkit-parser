@@ -1,10 +1,12 @@
-use itertools::Itertools;
-use serde_json::json;
-use std::io::Write;
+use std::fmt::Display;
+use std::io;
+use std::io::{stdout, BufWriter, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use bgpkit_parser::{BgpkitParser, Elementor};
+use bgpkit_parser::filter::Filter;
+use bgpkit_parser::models::ElemType;
+use bgpkit_parser::{BgpkitParser, Elementor, PrefixMatchType};
 use clap::Parser;
 use ipnet::IpNet;
 
@@ -104,43 +106,39 @@ fn main() {
     };
 
     if let Some(v) = opts.filters.as_path {
-        parser = parser.add_filter("as_path", v.as_str()).unwrap();
+        parser = parser.add_filter(Filter::as_path(v.as_str()).unwrap());
     }
     if let Some(v) = opts.filters.origin_asn {
-        parser = parser
-            .add_filter("origin_asn", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::OriginAsn(v));
     }
     if let Some(v) = opts.filters.prefix {
         let filter_type = match (opts.filters.include_super, opts.filters.include_sub) {
-            (false, false) => "prefix",
-            (true, false) => "prefix_super",
-            (false, true) => "prefix_sub",
-            (true, true) => "prefix_super_sub",
+            (false, false) => PrefixMatchType::Exact,
+            (true, false) => PrefixMatchType::IncludeSuper,
+            (false, true) => PrefixMatchType::IncludeSub,
+            (true, true) => PrefixMatchType::IncludeSuperSub,
         };
-        parser = parser
-            .add_filter(filter_type, v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::Prefix(v, filter_type));
     }
     if !opts.filters.peer_ip.is_empty() {
-        let v = opts.filters.peer_ip.iter().map(|p| p.to_string()).join(",");
-        parser = parser.add_filter("peer_ips", v.as_str()).unwrap();
+        parser = parser.add_filter(Filter::PeerIps(opts.filters.peer_ip.to_owned()));
     }
     if let Some(v) = opts.filters.peer_asn {
-        parser = parser
-            .add_filter("peer_asn", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::PeerAsn(v));
     }
     if let Some(v) = opts.filters.elem_type {
-        parser = parser.add_filter("type", v.as_str()).unwrap();
+        let filter_type = match v.as_str() {
+            "w" | "withdraw" | "withdrawal" => ElemType::WITHDRAW,
+            "a" | "announce" | "announcement" => ElemType::ANNOUNCE,
+            x => panic!("cannot parse elem type from {}", x),
+        };
+        parser = parser.add_filter(Filter::Type(filter_type));
     }
     if let Some(v) = opts.filters.start_ts {
-        parser = parser
-            .add_filter("start_ts", v.to_string().as_str())
-            .unwrap();
+        parser = parser.add_filter(Filter::TsStart(v));
     }
     if let Some(v) = opts.filters.end_ts {
-        parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
+        parser = parser.add_filter(Filter::TsEnd(v));
     }
 
     match (opts.elems_count, opts.records_count) {
@@ -148,8 +146,13 @@ fn main() {
             let mut elementor = Elementor::new();
             let (mut records_count, mut elems_count) = (0, 0);
             for record in parser.into_record_iter() {
-                records_count += 1;
-                elems_count += elementor.record_to_elems(record).len();
+                match record {
+                    Ok(record) => {
+                        records_count += 1;
+                        elems_count += elementor.record_to_elems(record).len();
+                    }
+                    Err(err) => handle_non_fatal_error(&mut stdout(), err),
+                }
             }
             println!("total records: {}", records_count);
             println!("total elems:   {}", elems_count);
@@ -158,28 +161,71 @@ fn main() {
             println!("total records: {}", parser.into_record_iter().count());
         }
         (true, false) => {
-            println!("total records: {}", parser.into_elem_iter().count());
+            println!("total elems: {}", parser.into_elem_iter().count());
         }
         (false, false) => {
-            let mut stdout = std::io::stdout();
+            let mut stdout = BufWriter::new(stdout().lock());
+
             for elem in parser {
-                let output_str = if opts.json {
-                    let val = json!(elem);
-                    if opts.pretty {
-                        serde_json::to_string_pretty(&val).unwrap()
-                    } else {
-                        val.to_string()
+                match elem {
+                    Ok(elem) => {
+                        if opts.json {
+                            let res = if opts.pretty {
+                                serde_json::to_writer_pretty(&mut stdout, &elem)
+                            } else {
+                                serde_json::to_writer(&mut stdout, &elem)
+                            };
+
+                            handle_serde_json_result(&mut stdout, res);
+                        } else {
+                            let res = writeln!(stdout, "{}", elem);
+                            handle_io_result(&mut stdout, res);
+                        }
                     }
-                } else {
-                    elem.to_string()
-                };
-                if let Err(e) = writeln!(stdout, "{}", &output_str) {
-                    if e.kind() != std::io::ErrorKind::BrokenPipe {
-                        eprintln!("{}", e);
+                    Err(err) => {
+                        let res = stdout.flush();
+                        handle_io_result(&mut stdout, res);
+                        eprintln!("{}", err);
                     }
-                    std::process::exit(1);
                 }
             }
         }
+    }
+}
+
+fn handle_serde_json_result<W: Write>(stdout: &mut W, res: serde_json::Result<()>) {
+    if let Err(err) = res {
+        if err.is_io() {
+            // If it was an IO error, we likely wont be able to flush stdout
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+
+        handle_non_fatal_error(stdout, err);
+    }
+}
+
+fn handle_non_fatal_error<W: Write, E: Display>(stdout: &mut W, err: E) {
+    // Attempt to flush stdout before printing the error to avoid mangling combined CLI output
+    if let Err(flush_err) = stdout.flush() {
+        eprintln!("{}", err);
+        eprintln!("{}", flush_err);
+        std::process::exit(1);
+    }
+
+    // Write the error to stderr then flush stderr to avoid mangling combined CLI output
+    eprintln!("{}", err);
+    if io::stderr().flush().is_err() {
+        // If this fails, then we are out of options for logging errors
+        std::process::exit(1);
+    }
+}
+
+fn handle_io_result<W: Write>(stdout: &mut W, res: io::Result<()>) {
+    if let Err(err) = res {
+        // We can try flushing stdout, but it will almost certainly fail
+        let _ = stdout.flush();
+        eprintln!("{}", err);
+        std::process::exit(1);
     }
 }

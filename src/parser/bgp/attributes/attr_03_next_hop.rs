@@ -2,34 +2,38 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::Bytes;
+use std::net::IpAddr;
 
 pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
-    if let Some(afi) = afi {
-        Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
-    } else {
-        Ok(input
-            .read_address(&Afi::Ipv4)
-            .map(AttributeValue::NextHop)?)
+    match afi.unwrap_or(Afi::Ipv4) {
+        Afi::Ipv4 => {
+            input.expect_remaining_eq(4, "NEXT_HOP")?;
+            Ok(input
+                .read_ipv4_address()
+                .map(IpAddr::V4)
+                .map(AttributeValue::NextHop)?)
+        }
+        Afi::Ipv6 => {
+            input.expect_remaining_eq(16, "NEXT_HOP")?;
+            Ok(input
+                .read_ipv6_address()
+                .map(IpAddr::V6)
+                .map(AttributeValue::NextHop)?)
+        }
     }
 }
 
 pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, ParserError> {
-    let output = match input.len() {
-        0 => None,
-        4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
-        16 => Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
-        32 => Some(NextHopAddress::Ipv6LinkLocal(
+    match input.len() {
+        0 => Ok(None),
+        4 => Ok(Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?)),
+        16 => Ok(Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?)),
+        32 => Ok(Some(NextHopAddress::Ipv6LinkLocal(
             input.read_ipv6_address()?,
             input.read_ipv6_address()?,
-        )),
-        v => {
-            return Err(ParserError::ParseError(format!(
-                "Invalid next hop length found: {}",
-                v
-            )));
-        }
-    };
-    Ok(output)
+        ))),
+        v => Err(ParserError::InvalidNextHopLength(v)),
+    }
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpErro
         let stat_data = match stat_len {
             4 => StatsData::Counter(data.read_u32()?),
             8 => StatsData::Gauge(data.read_u64()?),
-            _ => return Err(ParserBmpError::CorruptedBmpMessage),
+            x => return Err(ParserBmpError::InvalidStatsDataLength(x)),
         };
         counters.push(StatCounter {
             stat_type,

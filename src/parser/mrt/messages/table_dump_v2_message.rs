@@ -1,8 +1,7 @@
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{AttributeParser, ReadUtils};
-use bytes::{Buf, Bytes};
-use log::warn;
+use bytes::Bytes;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr};
@@ -43,9 +42,10 @@ pub fn parse_table_dump_v2_message(
         TableDumpV2Type::RibGeneric
         | TableDumpV2Type::RibGenericAddPath
         | TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
-            ))
+            return Err(ParserError::UnsupportedMrtType {
+                mrt_type: EntryType::TABLE_DUMP_V2,
+                subtype: sub_type,
+            });
         }
     };
 
@@ -56,7 +56,7 @@ pub fn parse_table_dump_v2_message(
 ///
 /// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3.1
 pub fn parse_peer_index_table(mut data: Bytes) -> Result<PeerIndexTable, ParserError> {
-    let collector_bgp_id = Ipv4Addr::from(data.read_u32()?);
+    let collector_bgp_id = data.read_ipv4_address()?;
     // read and ignore view name
     let view_name_length = data.read_u16()?;
     let view_name =
@@ -108,31 +108,23 @@ pub fn parse_rib_afi_entries(
     data: &mut Bytes,
     rib_type: TableDumpV2Type,
 ) -> Result<RibAfiEntries, ParserError> {
-    let afi: Afi;
-    let safi: Safi;
-    match rib_type {
+    let (afi, safi) = match rib_type {
         TableDumpV2Type::RibIpv4Unicast | TableDumpV2Type::RibIpv4UnicastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Unicast
+            (Afi::Ipv4, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv4Multicast | TableDumpV2Type::RibIpv4MulticastAddPath => {
-            afi = Afi::Ipv4;
-            safi = Safi::Multicast
+            (Afi::Ipv4, Safi::Multicast)
         }
         TableDumpV2Type::RibIpv6Unicast | TableDumpV2Type::RibIpv6UnicastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Unicast
+            (Afi::Ipv6, Safi::Unicast)
         }
         TableDumpV2Type::RibIpv6Multicast | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            afi = Afi::Ipv6;
-            safi = Safi::Multicast
+            (Afi::Ipv6, Safi::Multicast)
         }
-        _ => {
-            return Err(ParserError::ParseError(format!(
-                "wrong RIB type for parsing: {:?}",
-                rib_type
-            )))
-        }
+        ty => panic!(
+            "Invalid TableDumpV2Type {:?} passed to parse_rib_afi_entries",
+            ty
+        ),
     };
 
     let add_path = matches!(
@@ -157,14 +149,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        let entry = match parse_rib_entry(data, add_path, &afi, &safi, &prefixes) {
-            Ok(entry) => entry,
-            Err(e) => {
-                warn!("early break due to error {}", e.to_string());
-                break;
-            }
-        };
-        rib_entries.push(entry);
+        rib_entries.push(parse_rib_entry(data, add_path, &afi, &safi, &prefixes)?);
     }
 
     Ok(RibAfiEntries {
@@ -182,22 +167,19 @@ pub fn parse_rib_entry(
     safi: &Safi,
     prefixes: &[NetworkPrefix],
 ) -> Result<RibEntry, ParserError> {
-    if input.remaining() < 8 {
-        // total length - current position less than 16 --
-        // meaning less than 16 bytes available to read
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    // total length - current position less than 16 --
+    // meaning less than 16 bytes available to read
+    input.require_n_remaining(8, "rib entry")?;
 
     let peer_index = input.read_u16()?;
     let originated_time = input.read_u32()?;
     if add_path {
+        // TODO: Why is this value unused?
         let _path_id = input.read_u32()?;
     }
     let attribute_length = input.read_u16()? as usize;
 
-    if input.remaining() < attribute_length {
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
+    input.require_n_remaining(attribute_length, "rib entry attributes")?;
 
     let attr_parser = AttributeParser::new(add_path);
 

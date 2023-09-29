@@ -65,11 +65,11 @@ impl AttributeParser {
             // thus the while loop condition is set to be at least 3 bytes to read.
 
             // has content to read
-            let flag = AttrFlags::from_bits_retain(data.get_u8());
-            let attr_type = data.get_u8();
+            let flag = AttrFlags::from_bits_retain(data.read_u8()?);
+            let attr_type = data.read_u8()?;
             let attr_length = match flag.contains(AttrFlags::EXTENDED) {
-                false => data.get_u8() as usize,
-                true => data.get_u16() as usize,
+                false => data.read_u8()? as usize,
+                true => data.read_u16()? as usize,
             };
 
             let mut partial = false;
@@ -116,18 +116,8 @@ impl AttributeParser {
                 t => t,
             };
 
-            let bytes_left = data.remaining();
-
-            if data.remaining() < attr_length {
-                warn!(
-                    "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                    bytes_left, attr_length
-                );
-                // break and return already parsed attributes
-                break;
-            }
-
             // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
+            data.require_n_remaining(attr_length, "Attribute")?;
             let mut attr_data = data.split_to(attr_length);
 
             let attr = match attr_type {
@@ -189,15 +179,13 @@ impl AttributeParser {
                 AttrType::DEVELOPMENT => {
                     let mut value = vec![];
                     for _i in 0..attr_length {
-                        value.push(attr_data.get_u8());
+                        value.push(attr_data.read_u8()?);
                     }
                     Ok(AttributeValue::Development(value))
                 }
                 AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
-                _ => Err(ParserError::Unsupported(format!(
-                    "unsupported attribute type: {:?}",
-                    attr_type
-                ))),
+                // TODO: Should it be treated as a raw attribute instead?
+                _ => Err(ParserError::UnsupportedAttributeType(attr_type)),
             };
 
             match attr {
@@ -205,14 +193,14 @@ impl AttributeParser {
                     assert_eq!(attr_type, value.attr_type());
                     attributes.push(Attribute { value, flag });
                 }
+                Err(e) if partial => {
+                    // TODO: Is this correct? If we don't have enough bytes, split_to would panic.
+                    // it's ok to have errors when reading partial bytes
+                    warn!("PARTIAL: {}", e);
+                }
                 Err(e) => {
-                    if partial {
-                        // it's ok to have errors when reading partial bytes
-                        warn!("PARTIAL: {}", e.to_string());
-                    } else {
-                        warn!("{}", e.to_string());
-                    }
-                    continue;
+                    warn!("{}", e);
+                    return Err(e);
                 }
             };
         }

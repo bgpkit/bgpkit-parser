@@ -6,6 +6,7 @@ fn main() {
     )
     .unwrap()
     {
+        let elem = elem.unwrap();
         if let Some(otc) = elem.only_to_customer {
             println!(
                 "OTC found: {} for path {}\n{}\n",
