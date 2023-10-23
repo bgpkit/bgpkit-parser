@@ -1,6 +1,6 @@
 # BGPKIT Parser
 
-*This readme is generated from the library's doc comments using [cargo-readme](https://github.com/livioribeiro/cargo-readme). Please refer to the Rust docs website for the full documentation: [latest stable](https://docs.rs/bgpkit-parser/latest/bgpkit_parser/); [bleeding-edge](https://docs.rs/bgpkit-parser/0.10.0-alpha.1/bgpkit_parser/).*
+*This readme is generated from the library's doc comments using [cargo-readme](https://github.com/livioribeiro/cargo-readme). Please refer to the Rust docs website for the full documentation: [latest stable](https://docs.rs/bgpkit-parser/latest/bgpkit_parser/); [bleeding-edge](https://docs.rs/bgpkit-parser/0.10.0-alpha.2/bgpkit_parser/).*
 
 [![Rust](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml/badge.svg)](https://github.com/bgpkit/bgpkit-parser/actions/workflows/rust.yml)
 [![Crates.io](https://img.shields.io/crates/v/bgpkit-parser)](https://crates.io/crates/bgpkit-parser)
@@ -343,7 +343,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 ### BMP
 
 - [X] [RFC 7854](https://datatracker.ietf.org/doc/html/rfc7854): BGP Monitoring Protocol (BMP)
-- [ ] [RFC 8671](https://datatracker.ietf.org/doc/html/rfc8671): Support for Adj-RIB-Out in the BGP Monitoring Protocol (BMP)
+- [X] [RFC 8671](https://datatracker.ietf.org/doc/html/rfc8671): Support for Adj-RIB-Out in the BGP Monitoring Protocol (BMP)
 
 ### Communities
 
