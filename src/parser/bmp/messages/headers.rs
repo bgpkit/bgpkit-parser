@@ -121,12 +121,36 @@ pub enum PeerType {
 }
 
 bitflags! {
+    /// BMP per-peer header flags
+    ///
+    /// RFC section at
+    /// - RFC 7854: https://www.rfc-editor.org/rfc/rfc7854#section-4.2.
+    /// - RFC 8671: https://www.rfc-editor.org/rfc/rfc8671#section-4
+    ///
+    /// RFC 8671 extended the flags definition by adding one additional flag to indicate whenther
+    /// the messages are Adj-RIB-in or Adj-RIB-out.
+    ///
+    /// ```text
+    ///  0 1 2 3 4 5 6 7
+    /// +-+-+-+-+-+-+-+-+
+    /// |V|L|A|O| Resv  |
+    /// +-+-+-+-+-+-+-+-+
+    /// ```
+    /// When the O flag is set to 1, the following fields in the per-peer header are redefined:
+    /// - Peer Address: The remote IP address associated with the TCP session over which the encapsulated Protocol Data Unit (PDU) is sent.
+    /// - Peer AS: The Autonomous System number of the peer to which the encapsulated PDU is sent.
+    /// - Peer BGP ID: The BGP Identifier of the peer to which the encapsulated PDU is sent.
+    /// - Timestamp: The time when the encapsulated routes were advertised (one may also think of
+    ///   this as the time when they were installed in the Adj-RIB-Out), expressed in seconds and
+    ///   microseconds since midnight (zero hour), January 1, 1970 (UTC). If zero, the time is
+    ///   unavailable. Precision of the timestamp is implementation-dependent.
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct PeerFlags: u8 {
-        const ADDRESS_FAMILY_IPV6 = 0x80;
-        const IS_POST_POLICY = 0x40;
-        const AS_SIZE_16BIT = 0x20;
+        const ADDRESS_FAMILY_IPV6 = 0b1000_0000;
+        const IS_POST_POLICY = 0b0100_0000;
+        const AS_SIZE_16BIT = 0b0010_0000;
+        const IS_ADJ_RIB_OUT = 0b0001_0000;
     }
 }
 
@@ -145,6 +169,16 @@ impl PeerFlags {
         }
 
         AsnLength::Bits32
+    }
+
+    /// Returns true if the peer streams Adj-RIB-out BMP messages
+    pub fn is_adj_rib_out(&self) -> bool {
+        self.contains(PeerFlags::IS_ADJ_RIB_OUT)
+    }
+
+    /// Returns true if the peer streams post-policy BMP messages
+    pub fn is_post_policy(&self) -> bool {
+        self.contains(PeerFlags::IS_POST_POLICY)
     }
 }
 
