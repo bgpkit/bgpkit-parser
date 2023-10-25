@@ -25,4 +25,4 @@ jobs:
       run: cargo fmt --check
 
     - name: Run cargo-readme check
-      run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md > /dev/null
+      run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md
