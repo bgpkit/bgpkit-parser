@@ -11,9 +11,7 @@ env:
 
 jobs:
   build:
-
     runs-on: self-hosted
-
     steps:
     - uses: actions/checkout@v2
 
@@ -25,3 +23,6 @@ jobs:
 
     - name: Run format check
       run: cargo fmt --check
+
+    - name: Run cargo-readme check
+      run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md > /dev/null
