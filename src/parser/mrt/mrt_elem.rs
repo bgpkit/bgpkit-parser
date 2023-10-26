@@ -29,7 +29,7 @@ macro_rules! get_attr_value {
 
 #[allow(clippy::type_complexity)]
 fn get_relevant_attributes(
-    attributes: Vec<Attribute>,
+    attributes: Attributes,
 ) -> (
     Option<AsPath>,
     Option<AsPath>,
@@ -38,11 +38,11 @@ fn get_relevant_attributes(
     Option<u32>,
     Option<u32>,
     Option<Vec<MetaCommunity>>,
-    Option<AtomicAggregate>,
-    Option<(Asn, IpAddr)>,
+    bool,
+    Option<(Asn, BgpIdentifier)>,
     Option<Nlri>,
     Option<Nlri>,
-    Option<u32>,
+    Option<Asn>,
     Option<Vec<AttrRaw>>,
     Option<Vec<AttrRaw>>,
 ) {
@@ -52,7 +52,7 @@ fn get_relevant_attributes(
     let mut next_hop = None;
     let mut local_pref = Some(0);
     let mut med = Some(0);
-    let mut atomic = Some(AtomicAggregate::NAG);
+    let mut atomic = false;
     let mut aggregator = None;
     let mut announced = None;
     let mut withdrawn = None;
@@ -63,30 +63,33 @@ fn get_relevant_attributes(
     let mut communities_vec: Vec<MetaCommunity> = vec![];
 
     for attr in attributes {
-        match attr.value {
+        match attr {
             AttributeValue::Origin(v) => origin = Some(v),
-            AttributeValue::AsPath(v) => as_path = Some(v),
-            AttributeValue::As4Path(v) => as4_path = Some(v),
+            AttributeValue::AsPath {
+                path,
+                is_as4: false,
+            } => as_path = Some(path),
+            AttributeValue::AsPath { path, is_as4: true } => as4_path = Some(path),
             AttributeValue::NextHop(v) => next_hop = Some(v),
             AttributeValue::MultiExitDiscriminator(v) => med = Some(v),
             AttributeValue::LocalPreference(v) => local_pref = Some(v),
-            AttributeValue::AtomicAggregate(v) => atomic = Some(v),
+            AttributeValue::AtomicAggregate => atomic = true,
             AttributeValue::Communities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::Community)
+                    .map(MetaCommunity::Plain)
                     .collect::<Vec<MetaCommunity>>(),
             ),
             AttributeValue::ExtendedCommunities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::ExtendedCommunity)
+                    .map(MetaCommunity::Extended)
                     .collect::<Vec<MetaCommunity>>(),
             ),
             AttributeValue::LargeCommunities(v) => communities_vec.extend(
                 v.into_iter()
-                    .map(MetaCommunity::LargeCommunity)
+                    .map(MetaCommunity::Large)
                     .collect::<Vec<MetaCommunity>>(),
             ),
-            AttributeValue::Aggregator(v, v2) => aggregator = Some((v, v2)),
+            AttributeValue::Aggregator { asn, id, .. } => aggregator = Some((asn, id)),
             AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),
@@ -154,7 +157,7 @@ impl Elementor {
             BgpMessage::Update(msg) => {
                 Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
             }
-            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive(_) => {
+            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => {
                 vec![]
             }
         }
@@ -193,10 +196,9 @@ impl Elementor {
             (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap()),
         };
 
-        let origin_asns = match &path {
-            None => None,
-            Some(p) => p.get_origin(),
-        };
+        let origin_asns = path
+            .as_ref()
+            .map(|as_path| as_path.iter_origins().collect());
 
         elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
             timestamp,
@@ -255,7 +257,7 @@ impl Elementor {
             local_pref: None,
             med: None,
             communities: None,
-            atomic: None,
+            atomic: false,
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer,
@@ -276,7 +278,7 @@ impl Elementor {
                 local_pref: None,
                 med: None,
                 communities: None,
-                atomic: None,
+                atomic: false,
                 aggr_asn: None,
                 aggr_ip: None,
                 only_to_customer,
@@ -317,10 +319,9 @@ impl Elementor {
                     deprecated,
                 ) = get_relevant_attributes(msg.attributes);
 
-                let origin_asns = match &as_path {
-                    None => None,
-                    Some(p) => p.get_origin(),
-                };
+                let origin_asns = as_path
+                    .as_ref()
+                    .map(|as_path| as_path.iter_origins().collect());
 
                 elems.push(BgpElem {
                     timestamp,
@@ -349,7 +350,7 @@ impl Elementor {
                     TableDumpV2Message::PeerIndexTable(p) => {
                         self.peer_table = Some(p);
                     }
-                    TableDumpV2Message::RibAfiEntries(t) => {
+                    TableDumpV2Message::RibAfi(t) => {
                         let prefix = t.prefix;
                         for e in t.rib_entries {
                             let pid = e.peer_index;
@@ -407,10 +408,9 @@ impl Elementor {
                                 Some(v) => Some(v),
                             };
 
-                            let origin_asns = match &path {
-                                None => None,
-                                Some(p) => p.get_origin(),
-                            };
+                            let origin_asns = path
+                                .as_ref()
+                                .map(|as_path| as_path.iter_origins().collect());
 
                             elems.push(BgpElem {
                                 timestamp,
@@ -434,7 +434,7 @@ impl Elementor {
                             });
                         }
                     }
-                    TableDumpV2Message::RibGenericEntries(_t) => {
+                    TableDumpV2Message::RibGeneric(_t) => {
                         warn!(
                             "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
                         );
@@ -442,12 +442,8 @@ impl Elementor {
                 }
             }
             MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4Mp::Bgp4MpStateChange(_v) | Bgp4Mp::Bgp4MpStateChangeAs4(_v) => {}
-
-                Bgp4Mp::Bgp4MpMessage(v)
-                | Bgp4Mp::Bgp4MpMessageLocal(v)
-                | Bgp4Mp::Bgp4MpMessageAs4(v)
-                | Bgp4Mp::Bgp4MpMessageAs4Local(v) => {
+                Bgp4Mp::StateChange(_) => {}
+                Bgp4Mp::Message(v) => {
                     elems.extend(Elementor::bgp_to_elems(
                         v.bgp_message,
                         timestamp,

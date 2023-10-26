@@ -17,12 +17,9 @@ pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, Par
             COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
             COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
             value => {
-                let asn = Asn {
-                    asn: ((value >> 16) & 0xffff),
-                    len: AsnLength::Bits16,
-                };
-                let value = (value & 0xffff) as u16;
-                Community::Custom(asn, value)
+                let asn = ((value >> 16) & 0xffff) as u16;
+                let data = (value & 0xffff) as u16;
+                Community::Custom(Asn::new_16bit(asn), data)
             }
         });
     }

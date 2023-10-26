@@ -1,16 +1,19 @@
 use crate::models::Asn;
-use serde::Serialize;
-use std::fmt::Formatter;
+use num_enum::{FromPrimitive, IntoPrimitive};
+use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum MetaCommunity {
-    Community(Community),
-    ExtendedCommunity(ExtendedCommunity),
-    LargeCommunity(LargeCommunity),
+    Plain(Community),
+    Extended(ExtendedCommunity),
+    Large(LargeCommunity),
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Community {
     NoExport,
     NoAdvertise,
@@ -25,35 +28,40 @@ pub enum Community {
 /// Large community is displayed as `lg:GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`, where `lg`
 /// is a prefix for large community.
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LargeCommunity {
-    pub global_administrator: u32,
+    pub global_admin: u32,
     pub local_data: [u32; 2],
 }
 
 impl LargeCommunity {
-    pub fn new(global_administrator: u32, local_data: [u32; 2]) -> LargeCommunity {
+    pub fn new(global_admin: u32, local_data: [u32; 2]) -> LargeCommunity {
         LargeCommunity {
-            global_administrator,
+            global_admin,
             local_data,
         }
     }
 }
 
 /// Type definitions of extended communities
-#[derive(Debug, Primitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
 pub enum ExtendedCommunityType {
     // transitive types
-    TransitiveTwoOctetAsSpecific = 0x00,
-    TransitiveIpv4AddressSpecific = 0x01,
-    TransitiveFourOctetAsSpecific = 0x02,
+    TransitiveTwoOctetAs = 0x00,
+    TransitiveIpv4Addr = 0x01,
+    TransitiveFourOctetAs = 0x02,
     TransitiveOpaque = 0x03,
 
     // non-transitive types
-    NonTransitiveTwoOctetAsSpecific = 0x40,
-    NonTransitiveIpv4AddressSpecific = 0x41,
-    NonTransitiveFourOctetAsSpecific = 0x42,
+    NonTransitiveTwoOctetAs = 0x40,
+    NonTransitiveIpv4Addr = 0x41,
+    NonTransitiveFourOctetAs = 0x42,
     NonTransitiveOpaque = 0x43,
     // the rest are either draft or experimental
+    #[num_enum(catch_all)]
+    Unknown(u8),
 }
 
 /// Extended Communities.
@@ -94,75 +102,95 @@ pub enum ExtendedCommunityType {
 /// - `ecop:` stands for `Extended Community Opaque`
 /// - `ecraw:` stands for `Extended Community Raw`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExtendedCommunity {
-    TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific),
-    TransitiveIpv4AddressSpecific(Ipv4AddressSpecific),
-    TransitiveFourOctetAsSpecific(FourOctetAsSpecific),
-    TransitiveOpaque(Opaque),
-    NonTransitiveTwoOctetAsSpecific(TwoOctetAsSpecific),
-    NonTransitiveIpv4AddressSpecific(Ipv4AddressSpecific),
-    NonTransitiveFourOctetAsSpecific(FourOctetAsSpecific),
-    NonTransitiveOpaque(Opaque),
-    Ipv6AddressSpecific(Ipv6AddressSpecific),
+    TransitiveTwoOctetAs(TwoOctetAsExtCommunity),
+    TransitiveIpv4Addr(Ipv4AddrExtCommunity),
+    TransitiveFourOctetAs(FourOctetAsExtCommunity),
+    TransitiveOpaque(OpaqueExtCommunity),
+    NonTransitiveTwoOctetAs(TwoOctetAsExtCommunity),
+    NonTransitiveIpv4Addr(Ipv4AddrExtCommunity),
+    NonTransitiveFourOctetAs(FourOctetAsExtCommunity),
+    NonTransitiveOpaque(OpaqueExtCommunity),
+    Ipv6Addr(Ipv6AddrExtCommunity),
     Raw([u8; 8]),
 }
 
+impl ExtendedCommunity {
+    pub const fn community_type(&self) -> ExtendedCommunityType {
+        use ExtendedCommunityType::*;
+        match self {
+            ExtendedCommunity::TransitiveTwoOctetAs(_) => TransitiveTwoOctetAs,
+            ExtendedCommunity::TransitiveIpv4Addr(_) => TransitiveIpv4Addr,
+            ExtendedCommunity::TransitiveFourOctetAs(_) => TransitiveFourOctetAs,
+            ExtendedCommunity::TransitiveOpaque(_) => TransitiveOpaque,
+            ExtendedCommunity::NonTransitiveTwoOctetAs(_) => NonTransitiveTwoOctetAs,
+            ExtendedCommunity::NonTransitiveIpv4Addr(_) => NonTransitiveIpv4Addr,
+            ExtendedCommunity::NonTransitiveFourOctetAs(_) => NonTransitiveFourOctetAs,
+            ExtendedCommunity::NonTransitiveOpaque(_) => NonTransitiveOpaque,
+            ExtendedCommunity::Ipv6Addr(community) => community.community_type,
+            ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub struct Ipv6AddressSpecific {
-    pub ec_type: u8,
-    pub ec_subtype: u8,
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Ipv6AddrExtCommunity {
+    pub community_type: ExtendedCommunityType,
+    pub subtype: u8,
     // 16 octets
-    pub global_administrator: Ipv6Addr,
+    pub global_admin: Ipv6Addr,
     // 2 octets
-    pub local_administrator: [u8; 2],
+    pub local_admin: [u8; 2],
 }
 
 /// Two-Octet AS Specific Extended Community
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.1>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub struct TwoOctetAsSpecific {
-    pub ec_type: u8,
-    pub ec_subtype: u8,
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TwoOctetAsExtCommunity {
+    pub subtype: u8,
     // 2 octet
-    pub global_administrator: Asn,
+    pub global_admin: Asn,
     // 4 octet
-    pub local_administrator: [u8; 4],
+    pub local_admin: [u8; 4],
 }
 
 /// Four-Octet AS Specific Extended Community
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc5668#section-2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub struct FourOctetAsSpecific {
-    pub ec_type: u8,
-    pub ec_subtype: u8,
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FourOctetAsExtCommunity {
+    pub subtype: u8,
     // 4 octet
-    pub global_administrator: Asn,
+    pub global_admin: Asn,
     // 2 octet
-    pub local_administrator: [u8; 2],
+    pub local_admin: [u8; 2],
 }
 
 /// IPv4 Address Specific Extended Community
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub struct Ipv4AddressSpecific {
-    pub ec_type: u8,
-    pub ec_subtype: u8,
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Ipv4AddrExtCommunity {
+    pub subtype: u8,
     // 4 octet
-    pub global_administrator: Ipv4Addr,
+    pub global_admin: Ipv4Addr,
     // 2 octet
-    pub local_administrator: [u8; 2],
+    pub local_admin: [u8; 2],
 }
 
 /// Opaque Extended Community
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.3>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub struct Opaque {
-    pub ec_type: u8,
-    pub ec_subtype: u8,
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct OpaqueExtCommunity {
+    pub subtype: u8,
     // 6 octet
     pub value: [u8; 6],
 }
@@ -171,147 +199,108 @@ pub struct Opaque {
 // DISPLAY //
 /////////////
 
-fn bytes_to_string(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|x| format!("{:02X}", x))
-        .collect::<Vec<String>>()
-        .join("")
-}
+struct ToHexString<'a>(&'a [u8]);
 
-impl std::fmt::Display for Community {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Community::NoExport => {
-                    "no-export".to_string()
-                }
-                Community::NoAdvertise => {
-                    "no-advertise".to_string()
-                }
-                Community::NoExportSubConfed => {
-                    "no-export-sub-confed".to_string()
-                }
-                Community::Custom(asn, value) => {
-                    format!("{}:{}", asn, value)
-                }
-            }
-        )
+impl Display for ToHexString<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(f, "{:02X}", byte)?;
+        }
+        Ok(())
     }
 }
 
-impl std::fmt::Display for LargeCommunity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "lg:{}:{}:{}",
-            self.global_administrator, self.local_data[0], self.local_data[1]
-        )
+impl Display for Community {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Community::NoExport => write!(f, "no-export"),
+            Community::NoAdvertise => write!(f, "no-advertise"),
+            Community::NoExportSubConfed => write!(f, "no-export-sub-confed"),
+            Community::Custom(asn, value) => write!(f, "{}:{}", asn, value),
+        }
     }
 }
 
-impl std::fmt::Display for ExtendedCommunity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                ExtendedCommunity::TransitiveTwoOctetAsSpecific(ec)
-                | ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(ec) => {
-                    format!(
-                        "ecas2:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveIpv4AddressSpecific(ec)
-                | ExtendedCommunity::NonTransitiveIpv4AddressSpecific(ec) => {
-                    format!(
-                        "ecv4:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveFourOctetAsSpecific(ec)
-                | ExtendedCommunity::NonTransitiveFourOctetAsSpecific(ec) => {
-                    format!(
-                        "ecas4:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::TransitiveOpaque(ec)
-                | ExtendedCommunity::NonTransitiveOpaque(ec) => {
-                    format!(
-                        "ecop:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        bytes_to_string(&ec.value)
-                    )
-                }
-                ExtendedCommunity::Ipv6AddressSpecific(ec) => {
-                    format!(
-                        "ecv6:{}:{}:{}:{}",
-                        ec.ec_type,
-                        ec.ec_subtype,
-                        ec.global_administrator,
-                        bytes_to_string(&ec.local_administrator)
-                    )
-                }
-                ExtendedCommunity::Raw(ec) => {
-                    format!("ecraw:{}", bytes_to_string(ec))
-                }
-            }
-        )
-    }
-}
-
-impl std::fmt::Display for MetaCommunity {
+impl Display for LargeCommunity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}",
-            match self {
-                MetaCommunity::Community(c) => {
-                    c.to_string()
-                }
-                MetaCommunity::ExtendedCommunity(c) => {
-                    c.to_string()
-                }
-                MetaCommunity::LargeCommunity(c) => {
-                    c.to_string()
-                }
-            }
+            "lg:{}:{}:{}",
+            self.global_admin, self.local_data[0], self.local_data[1]
         )
     }
 }
 
-///////////////
-// SERIALIZE //
-///////////////
-
-macro_rules! impl_serialize {
-    ($a:ident) => {
-        impl Serialize for $a {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                serializer.serialize_str(self.to_string().as_str())
+impl Display for ExtendedCommunity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ec_type = u8::from(self.community_type());
+        match self {
+            ExtendedCommunity::TransitiveTwoOctetAs(ec)
+            | ExtendedCommunity::NonTransitiveTwoOctetAs(ec) => {
+                write!(
+                    f,
+                    "ecas2:{}:{}:{}:{}",
+                    ec_type,
+                    ec.subtype,
+                    ec.global_admin,
+                    ToHexString(&ec.local_admin)
+                )
+            }
+            ExtendedCommunity::TransitiveIpv4Addr(ec)
+            | ExtendedCommunity::NonTransitiveIpv4Addr(ec) => {
+                write!(
+                    f,
+                    "ecv4:{}:{}:{}:{}",
+                    ec_type,
+                    ec.subtype,
+                    ec.global_admin,
+                    ToHexString(&ec.local_admin)
+                )
+            }
+            ExtendedCommunity::TransitiveFourOctetAs(ec)
+            | ExtendedCommunity::NonTransitiveFourOctetAs(ec) => {
+                write!(
+                    f,
+                    "ecas4:{}:{}:{}:{}",
+                    ec_type,
+                    ec.subtype,
+                    ec.global_admin,
+                    ToHexString(&ec.local_admin)
+                )
+            }
+            ExtendedCommunity::TransitiveOpaque(ec)
+            | ExtendedCommunity::NonTransitiveOpaque(ec) => {
+                write!(
+                    f,
+                    "ecop:{}:{}:{}",
+                    ec_type,
+                    ec.subtype,
+                    ToHexString(&ec.value)
+                )
+            }
+            ExtendedCommunity::Ipv6Addr(ec) => {
+                write!(
+                    f,
+                    "ecv6:{}:{}:{}:{}",
+                    ec_type,
+                    ec.subtype,
+                    ec.global_admin,
+                    ToHexString(&ec.local_admin)
+                )
+            }
+            ExtendedCommunity::Raw(ec) => {
+                write!(f, "ecraw:{}", ToHexString(ec))
             }
         }
-    };
+    }
 }
 
-impl_serialize!(Community);
-impl_serialize!(ExtendedCommunity);
-impl_serialize!(LargeCommunity);
-impl_serialize!(MetaCommunity);
+impl Display for MetaCommunity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetaCommunity::Plain(c) => write!(f, "{}", c),
+            MetaCommunity::Extended(c) => write!(f, "{}", c),
+            MetaCommunity::Large(c) => write!(f, "{}", c),
+        }
+    }
+}

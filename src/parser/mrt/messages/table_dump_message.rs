@@ -45,8 +45,6 @@ pub fn parse_table_dump_message(
     //   - determine address family
     //   - create data slice reader cursor
 
-    // for TABLE_DUMP type, the AS number length is always 2-byte.
-    let asn_len = AsnLength::Bits16;
     // determine address family based on the sub_type value defined in the MRT [CommonHeader].
     let afi = match sub_type {
         1 => Afi::Ipv4,
@@ -82,7 +80,7 @@ pub fn parse_table_dump_message(
     let time = data.read_u32()? as u64;
 
     let peer_address: IpAddr = data.read_address(&afi)?;
-    let peer_asn = data.read_asn(&asn_len)?;
+    let peer_asn = Asn::new_16bit(data.read_u16()?);
 
     let attribute_length = data.read_u16()? as usize;
 
@@ -93,7 +91,10 @@ pub fn parse_table_dump_message(
 
     data.has_n_remaining(attribute_length)?;
     let attr_data_slice = data.split_to(attribute_length);
-    let attributes = parse_attributes(attr_data_slice, &asn_len, false, None, None, None)?;
+
+    // for TABLE_DUMP type, the AS number length is always 2-byte.
+    let attributes =
+        attr_parser.parse_attributes(attr_data_slice, &AsnLength::Bits16, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,

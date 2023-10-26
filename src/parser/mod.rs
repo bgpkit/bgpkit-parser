@@ -10,12 +10,14 @@ pub mod bmp;
 pub mod filter;
 pub mod iters;
 pub mod mrt;
+
+#[cfg(feature = "rislive")]
 pub mod rislive;
 
 pub(crate) use self::utils::*;
+pub(crate) use bgp::attributes::AttributeParser;
 
 use crate::models::MrtRecord;
-use filter::Filter;
 pub use mrt::mrt_elem::Elementor;
 use oneio::{get_cache_reader, get_reader};
 
@@ -24,6 +26,8 @@ pub use bmp::{parse_bmp_msg, parse_openbmp_header, parse_openbmp_msg};
 pub use filter::*;
 pub use iters::*;
 pub use mrt::*;
+
+#[cfg(feature = "rislive")]
 pub use rislive::parse_ris_live_message;
 
 pub struct BgpkitParser<R> {

@@ -21,7 +21,7 @@ use bytes::Bytes;
 /// ```
 pub fn parse_only_to_customer(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     let remote_asn = input.read_u32()?;
-    Ok(AttributeValue::OnlyToCustomer(remote_asn))
+    Ok(AttributeValue::OnlyToCustomer(Asn::new_32bit(remote_asn)))
 }
 
 pub fn encode_only_to_customer(remote_asn: u32) -> Bytes {
@@ -34,9 +34,10 @@ mod tests {
 
     #[test]
     fn test_parse_otc() {
-        if let Ok(AttributeValue::OnlyToCustomer(123)) =
+        if let Ok(AttributeValue::OnlyToCustomer(asn)) =
             parse_only_to_customer(Bytes::from(vec![0, 0, 0, 123]))
         {
+            assert_eq!(asn, 123);
         } else {
             panic!("parsing error")
         }

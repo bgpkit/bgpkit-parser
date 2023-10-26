@@ -4,7 +4,10 @@ pub mod bgp4mp;
 pub mod tabledump;
 
 pub use bgp4mp::*;
-use serde::Serialize;
+use chrono::{DateTime, TimeZone, Utc};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::io;
+use std::io::Write;
 pub use tabledump::*;
 
 /// MrtRecord is a wrapper struct that contains a header and a message.
@@ -22,7 +25,8 @@ pub use tabledump::*;
 ///
 /// See [CommonHeader] for the content in header, and [MrtMessage] for the
 /// message format.
-#[derive(Debug, Serialize, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MrtRecord {
     pub common_header: CommonHeader,
     pub message: MrtMessage,
@@ -68,7 +72,8 @@ pub struct MrtRecord {
 ///   `BGP4MP_ET`
 ///
 /// [header-link]: https://datatracker.ietf.org/doc/html/rfc6396#section-2
-#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommonHeader {
     pub timestamp: u32,
     pub microsecond_timestamp: Option<u32>,
@@ -77,7 +82,35 @@ pub struct CommonHeader {
     pub length: u32,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, Clone)]
+impl CommonHeader {
+    /// Writes the binary representation of the header to the given writer.
+    pub fn write_header<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.timestamp.to_be_bytes())?;
+        writer.write_all(&(self.entry_type as u16).to_be_bytes())?;
+        writer.write_all(&self.entry_subtype.to_be_bytes())?;
+
+        match self.microsecond_timestamp {
+            None => writer.write_all(&self.length.to_be_bytes()),
+            Some(microseconds) => {
+                // When the microsecond timestamp is present, the length must be adjusted to account
+                // for the stace used by the extra timestamp data.
+                writer.write_all(&(self.length + 4).to_be_bytes())?;
+                writer.write_all(&microseconds.to_be_bytes())
+            }
+        }
+    }
+
+    pub fn get_datetime(&self) -> DateTime<Utc> {
+        let nanos = self
+            .microsecond_timestamp
+            .map(|x| 1000 * x)
+            .unwrap_or_default();
+        Utc.timestamp_nanos(1_000_000_000 * (self.timestamp as i64) + nanos as i64)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),
     TableDumpV2Message(TableDumpV2Message),
@@ -106,7 +139,8 @@ pub enum MrtMessage {
 ///     48   OSPFv3
 ///     49   OSPFv3_ET
 /// ```
-#[derive(Debug, Primitive, Copy, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(non_camel_case_types)]
 #[repr(u16)]
 pub enum EntryType {

@@ -114,7 +114,7 @@ mod tests {
         }
 
         let mut combined = BytesMut::from(ipv6.to_vec().as_slice());
-        combined.extend_from_slice(&ipv6_2.to_vec());
+        combined.extend_from_slice(&ipv6_2);
 
         if let Some(NextHopAddress::Ipv6LinkLocal(n, m)) =
             parse_mp_next_hop(combined.into()).unwrap()

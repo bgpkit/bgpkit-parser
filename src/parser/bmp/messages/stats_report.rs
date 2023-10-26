@@ -8,6 +8,9 @@ pub struct StatsReport {
     pub counters: Vec<StatCounter>,
 }
 
+/// Statistics count values
+///
+/// Types of BMP statistics are listed here: <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types>
 #[derive(Debug)]
 pub struct StatCounter {
     pub stat_type: u16,

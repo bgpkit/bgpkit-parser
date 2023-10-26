@@ -4,16 +4,11 @@ use crate::ParserError;
 use bytes::{Buf, Bytes};
 use std::net::IpAddr;
 
-pub fn parse_clusters(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
-    // FIXME: in https://tools.ietf.org/html/rfc4456, the CLUSTER_LIST is a set of CLUSTER_ID each represented by a 4-byte number
-    let mut clusters = Vec::new();
+/// <https://tools.ietf.org/html/rfc4456>
+pub fn parse_clusters(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+    let mut clusters = Vec::with_capacity(input.remaining() / 4);
     while input.remaining() > 0 {
-        let afi = match afi {
-            None => &Afi::Ipv4,
-            Some(a) => a,
-        };
-        let addr = input.read_address(afi)?;
-        clusters.push(addr);
+        clusters.push(input.read_u32()?);
     }
     Ok(AttributeValue::Clusters(clusters))
 }
@@ -32,21 +27,15 @@ pub fn encode_clusters(clusters: &Vec<IpAddr>) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
-    use std::str::FromStr;
 
     #[test]
     fn test_parse_clusters() {
-        if let Ok(AttributeValue::Clusters(n)) = parse_clusters(
-            Bytes::from(vec![
-                0xC0, 0x00, 0x02, 0x01, // 192.0.2.1
-                0xC0, 0x00, 0x02, 0x02, // 192.0.2.2
-            ]),
-            &None,
-        ) {
+        if let Ok(AttributeValue::Clusters(n)) = parse_clusters(Bytes::from(vec![
+            0xC0, 0x00, 0x02, 0x01, 0xC0, 0x00, 0x02, 0x02,
+        ])) {
             assert_eq!(n.len(), 2);
-            assert_eq!(n[0], Ipv4Addr::from_str("192.0.2.1").unwrap());
-            assert_eq!(n[1], Ipv4Addr::from_str("192.0.2.2").unwrap());
+            assert_eq!(n[0], 0xC0000201);
+            assert_eq!(n[1], 0xC0000202);
         } else {
             panic!()
         }

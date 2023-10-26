@@ -1,6 +1,8 @@
 /*!
 error module defines the error types used in bgpkit-parser.
 */
+use crate::models::{Afi, Bgp4MpType, BgpState, EntryType, Safi, TableDumpV2Type};
+use num_enum::TryFromPrimitiveError;
 use oneio::OneIoError;
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;
@@ -37,20 +39,19 @@ impl Error for ParserErrorWithBytes {}
 
 /// implement Display trait for Error which satistifies the std::error::Error
 /// trait's requirement (must implement Display and Debug traits, Debug already derived)
-impl fmt::Display for ParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let message = match self {
-            ParserError::IoError(e) => e.to_string(),
-            ParserError::EofError(e) => e.to_string(),
-            ParserError::ParseError(s) => s.to_owned(),
-            ParserError::TruncatedMsg(s) => s.to_owned(),
-            ParserError::Unsupported(s) => s.to_owned(),
-            ParserError::EofExpected => "reach end of file".to_string(),
-            ParserError::OneIoError(e) => e.to_string(),
-            ParserError::FilterError(e) => e.to_owned(),
-            ParserError::IoNotEnoughBytes() => "Not enough bytes to read".to_string(),
-        };
-        write!(f, "Error: {}", message)
+impl Display for ParserError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ParserError::IoError(e) => write!(f, "Error: {}", e),
+            ParserError::EofError(e) => write!(f, "Error: {}", e),
+            ParserError::ParseError(s) => write!(f, "Error: {}", s),
+            ParserError::TruncatedMsg(s) => write!(f, "Error: {}", s),
+            ParserError::Unsupported(s) => write!(f, "Error: {}", s),
+            ParserError::EofExpected => write!(f, "Error: reach end of file"),
+            ParserError::OneIoError(e) => write!(f, "Error: {}", e),
+            ParserError::FilterError(e) => write!(f, "Error: {}", e),
+            ParserError::IoNotEnoughBytes() => write!(f, "Error: Not enough bytes to read"),
+        }
     }
 }
 
@@ -81,5 +82,41 @@ impl From<io::Error> for ParserError {
             ErrorKind::UnexpectedEof => ParserError::EofError(io_error),
             _ => ParserError::IoError(io_error),
         }
+    }
+}
+
+impl From<TryFromPrimitiveError<Bgp4MpType>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Bgp4MpType>) -> Self {
+        ParserError::ParseError(format!("cannot parse bgp4mp subtype: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<BgpState>> for ParserError {
+    fn from(value: TryFromPrimitiveError<BgpState>) -> Self {
+        ParserError::ParseError(format!("cannot parse bgp4mp state: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<TableDumpV2Type>> for ParserError {
+    fn from(value: TryFromPrimitiveError<TableDumpV2Type>) -> Self {
+        ParserError::ParseError(format!("cannot parse table dump v2 type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<EntryType>> for ParserError {
+    fn from(value: TryFromPrimitiveError<EntryType>) -> Self {
+        ParserError::ParseError(format!("cannot parse entry type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<Afi>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Afi>) -> Self {
+        ParserError::ParseError(format!("Unknown AFI type: {}", value.number))
+    }
+}
+
+impl From<TryFromPrimitiveError<Safi>> for ParserError {
+    fn from(value: TryFromPrimitiveError<Safi>) -> Self {
+        ParserError::ParseError(format!("Unknown SAFI type: {}", value.number))
     }
 }

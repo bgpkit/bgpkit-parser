@@ -3,7 +3,8 @@ use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
-use num_traits::FromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::convert::TryFrom;
 
 #[derive(Debug)]
 pub struct RouteMirroring {
@@ -22,7 +23,8 @@ pub enum RouteMirroringValue {
     Information(RouteMirroringInfo),
 }
 
-#[derive(Debug, Primitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[repr(u16)]
 pub enum RouteMirroringInfo {
     ErroredPdu = 0,
     MessageLost = 1,
@@ -46,7 +48,7 @@ pub fn parse_route_mirroring(
             }
             1 => {
                 let info_len = data.read_u16()?;
-                let value = RouteMirroringInfo::from_u16(data.read_u16()?).unwrap();
+                let value = RouteMirroringInfo::try_from(data.read_u16()?)?;
                 tlvs.push(RouteMirroringTlv {
                     info_len,
                     value: RouteMirroringValue::Information(value),

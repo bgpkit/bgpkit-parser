@@ -2,12 +2,12 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::Bytes;
-use num_traits::FromPrimitive;
+use std::convert::TryFrom;
 
 pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    match Origin::from_u8(input.read_u8()?) {
-        Some(v) => Ok(AttributeValue::Origin(v)),
-        None => Err(ParserError::ParseError(
+    match Origin::try_from(input.read_u8()?) {
+        Ok(v) => Ok(AttributeValue::Origin(v)),
+        Err(_) => Err(ParserError::ParseError(
             "Failed to parse attribute type: origin".to_string(),
         )),
     }

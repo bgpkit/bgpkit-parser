@@ -43,10 +43,10 @@ mod tests {
             parse_large_communities(Bytes::from(data))
         {
             assert_eq!(communities.len(), 2);
-            assert_eq!(communities[0].global_administrator, 1);
+            assert_eq!(communities[0].global_admin, 1);
             assert_eq!(communities[0].local_data[0], 2);
             assert_eq!(communities[0].local_data[1], 3);
-            assert_eq!(communities[1].global_administrator, 4);
+            assert_eq!(communities[1].global_admin, 4);
             assert_eq!(communities[1].local_data[0], 5);
             assert_eq!(communities[1].local_data[1], 6);
         } else {
