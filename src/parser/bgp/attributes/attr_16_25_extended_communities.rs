@@ -140,44 +140,44 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
     let mut bytes = BytesMut::new();
     for community in communities {
         match community {
-            ExtendedCommunity::TransitiveTwoOctetAsSpecific(two_octet)
-            | ExtendedCommunity::NonTransitiveTwoOctetAsSpecific(two_octet) => {
-                bytes.put_u8(two_octet.ec_type);
-                bytes.put_u8(two_octet.ec_subtype);
-                bytes.put_u16(two_octet.global_administrator.asn as u16);
-                bytes.put_slice(two_octet.local_administrator.as_slice());
+            ExtendedCommunity::TransitiveTwoOctetAs(two_octet)
+            | ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet) => {
+                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(two_octet.subtype);
+                bytes.put_u16(two_octet.global_admin.into());
+                bytes.put_slice(two_octet.local_admin.as_slice());
             }
-            ExtendedCommunity::TransitiveIpv4AddressSpecific(ipv4)
-            | ExtendedCommunity::NonTransitiveIpv4AddressSpecific(ipv4) => {
-                bytes.put_u8(ipv4.ec_type);
-                bytes.put_u8(ipv4.ec_subtype);
-                bytes.put_u32(ipv4.global_administrator.into());
-                bytes.put_slice(ipv4.local_administrator.as_slice());
+            ExtendedCommunity::TransitiveIpv4Addr(ipv4)
+            | ExtendedCommunity::NonTransitiveIpv4Addr(ipv4) => {
+                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ipv4.subtype);
+                bytes.put_u32(ipv4.global_admin.into());
+                bytes.put_slice(ipv4.local_admin.as_slice());
             }
 
-            ExtendedCommunity::TransitiveFourOctetAsSpecific(four_octet)
-            | ExtendedCommunity::NonTransitiveFourOctetAsSpecific(four_octet) => {
-                bytes.put_u8(four_octet.ec_type);
-                bytes.put_u8(four_octet.ec_subtype);
-                bytes.put_u32(four_octet.global_administrator.asn);
-                bytes.put_slice(four_octet.local_administrator.as_slice());
+            ExtendedCommunity::TransitiveFourOctetAs(four_octet)
+            | ExtendedCommunity::NonTransitiveFourOctetAs(four_octet) => {
+                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(four_octet.subtype);
+                bytes.put_u32(four_octet.global_admin.into());
+                bytes.put_slice(four_octet.local_admin.as_slice());
             }
 
             ExtendedCommunity::TransitiveOpaque(opaque)
             | ExtendedCommunity::NonTransitiveOpaque(opaque) => {
-                bytes.put_u8(opaque.ec_type);
-                bytes.put_u8(opaque.ec_subtype);
+                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(opaque.subtype);
                 bytes.put_slice(&opaque.value);
             }
 
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
-            ExtendedCommunity::Ipv6AddressSpecific(ipv6) => {
-                bytes.put_u8(ipv6.ec_type);
-                bytes.put_u8(ipv6.ec_subtype);
-                bytes.put_slice(&ipv6.global_administrator.octets());
-                bytes.put_slice(ipv6.local_administrator.as_slice());
+            ExtendedCommunity::Ipv6Addr(ipv6) => {
+                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ipv6.subtype);
+                bytes.put_slice(&ipv6.global_admin.octets());
+                bytes.put_slice(ipv6.local_admin.as_slice());
             }
         }
     }

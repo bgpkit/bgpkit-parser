@@ -15,7 +15,6 @@ pub mod mrt;
 pub mod rislive;
 
 pub(crate) use self::utils::*;
-pub(crate) use bgp::attributes::AttributeParser;
 
 use crate::models::MrtRecord;
 pub use mrt::mrt_elem::Elementor;

@@ -17,7 +17,7 @@ pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, Parse
 pub fn encode_large_communities(communities: &[LargeCommunity]) -> Bytes {
     let mut data = BytesMut::new();
     for community in communities {
-        data.put_u32(community.global_administrator);
+        data.put_u32(community.global_admin);
         data.put_u32(community.local_data[0]);
         data.put_u32(community.local_data[1]);
     }

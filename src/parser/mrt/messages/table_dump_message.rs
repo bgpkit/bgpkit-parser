@@ -94,7 +94,7 @@ pub fn parse_table_dump_message(
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
     let attributes =
-        attr_parser.parse_attributes(attr_data_slice, &AsnLength::Bits16, None, None, None)?;
+        parse_attributes(attr_data_slice, &AsnLength::Bits16, false, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,
@@ -135,11 +135,11 @@ impl TableDumpMessage {
                 bytes.put_u128(a.into());
             }
         }
-        bytes.put_u16(self.peer_asn.asn as u16);
+        bytes.put_u16(self.peer_asn.into());
 
         // encode attributes
         let mut attr_bytes = BytesMut::new();
-        for attr in &self.attributes {
+        for attr in &self.attributes.inner {
             // add_path always false for v1 table dump
             // asn_len always 16 bites
             attr_bytes.extend(attr.encode(false, AsnLength::Bits16));

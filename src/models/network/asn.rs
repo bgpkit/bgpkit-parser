@@ -1,8 +1,6 @@
+use bytes::{BufMut, Bytes, BytesMut};
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
-use bytes::{BufMut, Bytes, BytesMut};
-use serde::{Deserialize, Serialize, Serializer};
-use std::fmt::{Display, Formatter};
 
 /// AS number length: 16 or 32 bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -134,6 +132,20 @@ impl From<&Asn> for u32 {
     }
 }
 
+impl From<Asn> for u16 {
+    #[inline]
+    fn from(value: Asn) -> Self {
+        value.into()
+    }
+}
+
+impl From<&Asn> for u16 {
+    #[inline]
+    fn from(value: &Asn) -> Self {
+        value.into()
+    }
+}
+
 impl Display for Asn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.asn)
@@ -163,10 +175,8 @@ impl FromStr for Asn {
 impl Asn {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
-        match self.len {
-            AsnLength::Bits16 => bytes.put_u16(self.asn as u16),
-            AsnLength::Bits32 => bytes.put_u32(self.asn),
-        }
+        // TODO: handle 16-bit ASN case
+        bytes.put_u32(self.asn);
         bytes.freeze()
     }
 }

@@ -36,7 +36,7 @@ pub fn encode_regular_communities(communities: &Vec<Community>) -> Bytes {
             Community::NoAdvertise => bytes.put_u32(COMMUNITY_NO_ADVERTISE),
             Community::NoExportSubConfed => bytes.put_u32(COMMUNITY_NO_EXPORT_SUBCONFED),
             Community::Custom(asn, value) => {
-                bytes.put_u16(asn.asn as u16);
+                bytes.put_u16(asn.into());
                 bytes.put_u16(*value);
             }
         }

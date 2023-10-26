@@ -88,3 +88,10 @@ impl Bgp4MpMessage {
         )
     }
 }
+
+pub const fn address_family(ip: &IpAddr) -> u16 {
+    match ip {
+        IpAddr::V4(_) => 1,
+        IpAddr::V6(_) => 2,
+    }
+}

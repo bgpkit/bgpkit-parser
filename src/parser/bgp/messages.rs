@@ -1,12 +1,12 @@
 use crate::models::*;
-use std::convert::TryFrom;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::convert::TryFrom;
 
 use crate::error::ParserError;
 use crate::models::capabilities::BgpCapabilityType;
 use crate::models::error::BgpError;
 use crate::parser::bgp::attributes::parse_attributes;
-use crate::parser::{encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, AttributeParser, ReadUtils};
+use crate::parser::{encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, ReadUtils};
 use log::warn;
 
 /// BGP message
@@ -111,8 +111,9 @@ pub fn parse_bgp_notification_message(
 impl BgpNotificationMessage {
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::new();
-        buf.put_u8(self.error_code);
-        buf.put_u8(self.error_subcode);
+        let (code, subcode) = self.error.get_codes();
+        buf.put_u8(code);
+        buf.put_u8(subcode);
         buf.put_slice(&self.data);
         buf.freeze()
     }
@@ -200,7 +201,7 @@ impl BgpOpenMessage {
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put_u8(self.version);
-        buf.put_u16(self.asn.asn as u16);
+        buf.put_u16(self.asn.into());
         buf.put_u16(self.hold_time);
         buf.extend(encode_ipaddr(&self.sender_ip.into()));
         buf.put_u8(self.opt_params.len() as u8);
@@ -209,8 +210,8 @@ impl BgpOpenMessage {
             buf.put_u8(param.param_len as u8);
             match &param.param_value {
                 ParamValue::Capability(cap) => {
-                    buf.put_u8(cap.code);
-                    buf.put_u8(cap.len);
+                    buf.put_u8(cap.ty.into());
+                    buf.put_u8(cap.value.len() as u8);
                     buf.extend(&cap.value);
                 }
                 ParamValue::Raw(bytes) => {
@@ -287,7 +288,7 @@ impl BgpUpdateMessage {
 
         // attributes
         let mut attr_bytes = BytesMut::new();
-        for attribute in &self.attributes {
+        for attribute in &self.attributes.inner {
             attr_bytes.extend(&attribute.encode(add_path, asn_len));
         }
 
@@ -311,7 +312,7 @@ impl BgpMessage {
             BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()),
             BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(add_path, asn_len)),
             BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
-            BgpMessage::KeepAlive(_) => (BgpMessageType::KEEPALIVE, Bytes::new()),
+            BgpMessage::KeepAlive => (BgpMessageType::KEEPALIVE, Bytes::new()),
         };
 
         // msg total bytes length = msg bytes + 16 bytes marker + 2 bytes length + 1 byte type

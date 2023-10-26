@@ -9,11 +9,7 @@ const AS_PATH_AS_SEQUENCE: u8 = 2;
 const AS_PATH_CONFED_SEQUENCE: u8 = 3;
 const AS_PATH_CONFED_SET: u8 = 4;
 
-pub fn parse_as_path(
-    mut input: Bytes,
-    asn_len: &AsnLength,
-    as4_path: bool,
-) -> Result<AsPath, ParserError> {
+pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
         segments: Vec::with_capacity(5),
     };
@@ -21,11 +17,7 @@ pub fn parse_as_path(
         let segment = parse_as_path_segment(&mut input, asn_len)?;
         output.append_segment(segment);
     }
-    todo!();
-    match as4_path {
-        true => Ok(AttributeValue::As4Path(output)),
-        false => Ok(AttributeValue::AsPath(output)),
-    }
+    // TODO: does AS 2-byte or 4-byte matter here?
 
     Ok(output)
 }
@@ -82,12 +74,12 @@ fn write_asns(asns: &[Asn], asn_len: AsnLength, output: &mut BytesMut) {
     match asn_len {
         AsnLength::Bits16 => {
             for asn in asns.iter() {
-                output.put_u16(asn.asn as u16);
+                output.put_u16(asn.into());
             }
         }
         AsnLength::Bits32 => {
             for asn in asns.iter() {
-                output.put_u32(asn.asn);
+                output.put_u32(asn.into());
             }
         }
     }

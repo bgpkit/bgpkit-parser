@@ -14,6 +14,7 @@ mod attr_35_otc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::{debug, warn};
+use std::net::IpAddr;
 
 use crate::models::*;
 
@@ -61,17 +62,17 @@ pub fn parse_attributes(
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
         // thus the while loop condition is set to be at least 3 bytes to read.
 
-            // has content to read
-            let flag = AttrFlags::from_bits_retain(data.get_u8());
-            let attr_type = data.get_u8();
-            let attr_length = match flag.contains(AttrFlags::EXTENDED) {
-                false => data.get_u8() as usize,
-                true => data.get_u16() as usize,
-            };
+        // has content to read
+        let flag = AttrFlags::from_bits_retain(data.get_u8());
+        let attr_type = data.get_u8();
+        let attr_length = match flag.contains(AttrFlags::EXTENDED) {
+            false => data.get_u8() as usize,
+            true => data.get_u16() as usize,
+        };
 
-            let mut partial = false;
-            if flag.contains(AttrFlags::PARTIAL) {
-                /*
+        let mut partial = false;
+        if flag.contains(AttrFlags::PARTIAL) {
+            /*
                 https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
 
             > The third high-order bit (bit 2) of the Attribute Flags octet
@@ -84,34 +85,34 @@ pub fn parse_attributes(
             partial = true;
         }
 
-            debug!(
-                "reading attribute: type -- {:?}, length -- {}",
-                &attr_type, attr_length
-            );
-            let attr_type = match AttrType::from(attr_type) {
-                attr_type @ AttrType::Unknown(unknown_type) => {
-                    // skip pass the remaining bytes of this attribute
-                    let bytes = data.read_n_bytes(attr_length)?;
-                    let attr_value = match get_deprecated_attr_type(unknown_type) {
-                        Some(t) => {
-                            debug!("deprecated attribute type: {} - {}", unknown_type, t);
-                            AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
-                        }
-                        None => {
-                            debug!("unknown attribute type: {}", unknown_type);
-                            AttributeValue::Unknown(AttrRaw { attr_type, bytes })
-                        }
-                    };
+        debug!(
+            "reading attribute: type -- {:?}, length -- {}",
+            &attr_type, attr_length
+        );
+        let attr_type = match AttrType::from(attr_type) {
+            attr_type @ AttrType::Unknown(unknown_type) => {
+                // skip pass the remaining bytes of this attribute
+                let bytes = data.read_n_bytes(attr_length)?;
+                let attr_value = match get_deprecated_attr_type(unknown_type) {
+                    Some(t) => {
+                        debug!("deprecated attribute type: {} - {}", unknown_type, t);
+                        AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
+                    }
+                    None => {
+                        debug!("unknown attribute type: {}", unknown_type);
+                        AttributeValue::Unknown(AttrRaw { attr_type, bytes })
+                    }
+                };
 
-                    assert_eq!(attr_type, attr_value.attr_type());
-                    attributes.push(Attribute {
-                        value: attr_value,
-                        flag,
-                    });
-                    continue;
-                }
-                t => t,
-            };
+                assert_eq!(attr_type, attr_value.attr_type());
+                attributes.push(Attribute {
+                    value: attr_value,
+                    flag,
+                });
+                continue;
+            }
+            t => t,
+        };
 
         let bytes_left = data.remaining();
 
@@ -127,54 +128,44 @@ pub fn parse_attributes(
         // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
         let mut attr_data = data.split_to(attr_length);
 
-            let attr = match attr_type {
-                AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::AS_PATH => {
-                    parse_as_path(attr_data, asn_len).map(|path| AttributeValue::AsPath {
-                        path,
-                        is_as4: false,
-                    })
-                }
-                AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
-                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
-                AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
-                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
-                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len).map(|(asn, id)| {
+        let attr = match attr_type {
+            AttrType::ORIGIN => parse_origin(attr_data),
+            AttrType::AS_PATH => {
+                parse_as_path(attr_data, asn_len).map(|path| AttributeValue::AsPath {
+                    path,
+                    is_as4: false,
+                })
+            }
+            AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
+            AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
+            AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
+            AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
+            AttrType::AGGREGATOR => {
+                parse_aggregator(attr_data, asn_len).map(|(asn, id)| AttributeValue::Aggregator {
+                    asn,
+                    id,
+                    is_as4: false,
+                })
+            }
+            AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
+            AttrType::CLUSTER_LIST => parse_clusters(attr_data),
+            AttrType::MP_REACHABLE_NLRI => {
+                parse_nlri(attr_data, &afi, &safi, &prefixes, true, add_path)
+            }
+            AttrType::MP_UNREACHABLE_NLRI => {
+                parse_nlri(attr_data, &afi, &safi, &prefixes, false, add_path)
+            }
+            AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
+                .map(|path| AttributeValue::AsPath { path, is_as4: true }),
+            AttrType::AS4_AGGREGATOR => {
+                parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
                     AttributeValue::Aggregator {
                         asn,
                         id,
-                        is_as4: false,
+                        is_as4: true,
                     }
-                }),
-                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
-                AttrType::CLUSTER_LIST => parse_clusters(attr_data),
-                AttrType::MP_REACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    true,
-                    add_path
-                ),
-                AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
-                    attr_data,
-                    &afi,
-                    &safi,
-                    &prefixes,
-                    false,
-                    add_path,
-                ),
-                AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
-                    .map(|path| AttributeValue::AsPath { path, is_as4: true }),
-                AttrType::AS4_AGGREGATOR => {
-                    parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
-                        AttributeValue::Aggregator {
-                            asn,
-                            id,
-                            is_as4: true,
-                        }
-                    })
-                }
+                })
+            }
 
             // communities
             AttrType::COMMUNITIES => parse_regular_communities(attr_data),
@@ -197,47 +188,54 @@ pub fn parse_attributes(
             ))),
         };
 
-            match attr {
-                Ok(value) => {
-                    assert_eq!(attr_type, value.attr_type());
-                    attributes.push(Attribute { value, flag });
+        match attr {
+            Ok(value) => {
+                assert_eq!(attr_type, value.attr_type());
+                attributes.push(Attribute { value, flag });
+            }
+            Err(e) => {
+                if partial {
+                    // it's ok to have errors when reading partial bytes
+                    warn!("PARTIAL: {}", e.to_string());
+                } else {
+                    warn!("{}", e.to_string());
                 }
-                Err(e) => {
-                    if partial {
-                        // it's ok to have errors when reading partial bytes
-                        warn!("PARTIAL: {}", e.to_string());
-                    } else {
-                        warn!("{}", e.to_string());
-                    }
-                    continue;
-                }
-            };
-        }
+                continue;
+            }
+        };
+    }
 
-        Ok(Attributes::from(attributes))
+    Ok(Attributes::from(attributes))
 }
 
 impl Attribute {
     pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
 
-        bytes.put_u8(self.flag);
-        bytes.put_u8(self.attr_type);
+        bytes.put_u8(self.flag.bits());
+        bytes.put_u8(self.value.attr_type().into());
 
         let value_bytes = match &self.value {
             AttributeValue::Origin(v) => encode_origin(v),
-            AttributeValue::AsPath(v) => encode_as_path(v, asn_len),
-            AttributeValue::As4Path(v) => encode_as_path(v, AsnLength::Bits32),
+            AttributeValue::AsPath { path, is_as4 } => encode_as_path(
+                path,
+                match is_as4 {
+                    false => AsnLength::Bits16,
+                    true => AsnLength::Bits32,
+                },
+            ),
             AttributeValue::NextHop(v) => encode_next_hop(v),
             AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
             AttributeValue::LocalPreference(v) => encode_local_pref(*v),
-            AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(*v),
-            AttributeValue::AtomicAggregate(_v) => Bytes::default(),
-            AttributeValue::Aggregator(asn, ip) => encode_aggregator(asn, ip),
+            AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(v.into()),
+            AttributeValue::AtomicAggregate => Bytes::default(), // TODO: double check
+            AttributeValue::Aggregator { asn, id, is_as4 } => {
+                encode_aggregator(asn, &IpAddr::from(*id))
+            }
             AttributeValue::Communities(v) => encode_regular_communities(v),
             AttributeValue::ExtendedCommunities(v) => encode_extended_communities(v),
             AttributeValue::LargeCommunities(v) => encode_large_communities(v),
-            AttributeValue::OriginatorId(v) => encode_originator_id(v),
+            AttributeValue::OriginatorId(v) => encode_originator_id(&IpAddr::from(*v)),
             AttributeValue::Clusters(v) => encode_clusters(v),
             AttributeValue::MpReachNlri(v) => encode_nlri(v, true, add_path),
             AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false, add_path),
@@ -246,11 +244,11 @@ impl Attribute {
             AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),
         };
 
-        match self.flag & AttributeFlagsBit::ExtendedLengthBit as u8 {
-            0 => {
+        match self.is_extended() {
+            false => {
                 bytes.put_u8(value_bytes.len() as u8);
             }
-            _ => {
+            true => {
                 bytes.put_u16(value_bytes.len() as u16);
             }
         }

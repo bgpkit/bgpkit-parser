@@ -1,11 +1,43 @@
 use crate::models::{CommonHeader, EntryType};
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use num_traits::FromPrimitive;
 use std::io::Read;
 
 /// MRT common header [RFC6396][header].
 /// [header]: https://tools.ietf.org/html/rfc6396#section-4.1
+///
+/// A MRT record is constructed as the following:
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                           Timestamp                           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |             Type              |            Subtype            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                             Length                            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                      Message... (variable)
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+/// ```
+///
+/// Or with extended timestamp:
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                           Timestamp                           |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |             Type              |            Subtype            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                             Length                            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                      Microsecond Timestamp                    |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                      Message... (variable)
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
 pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
     let mut raw_bytes = [0u8; 12];
     input.read_exact(&mut raw_bytes)?;
@@ -13,9 +45,7 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 
     let timestamp = data.get_u32();
     let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::from_u16(entry_type_raw).ok_or_else(|| {
-        ParserError::ParseError(format!("Failed to parse entry type: {}", entry_type_raw))
-    })?;
+    let entry_type = EntryType::try_from(entry_type_raw)?;
     let entry_subtype = data.get_u16();
     // the length field does not include the length of the common header
     let mut length = data.get_u32();

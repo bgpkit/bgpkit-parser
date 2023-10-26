@@ -13,13 +13,10 @@ pub fn parse_clusters(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Clusters(clusters))
 }
 
-pub fn encode_clusters(clusters: &Vec<IpAddr>) -> Bytes {
+pub fn encode_clusters(clusters: &Vec<u32>) -> Bytes {
     let mut buf = Vec::new();
     for cluster in clusters {
-        buf.extend(match cluster {
-            IpAddr::V4(n) => Bytes::from(n.octets().to_vec()),
-            IpAddr::V6(n) => Bytes::from(n.octets().to_vec()),
-        });
+        buf.extend(cluster.to_be_bytes());
     }
     Bytes::from(buf)
 }

@@ -273,11 +273,9 @@ pub fn parse_nlri_list(
 pub fn encode_asn(asn: &Asn, asn_len: &AsnLength) -> Bytes {
     let mut bytes = BytesMut::new();
     match asn_len {
-        AsnLength::Bits16 => {
-            bytes.put_u16(asn.asn as u16);
-        }
+        AsnLength::Bits16 => bytes.put_u16(asn.into()),
         AsnLength::Bits32 => {
-            bytes.put_u32(asn.asn);
+            bytes.put_u32(asn.into());
         }
     }
     bytes.freeze()

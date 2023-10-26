@@ -1,77 +1,12 @@
-use super::messages::parse_mrt_message;
 use super::mrt_header::parse_common_header;
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
 };
-use std::convert::TryFrom;
 use bytes::{BufMut, Bytes, BytesMut};
+use std::convert::TryFrom;
 use std::io::Read;
-
-/// MRT common header
-///
-/// A MRT record is constructed as the following:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// ```
-///
-/// Or with extended timestamp:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Microsecond Timestamp                    |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// ```
-pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
-    let mut raw_bytes = [0u8; 12];
-    input.read_exact(&mut raw_bytes)?;
-    let mut data = BytesMut::from(&raw_bytes[..]);
-
-    let timestamp = data.get_u32();
-    let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::try_from(entry_type_raw)?;
-    let entry_subtype = data.get_u16();
-    let mut length = data.get_u32();
-
-    let microsecond_timestamp = match &entry_type {
-        EntryType::BGP4MP_ET => {
-            length -= 4;
-            let mut raw_bytes: [u8; 4] = [0; 4];
-            input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).get_u32())
-        }
-        _ => None,
-    };
-
-    Ok(CommonHeader {
-        timestamp,
-        microsecond_timestamp,
-        entry_type,
-        entry_subtype,
-        length,
-    })
-}
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     // parse common header
