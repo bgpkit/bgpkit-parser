@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 /// BMP message type enum.
 ///
@@ -97,7 +97,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 #[derive(Debug)]
 pub struct BmpPerPeerHeader {
     pub peer_type: PeerType,
-    pub peer_flags: PeerFlags,
+    pub peer_flags: PerPeerFlags,
     pub peer_distinguisher: u64,
     pub peer_ip: IpAddr,
     pub peer_asn: Asn,
@@ -110,14 +110,32 @@ impl BmpPerPeerHeader {
     pub fn afi(&self) -> Afi {
         Afi::from(self.peer_ip)
     }
+
+    pub fn asn_length(&self) -> AsnLength {
+        match self.peer_flags {
+            PerPeerFlags::PeerFlags(f) => f.asn_length(),
+            PerPeerFlags::LocalRibPeerFlags(_) => AsnLength::Bits32,
+        }
+    }
 }
 
+/// Peer type
+///
+/// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
+/// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
 #[derive(Debug, TryFromPrimitive)]
 #[repr(u8)]
 pub enum PeerType {
     Global = 0,
     RD = 1,
     Local = 2,
+    LocalRib = 3,
+}
+
+#[derive(Debug, Clone)]
+pub enum PerPeerFlags {
+    PeerFlags(PeerFlags),
+    LocalRibPeerFlags(LocalRibPeerFlags),
 }
 
 bitflags! {
@@ -163,7 +181,7 @@ impl PeerFlags {
         Afi::Ipv4
     }
 
-    pub fn asn_length(&self) -> AsnLength {
+    pub const fn asn_length(&self) -> AsnLength {
         if self.contains(PeerFlags::AS_SIZE_16BIT) {
             return AsnLength::Bits16;
         }
@@ -172,50 +190,99 @@ impl PeerFlags {
     }
 
     /// Returns true if the peer streams Adj-RIB-out BMP messages
-    pub fn is_adj_rib_out(&self) -> bool {
+    pub const fn is_adj_rib_out(&self) -> bool {
         self.contains(PeerFlags::IS_ADJ_RIB_OUT)
     }
 
     /// Returns true if the peer streams post-policy BMP messages
-    pub fn is_post_policy(&self) -> bool {
+    pub const fn is_post_policy(&self) -> bool {
         self.contains(PeerFlags::IS_POST_POLICY)
+    }
+}
+
+bitflags! {
+    /// BMP local RIB per-peer header flags
+    ///
+    /// RFC section at
+    /// - RFC 9069: https://datatracker.ietf.org/doc/html/rfc9069#section-4.2
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct LocalRibPeerFlags: u8 {
+        const IS_FILTERED = 0b1000_0000;
+    }
+}
+
+impl LocalRibPeerFlags {
+    pub const fn is_filtered(&self) -> bool {
+        self.contains(LocalRibPeerFlags::IS_FILTERED)
     }
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
     let peer_type = PeerType::try_from(data.read_u8()?)?;
-    let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
 
-    let peer_distinguisher = data.read_u64()?;
-    let peer_ip = match peer_flags.address_family() {
-        Afi::Ipv4 => {
-            data.advance(12);
-            IpAddr::V4(data.read_ipv4_address()?)
+    match peer_type {
+        PeerType::Global | PeerType::RD | PeerType::Local => {
+            let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
+
+            let peer_distinguisher = data.read_u64()?;
+            let peer_ip = match peer_flags.address_family() {
+                Afi::Ipv4 => {
+                    data.advance(12);
+                    IpAddr::V4(data.read_ipv4_address()?)
+                }
+                Afi::Ipv6 => IpAddr::V6(data.read_ipv6_address()?),
+            };
+
+            let peer_asn = match peer_flags.asn_length() {
+                AsnLength::Bits16 => {
+                    data.advance(2);
+                    Asn::new_16bit(data.read_u16()?)
+                }
+                AsnLength::Bits32 => Asn::new_32bit(data.read_u32()?),
+            };
+
+            let peer_bgp_id = data.read_ipv4_address()?;
+
+            let t_sec = data.read_u32()?;
+            let t_usec = data.read_u32()?;
+            let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
+
+            Ok(BmpPerPeerHeader {
+                peer_type,
+                peer_flags: PerPeerFlags::PeerFlags(peer_flags),
+                peer_distinguisher,
+                peer_ip,
+                peer_asn,
+                peer_bgp_id,
+                timestamp,
+            })
         }
-        Afi::Ipv6 => IpAddr::V6(data.read_ipv6_address()?),
-    };
+        PeerType::LocalRib => {
+            let local_rib_peer_flags = LocalRibPeerFlags::from_bits_retain(data.read_u8()?);
 
-    let peer_asn = match peer_flags.asn_length() {
-        AsnLength::Bits16 => {
-            data.advance(2);
-            Asn::new_16bit(data.read_u16()?)
+            let peer_distinguisher = data.read_u64()?;
+            // zero-filled peer_ip address field
+            let peer_ip = IpAddr::V4(Ipv4Addr::from(0));
+            data.advance(16);
+
+            let peer_asn = Asn::new_32bit(data.read_u32()?);
+
+            let peer_bgp_id = data.read_ipv4_address()?;
+
+            let t_sec = data.read_u32()?;
+            let t_usec = data.read_u32()?;
+            let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
+
+            Ok(BmpPerPeerHeader {
+                peer_type,
+                peer_flags: PerPeerFlags::LocalRibPeerFlags(local_rib_peer_flags),
+                peer_distinguisher,
+                peer_ip,
+                peer_asn,
+                peer_bgp_id,
+                timestamp,
+            })
         }
-        AsnLength::Bits32 => Asn::new_32bit(data.read_u32()?),
-    };
-
-    let peer_bgp_id = data.read_ipv4_address()?;
-
-    let t_sec = data.read_u32()?;
-    let t_usec = data.read_u32()?;
-    let timestamp = t_sec as f64 + (t_usec as f64) / 1_000_000.0;
-
-    Ok(BmpPerPeerHeader {
-        peer_type,
-        peer_flags,
-        peer_distinguisher,
-        peer_ip,
-        peer_asn,
-        peer_bgp_id,
-        timestamp,
-    })
+    }
 }

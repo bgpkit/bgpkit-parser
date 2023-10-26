@@ -337,6 +337,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 
 - [X] [RFC 7854](https://datatracker.ietf.org/doc/html/rfc7854): BGP Monitoring Protocol (BMP)
 - [X] [RFC 8671](https://datatracker.ietf.org/doc/html/rfc8671): Support for Adj-RIB-Out in the BGP Monitoring Protocol (BMP)
+- [X] [RFC 9069](https://datatracker.ietf.org/doc/html/rfc9069): Support for Local RIB in the BGP Monitoring Protocol (BMP)
 
 ## Communities
 
