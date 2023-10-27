@@ -217,19 +217,22 @@ impl Attribute {
 
         let value_bytes = match &self.value {
             AttributeValue::Origin(v) => encode_origin(v),
-            AttributeValue::AsPath { path, is_as4 } => encode_as_path(
-                path,
-                match is_as4 {
-                    false => AsnLength::Bits16,
+            AttributeValue::AsPath { path, is_as4 } => {
+                let four_byte = match is_as4 {
                     true => AsnLength::Bits32,
-                },
-            ),
+                    false => match asn_len.is_four_byte() {
+                        true => AsnLength::Bits32,
+                        false => AsnLength::Bits16,
+                    },
+                };
+                encode_as_path(path, four_byte)
+            }
             AttributeValue::NextHop(v) => encode_next_hop(v),
             AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
             AttributeValue::LocalPreference(v) => encode_local_pref(*v),
             AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(v.into()),
             AttributeValue::AtomicAggregate => Bytes::default(), // TODO: double check
-            AttributeValue::Aggregator { asn, id, is_as4 } => {
+            AttributeValue::Aggregator { asn, id, is_as4: _ } => {
                 encode_aggregator(asn, &IpAddr::from(*id))
             }
             AttributeValue::Communities(v) => encode_regular_communities(v),

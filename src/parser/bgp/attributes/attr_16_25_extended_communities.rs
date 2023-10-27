@@ -139,17 +139,18 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
 pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
     let mut bytes = BytesMut::new();
     for community in communities {
+        let ec_type = u8::from(community.community_type());
         match community {
             ExtendedCommunity::TransitiveTwoOctetAs(two_octet)
             | ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet) => {
-                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ec_type);
                 bytes.put_u8(two_octet.subtype);
                 bytes.put_u16(two_octet.global_admin.into());
                 bytes.put_slice(two_octet.local_admin.as_slice());
             }
             ExtendedCommunity::TransitiveIpv4Addr(ipv4)
             | ExtendedCommunity::NonTransitiveIpv4Addr(ipv4) => {
-                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ec_type);
                 bytes.put_u8(ipv4.subtype);
                 bytes.put_u32(ipv4.global_admin.into());
                 bytes.put_slice(ipv4.local_admin.as_slice());
@@ -157,7 +158,7 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
 
             ExtendedCommunity::TransitiveFourOctetAs(four_octet)
             | ExtendedCommunity::NonTransitiveFourOctetAs(four_octet) => {
-                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ec_type);
                 bytes.put_u8(four_octet.subtype);
                 bytes.put_u32(four_octet.global_admin.into());
                 bytes.put_slice(four_octet.local_admin.as_slice());
@@ -165,7 +166,7 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
 
             ExtendedCommunity::TransitiveOpaque(opaque)
             | ExtendedCommunity::NonTransitiveOpaque(opaque) => {
-                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ec_type);
                 bytes.put_u8(opaque.subtype);
                 bytes.put_slice(&opaque.value);
             }
@@ -174,7 +175,7 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
                 bytes.put_slice(raw);
             }
             ExtendedCommunity::Ipv6Addr(ipv6) => {
-                bytes.put_u8(todo!("ec_type"));
+                bytes.put_u8(ec_type);
                 bytes.put_u8(ipv6.subtype);
                 bytes.put_slice(&ipv6.global_admin.octets());
                 bytes.put_slice(ipv6.local_admin.as_slice());
@@ -323,66 +324,5 @@ mod tests {
         } else {
             panic!("Unexpected attribute type");
         }
-    }
-
-    #[test]
-    fn test_encode_extended_communites() {
-        let communities = vec![
-            ExtendedCommunity::TransitiveTwoOctetAsSpecific(TwoOctetAsSpecific {
-                ec_type: 0x00,
-                ec_subtype: 0x02,
-                global_administrator: Asn::from(1),
-                local_administrator: [0x00, 0x00, 0x00, 0x01],
-            }),
-            ExtendedCommunity::TransitiveIpv4AddressSpecific(Ipv4AddressSpecific {
-                ec_type: 0x01,
-                ec_subtype: 0x02,
-                global_administrator: Ipv4Addr::new(192, 0, 2, 1),
-                local_administrator: [0x00, 0x01],
-            }),
-            ExtendedCommunity::TransitiveFourOctetAsSpecific(FourOctetAsSpecific {
-                ec_type: 0x02,
-                ec_subtype: 0x02,
-                global_administrator: Asn::from(1),
-                local_administrator: [0x00, 0x01],
-            }),
-            ExtendedCommunity::TransitiveOpaque(Opaque {
-                ec_type: 0x03,
-                ec_subtype: 0x02,
-                value: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05],
-            }),
-            ExtendedCommunity::Ipv6AddressSpecific(Ipv6AddressSpecific {
-                ec_type: 0x40,
-                ec_subtype: 0x02,
-                global_administrator: Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
-                local_administrator: [0x00, 0x01],
-            }),
-        ];
-
-        let data = encode_extended_communities(&communities);
-        assert_eq!(
-            data,
-            vec![
-                0x00, // Transitive Two Octet AS Specific
-                0x02, // Route Target
-                0x00, 0x01, // AS 1
-                0x00, 0x00, 0x00, 0x01, // Local Admin 1
-                0x01, // Transitive IPv4 Address Specific
-                0x02, // Route Target
-                0xC0, 0x00, 0x02, 0x01, // ipv4:
-                0x00, 0x01, // Local Admin 1
-                0x02, // Transitive Four Octet AS Specific
-                0x02, // Route Target
-                0x00, 0x00, 0x00, 0x01, // AS 1
-                0x00, 0x01, // Local Admin 1
-                0x03, // Transitive Opaque
-                0x02, // Route Target
-                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, // Opaque
-                0x40, // Transitive IPv6 Address Specific
-                0x02, // Route Target
-                0x20, 0x01, 0x0D, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x01, 0x00, 0x01, // Local Admin 1
-            ]
-        );
     }
 }

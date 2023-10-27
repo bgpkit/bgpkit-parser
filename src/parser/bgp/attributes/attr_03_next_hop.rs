@@ -40,6 +40,7 @@ pub fn encode_next_hop(addr: &IpAddr) -> Bytes {
     }
 }
 
+#[allow(unused_variables, dead_code)]
 pub fn encode_mp_next_hop(n: &NextHopAddress) -> Bytes {
     match n {
         NextHopAddress::Ipv4(n) => Bytes::from(n.octets().to_vec()),
@@ -89,9 +90,9 @@ mod tests {
         let ipv4_bytes = Bytes::from(ipv4.octets().to_vec());
         let ipv6_bytes = Bytes::from(ipv6.octets().to_vec());
 
-        let res = parse_next_hop(ipv4_bytes.clone(), &None).unwrap();
+        let _res = parse_next_hop(ipv4_bytes.clone(), &None).unwrap();
         assert_eq!(ipv4_bytes, encode_next_hop(&ipv4.into()));
-        let res = parse_next_hop(ipv6_bytes.clone(), &None).unwrap();
+        let _res = parse_next_hop(ipv6_bytes.clone(), &None).unwrap();
         assert_eq!(ipv6_bytes, encode_next_hop(&ipv6.into()));
     }
 

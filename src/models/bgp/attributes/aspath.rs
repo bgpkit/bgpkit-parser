@@ -135,6 +135,13 @@ impl AsPathSegment {
             }
         }
     }
+
+    pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
+        match self {
+            AsPathSegment::AsSequence(v) => Some(v.iter().map(|asn| (*asn).into()).collect()),
+            _ => None,
+        }
+    }
 }
 
 impl IntoIterator for AsPathSegment {
@@ -654,8 +661,8 @@ impl AsPath {
 
     pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
         match self.segments.last() {
-            Some(AsPathSegment::AsSequence(v)) => Some(v.iter().map(|asn| (*asn).into()).collect()),
-            _ => None,
+            None => None,
+            Some(v) => v.to_u32_vec(),
         }
     }
 }
@@ -968,7 +975,7 @@ mod tests {
     fn test_get_origin() {
         let aspath = AsPath::from_sequence([1, 2, 3, 5]);
         let origins = aspath.get_singular_origin();
-        assert_eq!(origins.unwrap(), Asn::from(5));
+        assert_eq!(origins.unwrap(), Asn::from(5u32));
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3, 5]),

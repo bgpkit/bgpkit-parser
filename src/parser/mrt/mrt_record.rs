@@ -126,13 +126,17 @@ impl MrtRecord {
         let mut bytes = BytesMut::new();
         let header_bytes = self.common_header.encode();
         let message_bytes = self.message.encode(self.common_header.entry_subtype);
-        // let parsed_body = crate::parser::mrt::mrt_record::parse_mrt_body(
+
+        // // debug begins
+        // let parsed_body = parse_mrt_body(
         //     self.common_header.entry_type as u16,
         //     self.common_header.entry_subtype,
         //     message_bytes.clone(),
         // )
         // .unwrap();
         // assert!(self.message == parsed_body);
+        // // debug ends
+
         bytes.put_slice(&header_bytes);
         bytes.put_slice(&message_bytes);
         bytes.freeze()

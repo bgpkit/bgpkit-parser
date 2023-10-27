@@ -17,7 +17,6 @@ pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Pa
         let segment = parse_as_path_segment(&mut input, asn_len)?;
         output.append_segment(segment);
     }
-    // TODO: does AS 2-byte or 4-byte matter here?
 
     Ok(output)
 }
@@ -88,7 +87,6 @@ fn write_asns(asns: &[Asn], asn_len: AsnLength, output: &mut BytesMut) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AttributeValue::{As4Path, AsPath};
 
     ///
     /// ```text
@@ -126,16 +124,14 @@ mod tests {
             0, 2, // AS2
             0, 3, // AS3
         ]);
-        let res = parse_as_path(data, &AsnLength::Bits16, false).unwrap();
+        let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
+        assert_eq!(vec![1, 2, 3], path.to_u32_vec().unwrap());
 
-        assert!(matches!(res, AsPath(_)));
-        if let AsPath(path) = res {
-            assert_eq!(vec![1, 2, 3], path.to_u32_vec().unwrap())
-        } else {
-            panic!("cannot parse the path")
-        }
         let path = parse_as_path(data, &AsnLength::Bits16).unwrap();
-        assert_eq!(path, AsPath::from_sequence([1, 2, 3]));
+        assert_eq!(
+            path.to_u32_vec(),
+            AsPath::from_sequence([1, 2, 3]).to_u32_vec()
+        );
     }
 
     #[test]
@@ -211,11 +207,9 @@ mod tests {
             0, 2, // AS2
             0, 3, // AS3
         ]);
-        let path = parse_as_path(data.clone(), &AsnLength::Bits16, false).unwrap();
-        if let AsPath(path) = path {
-            let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
-            assert_eq!(data, encoded_bytes);
-        }
+        let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        assert_eq!(data, encoded_bytes);
 
         let data = Bytes::from(vec![
             2, // sequence
@@ -224,10 +218,8 @@ mod tests {
             0, 0, 0, 2, // AS2
             0, 0, 0, 3, // AS3
         ]);
-        let path = parse_as_path(data.clone(), &AsnLength::Bits32, true).unwrap();
-        if let AsPath(path) = path {
-            let encoded_bytes = encode_as_path(&path, AsnLength::Bits32);
-            assert_eq!(data, encoded_bytes);
-        }
+        let path = parse_as_path(data.clone(), &AsnLength::Bits32).unwrap();
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits32);
+        assert_eq!(data, encoded_bytes);
     }
 }

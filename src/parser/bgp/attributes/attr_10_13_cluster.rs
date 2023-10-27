@@ -2,7 +2,6 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
-use std::net::IpAddr;
 
 /// <https://tools.ietf.org/html/rfc4456>
 pub fn parse_clusters(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -40,9 +39,9 @@ mod tests {
 
     #[test]
     fn test_encode_clusters() {
-        let clusters = vec![
-            IpAddr::V4(Ipv4Addr::from_str("192.0.2.1").unwrap()),
-            IpAddr::V4(Ipv4Addr::from_str("192.0.2.2").unwrap()),
+        let clusters: Vec<u32> = vec![
+            0xC0000201, //
+            0xC0000202, //
         ];
         assert_eq!(
             encode_clusters(&clusters),

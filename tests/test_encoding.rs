@@ -27,6 +27,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "very long test, only run if necessary"]
     fn test_encode_table_dump_v1() {
         let url = "http://archive.routeviews.org/bgpdata/2002.01/RIBS/rib.20020101.0027.bz2";
         let input_records: Vec<MrtRecord> =

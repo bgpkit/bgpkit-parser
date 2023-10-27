@@ -1,5 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 /// AS number length: 16 or 32 bits.
@@ -10,13 +12,47 @@ pub enum AsnLength {
     Bits32,
 }
 
+impl AsnLength {
+    pub const fn is_four_byte(&self) -> bool {
+        match self {
+            AsnLength::Bits16 => false,
+            AsnLength::Bits32 => true,
+        }
+    }
+}
+
 /// ASN -- Autonomous System Number
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub struct Asn {
     asn: u32,
+    #[cfg_attr(feature = "serde", serde(skip_serializing, default))]
+    four_byte: bool,
+}
+
+impl Ord for Asn {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.asn.cmp(&other.asn)
+    }
+}
+
+impl Hash for Asn {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.asn.hash(state);
+    }
+}
+
+impl PartialEq for Asn {
+    fn eq(&self, other: &Self) -> bool {
+        self.asn == other.asn
+    }
+}
+
+impl PartialOrd for Asn {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.asn.cmp(&other.asn))
+    }
 }
 
 impl Asn {
@@ -27,13 +63,19 @@ impl Asn {
     /// Constructs a new 2-octet `Asn`.
     #[inline]
     pub const fn new_16bit(asn: u16) -> Self {
-        Asn { asn: asn as u32 }
+        Asn {
+            asn: asn as u32,
+            four_byte: false,
+        }
     }
 
     /// Constructs a new 4-octet `Asn`.
     #[inline]
     pub const fn new_32bit(asn: u32) -> Self {
-        Asn { asn }
+        Asn {
+            asn,
+            four_byte: true,
+        }
     }
 
     /// Gets the size required to store this ASN
@@ -104,6 +146,12 @@ impl Default for Asn {
     }
 }
 
+// *************** //
+// *************** //
+// ASN conversions //
+// *************** //
+// *************** //
+
 impl PartialEq<u32> for Asn {
     #[inline]
     fn eq(&self, other: &u32) -> bool {
@@ -132,17 +180,59 @@ impl From<&Asn> for u32 {
     }
 }
 
+impl PartialEq<i32> for Asn {
+    #[inline]
+    fn eq(&self, other: &i32) -> bool {
+        self.asn == *other as u32
+    }
+}
+
+impl From<i32> for Asn {
+    #[inline]
+    fn from(v: i32) -> Self {
+        Asn::new_32bit(v as u32)
+    }
+}
+
+impl From<Asn> for i32 {
+    #[inline]
+    fn from(value: Asn) -> Self {
+        value.asn as i32
+    }
+}
+
+impl From<&Asn> for i32 {
+    #[inline]
+    fn from(value: &Asn) -> Self {
+        value.asn as i32
+    }
+}
+
+impl PartialEq<u16> for Asn {
+    #[inline]
+    fn eq(&self, other: &u16) -> bool {
+        self.asn == *other as u32
+    }
+}
+
+impl From<u16> for Asn {
+    #[inline]
+    fn from(v: u16) -> Self {
+        Asn::new_16bit(v)
+    }
+}
+
 impl From<Asn> for u16 {
     #[inline]
     fn from(value: Asn) -> Self {
-        value.into()
+        value.asn as u16
     }
 }
 
 impl From<&Asn> for u16 {
     #[inline]
     fn from(value: &Asn) -> Self {
-        value.into()
+        value.asn as u16
     }
 }
 
@@ -175,8 +265,10 @@ impl FromStr for Asn {
 impl Asn {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
-        // TODO: handle 16-bit ASN case
-        bytes.put_u32(self.asn);
+        match self.four_byte {
+            true => bytes.put_u32(self.asn),
+            false => bytes.put_u16(self.asn as u16),
+        }
         bytes.freeze()
     }
 }
@@ -188,17 +280,7 @@ mod tests {
 
     #[test]
     fn test_asn_encode() {
-        let asn = Asn {
-            asn: 123,
-            len: AsnLength::Bits16,
-        };
-        let mut bytes = asn.encode();
-        assert_eq!(123, bytes.read_u16().unwrap());
-
-        let asn = Asn {
-            asn: 123,
-            len: AsnLength::Bits32,
-        };
+        let asn = Asn::new_32bit(123);
         let mut bytes = asn.encode();
         assert_eq!(123, bytes.read_u32().unwrap());
     }

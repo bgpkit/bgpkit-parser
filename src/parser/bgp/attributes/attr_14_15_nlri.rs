@@ -111,6 +111,7 @@ pub fn parse_nlri(
 ///
 /// Table dump V2 have the prefixes and AFI/SAFI information encoded before the attribute, and
 /// therefore not encoding them here.
+#[allow(unused_variables, dead_code)]
 pub fn encode_nlri_table_v2(nlri: &Nlri) -> Bytes {
     todo!()
 }
