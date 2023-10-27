@@ -231,7 +231,7 @@ impl Attribute {
             AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
             AttributeValue::LocalPreference(v) => encode_local_pref(*v),
             AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(v.into()),
-            AttributeValue::AtomicAggregate => Bytes::default(), // TODO: double check
+            AttributeValue::AtomicAggregate => Bytes::default(),
             AttributeValue::Aggregator { asn, id, is_as4: _ } => {
                 encode_aggregator(asn, &IpAddr::from(*id))
             }

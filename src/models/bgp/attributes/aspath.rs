@@ -975,7 +975,7 @@ mod tests {
     fn test_get_origin() {
         let aspath = AsPath::from_sequence([1, 2, 3, 5]);
         let origins = aspath.get_singular_origin();
-        assert_eq!(origins.unwrap(), Asn::from(5u32));
+        assert_eq!(origins.unwrap(), Asn::from(5));
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3, 5]),
