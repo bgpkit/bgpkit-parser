@@ -13,6 +13,14 @@ mod tests {
             let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
             assert_eq!(record, parsed_record);
         }
+
+        let url = "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2";
+        let parser = BgpkitParser::new(url).unwrap();
+        for record in parser.into_record_iter() {
+            let bytes = record.encode();
+            let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
+            assert_eq!(record, parsed_record);
+        }
     }
 
     #[test]
