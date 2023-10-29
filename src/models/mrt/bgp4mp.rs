@@ -19,16 +19,16 @@ pub enum BgpState {
 /// BGP4MP message types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Bgp4Mp {
+pub enum Bgp4MpEnum {
     StateChange(Bgp4MpStateChange),
     Message(Bgp4MpMessage),
 }
 
-impl Bgp4Mp {
+impl Bgp4MpEnum {
     pub const fn msg_type(&self) -> Bgp4MpType {
         match self {
-            Bgp4Mp::StateChange(x) => x.msg_type,
-            Bgp4Mp::Message(x) => x.msg_type,
+            Bgp4MpEnum::StateChange(x) => x.msg_type,
+            Bgp4MpEnum::Message(x) => x.msg_type,
         }
     }
 }

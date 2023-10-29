@@ -125,7 +125,7 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         let mut local: [u8; 2] = [0; 2];
         local[0] = input.read_u8()?;
         local[1] = input.read_u8()?;
-        let ec = ExtendedCommunity::Ipv6Addr(Ipv6AddrExtCommunity {
+        let ec = ExtendedCommunity::Ipv6AddrSpecific(Ipv6AddrExtCommunity {
             community_type: ExtendedCommunityType::from(ec_type_u8),
             subtype: sub_type,
             global_admin: global,
@@ -174,7 +174,7 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
-            ExtendedCommunity::Ipv6Addr(ipv6) => {
+            ExtendedCommunity::Ipv6AddrSpecific(ipv6) => {
                 bytes.put_u8(ec_type);
                 bytes.put_u8(ipv6.subtype);
                 bytes.put_slice(&ipv6.global_admin.octets());
@@ -307,7 +307,7 @@ mod tests {
             parse_ipv6_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
-            if let ExtendedCommunity::Ipv6Addr(community) = &communities[0] {
+            if let ExtendedCommunity::Ipv6AddrSpecific(community) = &communities[0] {
                 assert_eq!(
                     community.community_type,
                     ExtendedCommunityType::NonTransitiveTwoOctetAs

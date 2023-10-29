@@ -112,7 +112,7 @@ pub enum ExtendedCommunity {
     NonTransitiveIpv4Addr(Ipv4AddrExtCommunity),
     NonTransitiveFourOctetAs(FourOctetAsExtCommunity),
     NonTransitiveOpaque(OpaqueExtCommunity),
-    Ipv6Addr(Ipv6AddrExtCommunity),
+    Ipv6AddrSpecific(Ipv6AddrExtCommunity),
     Raw([u8; 8]),
 }
 
@@ -128,7 +128,7 @@ impl ExtendedCommunity {
             ExtendedCommunity::NonTransitiveIpv4Addr(_) => NonTransitiveIpv4Addr,
             ExtendedCommunity::NonTransitiveFourOctetAs(_) => NonTransitiveFourOctetAs,
             ExtendedCommunity::NonTransitiveOpaque(_) => NonTransitiveOpaque,
-            ExtendedCommunity::Ipv6Addr(community) => community.community_type,
+            ExtendedCommunity::Ipv6AddrSpecific(community) => community.community_type,
             ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
         }
     }
@@ -278,7 +278,7 @@ impl Display for ExtendedCommunity {
                     ToHexString(&ec.value)
                 )
             }
-            ExtendedCommunity::Ipv6Addr(ec) => {
+            ExtendedCommunity::Ipv6AddrSpecific(ec) => {
                 write!(
                     f,
                     "ecv6:{}:{}:{}:{}",

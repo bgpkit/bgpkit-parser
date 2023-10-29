@@ -114,7 +114,7 @@ impl CommonHeader {
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),
     TableDumpV2Message(TableDumpV2Message),
-    Bgp4Mp(Bgp4Mp),
+    Bgp4Mp(Bgp4MpEnum),
 }
 
 /// MRT entry type.

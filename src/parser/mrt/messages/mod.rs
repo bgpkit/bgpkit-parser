@@ -1,4 +1,4 @@
-use crate::models::{AsnLength, Bgp4Mp, Bgp4MpType, MrtMessage};
+use crate::models::{AsnLength, Bgp4MpEnum, Bgp4MpType, MrtMessage};
 use bytes::Bytes;
 
 pub(crate) mod bgp4mp;
@@ -16,14 +16,14 @@ impl MrtMessage {
                 let msg_type = Bgp4MpType::try_from(sub_type).unwrap();
 
                 match m {
-                    Bgp4Mp::StateChange(msg) => {
+                    Bgp4MpEnum::StateChange(msg) => {
                         let asn_len = match matches!(msg_type, Bgp4MpType::StateChangeAs4) {
                             true => AsnLength::Bits32,
                             false => AsnLength::Bits16,
                         };
                         msg.encode(asn_len)
                     }
-                    Bgp4Mp::Message(msg) => {
+                    Bgp4MpEnum::Message(msg) => {
                         let add_path = matches!(
                             msg_type,
                             Bgp4MpType::MessageAddpath
