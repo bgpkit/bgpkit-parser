@@ -136,6 +136,13 @@ impl Asn {
             _ => false,
         }
     }
+
+    /// Return if an ASN is 4 bytes or not.
+    ///
+    #[inline]
+    pub const fn is_four_byte(&self) -> bool {
+        self.four_byte
+    }
 }
 
 /// Creates an ASN with a value of 0. This is equivalent to [Asn::RESERVED].

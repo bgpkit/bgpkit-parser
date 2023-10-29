@@ -1,5 +1,5 @@
-extern crate core;
-
+//! This example shows how to consume BGP messages from RouteViews AMSIX peer at AS34968 and archive
+//! the received BGP messages to a MRT file.
 pub use bgpkit_parser::parse_bmp_msg;
 use bgpkit_parser::parse_openbmp_header;
 use bytes::Bytes;

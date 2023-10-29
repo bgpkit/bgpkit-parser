@@ -1,5 +1,3 @@
-extern crate core;
-
 use bgpkit_parser::parser::bmp::messages::MessageBody;
 use bgpkit_parser::Elementor;
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
@@ -64,7 +62,7 @@ pub fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let broker = "stream.routeviews.org:9092".to_owned();
-    let topic = "routeviews.linx.6830.bmp_raw".to_owned();
+    let topic = "routeviews.amsix.34968.bmp_raw".to_owned();
     let group = "bgpkit-parser-example".to_owned();
 
     consume_and_print(group, topic, vec![broker]).unwrap();
