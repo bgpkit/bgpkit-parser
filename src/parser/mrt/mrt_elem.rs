@@ -442,8 +442,8 @@ impl Elementor {
                 }
             }
             MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4Mp::StateChange(_) => {}
-                Bgp4Mp::Message(v) => {
+                Bgp4MpEnum::StateChange(_) => {}
+                Bgp4MpEnum::Message(v) => {
                     elems.extend(Elementor::bgp_to_elems(
                         v.bgp_message,
                         timestamp,

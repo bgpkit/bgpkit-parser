@@ -13,6 +13,10 @@ pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     }
 }
 
+pub fn encode_origin(origin: &Origin) -> Bytes {
+    Bytes::from(vec![*origin as u8])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +58,26 @@ mod tests {
             parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
             ParserError::ParseError(_)
         ));
+    }
+
+    #[test]
+    fn test_encode_origin() {
+        let value = Origin::IGP;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
+
+        let value = Origin::EGP;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
+
+        let value = Origin::INCOMPLETE;
+        assert_eq!(
+            AttributeValue::Origin(value),
+            parse_origin(encode_origin(&value)).unwrap()
+        );
     }
 }

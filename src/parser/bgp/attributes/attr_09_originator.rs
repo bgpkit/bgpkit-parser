@@ -2,6 +2,7 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
+use std::net::IpAddr;
 
 pub fn parse_originator_id(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     if input.remaining() != 4 {
@@ -10,6 +11,13 @@ pub fn parse_originator_id(mut input: Bytes) -> Result<AttributeValue, ParserErr
         ));
     }
     Ok(AttributeValue::OriginatorId(input.read_ipv4_address()?))
+}
+
+pub fn encode_originator_id(addr: &IpAddr) -> Bytes {
+    match addr {
+        IpAddr::V4(ip) => Bytes::from(ip.octets().to_vec()),
+        IpAddr::V6(ip) => Bytes::from(ip.octets().to_vec()),
+    }
 }
 
 #[cfg(test)]
@@ -28,5 +36,14 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_originator() {
+        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        assert_eq!(
+            encode_originator_id(&IpAddr::V4(ipv4)),
+            Bytes::from(ipv4.octets().to_vec())
+        );
     }
 }

@@ -1,8 +1,9 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::warn;
+use std::net::IpAddr;
 
 /// Parse aggregator attribute.
 ///
@@ -42,6 +43,19 @@ pub fn parse_aggregator(
     Ok((asn, identifier))
 }
 
+pub fn encode_aggregator(asn: &Asn, addr: &IpAddr) -> Bytes {
+    let mut bytes = BytesMut::new();
+
+    bytes.extend(asn.encode());
+    match addr {
+        IpAddr::V4(ip) => bytes.put_u32((*ip).into()),
+        IpAddr::V6(ip) => {
+            bytes.put_u128((*ip).into());
+        }
+    }
+    bytes.freeze()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,5 +88,13 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_aggregator() {
+        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        let asn = Asn::new_16bit(258);
+        let bytes = encode_aggregator(&asn, &ipv4.into());
+        assert_eq!(bytes, Bytes::from_static(&[1u8, 2, 10, 0, 0, 1]));
     }
 }

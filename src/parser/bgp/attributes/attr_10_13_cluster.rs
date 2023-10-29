@@ -12,6 +12,14 @@ pub fn parse_clusters(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Clusters(clusters))
 }
 
+pub fn encode_clusters(clusters: &Vec<u32>) -> Bytes {
+    let mut buf = Vec::new();
+    for cluster in clusters {
+        buf.extend(cluster.to_be_bytes());
+    }
+    Bytes::from(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -27,5 +35,20 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_clusters() {
+        let clusters: Vec<u32> = vec![
+            0xC0000201, //
+            0xC0000202, //
+        ];
+        assert_eq!(
+            encode_clusters(&clusters),
+            Bytes::from(vec![
+                0xC0, 0x00, 0x02, 0x01, //
+                0xC0, 0x00, 0x02, 0x02, //
+            ])
+        );
     }
 }

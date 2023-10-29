@@ -7,6 +7,10 @@ pub fn parse_med(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::MultiExitDiscriminator(input.read_u32()?))
 }
 
+pub fn encode_med(med: u32) -> Bytes {
+    Bytes::from(med.to_be_bytes().to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -19,5 +23,10 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn test_encode_med() {
+        assert_eq!(encode_med(123), Bytes::from(vec![0, 0, 0, 123]));
     }
 }

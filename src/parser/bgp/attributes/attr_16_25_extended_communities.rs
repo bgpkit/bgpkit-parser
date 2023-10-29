@@ -7,7 +7,7 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -83,6 +83,7 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                     local_admin: local,
                 })
             }
+
             ExtendedCommunityType::TransitiveOpaque => {
                 let sub_type = input.read_u8()?;
                 let mut value: [u8; 6] = [0; 6];
@@ -124,7 +125,7 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         let mut local: [u8; 2] = [0; 2];
         local[0] = input.read_u8()?;
         local[1] = input.read_u8()?;
-        let ec = ExtendedCommunity::Ipv6Addr(Ipv6AddrExtCommunity {
+        let ec = ExtendedCommunity::Ipv6AddrSpecific(Ipv6AddrExtCommunity {
             community_type: ExtendedCommunityType::from(ec_type_u8),
             subtype: sub_type,
             global_admin: global,
@@ -133,6 +134,55 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         communities.push(ec);
     }
     Ok(AttributeValue::ExtendedCommunities(communities))
+}
+
+pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
+    let mut bytes = BytesMut::new();
+    for community in communities {
+        let ec_type = u8::from(community.community_type());
+        match community {
+            ExtendedCommunity::TransitiveTwoOctetAs(two_octet)
+            | ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(two_octet.subtype);
+                bytes.put_u16(two_octet.global_admin.into());
+                bytes.put_slice(two_octet.local_admin.as_slice());
+            }
+            ExtendedCommunity::TransitiveIpv4Addr(ipv4)
+            | ExtendedCommunity::NonTransitiveIpv4Addr(ipv4) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(ipv4.subtype);
+                bytes.put_u32(ipv4.global_admin.into());
+                bytes.put_slice(ipv4.local_admin.as_slice());
+            }
+
+            ExtendedCommunity::TransitiveFourOctetAs(four_octet)
+            | ExtendedCommunity::NonTransitiveFourOctetAs(four_octet) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(four_octet.subtype);
+                bytes.put_u32(four_octet.global_admin.into());
+                bytes.put_slice(four_octet.local_admin.as_slice());
+            }
+
+            ExtendedCommunity::TransitiveOpaque(opaque)
+            | ExtendedCommunity::NonTransitiveOpaque(opaque) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(opaque.subtype);
+                bytes.put_slice(&opaque.value);
+            }
+
+            ExtendedCommunity::Raw(raw) => {
+                bytes.put_slice(raw);
+            }
+            ExtendedCommunity::Ipv6AddrSpecific(ipv6) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(ipv6.subtype);
+                bytes.put_slice(&ipv6.global_admin.octets());
+                bytes.put_slice(ipv6.local_admin.as_slice());
+            }
+        }
+    }
+    bytes.freeze()
 }
 
 #[cfg(test)]
@@ -257,7 +307,7 @@ mod tests {
             parse_ipv6_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
-            if let ExtendedCommunity::Ipv6Addr(community) = &communities[0] {
+            if let ExtendedCommunity::Ipv6AddrSpecific(community) = &communities[0] {
                 assert_eq!(
                     community.community_type,
                     ExtendedCommunityType::NonTransitiveTwoOctetAs

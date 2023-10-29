@@ -1,41 +1,40 @@
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
-use crate::parser::ReadUtils;
-use bytes::{Buf, Bytes};
+use crate::parser::{encode_asn, encode_ipaddr, ReadUtils};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 
 /// Parse MRT BGP4MP type
 ///
 /// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.4>
 ///
-pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4Mp, ParserError> {
+pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4MpEnum, ParserError> {
     let bgp4mp_type: Bgp4MpType = Bgp4MpType::try_from(sub_type)?;
-    let msg: Bgp4Mp =
-        match bgp4mp_type {
-            Bgp4MpType::StateChange => Bgp4Mp::StateChange(parse_bgp4mp_state_change(
-                input,
-                AsnLength::Bits16,
-                &bgp4mp_type,
-            )?),
-            Bgp4MpType::StateChangeAs4 => Bgp4Mp::StateChange(parse_bgp4mp_state_change(
-                input,
-                AsnLength::Bits32,
-                &bgp4mp_type,
-            )?),
-            Bgp4MpType::Message | Bgp4MpType::MessageLocal => Bgp4Mp::Message(
-                parse_bgp4mp_message(input, false, AsnLength::Bits16, &bgp4mp_type)?,
-            ),
-            Bgp4MpType::MessageAs4 | Bgp4MpType::MessageAs4Local => Bgp4Mp::Message(
-                parse_bgp4mp_message(input, false, AsnLength::Bits32, &bgp4mp_type)?,
-            ),
-            Bgp4MpType::MessageAddpath | Bgp4MpType::MessageLocalAddpath => Bgp4Mp::Message(
-                parse_bgp4mp_message(input, true, AsnLength::Bits16, &bgp4mp_type)?,
-            ),
-            Bgp4MpType::MessageAs4Addpath | Bgp4MpType::MessageLocalAs4Addpath => Bgp4Mp::Message(
-                parse_bgp4mp_message(input, true, AsnLength::Bits32, &bgp4mp_type)?,
-            ),
-        };
+    let msg: Bgp4MpEnum = match bgp4mp_type {
+        Bgp4MpType::StateChange => Bgp4MpEnum::StateChange(parse_bgp4mp_state_change(
+            input,
+            AsnLength::Bits16,
+            &bgp4mp_type,
+        )?),
+        Bgp4MpType::StateChangeAs4 => Bgp4MpEnum::StateChange(parse_bgp4mp_state_change(
+            input,
+            AsnLength::Bits32,
+            &bgp4mp_type,
+        )?),
+        Bgp4MpType::Message | Bgp4MpType::MessageLocal => Bgp4MpEnum::Message(
+            parse_bgp4mp_message(input, false, AsnLength::Bits16, &bgp4mp_type)?,
+        ),
+        Bgp4MpType::MessageAs4 | Bgp4MpType::MessageAs4Local => Bgp4MpEnum::Message(
+            parse_bgp4mp_message(input, false, AsnLength::Bits32, &bgp4mp_type)?,
+        ),
+        Bgp4MpType::MessageAddpath | Bgp4MpType::MessageLocalAddpath => Bgp4MpEnum::Message(
+            parse_bgp4mp_message(input, true, AsnLength::Bits16, &bgp4mp_type)?,
+        ),
+        Bgp4MpType::MessageAs4Addpath | Bgp4MpType::MessageLocalAs4Addpath => Bgp4MpEnum::Message(
+            parse_bgp4mp_message(input, true, AsnLength::Bits32, &bgp4mp_type)?,
+        ),
+    };
 
     Ok(msg)
 }
@@ -102,6 +101,20 @@ pub fn parse_bgp4mp_message(
     })
 }
 
+impl Bgp4MpMessage {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.extend(self.peer_asn.encode());
+        bytes.extend(self.local_asn.encode());
+        bytes.put_u16(self.interface_index);
+        bytes.put_u16(address_family(&self.peer_ip));
+        bytes.extend(encode_ipaddr(&self.peer_ip));
+        bytes.extend(encode_ipaddr(&self.local_ip));
+        bytes.extend(&self.bgp_message.encode(add_path, asn_len));
+        bytes.freeze()
+    }
+}
+
 /*
    0                   1                   2                   3
    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -156,4 +169,19 @@ pub fn parse_bgp4mp_state_change(
         old_state,
         new_state,
     })
+}
+
+impl Bgp4MpStateChange {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.extend(encode_asn(&self.peer_asn, &asn_len));
+        bytes.extend(encode_asn(&self.local_asn, &asn_len));
+        bytes.put_u16(self.interface_index);
+        bytes.put_u16(address_family(&self.peer_addr));
+        bytes.extend(encode_ipaddr(&self.peer_addr));
+        bytes.extend(encode_ipaddr(&self.local_addr));
+        bytes.put_u16(self.old_state as u16);
+        bytes.put_u16(self.new_state as u16);
+        bytes.freeze()
+    }
 }

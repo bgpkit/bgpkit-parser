@@ -60,7 +60,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 
     let record = MrtRecord {
         common_header: header,
-        message: MrtMessage::Bgp4Mp(Bgp4Mp::Message(Bgp4MpMessage {
+        message: MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
             msg_type: Bgp4MpType::MessageAs4,
             peer_asn,
             local_asn: Asn::RESERVED,

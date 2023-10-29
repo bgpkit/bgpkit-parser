@@ -131,7 +131,7 @@ fn benchmark(c: &mut Criterion) {
                 let mut total_elapsed = Duration::default();
 
                 for _ in 0..n {
-                    total_elapsed += perform_run(&path, program.args, &update_data);
+                    total_elapsed += perform_run(path, program.args, &update_data);
                 }
 
                 total_elapsed
@@ -153,7 +153,7 @@ fn benchmark(c: &mut Criterion) {
                 let mut total_elapsed = Duration::default();
 
                 for _ in 0..n {
-                    total_elapsed += perform_run(&path, program.args, &rib_data);
+                    total_elapsed += perform_run(path, program.args, &rib_data);
                 }
 
                 total_elapsed

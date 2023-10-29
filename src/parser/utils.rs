@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::models::*;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::debug;
 use std::net::IpAddr;
 
@@ -268,6 +268,55 @@ pub fn parse_nlri_list(
     }
 
     Ok(prefixes)
+}
+
+pub fn encode_asn(asn: &Asn, asn_len: &AsnLength) -> Bytes {
+    let mut bytes = BytesMut::new();
+    match asn_len {
+        AsnLength::Bits16 => bytes.put_u16(asn.into()),
+        AsnLength::Bits32 => {
+            bytes.put_u32(asn.into());
+        }
+    }
+    bytes.freeze()
+}
+
+pub fn encode_ipaddr(addr: &IpAddr) -> Vec<u8> {
+    match addr {
+        IpAddr::V4(addr) => addr.octets().to_vec(),
+        IpAddr::V6(addr) => addr.octets().to_vec(),
+    }
+}
+
+pub fn encode_nlri_prefixes(prefixes: &[NetworkPrefix], add_path: bool) -> Bytes {
+    let mut bytes = BytesMut::new();
+    for prefix in prefixes {
+        bytes.extend(encode_nlri_prefix(prefix, add_path));
+    }
+    bytes.freeze()
+}
+
+pub fn encode_nlri_prefix(prefix: &NetworkPrefix, add_path: bool) -> Bytes {
+    let mut bytes = BytesMut::new();
+    if add_path {
+        // encode path identifier
+        bytes.put_u32(prefix.path_id);
+    }
+    // encode prefix
+
+    let bit_len = prefix.prefix.prefix_len();
+    let byte_len = ((bit_len + 7) / 8) as usize;
+    bytes.put_u8(bit_len);
+
+    match prefix.prefix {
+        IpNet::V4(prefix) => {
+            bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
+        }
+        IpNet::V6(prefix) => {
+            bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
+        }
+    };
+    bytes.freeze()
 }
 
 /// A CRC32 implementation that converts a string to a hex string.

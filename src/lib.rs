@@ -206,6 +206,58 @@ match bmp_msg {
 [bmp-rfc]: https://datatracker.ietf.org/doc/html/rfc7854
 [openbmp-url]: https://www.openbmp.org/
 
+### Archive filtered MRT records to a new MRT file on disk
+
+The example will download one MRT file from RouteViews, filter out all the BGP messages that
+are not originated from AS3356, and write the filtered MRT records to disk. Then it re-parses the
+filtered MRT file and prints out the number of BGP messages.
+
+```no_run
+use bgpkit_parser::Elementor;
+use itertools::Itertools;
+use std::io::Write;
+
+fn main() {
+    const OUTPUT_FILE: &str = "as3356_mrt.gz";
+
+    println!("Start downloading and filtering BGP messages from AS3356");
+    let mut mrt_writer = oneio::get_writer(OUTPUT_FILE).unwrap();
+
+    let mut records_count = 0;
+    let mut elems_count = 0;
+    bgpkit_parser::BgpkitParser::new(
+        "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2",
+    )
+    .unwrap()
+    .add_filter("origin_asn", "3356")
+    .unwrap()
+    .into_record_iter()
+    .for_each(|record| {
+        let bytes = record.encode();
+        mrt_writer.write_all(&bytes).unwrap();
+        records_count += 1;
+        let mut elementor = Elementor::new();
+        elems_count += elementor.record_to_elems(record).len();
+    });
+    // make sure to properly flush bytes from writer
+    drop(mrt_writer);
+
+    println!(
+        "Found and archived {} MRT records, {} BGP messages",
+        records_count, elems_count
+    );
+
+    let elems = bgpkit_parser::BgpkitParser::new(OUTPUT_FILE)
+        .unwrap()
+        .into_elem_iter()
+        .collect_vec();
+    println!(
+        "Read {} BGP messages from the newly archived MRT file.",
+        elems.len()
+    );
+}
+```
+
 # Command Line Tool
 
 `bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.

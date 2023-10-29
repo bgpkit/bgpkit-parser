@@ -5,6 +5,7 @@ Parse MRT header and content, provides [BgpElem][BgpElem] struct for per-prefix 
 */
 pub mod messages;
 pub mod mrt_elem;
+pub mod mrt_header;
 pub mod mrt_record;
 
 pub use messages::bgp4mp::parse_bgp4mp;

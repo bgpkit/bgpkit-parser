@@ -68,6 +68,20 @@ impl BgpError {
             }
         }
     }
+
+    pub fn get_codes(&self) -> (u8, u8) {
+        match self {
+            BgpError::Reserved(code) => (0, *code),
+            BgpError::MessageHeaderError(v) => (1, (*v).into()),
+            BgpError::OpenError(v) => (2, (*v).into()),
+            BgpError::UpdateError(v) => (3, (*v).into()),
+            BgpError::HoldTimerExpired(v) => (4, *v),
+            BgpError::FiniteStateMachineError(v) => (5, (*v).into()),
+            BgpError::CeaseNotification(v) => (6, (*v).into()),
+            BgpError::RouteFreshError(v) => (7, (*v).into()),
+            BgpError::Unknown(code, subcode) => (*code, *subcode),
+        }
+    }
 }
 
 /// Message Header Error subcodes

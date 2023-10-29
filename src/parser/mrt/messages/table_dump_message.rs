@@ -1,8 +1,9 @@
 use crate::error::*;
 use crate::models::*;
-use crate::parser::bgp::attributes::AttributeParser;
+use crate::parser::bgp::attributes::parse_attributes;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+use ipnet::IpNet;
 use std::net::IpAddr;
 
 /// Parse MRT TABLE_DUMP type message.
@@ -88,14 +89,12 @@ pub fn parse_table_dump_message(
     //   - create subslice based on the cursor's current position
     //   - pass the data into the parser function
 
-    let attr_parser = AttributeParser::new(false);
-
     data.has_n_remaining(attribute_length)?;
     let attr_data_slice = data.split_to(attribute_length);
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
     let attributes =
-        attr_parser.parse_attributes(attr_data_slice, &AsnLength::Bits16, None, None, None)?;
+        parse_attributes(attr_data_slice, &AsnLength::Bits16, false, None, None, None)?;
 
     Ok(TableDumpMessage {
         view_number,
@@ -107,4 +106,48 @@ pub fn parse_table_dump_message(
         peer_asn,
         attributes,
     })
+}
+
+impl TableDumpMessage {
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put_u16(self.view_number);
+        bytes.put_u16(self.sequence_number);
+        match &self.prefix.prefix {
+            IpNet::V4(p) => {
+                bytes.put_u32(p.addr().into());
+                bytes.put_u8(p.prefix_len());
+            }
+            IpNet::V6(p) => {
+                bytes.put_u128(p.addr().into());
+                bytes.put_u8(p.prefix_len());
+            }
+        }
+        bytes.put_u8(self.status);
+        bytes.put_u32(self.originated_time as u32);
+
+        // peer address and peer asn
+        match self.peer_address {
+            IpAddr::V4(a) => {
+                bytes.put_u32(a.into());
+            }
+            IpAddr::V6(a) => {
+                bytes.put_u128(a.into());
+            }
+        }
+        bytes.put_u16(self.peer_asn.into());
+
+        // encode attributes
+        let mut attr_bytes = BytesMut::new();
+        for attr in &self.attributes.inner {
+            // add_path always false for v1 table dump
+            // asn_len always 16 bites
+            attr_bytes.extend(attr.encode(false, AsnLength::Bits16));
+        }
+
+        bytes.put_u16(attr_bytes.len() as u16);
+        bytes.put_slice(&attr_bytes);
+
+        bytes.freeze()
+    }
 }

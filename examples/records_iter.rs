@@ -10,8 +10,8 @@ fn main() {
             MrtMessage::TableDumpMessage(_) => {}
             MrtMessage::TableDumpV2Message(_) => {}
             MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4Mp::StateChange(_) => {}
-                Bgp4Mp::Message(m) => match m.bgp_message {
+                Bgp4MpEnum::StateChange(_) => {}
+                Bgp4MpEnum::Message(m) => match m.bgp_message {
                     BgpMessage::Open(_) => {}
                     BgpMessage::Update(u) => {
                         for attr in &u.attributes {

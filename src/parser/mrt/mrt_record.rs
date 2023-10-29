@@ -1,75 +1,16 @@
+use super::mrt_header::parse_common_header;
+use crate::bmp::messages::{BmpMessage, MessageBody};
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
 };
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
+use log::warn;
 use std::convert::TryFrom;
 use std::io::Read;
-
-/// MRT common header
-///
-/// A MRT record is constructed as the following:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-///
-/// ```
-///
-/// Or with extended timestamp:
-/// ```text
-///  0                   1                   2                   3
-///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                           Timestamp                           |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |             Type              |            Subtype            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                             Length                            |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Microsecond Timestamp                    |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                      Message... (variable)
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// ```
-pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
-    let mut raw_bytes = [0u8; 12];
-    input.read_exact(&mut raw_bytes)?;
-    let mut data = BytesMut::from(&raw_bytes[..]);
-
-    let timestamp = data.get_u32();
-    let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::try_from(entry_type_raw)?;
-    let entry_subtype = data.get_u16();
-    let mut length = data.get_u32();
-
-    let microsecond_timestamp = match &entry_type {
-        EntryType::BGP4MP_ET => {
-            length -= 4;
-            let mut raw_bytes: [u8; 4] = [0; 4];
-            input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).get_u32())
-        }
-        _ => None,
-    };
-
-    Ok(CommonHeader {
-        timestamp,
-        microsecond_timestamp,
-        entry_type,
-        entry_subtype,
-        length,
-    })
-}
+use std::net::IpAddr;
+use std::str::FromStr;
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     // parse common header
@@ -182,4 +123,90 @@ pub fn parse_mrt_body(
         }
     };
     Ok(message)
+}
+
+impl MrtRecord {
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        let message_bytes = self.message.encode(self.common_header.entry_subtype);
+        let mut new_header = self.common_header;
+        if message_bytes.len() < new_header.length as usize {
+            warn!("message length is less than the length in the header");
+            new_header.length = message_bytes.len() as u32;
+        }
+        let header_bytes = new_header.encode();
+
+        // // debug begins
+        // let parsed_body = parse_mrt_body(
+        //     self.common_header.entry_type as u16,
+        //     self.common_header.entry_subtype,
+        //     message_bytes.clone(),
+        // )
+        // .unwrap();
+        // assert!(self.message == parsed_body);
+        // // debug ends
+
+        bytes.put_slice(&header_bytes);
+        bytes.put_slice(&message_bytes);
+        bytes.freeze()
+    }
+}
+
+// convert f64 timestamp into u32 seconds and u32 microseconds
+fn convert_timestamp(timestamp: f64) -> (u32, u32) {
+    let seconds = timestamp as u32;
+    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
+    (seconds, microseconds)
+}
+
+impl TryFrom<BmpMessage> for MrtRecord {
+    type Error = String;
+
+    fn try_from(bmp_message: BmpMessage) -> Result<Self, Self::Error> {
+        let bgp_message = match bmp_message.message_body {
+            MessageBody::RouteMonitoring(m) => m.bgp_message,
+            _ => return Err("unsupported bmp message type".to_string()),
+        };
+        let bmp_header = match bmp_message.per_peer_header {
+            Some(h) => h,
+            None => return Err("missing per peer header".to_string()),
+        };
+
+        let local_ip = match bmp_header.peer_ip {
+            IpAddr::V4(_) => IpAddr::from_str("0.0.0.0").unwrap(),
+            IpAddr::V6(_) => IpAddr::from_str("::").unwrap(),
+        };
+        let local_asn = match bmp_header.peer_asn.is_four_byte() {
+            true => Asn::new_32bit(0),
+            false => Asn::new_16bit(0),
+        };
+
+        let bgp4mp_message = Bgp4MpMessage {
+            msg_type: Bgp4MpType::MessageAs4, // TODO: check Message or MessageAs4
+            peer_asn: bmp_header.peer_asn,
+            local_asn,
+            interface_index: 0,
+            peer_ip: bmp_header.peer_ip,
+            local_ip,
+            bgp_message,
+        };
+
+        let mrt_message = MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(bgp4mp_message));
+
+        let (seconds, microseconds) = convert_timestamp(bmp_header.timestamp);
+
+        let subtype = Bgp4MpType::MessageAs4 as u16;
+        let mrt_header = CommonHeader {
+            timestamp: seconds,
+            microsecond_timestamp: Some(microseconds),
+            entry_type: EntryType::BGP4MP_ET,
+            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            length: mrt_message.encode(subtype).len() as u32,
+        };
+
+        Ok(MrtRecord {
+            common_header: mrt_header,
+            message: mrt_message,
+        })
+    }
 }

@@ -1,8 +1,9 @@
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
-use crate::parser::{parse_nlri_list, ReadUtils};
+use crate::parser::{encode_nlri_prefix, parse_nlri_list, ReadUtils};
 use crate::ParserError;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
+
 use log::warn;
 
 ///
@@ -106,6 +107,53 @@ pub fn parse_nlri(
         })),
     }
 }
+/// Encode a NLRI attribute for TableDump V2 format.
+///
+/// Table dump V2 have the prefixes and AFI/SAFI information encoded before the attribute, and
+/// therefore not encoding them here.
+#[allow(unused_variables, dead_code)]
+pub fn encode_nlri_table_v2(nlri: &Nlri) -> Bytes {
+    todo!()
+}
+
+/// Encode a NLRI attribute.
+pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Bytes {
+    let mut bytes = BytesMut::new();
+
+    // encode address family
+    bytes.put_u16(nlri.afi as u16);
+    bytes.put_u8(nlri.safi as u8);
+
+    if let Some(next_hop) = &nlri.next_hop {
+        if !reachable {
+            warn!("NLRI next hop should not be set for unreachable NLRI");
+        }
+        // encode next hop
+        let next_hop_bytes = match next_hop {
+            NextHopAddress::Ipv4(ip) => ip.octets().to_vec(),
+            NextHopAddress::Ipv6(ip) => ip.octets().to_vec(),
+            NextHopAddress::Ipv6LinkLocal(ip1, ip2) => {
+                let mut ip_bytes = ip1.octets().to_vec();
+                ip_bytes.extend_from_slice(&ip2.octets());
+                ip_bytes
+            }
+        };
+        bytes.put_u8(next_hop_bytes.len() as u8);
+        bytes.put_slice(&next_hop_bytes);
+    }
+
+    // write reserved byte for reachable NRLI
+    if reachable {
+        bytes.put_u8(0);
+    }
+
+    // NLRI
+    for prefix in &nlri.prefixes {
+        bytes.extend(encode_nlri_prefix(prefix, add_path))
+    }
+
+    bytes.freeze()
+}
 
 #[cfg(test)]
 mod tests {
@@ -176,5 +224,63 @@ mod tests {
         } else {
             panic!("Unexpected result: {:?}", res);
         }
+    }
+
+    #[test]
+    fn test_encode_nlri() {
+        let nlri = Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: Some(NextHopAddress::Ipv4(
+                Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            )),
+            prefixes: vec![NetworkPrefix {
+                prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
+                path_id: 0,
+            }],
+        };
+        let bytes = encode_nlri(&nlri, true, false);
+        assert_eq!(
+            bytes,
+            Bytes::from(vec![
+                0x00, 0x01, // address family: IPv4
+                0x01, // safi: unicast
+                0x04, // next hop length: 4
+                0x0A, 0x00, 0x00, 0x01, // next hop:
+                0x00, // reserved
+                // NLRI
+                0x18, // 24 bits prefix length
+                0xC0, 0x00, 0x01, // 192.0.1
+            ])
+        );
+        let parsed_nlri = parse_nlri(bytes, &None, &None, &None, true, false).unwrap();
+        assert_eq!(parsed_nlri, AttributeValue::MpReachNlri(nlri.clone()));
+
+        let nlri = Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: Some(NextHopAddress::Ipv4(
+                Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            )),
+            prefixes: vec![NetworkPrefix {
+                prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
+                path_id: 123,
+            }],
+        };
+        let bytes = encode_nlri(&nlri, true, true);
+        assert_eq!(
+            bytes,
+            Bytes::from(vec![
+                0x00, 0x01, // address family: IPv4
+                0x01, // safi: unicast
+                0x04, // next hop length: 4
+                0x0A, 0x00, 0x00, 0x01, // next hop:
+                0x00, // reserved
+                // NLRI
+                0x00, 0x00, 0x00, 0x7B, // path_id: 123
+                0x18, // 24 bits prefix length
+                0xC0, 0x00, 0x01, // 192.0.1
+            ])
+        );
     }
 }
