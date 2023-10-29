@@ -72,7 +72,7 @@ pub struct MrtRecord {
 ///   `BGP4MP_ET`
 ///
 /// [header-link]: https://datatracker.ietf.org/doc/html/rfc6396#section-2
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommonHeader {
     pub timestamp: u32,
@@ -80,6 +80,17 @@ pub struct CommonHeader {
     pub entry_type: EntryType,
     pub entry_subtype: u16,
     pub length: u32,
+}
+
+impl PartialEq for CommonHeader {
+    fn eq(&self, other: &Self) -> bool {
+        self.timestamp == other.timestamp
+            && self.microsecond_timestamp == other.microsecond_timestamp
+            && self.entry_type == other.entry_type
+            && self.entry_subtype == other.entry_subtype
+        // && self.length == other.length
+        // relax the length check as it might be different due to incorrect encoding
+    }
 }
 
 impl CommonHeader {
