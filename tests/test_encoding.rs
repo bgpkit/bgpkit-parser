@@ -22,6 +22,24 @@ mod tests {
             assert_eq!(record, parsed_record);
         }
     }
+    #[test]
+    fn test_encode_ipv6() {
+        let url = "http://archive.routeviews.org/route-views6/bgpdata/2023.10/UPDATES/updates.20231029.2115.bz2";
+        let parser = BgpkitParser::new(url).unwrap();
+        for record in parser.into_record_iter() {
+            let bytes = record.encode();
+            let parsed_record = match parse_mrt_record(&mut Cursor::new(bytes.clone())) {
+                Ok(r) => r,
+                Err(_) => {
+                    // uncomment the following two lines when debugging issues
+                    // dbg!(&record);
+                    // parse_mrt_record(&mut Cursor::new(bytes.clone())).unwrap();
+                    break;
+                }
+            };
+            assert_eq!(record, parsed_record);
+        }
+    }
 
     #[test]
     fn test_encode_large() {
