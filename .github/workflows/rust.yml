@@ -26,3 +26,6 @@ jobs:
 
     - name: Run cargo-readme check
       run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md
+
+    - name: Run clippy
+      run: cargo clippy --all-features -- -D warnings
