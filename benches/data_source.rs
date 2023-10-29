@@ -61,7 +61,7 @@ pub fn download_test_data() {
                 ),
             };
 
-            if &format!("{:x}", computed_checksum) == checksum {
+            if format!("{:x}", computed_checksum).as_str() == checksum {
                 continue;
             }
         }
@@ -74,7 +74,7 @@ pub fn download_test_data() {
 
         match download_file(url, &data_file_path) {
             Ok(download_checksum) => {
-                if &format!("{:x}", download_checksum) != checksum {
+                if format!("{:x}", download_checksum).as_str() != checksum {
                     println!("MD5 checksum for downloaded file ({:x}) does not match expected checksum ({:?}).", download_checksum, checksum);
                     println!("Perhaps a different file is being used?");
 

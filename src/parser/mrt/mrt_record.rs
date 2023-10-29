@@ -129,7 +129,7 @@ impl MrtRecord {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         let message_bytes = self.message.encode(self.common_header.entry_subtype);
-        let mut new_header = self.common_header.clone();
+        let mut new_header = self.common_header;
         if message_bytes.len() < new_header.length as usize {
             warn!("message length is less than the length in the header");
             new_header.length = message_bytes.len() as u32;
