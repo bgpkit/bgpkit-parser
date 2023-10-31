@@ -39,8 +39,8 @@ pub fn parse_peer_up_notification(
     let local_port = data.read_u16()?;
     let remote_port = data.read_u16()?;
 
-    let sent_open = parse_bgp_message(data, false, &asn_len)?;
-    let received_open = parse_bgp_message(data, false, &asn_len)?;
+    let sent_open = parse_bgp_message(data, false, asn_len)?;
+    let received_open = parse_bgp_message(data, false, asn_len)?;
     // let received_open = parse_bgp_open_message(data)?;
     let mut tlvs = vec![];
     while data.remaining() >= 4 {

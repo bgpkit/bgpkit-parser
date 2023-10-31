@@ -39,7 +39,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                                 m.bgp_message,
                                 header.timestamp,
                                 &per_peer_header.peer_ip,
-                                &per_peer_header.peer_asn.into(),
+                                &per_peer_header.peer_asn,
                             ) {
                                 info!("{}", elem);
                             }
