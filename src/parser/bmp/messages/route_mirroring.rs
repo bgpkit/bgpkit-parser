@@ -1,5 +1,5 @@
+use crate::bgp::parse_bgp_message;
 use crate::models::*;
-use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
@@ -19,7 +19,7 @@ pub struct RouteMirroringTlv {
 
 #[derive(Debug)]
 pub enum RouteMirroringValue {
-    BgpMessage(BgpUpdateMessage),
+    BgpMessage(BgpMessage),
     Information(RouteMirroringInfo),
 }
 
@@ -39,8 +39,8 @@ pub fn parse_route_mirroring(
         match data.read_u16()? {
             0 => {
                 let info_len = data.read_u16()?;
-                let bytes = data.split_to(info_len as usize);
-                let value = parse_bgp_update_message(bytes, false, asn_len)?;
+                let mut bytes = data.split_to(info_len as usize);
+                let value = parse_bgp_message(&mut bytes, false, asn_len)?;
                 tlvs.push(RouteMirroringTlv {
                     info_len,
                     value: RouteMirroringValue::BgpMessage(value),

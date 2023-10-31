@@ -1,5 +1,5 @@
+use crate::bgp::parse_bgp_message;
 use crate::models::*;
-use crate::parser::bgp::messages::parse_bgp_open_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
@@ -10,8 +10,8 @@ pub struct PeerUpNotification {
     pub local_addr: IpAddr,
     pub local_port: u16,
     pub remote_port: u16,
-    pub sent_open: BgpOpenMessage,
-    pub received_open: BgpOpenMessage,
+    pub sent_open: BgpMessage,
+    pub received_open: BgpMessage,
     pub tlvs: Vec<PeerUpNotificationTlv>,
 }
 
@@ -25,6 +25,7 @@ pub struct PeerUpNotificationTlv {
 pub fn parse_peer_up_notification(
     data: &mut Bytes,
     afi: &Afi,
+    asn_len: &AsnLength,
 ) -> Result<PeerUpNotification, ParserBmpError> {
     let local_addr: IpAddr = match afi {
         Afi::Ipv4 => {
@@ -38,8 +39,9 @@ pub fn parse_peer_up_notification(
     let local_port = data.read_u16()?;
     let remote_port = data.read_u16()?;
 
-    let sent_open = parse_bgp_open_message(data)?;
-    let received_open = parse_bgp_open_message(data)?;
+    let sent_open = parse_bgp_message(data, false, &asn_len)?;
+    let received_open = parse_bgp_message(data, false, &asn_len)?;
+    // let received_open = parse_bgp_open_message(data)?;
     let mut tlvs = vec![];
     while data.remaining() >= 4 {
         let info_type = data.read_u16()?;

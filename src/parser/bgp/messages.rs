@@ -129,36 +129,61 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     let hold_time = input.get_u16();
 
     let sender_ip = input.read_ipv4_address()?;
-    let opt_params_len = input.get_u8();
-
-    // let pos_end = input.position() + opt_params_len as u64;
-    if input.remaining() != opt_params_len as usize {
-        warn!(
-            "BGP open message length {} does not match the actual length {}",
-            opt_params_len,
-            input.remaining()
-        );
-    }
+    let mut opt_params_len: u16 = input.get_u8() as u16;
 
     let mut extended_length = false;
     let mut first = true;
 
     let mut params: Vec<OptParam> = vec![];
     while input.remaining() >= 2 {
-        let param_type = input.get_u8();
+        let mut param_type = input.get_u8();
         if first {
             // first parameter, check if it is extended length message
             if opt_params_len == 255 && param_type == 255 {
+                //
+                // 0                   1                   2                   3
+                // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+                //     +-+-+-+-+-+-+-+-+
+                //     |    Version    |
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     |     My Autonomous System      |
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     |           Hold Time           |
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     |                         BGP Identifier                        |
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     |Non-Ext OP Len.|Non-Ext OP Type|  Extended Opt. Parm. Length   |
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     |                                                               |
+                //     |             Optional Parameters (variable)                    |
+                //     |                                                               |
+                //         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //
+                //         Figure 1: Extended Encoding OPEN Format
                 extended_length = true;
-                // TODO: handle extended length
-                break;
-            } else {
-                first = false;
+                opt_params_len = input.read_u16()?;
+                if opt_params_len == 0 {
+                    break;
+                }
+                // let pos_end = input.position() + opt_params_len as u64;
+                if input.remaining() != opt_params_len as usize {
+                    warn!(
+                        "BGP open message length {} does not match the actual length {}",
+                        opt_params_len,
+                        input.remaining()
+                    );
+                }
+
+                param_type = input.read_u8()?;
             }
+            first = false;
         }
         // reaching here means all the remain params are regular non-extended-length parameters
 
-        let parm_length = input.get_u8();
+        let param_len = match extended_length {
+            true => input.read_u16()?,
+            false => input.read_u8()? as u16,
+        };
         // https://tools.ietf.org/html/rfc3392
         // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
 
@@ -167,7 +192,10 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 // capability codes:
                 // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
                 let code = input.read_u8()?;
-                let len = input.read_u8()?;
+                let len = match extended_length {
+                    true => input.read_u16()?,
+                    false => input.read_u8()? as u16,
+                };
 
                 ParamValue::Capability(Capability {
                     ty: BgpCapabilityType::from(code),
@@ -176,13 +204,13 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
             }
             _ => {
                 // unsupported param, read as raw bytes
-                let bytes = input.read_n_bytes(parm_length as usize)?;
+                let bytes = input.read_n_bytes(param_len as usize)?;
                 ParamValue::Raw(bytes)
             }
         };
         params.push(OptParam {
             param_type,
-            param_len: parm_length as u16,
+            param_len,
             param_value,
         });
     }
