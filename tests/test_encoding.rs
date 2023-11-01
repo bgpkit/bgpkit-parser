@@ -23,6 +23,7 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "very long test, only run if necessary"]
     fn test_encode_ipv6() {
         let url = "http://archive.routeviews.org/route-views6/bgpdata/2023.10/UPDATES/updates.20231029.2115.bz2";
         let parser = BgpkitParser::new(url).unwrap();
@@ -42,6 +43,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "very long test, only run if necessary"]
     fn test_encode_large() {
         let url = "http://archive.routeviews.org/route-views.amsix/bgpdata/2023.05/UPDATES/updates.20230505.0330.bz2";
         let parser = BgpkitParser::new(url).unwrap();
