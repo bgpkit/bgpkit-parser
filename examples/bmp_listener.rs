@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 102400];
 
     loop {
         match stream.read(&mut buffer) {
