@@ -136,9 +136,15 @@ impl AsPathSegment {
         }
     }
 
-    pub fn to_u32_vec(&self) -> Option<Vec<u32>> {
+    pub fn to_u32_vec(&self, dedup: bool) -> Option<Vec<u32>> {
         match self {
-            AsPathSegment::AsSequence(v) => Some(v.iter().map(|asn| (*asn).into()).collect()),
+            AsPathSegment::AsSequence(v) => {
+                let mut p: Vec<u32> = v.iter().map(|asn| (*asn).into()).collect();
+                if dedup {
+                    p.dedup();
+                }
+                Some(p)
+            }
             _ => None,
         }
     }
