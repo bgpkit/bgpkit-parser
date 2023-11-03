@@ -254,7 +254,7 @@ mod tests {
             ])
         );
         let parsed_nlri = parse_nlri(bytes, &None, &None, &None, true, false).unwrap();
-        assert_eq!(parsed_nlri, AttributeValue::MpReachNlri(nlri.clone()));
+        assert_eq!(parsed_nlri, AttributeValue::MpReachNlri(nlri));
 
         let nlri = Nlri {
             afi: Afi::Ipv4,

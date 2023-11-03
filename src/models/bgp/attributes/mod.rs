@@ -9,7 +9,6 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
 use std::net::IpAddr;
-use std::ops::Deref;
 use std::slice::Iter;
 use std::vec::IntoIter;
 
@@ -419,14 +418,6 @@ impl From<AttributeValue> for Attribute {
             flag: value.default_flags(),
             value,
         }
-    }
-}
-
-impl Deref for Attribute {
-    type Target = AttributeValue;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
     }
 }
 

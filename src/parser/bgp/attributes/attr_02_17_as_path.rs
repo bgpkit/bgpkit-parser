@@ -125,12 +125,12 @@ mod tests {
             0, 3, // AS3
         ]);
         let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
-        assert_eq!(vec![1, 2, 3], path.to_u32_vec().unwrap());
+        assert_eq!(vec![1, 2, 3], path.to_u32_vec_opt(false).unwrap());
 
         let path = parse_as_path(data, &AsnLength::Bits16).unwrap();
         assert_eq!(
-            path.to_u32_vec(),
-            AsPath::from_sequence([1, 2, 3]).to_u32_vec()
+            path.to_u32_vec_opt(false),
+            AsPath::from_sequence([1, 2, 3]).to_u32_vec_opt(false)
         );
     }
 
