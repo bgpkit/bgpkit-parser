@@ -665,6 +665,16 @@ impl AsPath {
         }
     }
 
+    /// This function optionally returns the first hop in the AS hop, which is considered as the
+    /// collector ASN of the message.
+    pub fn get_collector_opt(&self) -> Option<Asn> {
+        match self.segments.first() {
+            Some(AsPathSegment::AsSequence(v)) => v.first().copied(),
+            Some(AsPathSegment::AsSet(v)) if v.len() == 1 => Some(v[0]),
+            _ => None,
+        }
+    }
+
     pub fn to_u32_vec_opt(&self, dedup: bool) -> Option<Vec<u32>> {
         match self.segments.last() {
             None => None,
@@ -989,6 +999,13 @@ mod tests {
         ]);
         let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
         assert_eq!(origins, vec![7, 8]);
+    }
+
+    #[test]
+    fn test_get_collector() {
+        let aspath = AsPath::from_sequence([1, 2, 3, 5]);
+        let origins = aspath.get_collector_opt();
+        assert_eq!(origins.unwrap(), 1);
     }
 
     #[test]
