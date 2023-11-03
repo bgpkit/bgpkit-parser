@@ -138,10 +138,15 @@ impl Asn {
     }
 
     /// Return if an ASN is 4 bytes or not.
-    ///
     #[inline]
     pub const fn is_four_byte(&self) -> bool {
         self.four_byte
+    }
+
+    /// Return AS number as u32.
+    #[inline]
+    pub const fn to_u32(&self) -> u32 {
+        self.asn
     }
 }
 
