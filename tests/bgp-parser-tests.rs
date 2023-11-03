@@ -22,7 +22,7 @@ mod tests {
                 .as_path
                 .as_ref()
                 .unwrap()
-                .to_u32_vec()
+                .to_u32_vec_opt(false)
                 .unwrap()
         );
     }
