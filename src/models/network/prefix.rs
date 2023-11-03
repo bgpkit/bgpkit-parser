@@ -1,7 +1,6 @@
 use crate::models::BgpModelsError;
 use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
-use std::ops::Deref;
 use std::str::FromStr;
 
 /// A representation of a IP prefix with optional path ID.
@@ -9,14 +8,6 @@ use std::str::FromStr;
 pub struct NetworkPrefix {
     pub prefix: IpNet,
     pub path_id: u32,
-}
-
-impl Deref for NetworkPrefix {
-    type Target = IpNet;
-
-    fn deref(&self) -> &Self::Target {
-        &self.prefix
-    }
 }
 
 // Attempt to reduce the size of the debug output

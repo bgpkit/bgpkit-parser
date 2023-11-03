@@ -3,7 +3,6 @@ use ipnet::IpNet;
 use std::fmt::Debug;
 use std::iter::Map;
 use std::net::IpAddr;
-use std::ops::Deref;
 use std::slice::Iter;
 use std::vec::IntoIter;
 
@@ -41,14 +40,6 @@ impl Nlri {
             Some(next_hop) => next_hop.addr(),
             None => panic!("unreachable NLRI "),
         }
-    }
-}
-
-impl Deref for Nlri {
-    type Target = Vec<NetworkPrefix>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.prefixes
     }
 }
 
