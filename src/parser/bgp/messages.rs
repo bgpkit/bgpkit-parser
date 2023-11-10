@@ -326,6 +326,17 @@ impl BgpUpdateMessage {
         bytes.extend(encode_nlri_prefixes(&self.announced_prefixes, add_path));
         bytes.freeze()
     }
+
+    /// Check if this is an end-of-rib message.
+    ///
+    /// <https://datatracker.ietf.org/doc/html/rfc4724#section-2>
+    /// End-of-rib message is a special update message that contains no NLRI or withdrawal NLRI.
+    pub fn is_end_of_rib(&self) -> bool {
+        self.announced_prefixes.is_empty()
+            && self.withdrawn_prefixes.is_empty()
+            && self.attributes.get_reachable().is_none()
+            && self.attributes.get_unreachable().is_none()
+    }
 }
 
 impl BgpMessage {
@@ -348,5 +359,20 @@ impl BgpMessage {
         bytes.put_u8(msg_type as u8);
         bytes.put_slice(&msg_bytes);
         bytes.freeze()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_end_of_rib() {
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::default(),
+            announced_prefixes: vec![],
+        };
+        assert!(msg.is_end_of_rib());
     }
 }
