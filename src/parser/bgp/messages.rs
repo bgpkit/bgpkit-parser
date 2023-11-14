@@ -330,12 +330,23 @@ impl BgpUpdateMessage {
     /// Check if this is an end-of-rib message.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc4724#section-2>
-    /// End-of-rib message is a special update message that contains no NLRI or withdrawal NLRI.
+    /// End-of-rib message is a special update message that contains no NLRI or withdrawal NLRI prefixes.
     pub fn is_end_of_rib(&self) -> bool {
-        self.announced_prefixes.is_empty()
-            && self.withdrawn_prefixes.is_empty()
-            && self.attributes.get_reachable().is_none()
-            && self.attributes.get_unreachable().is_none()
+        let mut is_end_of_rib = true;
+        if !self.announced_prefixes.is_empty() || !self.withdrawn_prefixes.is_empty() {
+            is_end_of_rib = false;
+        }
+        if let Some(nlri) = self.attributes.get_reachable_nlri() {
+            if !nlri.prefixes.is_empty() {
+                is_end_of_rib = false;
+            }
+        }
+        if let Some(nlri) = self.attributes.get_unreachable_nlri() {
+            if !nlri.prefixes.is_empty() {
+                is_end_of_rib = false;
+            }
+        }
+        is_end_of_rib
     }
 }
 
@@ -368,9 +379,25 @@ mod tests {
 
     #[test]
     fn test_end_of_rib() {
+        // empty attributes
+        let attrs = Attributes::default();
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
-            attributes: Attributes::default(),
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(msg.is_end_of_rib());
+
+        // NLRI attribute with empty prefixes
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpReachNlri(Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: None,
+            prefixes: vec![],
+        })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
             announced_prefixes: vec![],
         };
         assert!(msg.is_end_of_rib());

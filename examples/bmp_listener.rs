@@ -1,3 +1,4 @@
+use bgpkit_parser::bmp::messages::MessageBody;
 use bgpkit_parser::parse_bmp_msg;
 use bytes::{Buf, Bytes};
 use std::io::Read;
@@ -26,6 +27,11 @@ fn handle_client(mut stream: TcpStream) {
                 let mut data = Bytes::from(buffer[..bytes_read].to_vec());
                 while data.remaining() > 0 {
                     let msg = parse_bmp_msg(&mut data).unwrap();
+                    if let MessageBody::RouteMonitoring(mon_msg) = &msg.message_body {
+                        if mon_msg.is_end_of_rib() {
+                            dbg!("end of RIB");
+                        }
+                    }
                     dbg!(msg);
                 }
             }

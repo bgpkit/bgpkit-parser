@@ -236,14 +236,14 @@ impl Attributes {
         })
     }
 
-    pub fn get_reachable(&self) -> Option<&Nlri> {
+    pub fn get_reachable_nlri(&self) -> Option<&Nlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpReachNlri(x) => Some(x),
             _ => None,
         })
     }
 
-    pub fn get_unreachable(&self) -> Option<&Nlri> {
+    pub fn get_unreachable_nlri(&self) -> Option<&Nlri> {
         self.inner.iter().find_map(|x| match &x.value {
             AttributeValue::MpUnreachNlri(x) => Some(x),
             _ => None,
