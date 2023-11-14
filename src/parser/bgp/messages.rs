@@ -376,6 +376,7 @@ impl BgpMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_end_of_rib() {
@@ -401,5 +402,43 @@ mod tests {
             announced_prefixes: vec![],
         };
         assert!(msg.is_end_of_rib());
+
+        // message with announced or withdrawal prefixes
+        let prefix = NetworkPrefix::from_str("192.168.1.0/24").unwrap();
+        let attrs = Attributes::default();
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![prefix],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib());
+
+        // NLRI attribute with non-empty prefixes
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpReachNlri(Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: None,
+            prefixes: vec![prefix],
+        })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib());
+
+        // Unreachable NLRI attribute with non-empty prefixes
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpUnreachNlri(Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: None,
+            prefixes: vec![prefix],
+        })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib());
     }
 }
