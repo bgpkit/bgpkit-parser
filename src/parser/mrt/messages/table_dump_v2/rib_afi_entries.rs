@@ -1,106 +1,11 @@
-use crate::error::ParserError;
-use crate::models::*;
-use crate::parser::bgp::attributes::parse_attributes;
+use crate::bgp::attributes::parse_attributes;
+use crate::models::{
+    Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
+};
 use crate::parser::ReadUtils;
+use crate::ParserError;
 use bytes::{Buf, Bytes};
-use log::warn;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv4Addr};
-
-/// Parse TABLE_DUMP V2 format MRT message.
-///
-/// RFC: <https://www.rfc-editor.org/rfc/rfc6396#section-4.3>
-///
-/// Subtypes include
-/// 1. PEER_INDEX_TABLE
-/// 2. RIB_IPV4_UNICAST
-/// 3. RIB_IPV4_MULTICAST
-/// 4. RIB_IPV6_UNICAST
-/// 5. RIB_IPV6_MULTICAST
-/// 6. RIB_GENERIC
-///
-pub fn parse_table_dump_v2_message(
-    sub_type: u16,
-    mut input: Bytes,
-) -> Result<TableDumpV2Message, ParserError> {
-    let v2_type: TableDumpV2Type = TableDumpV2Type::try_from(sub_type)?;
-
-    let msg: TableDumpV2Message = match v2_type {
-        TableDumpV2Type::PeerIndexTable => {
-            // peer index table type
-            TableDumpV2Message::PeerIndexTable(parse_peer_index_table(&mut input)?)
-        }
-        TableDumpV2Type::RibIpv4Unicast
-        | TableDumpV2Type::RibIpv4Multicast
-        | TableDumpV2Type::RibIpv6Unicast
-        | TableDumpV2Type::RibIpv6Multicast
-        | TableDumpV2Type::RibIpv4UnicastAddPath
-        | TableDumpV2Type::RibIpv4MulticastAddPath
-        | TableDumpV2Type::RibIpv6UnicastAddPath
-        | TableDumpV2Type::RibIpv6MulticastAddPath => {
-            TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
-        }
-        TableDumpV2Type::RibGeneric
-        | TableDumpV2Type::RibGenericAddPath
-        | TableDumpV2Type::GeoPeerTable => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
-            ))
-        }
-    };
-
-    Ok(msg)
-}
-
-/// Peer index table
-///
-/// RFC: https://www.rfc-editor.org/rfc/rfc6396#section-4.3.1
-pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, ParserError> {
-    let collector_bgp_id = Ipv4Addr::from(data.read_u32()?);
-    // read and ignore view name
-    let view_name_length = data.read_u16()?;
-    let view_name =
-        String::from_utf8(data.read_n_bytes(view_name_length as usize)?).unwrap_or("".to_string());
-
-    let peer_count = data.read_u16()?;
-    let mut peers = vec![];
-    for _index in 0..peer_count {
-        let peer_type = PeerType::from_bits_retain(data.read_u8()?);
-        let afi = match peer_type.contains(PeerType::ADDRESS_FAMILY_IPV6) {
-            true => Afi::Ipv6,
-            false => Afi::Ipv4,
-        };
-        let asn_len = match peer_type.contains(PeerType::AS_SIZE_32BIT) {
-            true => AsnLength::Bits32,
-            false => AsnLength::Bits16,
-        };
-
-        let peer_bgp_id = Ipv4Addr::from(data.read_u32()?);
-        let peer_address: IpAddr = data.read_address(&afi)?;
-        let peer_asn = data.read_asn(asn_len)?;
-        peers.push(Peer {
-            peer_type,
-            peer_bgp_id,
-            peer_address,
-            peer_asn,
-        })
-    }
-
-    let mut peers_map = HashMap::new();
-
-    for (id, p) in peers.into_iter().enumerate() {
-        peers_map.insert(id as u32, p);
-    }
-
-    Ok(PeerIndexTable {
-        collector_bgp_id,
-        view_name_length,
-        view_name,
-        peer_count,
-        peers_map,
-    })
-}
+use tracing::warn;
 
 /// RIB AFI-specific entries
 ///

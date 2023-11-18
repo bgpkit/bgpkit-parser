@@ -1,23 +1,9 @@
-//! MRT table dump version 1 and 2 structs
+//! MRT table dump version 2 structs
 use crate::models::*;
 use bitflags::bitflags;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::collections::HashMap;
 use std::net::IpAddr;
-
-/// TableDump message version 1
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TableDumpMessage {
-    pub view_number: u16,
-    pub sequence_number: u16,
-    pub prefix: NetworkPrefix,
-    pub status: u8,
-    pub originated_time: u64,
-    pub peer_address: IpAddr,
-    pub peer_asn: Asn,
-    pub attributes: Attributes,
-}
 
 /// TableDump message version 2 enum
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +11,7 @@ pub struct TableDumpMessage {
 pub enum TableDumpV2Message {
     PeerIndexTable(PeerIndexTable),
     RibAfi(RibAfiEntries),
+    /// Currently unsupported
     RibGeneric(RibGenericEntries),
 }
 

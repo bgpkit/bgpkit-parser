@@ -1,14 +1,16 @@
 //! MRT message and relevant structs.
 
 pub mod bgp4mp;
-pub mod tabledump;
+pub mod table_dump;
+pub mod table_dump_v2;
 
 pub use bgp4mp::*;
 use chrono::{DateTime, TimeZone, Utc};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::io;
 use std::io::Write;
-pub use tabledump::*;
+pub use table_dump::*;
+pub use table_dump_v2::*;
 
 /// MrtRecord is a wrapper struct that contains a header and a message.
 ///
