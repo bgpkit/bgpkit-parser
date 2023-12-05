@@ -358,8 +358,7 @@ impl Elementor {
                                 .peer_table
                                 .as_ref()
                                 .unwrap()
-                                .peers_map
-                                .get(&(pid as u32))
+                                .get_peer_by_id(&pid)
                                 .unwrap();
                             let (
                                 as_path,

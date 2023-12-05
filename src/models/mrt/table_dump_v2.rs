@@ -3,7 +3,8 @@ use crate::models::*;
 use bitflags::bitflags;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
+use std::str::FromStr;
 
 /// TableDump message version 2 enum
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,7 +162,21 @@ pub struct PeerIndexTable {
     pub view_name_length: u16,
     pub view_name: String,
     pub peer_count: u16,
-    pub peers_map: HashMap<u32, Peer>,
+    pub id_peer_map: HashMap<u16, Peer>,
+    pub peer_addr_id_map: HashMap<IpAddr, u16>,
+}
+
+impl Default for PeerIndexTable {
+    fn default() -> Self {
+        PeerIndexTable {
+            collector_bgp_id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
+            view_name_length: 0,
+            view_name: "".to_string(),
+            peer_count: 0,
+            id_peer_map: HashMap::new(),
+            peer_addr_id_map: HashMap::new(),
+        }
+    }
 }
 
 bitflags! {
@@ -174,7 +189,7 @@ bitflags! {
 }
 
 /// Peer struct.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Peer {
     pub peer_type: PeerType,

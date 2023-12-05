@@ -8,6 +8,8 @@ pub mod mrt_elem;
 pub mod mrt_header;
 pub mod mrt_record;
 
+pub mod mrt_encoder;
+
 pub use messages::bgp4mp::parse_bgp4mp;
 pub use messages::table_dump::parse_table_dump_message;
 pub use messages::table_dump_v2::parse_table_dump_v2_message;

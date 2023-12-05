@@ -1,11 +1,13 @@
 use crate::bgp::attributes::parse_attributes;
+use crate::bmp::messages::BmpMessage;
 use crate::models::{
-    Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
+    Afi, AsnLength, MrtMessage, MrtRecord, NetworkPrefix, RibAfiEntries, RibEntry, Safi,
+    TableDumpV2Message, TableDumpV2Type,
 };
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, Bytes};
-use tracing::warn;
+use log::warn;
 
 /// RIB AFI-specific entries
 ///
@@ -120,4 +122,35 @@ pub fn parse_rib_entry(
         originated_time,
         attributes,
     })
+}
+
+impl RibAfiEntries {
+    pub fn encode(&self) -> Bytes {
+        todo!()
+        // let mut bytes = Bytes::new();
+        // bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
+        // bytes.extend_from_slice(&self.prefix.encode());
+        // bytes.extend_from_slice(&(self.rib_entries.len() as u16).to_be_bytes());
+        // for entry in &self.rib_entries {
+        //     bytes.extend_from_slice(&entry.encode());
+        // }
+        // bytes
+    }
+}
+
+impl TryFrom<MrtRecord> for RibAfiEntries {
+    type Error = String;
+
+    fn try_from(mrt_record: MrtRecord) -> Result<Self, Self::Error> {
+        match mrt_record.message {
+            MrtMessage::TableDumpMessage(_) => {}
+            MrtMessage::TableDumpV2Message(m) => match m {
+                TableDumpV2Message::PeerIndexTable(_) => {}
+                TableDumpV2Message::RibAfi(_) => {}
+                TableDumpV2Message::RibGeneric(_) => {}
+            },
+            MrtMessage::Bgp4Mp(_) => {}
+        }
+        todo!()
+    }
 }

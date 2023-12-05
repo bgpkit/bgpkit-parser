@@ -39,10 +39,12 @@ pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, Parser
         })
     }
 
-    let mut peers_map = HashMap::new();
+    let mut id_peer_map = HashMap::new();
+    let mut peer_addr_id_map = HashMap::new();
 
     for (id, p) in peers.into_iter().enumerate() {
-        peers_map.insert(id as u32, p);
+        id_peer_map.insert(id as u16, p);
+        peer_addr_id_map.insert(p.peer_address, id as u16);
     }
 
     Ok(PeerIndexTable {
@@ -50,6 +52,33 @@ pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, Parser
         view_name_length,
         view_name,
         peer_count,
-        peers_map,
+        id_peer_map,
+        peer_addr_id_map,
     })
+}
+
+impl PeerIndexTable {
+    /// Add peer to peer index table and return peer id
+    pub fn add_peer(&mut self, peer: Peer) -> u16 {
+        match self.peer_addr_id_map.get(&peer.peer_address) {
+            Some(id) => *id,
+            None => {
+                self.peer_count += 1;
+                let peer_id = self.peer_count;
+                self.peer_addr_id_map.insert(peer.peer_address, peer_id);
+                self.id_peer_map.insert(peer_id, peer);
+                peer_id
+            }
+        }
+    }
+
+    /// Get peer by id
+    pub fn get_peer_by_id(&self, peer_id: &u16) -> Option<&Peer> {
+        self.id_peer_map.get(peer_id)
+    }
+
+    /// Get peer id by IP address.
+    pub fn get_peer_id_by_addr(&self, peer_addr: &IpAddr) -> Option<u16> {
+        self.peer_addr_id_map.get(peer_addr).copied()
+    }
 }
