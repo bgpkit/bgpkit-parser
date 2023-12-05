@@ -4,7 +4,7 @@ use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use bgpkit_parser::{BgpkitParser, Elementor};
+use bgpkit_parser::{BgpElem, BgpkitParser, Elementor};
 use clap::Parser;
 use ipnet::IpNet;
 
@@ -23,6 +23,10 @@ struct Opts {
     /// Output as JSON objects
     #[clap(long)]
     json: bool,
+
+    /// Output as full PSV entries with header
+    #[clap(long)]
+    psv: bool,
 
     /// Pretty-print JSON output
     #[clap(long)]
@@ -162,13 +166,19 @@ fn main() {
         }
         (false, false) => {
             let mut stdout = std::io::stdout();
-            for elem in parser {
+            for (index, elem) in parser.into_elem_iter().enumerate() {
                 let output_str = if opts.json {
                     let val = json!(elem);
                     if opts.pretty {
                         serde_json::to_string_pretty(&val).unwrap()
                     } else {
                         val.to_string()
+                    }
+                } else if opts.psv {
+                    if index == 0 {
+                        format!("{}\n{}", BgpElem::get_psv_header(), elem.to_psv())
+                    } else {
+                        elem.to_psv()
                     }
                 } else {
                     elem.to_string()

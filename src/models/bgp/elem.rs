@@ -164,6 +164,54 @@ impl BgpElem {
         let origin_asns = self.origin_asns.as_ref()?;
         (origin_asns.len() == 1).then(|| origin_asns[0].into())
     }
+
+    /// Returns the headers of the PSV format.
+    pub fn get_psv_header() -> String {
+        let fields = [
+            "type",
+            "timestamp",
+            "peer_ip",
+            "peer_asn",
+            "prefix",
+            "as_path",
+            "origin",
+            "next_hop",
+            "local_pref",
+            "med",
+            "communities",
+            "atomic",
+            "aggr_asn",
+            "aggr_ip",
+            "only_to_customer",
+        ];
+        fields.join("|")
+    }
+
+    /// Returns the PSV format of the element.
+    pub fn to_psv(&self) -> String {
+        let t = match self.elem_type {
+            ElemType::ANNOUNCE => "A",
+            ElemType::WITHDRAW => "W",
+        };
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            t,
+            &self.timestamp,
+            &self.peer_ip,
+            &self.peer_asn,
+            &self.prefix,
+            OptionToStr(&self.as_path),
+            OptionToStr(&self.origin),
+            OptionToStr(&self.next_hop),
+            OptionToStr(&self.local_pref),
+            OptionToStr(&self.med),
+            option_to_string_communities(&self.communities),
+            self.atomic,
+            OptionToStr(&self.aggr_asn),
+            OptionToStr(&self.aggr_ip),
+            OptionToStr(&self.only_to_customer),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -215,5 +263,18 @@ mod tests {
 
         assert!(elem1 < elem2);
         assert!(elem2 < elem3);
+    }
+
+    #[test]
+    fn test_psv() {
+        assert_eq!(
+            BgpElem::get_psv_header().as_str(),
+            "type|timestamp|peer_ip|peer_asn|prefix|as_path|origin|next_hop|local_pref|med|communities|atomic|aggr_asn|aggr_ip|only_to_customer"
+        );
+        let elem = BgpElem::default();
+        assert_eq!(
+            elem.to_psv().as_str(),
+            "A|0|0.0.0.0|0|0.0.0.0/0|||||||false|||"
+        );
     }
 }
