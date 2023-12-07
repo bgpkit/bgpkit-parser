@@ -159,9 +159,7 @@ pub struct RibEntry {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerIndexTable {
     pub collector_bgp_id: BgpIdentifier,
-    pub view_name_length: u16,
     pub view_name: String,
-    pub peer_count: u16,
     pub id_peer_map: HashMap<u16, Peer>,
     pub peer_addr_id_map: HashMap<IpAddr, u16>,
 }
@@ -170,9 +168,7 @@ impl Default for PeerIndexTable {
     fn default() -> Self {
         PeerIndexTable {
             collector_bgp_id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
-            view_name_length: 0,
             view_name: "".to_string(),
-            peer_count: 0,
             id_peer_map: HashMap::new(),
             peer_addr_id_map: HashMap::new(),
         }
