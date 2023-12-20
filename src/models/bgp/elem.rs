@@ -43,6 +43,7 @@ pub struct BgpElem {
     pub peer_ip: IpAddr,
     pub peer_asn: Asn,
     pub prefix: NetworkPrefix,
+
     pub next_hop: Option<IpAddr>,
     pub as_path: Option<AsPath>,
     pub origin_asns: Option<Vec<Asn>>,

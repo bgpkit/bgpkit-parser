@@ -315,10 +315,7 @@ impl BgpUpdateMessage {
         bytes.put_slice(&withdrawn_bytes);
 
         // attributes
-        let mut attr_bytes = BytesMut::new();
-        for attribute in &self.attributes.inner {
-            attr_bytes.extend(&attribute.encode(add_path, asn_len));
-        }
+        let attr_bytes = self.attributes.encode(add_path, asn_len);
 
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.put_slice(&attr_bytes);

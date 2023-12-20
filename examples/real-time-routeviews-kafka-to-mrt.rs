@@ -48,7 +48,7 @@ fn consume_and_archive(
                 let bmp_msg = parse_bmp_msg(&mut bytes);
                 match bmp_msg {
                     Ok(msg) => {
-                        let mrt_record = match bgpkit_parser::models::MrtRecord::try_from(msg) {
+                        let mrt_record = match bgpkit_parser::models::MrtRecord::try_from(&msg) {
                             Ok(r) => r,
                             Err(msg) => {
                                 dbg!(msg);

@@ -159,15 +159,15 @@ fn convert_timestamp(timestamp: f64) -> (u32, u32) {
     (seconds, microseconds)
 }
 
-impl TryFrom<BmpMessage> for MrtRecord {
+impl TryFrom<&BmpMessage> for MrtRecord {
     type Error = String;
 
-    fn try_from(bmp_message: BmpMessage) -> Result<Self, Self::Error> {
-        let bgp_message = match bmp_message.message_body {
-            MessageBody::RouteMonitoring(m) => m.bgp_message,
+    fn try_from(bmp_message: &BmpMessage) -> Result<Self, Self::Error> {
+        let bgp_message = match &bmp_message.message_body {
+            MessageBody::RouteMonitoring(m) => &m.bgp_message,
             _ => return Err("unsupported bmp message type".to_string()),
         };
-        let bmp_header = match bmp_message.per_peer_header {
+        let bmp_header = match &bmp_message.per_peer_header {
             Some(h) => h,
             None => return Err("missing per peer header".to_string()),
         };
@@ -188,7 +188,7 @@ impl TryFrom<BmpMessage> for MrtRecord {
             interface_index: 0,
             peer_ip: bmp_header.peer_ip,
             local_ip,
-            bgp_message,
+            bgp_message: bgp_message.clone(),
         };
 
         let mrt_message = MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(bgp4mp_message));
@@ -208,5 +208,13 @@ impl TryFrom<BmpMessage> for MrtRecord {
             common_header: mrt_header,
             message: mrt_message,
         })
+    }
+}
+
+impl TryFrom<&BgpElem> for MrtRecord {
+    type Error = String;
+
+    fn try_from(value: &BgpElem) -> Result<Self, Self::Error> {
+        todo!()
     }
 }

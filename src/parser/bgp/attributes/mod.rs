@@ -259,3 +259,13 @@ impl Attribute {
         bytes.freeze()
     }
 }
+
+impl Attributes {
+    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+        let mut bytes = BytesMut::new();
+        for attr in &self.inner {
+            bytes.extend(attr.encode(add_path, asn_len));
+        }
+        bytes.freeze()
+    }
+}

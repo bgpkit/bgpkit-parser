@@ -1,21 +1,14 @@
 use crate::bgp::attributes::parse_attributes;
-use crate::bmp::messages::BmpMessage;
 use crate::models::{
     Afi, AsnLength, MrtMessage, MrtRecord, NetworkPrefix, RibAfiEntries, RibEntry, Safi,
     TableDumpV2Message, TableDumpV2Type,
 };
 use crate::parser::ReadUtils;
 use crate::ParserError;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::warn;
 
-/// RIB AFI-specific entries
-///
-/// https://tools.ietf.org/html/rfc6396#section-4.3
-pub fn parse_rib_afi_entries(
-    data: &mut Bytes,
-    rib_type: TableDumpV2Type,
-) -> Result<RibAfiEntries, ParserError> {
+fn extract_afi_safi_from_rib_type(rib_type: &TableDumpV2Type) -> Result<(Afi, Safi), ParserError> {
     let afi: Afi;
     let safi: Safi;
     match rib_type {
@@ -42,6 +35,18 @@ pub fn parse_rib_afi_entries(
             )))
         }
     };
+
+    Ok((afi, safi))
+}
+
+/// RIB AFI-specific entries
+///
+/// https://tools.ietf.org/html/rfc6396#section-4.3
+pub fn parse_rib_afi_entries(
+    data: &mut Bytes,
+    rib_type: TableDumpV2Type,
+) -> Result<RibAfiEntries, ParserError> {
+    let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type)?;
 
     let add_path = matches!(
         rib_type,
@@ -83,6 +88,24 @@ pub fn parse_rib_afi_entries(
 }
 
 /// RIB entry: one prefix per entry
+///
+///
+/// https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.4
+/// ```text
+///         0                   1                   2                   3
+///         0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///        |         Peer Index            |
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///        |                         Originated Time                       |
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///        |      Attribute Length         |
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///        |                    BGP Attributes... (variable)
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+///                           Figure 10: RIB Entries
+/// ```
 pub fn parse_rib_entry(
     input: &mut Bytes,
     add_path: bool,
@@ -126,15 +149,32 @@ pub fn parse_rib_entry(
 
 impl RibAfiEntries {
     pub fn encode(&self) -> Bytes {
-        todo!()
-        // let mut bytes = Bytes::new();
-        // bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
-        // bytes.extend_from_slice(&self.prefix.encode());
-        // bytes.extend_from_slice(&(self.rib_entries.len() as u16).to_be_bytes());
-        // for entry in &self.rib_entries {
-        //     bytes.extend_from_slice(&entry.encode());
-        // }
-        // bytes
+        let mut bytes = BytesMut::new();
+        let (afi, safi) = extract_afi_safi_from_rib_type(&self.rib_type).unwrap();
+
+        bytes.put_u32(self.sequence_number);
+        bytes.extend(self.prefix.encode(false));
+
+        let entry_count = self.rib_entries.len();
+        bytes.put_u16(entry_count as u16);
+
+        for entry in &self.rib_entries {
+            bytes.extend(entry.encode());
+        }
+
+        bytes.freeze()
+    }
+}
+
+impl RibEntry {
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put_u16(self.peer_index);
+        bytes.put_u32(self.originated_time);
+        let attr_bytes = self.attributes.encode(false, AsnLength::Bits32);
+        bytes.put_u16(attr_bytes.len() as u16);
+        bytes.extend(attr_bytes);
+        bytes.freeze()
     }
 }
 

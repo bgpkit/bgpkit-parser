@@ -152,6 +152,10 @@ impl Attributes {
             .cloned()
     }
 
+    pub fn add_attr(&mut self, attr: Attribute) {
+        self.inner.push(attr);
+    }
+
     /// Get the `ORIGIN` attribute. In the event that this attribute is not present,
     /// [Origin::INCOMPLETE] will be returned instead.
     pub fn origin(&self) -> Origin {

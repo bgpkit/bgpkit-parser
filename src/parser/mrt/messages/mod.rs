@@ -11,17 +11,13 @@ impl MrtMessage {
     pub fn encode(&self, sub_type: u16) -> Bytes {
         let msg_bytes: Bytes = match self {
             MrtMessage::TableDumpMessage(m) => m.encode(),
-            MrtMessage::TableDumpV2Message(m) => {
-                let v2_type: TableDumpV2Type = TableDumpV2Type::try_from(sub_type).unwrap();
-                match m {
-                    TableDumpV2Message::PeerIndexTable(p) => {}
-                    TableDumpV2Message::RibAfi(r) => {}
-                    TableDumpV2Message::RibGeneric(_) => {
-                        todo!("RibGeneric message is not supported yet");
-                    }
+            MrtMessage::TableDumpV2Message(m) => match m {
+                TableDumpV2Message::PeerIndexTable(p) => p.encode(),
+                TableDumpV2Message::RibAfi(r) => r.encode(),
+                TableDumpV2Message::RibGeneric(_) => {
+                    todo!("RibGeneric message is not supported yet");
                 }
-                todo!("TableDumpV2 message is not supported yet");
-            }
+            },
             MrtMessage::Bgp4Mp(m) => {
                 let msg_type = Bgp4MpType::try_from(sub_type).unwrap();
 

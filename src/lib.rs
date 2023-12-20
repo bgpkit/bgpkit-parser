@@ -428,6 +428,7 @@ pub mod error;
 pub mod models;
 #[cfg(feature = "parser")]
 pub mod parser;
+mod encoder;
 
 #[cfg(feature = "models")]
 pub use models::BgpElem;
