@@ -1,6 +1,4 @@
-use crate::models::{
-    AsnLength, Bgp4MpEnum, Bgp4MpType, MrtMessage, TableDumpV2Message, TableDumpV2Type,
-};
+use crate::models::{AsnLength, Bgp4MpEnum, Bgp4MpType, MrtMessage, TableDumpV2Message};
 use bytes::Bytes;
 
 pub(crate) mod bgp4mp;

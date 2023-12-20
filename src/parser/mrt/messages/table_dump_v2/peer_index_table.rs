@@ -1,6 +1,4 @@
-use crate::models::{
-    Afi, AsnLength, MrtMessage, MrtRecord, Peer, PeerIndexTable, PeerType, TableDumpV2Message,
-};
+use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -154,7 +152,8 @@ impl PeerIndexTable {
         buf.extend(view_name_bytes);
 
         // Encode peer_count
-        buf.put_u16(self.peer_addr_id_map.len() as u16);
+        let peer_count = self.id_peer_map.len() as u16;
+        buf.put_u16(peer_count);
 
         // Encode peers
         let mut peer_ids: Vec<_> = self.id_peer_map.keys().collect();
@@ -187,12 +186,6 @@ impl PeerIndexTable {
         // Return Bytes
         buf.freeze()
     }
-}
-
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
 }
 
 #[cfg(test)]

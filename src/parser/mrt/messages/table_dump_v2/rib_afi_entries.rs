@@ -150,7 +150,6 @@ pub fn parse_rib_entry(
 impl RibAfiEntries {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
-        let (afi, safi) = extract_afi_safi_from_rib_type(&self.rib_type).unwrap();
 
         bytes.put_u32(self.sequence_number);
         bytes.extend(self.prefix.encode(false));

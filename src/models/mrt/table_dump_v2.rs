@@ -198,7 +198,7 @@ impl Peer {
     pub fn new(peer_bgp_id: BgpIdentifier, peer_address: IpAddr, peer_asn: Asn) -> Self {
         let mut peer_type = PeerType::empty();
 
-        if peer_asn.required_len() == AsnLength::Bits32 {
+        if peer_asn.is_four_byte() {
             peer_type.insert(PeerType::AS_SIZE_32BIT);
         }
 

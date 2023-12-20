@@ -505,9 +505,9 @@ impl From<&BgpElem> for Attributes {
             let mut large_communities = vec![];
             for c in v {
                 match c {
-                    MetaCommunity::Plain(v) => communites.push(v.clone()),
-                    MetaCommunity::Extended(v) => extended_communities.push(v.clone()),
-                    MetaCommunity::Large(v) => large_communities.push(v.clone()),
+                    MetaCommunity::Plain(v) => communites.push(*v),
+                    MetaCommunity::Extended(v) => extended_communities.push(*v),
+                    MetaCommunity::Large(v) => large_communities.push(*v),
                 }
             }
             if !communites.is_empty() {

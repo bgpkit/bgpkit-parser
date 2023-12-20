@@ -5,8 +5,8 @@
 //! reconstructing the peer index table before encoding all other contents.
 
 use crate::models::{
-    Attributes, Bgp4MpType, BgpElem, CommonHeader, EntryType, MrtMessage, MrtRecord, NetworkPrefix,
-    Peer, PeerIndexTable, RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
+    Attributes, BgpElem, CommonHeader, EntryType, MrtMessage, NetworkPrefix, Peer, PeerIndexTable,
+    RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
 };
 use bytes::{Bytes, BytesMut};
 use ipnet::IpNet;
@@ -30,8 +30,14 @@ fn convert_timestamp(timestamp: f64) -> (u32, u32) {
 
 impl MrtRibEncoder {
     pub fn new() -> Self {
+        let index_table = PeerIndexTable {
+            collector_bgp_id: Ipv4Addr::from(0),
+            view_name: "bgpkit collector".to_string(),
+            id_peer_map: Default::default(),
+            peer_addr_id_map: Default::default(),
+        };
         Self {
-            index_table: Default::default(),
+            index_table,
             per_prefix_entries_map: Default::default(),
             timestamp: 0.0,
         }
@@ -43,7 +49,7 @@ impl MrtRibEncoder {
         }
         let bgp_identifier = match elem.peer_ip {
             IpAddr::V4(ip) => ip,
-            IpAddr::V6(ip) => Ipv4Addr::from(0),
+            IpAddr::V6(_ip) => Ipv4Addr::from(0),
         };
         let peer = Peer::new(bgp_identifier, elem.peer_ip, elem.peer_asn);
         let peer_id = self.index_table.add_peer(peer);
@@ -65,17 +71,17 @@ impl MrtRibEncoder {
         let mrt_message = MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(
             self.index_table.clone(),
         ));
-        let (seconds, microseconds) = convert_timestamp(self.timestamp);
+        let (seconds, _microseconds) = convert_timestamp(self.timestamp);
         let subtype = TableDumpV2Type::PeerIndexTable as u16;
         let data_bytes = mrt_message.encode(subtype);
-        let header_bytes = CommonHeader {
+        let header = CommonHeader {
             timestamp: seconds,
-            microsecond_timestamp: Some(microseconds),
+            microsecond_timestamp: None,
             entry_type: EntryType::TABLE_DUMP_V2,
             entry_subtype: subtype,
             length: data_bytes.len() as u32,
-        }
-        .encode();
+        };
+        let header_bytes = header.encode();
         bytes.extend(header_bytes);
         bytes.extend(data_bytes);
 
@@ -99,12 +105,12 @@ impl MrtRibEncoder {
             let mrt_message =
                 MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(prefix_rib_entry));
 
-            let (seconds, microseconds) = convert_timestamp(self.timestamp);
+            let (seconds, _microseconds) = convert_timestamp(self.timestamp);
             let subtype = rib_type as u16;
             let data_bytes = mrt_message.encode(subtype);
             let header_bytes = CommonHeader {
                 timestamp: seconds,
-                microsecond_timestamp: Some(microseconds),
+                microsecond_timestamp: None,
                 entry_type: EntryType::TABLE_DUMP_V2,
                 entry_subtype: subtype,
                 length: data_bytes.len() as u32,
@@ -125,17 +131,33 @@ impl MrtRibEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::Asn;
     use crate::parse_mrt_record;
+    use bytes::Buf;
     use std::io::Cursor;
 
     #[test]
     fn test_encoding_rib() {
         let mut encoder = MrtRibEncoder::new();
-        let elem = BgpElem::default();
+        let mut elem = BgpElem::default();
+        elem.peer_ip = IpAddr::V4("10.0.0.1".parse().unwrap());
+        elem.peer_asn = Asn::from(65000);
+        elem.prefix.prefix = "10.250.0.0/24".parse().unwrap();
+        encoder.process_elem(&elem);
+        elem.prefix.prefix = "10.251.0.0/24".parse().unwrap();
         encoder.process_elem(&elem);
         let bytes = encoder.export_bytes();
 
-        let parsed = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
-        dbg!(&parsed);
+        let mut cursor = Cursor::new(bytes.clone());
+        while cursor.has_remaining() {
+            let parsed = parse_mrt_record(&mut cursor).unwrap();
+            dbg!(&parsed);
+        }
+
+        let mut cursor = Cursor::new(bytes);
+        let parser = crate::BgpkitParser::from_reader(&mut cursor);
+        for elem in parser {
+            println!("{}", elem.to_string());
+        }
     }
 }
