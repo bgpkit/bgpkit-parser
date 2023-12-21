@@ -34,7 +34,8 @@ use crate::parser::bgp::attributes::attr_09_originator::{
 use crate::parser::bgp::attributes::attr_10_13_cluster::{encode_clusters, parse_clusters};
 use crate::parser::bgp::attributes::attr_14_15_nlri::{encode_nlri, parse_nlri};
 use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
-    encode_extended_communities, parse_extended_community, parse_ipv6_extended_community,
+    encode_extended_communities, encode_ipv6_extended_communities, parse_extended_community,
+    parse_ipv6_extended_community,
 };
 use crate::parser::bgp::attributes::attr_32_large_communities::{
     encode_large_communities, parse_large_communities,
@@ -196,9 +197,9 @@ pub fn parse_attributes(
             Err(e) => {
                 if partial {
                     // it's ok to have errors when reading partial bytes
-                    warn!("PARTIAL: {}", e.to_string());
+                    debug!("PARTIAL: {}", e.to_string());
                 } else {
-                    warn!("{}", e.to_string());
+                    debug!("{}", e.to_string());
                 }
                 continue;
             }
@@ -212,8 +213,11 @@ impl Attribute {
     pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
 
-        bytes.put_u8(self.flag.bits());
-        bytes.put_u8(self.value.attr_type().into());
+        let flag = self.flag.bits();
+        let type_code = self.value.attr_type().into();
+
+        bytes.put_u8(flag);
+        bytes.put_u8(type_code);
 
         let value_bytes = match &self.value {
             AttributeValue::Origin(v) => encode_origin(v),
@@ -238,6 +242,9 @@ impl Attribute {
             AttributeValue::Communities(v) => encode_regular_communities(v),
             AttributeValue::ExtendedCommunities(v) => encode_extended_communities(v),
             AttributeValue::LargeCommunities(v) => encode_large_communities(v),
+            AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => {
+                encode_ipv6_extended_communities(v)
+            }
             AttributeValue::OriginatorId(v) => encode_originator_id(&IpAddr::from(*v)),
             AttributeValue::Clusters(v) => encode_clusters(v),
             AttributeValue::MpReachNlri(v) => encode_nlri(v, true, add_path),

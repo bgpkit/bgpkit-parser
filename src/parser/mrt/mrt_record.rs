@@ -210,11 +210,3 @@ impl TryFrom<&BmpMessage> for MrtRecord {
         })
     }
 }
-
-impl TryFrom<&BgpElem> for MrtRecord {
-    type Error = String;
-
-    fn try_from(value: &BgpElem) -> Result<Self, Self::Error> {
-        todo!()
-    }
-}

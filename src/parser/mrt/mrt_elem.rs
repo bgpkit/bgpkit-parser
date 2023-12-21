@@ -84,6 +84,11 @@ fn get_relevant_attributes(
                     .map(MetaCommunity::Extended)
                     .collect::<Vec<MetaCommunity>>(),
             ),
+            AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => communities_vec.extend(
+                v.into_iter()
+                    .map(MetaCommunity::Ipv6Extended)
+                    .collect::<Vec<MetaCommunity>>(),
+            ),
             AttributeValue::LargeCommunities(v) => communities_vec.extend(
                 v.into_iter()
                     .map(MetaCommunity::Large)
@@ -502,12 +507,14 @@ impl From<&BgpElem> for Attributes {
         if let Some(v) = value.communities.as_ref() {
             let mut communites = vec![];
             let mut extended_communities = vec![];
+            let mut ipv6_extended_communities = vec![];
             let mut large_communities = vec![];
             for c in v {
                 match c {
                     MetaCommunity::Plain(v) => communites.push(*v),
                     MetaCommunity::Extended(v) => extended_communities.push(*v),
                     MetaCommunity::Large(v) => large_communities.push(*v),
+                    MetaCommunity::Ipv6Extended(v) => ipv6_extended_communities.push(*v),
                 }
             }
             if !communites.is_empty() {
@@ -518,6 +525,11 @@ impl From<&BgpElem> for Attributes {
             }
             if !large_communities.is_empty() {
                 values.push(AttributeValue::LargeCommunities(large_communities));
+            }
+            if !ipv6_extended_communities.is_empty() {
+                values.push(AttributeValue::Ipv6AddressSpecificExtendedCommunities(
+                    ipv6_extended_communities,
+                ));
             }
         }
 

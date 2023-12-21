@@ -446,6 +446,7 @@ pub enum AttributeValue {
     },
     Communities(Vec<Community>),
     ExtendedCommunities(Vec<ExtendedCommunity>),
+    Ipv6AddressSpecificExtendedCommunities(Vec<Ipv6AddrExtCommunity>),
     LargeCommunities(Vec<LargeCommunity>),
     OriginatorId(BgpIdentifier),
     Clusters(Vec<u32>),
@@ -499,6 +500,9 @@ impl AttributeValue {
             AttributeValue::Aggregator { is_as4: true, .. } => AttrType::AS4_AGGREGATOR,
             AttributeValue::Communities(_) => AttrType::COMMUNITIES,
             AttributeValue::ExtendedCommunities(_) => AttrType::EXTENDED_COMMUNITIES,
+            AttributeValue::Ipv6AddressSpecificExtendedCommunities(_) => {
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+            }
             AttributeValue::LargeCommunities(_) => AttrType::LARGE_COMMUNITIES,
             AttributeValue::OriginatorId(_) => AttrType::ORIGINATOR_ID,
             AttributeValue::Clusters(_) => AttrType::CLUSTER_LIST,
