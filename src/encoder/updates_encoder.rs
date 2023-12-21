@@ -15,17 +15,12 @@ fn convert_timestamp(timestamp: f64) -> (u32, u32) {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 pub struct MrtUpdatesEncoder {
     cached_elems: Vec<BgpElem>,
 }
 
-impl Default for MrtUpdatesEncoder {
-    fn default() -> Self {
-        Self {
-            cached_elems: Vec::new(),
-        }
-    }
-}
+
 
 impl MrtUpdatesEncoder {
     pub fn new() -> Self {
@@ -115,7 +110,7 @@ mod tests {
         let mut cursor = Cursor::new(bytes);
         let parser = crate::BgpkitParser::from_reader(&mut cursor);
         for elem in parser {
-            println!("{}", elem.to_string());
+            println!("{}", elem);
         }
     }
 }

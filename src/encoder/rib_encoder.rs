@@ -164,7 +164,7 @@ mod tests {
         let mut cursor = Cursor::new(bytes);
         let parser = crate::BgpkitParser::from_reader(&mut cursor);
         for elem in parser {
-            println!("{}", elem.to_string());
+            println!("{}", elem);
         }
     }
 }

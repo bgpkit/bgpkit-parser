@@ -373,8 +373,8 @@ impl BgpMessage {
 impl From<&BgpElem> for BgpUpdateMessage {
     fn from(elem: &BgpElem) -> Self {
         let (announced_prefixes, withdrawn_prefixes) = match elem.elem_type {
-            ElemType::ANNOUNCE => (vec![elem.prefix.clone()], vec![]),
-            ElemType::WITHDRAW => (vec![], vec![elem.prefix.clone()]),
+            ElemType::ANNOUNCE => (vec![elem.prefix], vec![]),
+            ElemType::WITHDRAW => (vec![], vec![elem.prefix]),
         };
         BgpUpdateMessage {
             withdrawn_prefixes,

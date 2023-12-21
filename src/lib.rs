@@ -217,17 +217,16 @@ use bgpkit_parser::Elementor;
 use itertools::Itertools;
 use std::io::Write;
 
-fn main() {
-    const OUTPUT_FILE: &str = "as3356_mrt.gz";
+const OUTPUT_FILE: &str = "as3356_mrt.gz";
 
-    println!("Start downloading and filtering BGP messages from AS3356");
-    let mut mrt_writer = oneio::get_writer(OUTPUT_FILE).unwrap();
+println!("Start downloading and filtering BGP messages from AS3356");
+let mut mrt_writer = oneio::get_writer(OUTPUT_FILE).unwrap();
 
-    let mut records_count = 0;
-    let mut elems_count = 0;
-    bgpkit_parser::BgpkitParser::new(
-        "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2",
-    )
+let mut records_count = 0;
+let mut elems_count = 0;
+bgpkit_parser::BgpkitParser::new(
+    "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2",
+)
     .unwrap()
     .add_filter("origin_asn", "3356")
     .unwrap()
@@ -239,23 +238,22 @@ fn main() {
         let mut elementor = Elementor::new();
         elems_count += elementor.record_to_elems(record).len();
     });
-    // make sure to properly flush bytes from writer
-    drop(mrt_writer);
+// make sure to properly flush bytes from writer
+drop(mrt_writer);
 
-    println!(
-        "Found and archived {} MRT records, {} BGP messages",
-        records_count, elems_count
-    );
+println!(
+    "Found and archived {} MRT records, {} BGP messages",
+    records_count, elems_count
+);
 
-    let elems = bgpkit_parser::BgpkitParser::new(OUTPUT_FILE)
-        .unwrap()
-        .into_elem_iter()
-        .collect_vec();
-    println!(
-        "Read {} BGP messages from the newly archived MRT file.",
-        elems.len()
-    );
-}
+let elems = bgpkit_parser::BgpkitParser::new(OUTPUT_FILE)
+    .unwrap()
+    .into_elem_iter()
+    .collect_vec();
+println!(
+    "Read {} BGP messages from the newly archived MRT file.",
+    elems.len()
+);
 ```
 
 # Command Line Tool
