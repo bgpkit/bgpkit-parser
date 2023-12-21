@@ -14,13 +14,10 @@ fn convert_timestamp(timestamp: f64) -> (u32, u32) {
     (seconds, microseconds)
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MrtUpdatesEncoder {
     cached_elems: Vec<BgpElem>,
 }
-
-
 
 impl MrtUpdatesEncoder {
     pub fn new() -> Self {
