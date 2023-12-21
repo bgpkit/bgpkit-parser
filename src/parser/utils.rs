@@ -291,31 +291,8 @@ pub fn encode_ipaddr(addr: &IpAddr) -> Vec<u8> {
 pub fn encode_nlri_prefixes(prefixes: &[NetworkPrefix], add_path: bool) -> Bytes {
     let mut bytes = BytesMut::new();
     for prefix in prefixes {
-        bytes.extend(encode_nlri_prefix(prefix, add_path));
+        bytes.extend(prefix.encode(add_path));
     }
-    bytes.freeze()
-}
-
-pub fn encode_nlri_prefix(prefix: &NetworkPrefix, add_path: bool) -> Bytes {
-    let mut bytes = BytesMut::new();
-    if add_path {
-        // encode path identifier
-        bytes.put_u32(prefix.path_id);
-    }
-    // encode prefix
-
-    let bit_len = prefix.prefix.prefix_len();
-    let byte_len = ((bit_len + 7) / 8) as usize;
-    bytes.put_u8(bit_len);
-
-    match prefix.prefix {
-        IpNet::V4(prefix) => {
-            bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
-        }
-        IpNet::V6(prefix) => {
-            bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
-        }
-    };
     bytes.freeze()
 }
 

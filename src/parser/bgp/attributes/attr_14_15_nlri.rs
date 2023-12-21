@@ -1,6 +1,6 @@
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
-use crate::parser::{encode_nlri_prefix, parse_nlri_list, ReadUtils};
+use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
 
@@ -149,7 +149,7 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Bytes {
 
     // NLRI
     for prefix in &nlri.prefixes {
-        bytes.extend(encode_nlri_prefix(prefix, add_path))
+        bytes.extend(prefix.encode(add_path));
     }
 
     bytes.freeze()

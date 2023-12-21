@@ -93,7 +93,7 @@ pub fn parse_bgp_message(
 /// Parse BGP NOTIFICATION message.
 ///
 /// The BGP NOTIFICATION messages contains BGP error codes received from a connected BGP router. The
-/// error code is parsed into [BgpError](crate::models::error::BgpError) data structure and any unknown codes will produce warning
+/// error code is parsed into [BgpError] data structure and any unknown codes will produce warning
 /// messages, but not critical errors.
 ///
 pub fn parse_bgp_notification_message(
@@ -315,10 +315,7 @@ impl BgpUpdateMessage {
         bytes.put_slice(&withdrawn_bytes);
 
         // attributes
-        let mut attr_bytes = BytesMut::new();
-        for attribute in &self.attributes.inner {
-            attr_bytes.extend(&attribute.encode(add_path, asn_len));
-        }
+        let attr_bytes = self.attributes.encode(add_path, asn_len);
 
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.put_slice(&attr_bytes);
@@ -370,6 +367,26 @@ impl BgpMessage {
         bytes.put_u8(msg_type as u8);
         bytes.put_slice(&msg_bytes);
         bytes.freeze()
+    }
+}
+
+impl From<&BgpElem> for BgpUpdateMessage {
+    fn from(elem: &BgpElem) -> Self {
+        let (announced_prefixes, withdrawn_prefixes) = match elem.elem_type {
+            ElemType::ANNOUNCE => (vec![elem.prefix], vec![]),
+            ElemType::WITHDRAW => (vec![], vec![elem.prefix]),
+        };
+        BgpUpdateMessage {
+            withdrawn_prefixes,
+            attributes: Attributes::from(elem),
+            announced_prefixes,
+        }
+    }
+}
+
+impl From<BgpUpdateMessage> for BgpMessage {
+    fn from(value: BgpUpdateMessage) -> Self {
+        BgpMessage::Update(value)
     }
 }
 

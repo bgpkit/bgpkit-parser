@@ -84,6 +84,11 @@ fn get_relevant_attributes(
                     .map(MetaCommunity::Extended)
                     .collect::<Vec<MetaCommunity>>(),
             ),
+            AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => communities_vec.extend(
+                v.into_iter()
+                    .map(MetaCommunity::Ipv6Extended)
+                    .collect::<Vec<MetaCommunity>>(),
+            ),
             AttributeValue::LargeCommunities(v) => communities_vec.extend(
                 v.into_iter()
                     .map(MetaCommunity::Large)
@@ -358,8 +363,7 @@ impl Elementor {
                                 .peer_table
                                 .as_ref()
                                 .unwrap()
-                                .peers_map
-                                .get(&(pid as u32))
+                                .get_peer_by_id(&pid)
                                 .unwrap();
                             let (
                                 as_path,
@@ -466,5 +470,94 @@ where
         v.to_string()
     } else {
         String::new()
+    }
+}
+
+impl From<&BgpElem> for Attributes {
+    fn from(value: &BgpElem) -> Self {
+        let mut values = Vec::<AttributeValue>::new();
+        let mut attributes = Attributes::default();
+        if value.elem_type == ElemType::WITHDRAW {
+            return attributes;
+        }
+
+        if let Some(v) = value.next_hop {
+            values.push(AttributeValue::NextHop(v));
+        }
+
+        if let Some(v) = value.as_path.as_ref() {
+            values.push(AttributeValue::AsPath {
+                path: v.clone(),
+                is_as4: false,
+            });
+        }
+
+        if let Some(v) = value.origin {
+            values.push(AttributeValue::Origin(v));
+        }
+
+        if let Some(v) = value.local_pref {
+            values.push(AttributeValue::LocalPreference(v));
+        }
+
+        if let Some(v) = value.med {
+            values.push(AttributeValue::MultiExitDiscriminator(v));
+        }
+
+        if let Some(v) = value.communities.as_ref() {
+            let mut communites = vec![];
+            let mut extended_communities = vec![];
+            let mut ipv6_extended_communities = vec![];
+            let mut large_communities = vec![];
+            for c in v {
+                match c {
+                    MetaCommunity::Plain(v) => communites.push(*v),
+                    MetaCommunity::Extended(v) => extended_communities.push(*v),
+                    MetaCommunity::Large(v) => large_communities.push(*v),
+                    MetaCommunity::Ipv6Extended(v) => ipv6_extended_communities.push(*v),
+                }
+            }
+            if !communites.is_empty() {
+                values.push(AttributeValue::Communities(communites));
+            }
+            if !extended_communities.is_empty() {
+                values.push(AttributeValue::ExtendedCommunities(extended_communities));
+            }
+            if !large_communities.is_empty() {
+                values.push(AttributeValue::LargeCommunities(large_communities));
+            }
+            if !ipv6_extended_communities.is_empty() {
+                values.push(AttributeValue::Ipv6AddressSpecificExtendedCommunities(
+                    ipv6_extended_communities,
+                ));
+            }
+        }
+
+        if let Some(v) = value.aggr_asn {
+            values.push(AttributeValue::Aggregator {
+                asn: v,
+                id: value.aggr_ip.unwrap(),
+                is_as4: true,
+            });
+        }
+
+        if let Some(v) = value.only_to_customer {
+            values.push(AttributeValue::OnlyToCustomer(v));
+        }
+
+        if let Some(v) = value.unknown.as_ref() {
+            for t in v {
+                values.push(AttributeValue::Unknown(t.clone()));
+            }
+        }
+
+        if let Some(v) = value.deprecated.as_ref() {
+            for t in v {
+                values.push(AttributeValue::Deprecated(t.clone()));
+            }
+        }
+
+        attributes.extend(values);
+        attributes
     }
 }

@@ -1,9 +1,10 @@
 use crate::models::BgpModelsError;
+use bytes::{BufMut, Bytes, BytesMut};
 use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-/// A representation of a IP prefix with optional path ID.
+/// A representation of a network prefix with an optional path ID.
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
@@ -33,6 +34,52 @@ impl FromStr for NetworkPrefix {
 impl NetworkPrefix {
     pub fn new(prefix: IpNet, path_id: u32) -> NetworkPrefix {
         NetworkPrefix { prefix, path_id }
+    }
+
+    /// Encodes the IPNet prefix into a byte slice.
+    ///
+    /// # Arguments
+    ///
+    /// * `add_path` - A bool indicating whether to include the path identifier in the encoded bytes.
+    ///
+    /// # Returns
+    ///
+    /// A `Bytes` slice containing the encoded IPNet prefix.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::str::FromStr;
+    /// use bytes::Bytes;
+    /// use ipnet::{IpNet, Ipv4Net};
+    /// use bgpkit_parser::models::NetworkPrefix;
+    ///
+    /// let prefix = NetworkPrefix::from_str("192.168.0.0/24").unwrap();
+    /// let encoded_bytes = prefix.encode(false);
+    ///
+    /// assert_eq!(encoded_bytes.iter().as_slice(), &[24, 192, 168, 0]);
+    /// ```
+    pub fn encode(&self, add_path: bool) -> Bytes {
+        let mut bytes = BytesMut::new();
+        if add_path {
+            // encode path identifier
+            bytes.put_u32(self.path_id);
+        }
+        // encode prefix
+
+        let bit_len = self.prefix.prefix_len();
+        let byte_len = ((bit_len + 7) / 8) as usize;
+        bytes.put_u8(bit_len);
+
+        match self.prefix {
+            IpNet::V4(prefix) => {
+                bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
+            }
+            IpNet::V6(prefix) => {
+                bytes.put_slice(&prefix.addr().octets()[0..byte_len]);
+            }
+        };
+        bytes.freeze()
     }
 }
 

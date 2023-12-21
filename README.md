@@ -100,13 +100,11 @@ for item in broker.into_iter().take(2) {
 
 ### Filtering BGP Messages
 
-BGPKIT Parser also has built-in [Filter][filter] mechanism. When creating a new [`BgpkitParser`] instance,
+BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [`BgpkitParser`] instance,
 once can also call `add_filter` function to customize the parser to only show matching messages
 when iterating through [BgpElem]s.
 
-For all types of filters, check out the [Filter][filter] enum documentation.
-
-[filter]: crate::parser::filter::Filter
+For all types of filters, check out the [Filter] enum documentation.
 
 ```rust
 use bgpkit_parser::BgpkitParser;
@@ -159,10 +157,10 @@ fn main() {
 
     // subscribe to messages from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
-    socket.write_message(Message::Text(msg)).unwrap();
+    socket.send(Message::Text(msg)).unwrap();
 
     loop {
-        let msg = socket.read_message().expect("Error reading message").to_string();
+        let msg = socket.read().expect("Error reading message").to_string();
         if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);
@@ -175,7 +173,7 @@ fn main() {
 #### Parsing OpenBMP Messages From RouteViews Kafka Stream
 
 [RouteViews](http://www.routeviews.org/routeviews/) provides a real-time Kafka stream of the OpenBMP
-data received from their collectors. Below is an partial example of how we handle the raw bytes
+data received from their collectors. Below is a partial example of how we handle the raw bytes
 received from the Kafka stream. For full examples, check out the [examples folder on GitHub](https://github.com/bgpkit/bgpkit-parser/tree/main/examples).
 
 ```rust
@@ -225,45 +223,20 @@ use bgpkit_parser::Elementor;
 use itertools::Itertools;
 use std::io::Write;
 
-fn main() {
-    const OUTPUT_FILE: &str = "as3356_mrt.gz";
+let mut updates_encoder = bgpkit_parser::encoder::MrtUpdatesEncoder::new();
 
-    println!("Start downloading and filtering BGP messages from AS3356");
-    let mut mrt_writer = oneio::get_writer(OUTPUT_FILE).unwrap();
-
-    let mut records_count = 0;
-    let mut elems_count = 0;
-    bgpkit_parser::BgpkitParser::new(
-        "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2",
-    )
-    .unwrap()
-    .add_filter("origin_asn", "3356")
-    .unwrap()
-    .into_record_iter()
-    .for_each(|record| {
-        let bytes = record.encode();
-        mrt_writer.write_all(&bytes).unwrap();
-        records_count += 1;
-        let mut elementor = Elementor::new();
-        elems_count += elementor.record_to_elems(record).len();
+bgpkit_parser::BgpkitParser::new(
+    "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2",
+).unwrap()
+    .add_filter("origin_asn", "3356").unwrap()
+    .into_iter()
+    .for_each(|elem| {
+        updates_encoder.process_elem(&elem);
     });
-    // make sure to properly flush bytes from writer
-    drop(mrt_writer);
 
-    println!(
-        "Found and archived {} MRT records, {} BGP messages",
-        records_count, elems_count
-    );
-
-    let elems = bgpkit_parser::BgpkitParser::new(OUTPUT_FILE)
-        .unwrap()
-        .into_elem_iter()
-        .collect_vec();
-    println!(
-        "Read {} BGP messages from the newly archived MRT file.",
-        elems.len()
-    );
-}
+let mut mrt_writer = oneio::get_writer("as3356_mrt.gz").unwrap();
+mrt_writer.write_all(updates_encoder.export_bytes().as_ref()).unwrap();
+drop(mrt_writer);
 ```
 
 ## Command Line Tool
@@ -310,13 +283,11 @@ OPTIONS:
 
 ## Data Representation
 
-There are two key data structure to understand for the parsing results: [MrtRecord][mrtrecord] and [BgpElem].
-
-[mrtrecord]: crate::models::MrtRecord
+There are two key data structure to understand for the parsing results: [MrtRecord] and [BgpElem].
 
 ### `MrtRecord`: unmodified MRT information representation
 
-The [`MrtRecord`][mrtrecord] is the data structure that holds the unmodified, complete information parsed from the MRT data file.
+The [MrtRecord] is the data structure that holds the unmodified, complete information parsed from the MRT data file.
 
 ```rust
 pub struct MrtRecord {

@@ -125,15 +125,17 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         let mut local: [u8; 2] = [0; 2];
         local[0] = input.read_u8()?;
         local[1] = input.read_u8()?;
-        let ec = ExtendedCommunity::Ipv6AddrSpecific(Ipv6AddrExtCommunity {
+        let ec = Ipv6AddrExtCommunity {
             community_type: ExtendedCommunityType::from(ec_type_u8),
             subtype: sub_type,
             global_admin: global,
             local_admin: local,
-        });
+        };
         communities.push(ec);
     }
-    Ok(AttributeValue::ExtendedCommunities(communities))
+    Ok(AttributeValue::Ipv6AddressSpecificExtendedCommunities(
+        communities,
+    ))
 }
 
 pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
@@ -174,13 +176,19 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
-            ExtendedCommunity::Ipv6AddrSpecific(ipv6) => {
-                bytes.put_u8(ec_type);
-                bytes.put_u8(ipv6.subtype);
-                bytes.put_slice(&ipv6.global_admin.octets());
-                bytes.put_slice(ipv6.local_admin.as_slice());
-            }
         }
+    }
+    bytes.freeze()
+}
+
+pub fn encode_ipv6_extended_communities(communities: &Vec<Ipv6AddrExtCommunity>) -> Bytes {
+    let mut bytes = BytesMut::new();
+    for community in communities {
+        let ec_type = u8::from(community.community_type);
+        bytes.put_u8(ec_type);
+        bytes.put_u8(community.subtype);
+        bytes.put_u128(community.global_admin.into());
+        bytes.put_slice(community.local_admin.as_slice());
     }
     bytes.freeze()
 }
@@ -303,24 +311,21 @@ mod tests {
             0x00, 0x01, // Local Admin 1
         ];
 
-        if let AttributeValue::ExtendedCommunities(communities) =
+        if let AttributeValue::Ipv6AddressSpecificExtendedCommunities(communities) =
             parse_ipv6_extended_community(Bytes::from(data)).unwrap()
         {
             assert_eq!(communities.len(), 1);
-            if let ExtendedCommunity::Ipv6AddrSpecific(community) = &communities[0] {
-                assert_eq!(
-                    community.community_type,
-                    ExtendedCommunityType::NonTransitiveTwoOctetAs
-                );
-                assert_eq!(community.subtype, 0x02);
-                assert_eq!(
-                    community.global_admin,
-                    Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)
-                );
-                assert_eq!(community.local_admin, [0x00, 0x01]);
-            } else {
-                panic!("Unexpected community type");
-            }
+            let community = communities[0];
+            assert_eq!(
+                community.community_type,
+                ExtendedCommunityType::NonTransitiveTwoOctetAs
+            );
+            assert_eq!(community.subtype, 0x02);
+            assert_eq!(
+                community.global_admin,
+                Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)
+            );
+            assert_eq!(community.local_admin, [0x00, 0x01]);
         } else {
             panic!("Unexpected attribute type");
         }

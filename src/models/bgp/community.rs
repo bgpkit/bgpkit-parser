@@ -9,6 +9,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 pub enum MetaCommunity {
     Plain(Community),
     Extended(ExtendedCommunity),
+    Ipv6Extended(Ipv6AddrExtCommunity),
     Large(LargeCommunity),
 }
 
@@ -112,7 +113,6 @@ pub enum ExtendedCommunity {
     NonTransitiveIpv4Addr(Ipv4AddrExtCommunity),
     NonTransitiveFourOctetAs(FourOctetAsExtCommunity),
     NonTransitiveOpaque(OpaqueExtCommunity),
-    Ipv6AddrSpecific(Ipv6AddrExtCommunity),
     Raw([u8; 8]),
 }
 
@@ -128,7 +128,6 @@ impl ExtendedCommunity {
             ExtendedCommunity::NonTransitiveIpv4Addr(_) => NonTransitiveIpv4Addr,
             ExtendedCommunity::NonTransitiveFourOctetAs(_) => NonTransitiveFourOctetAs,
             ExtendedCommunity::NonTransitiveOpaque(_) => NonTransitiveOpaque,
-            ExtendedCommunity::Ipv6AddrSpecific(community) => community.community_type,
             ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
         }
     }
@@ -278,20 +277,23 @@ impl Display for ExtendedCommunity {
                     ToHexString(&ec.value)
                 )
             }
-            ExtendedCommunity::Ipv6AddrSpecific(ec) => {
-                write!(
-                    f,
-                    "ecv6:{}:{}:{}:{}",
-                    ec_type,
-                    ec.subtype,
-                    ec.global_admin,
-                    ToHexString(&ec.local_admin)
-                )
-            }
             ExtendedCommunity::Raw(ec) => {
                 write!(f, "ecraw:{}", ToHexString(ec))
             }
         }
+    }
+}
+
+impl Display for Ipv6AddrExtCommunity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ecv6:{}:{}:{}:{}",
+            u8::from(self.community_type),
+            self.subtype,
+            self.global_admin,
+            ToHexString(&self.local_admin)
+        )
     }
 }
 
@@ -301,6 +303,7 @@ impl Display for MetaCommunity {
             MetaCommunity::Plain(c) => write!(f, "{}", c),
             MetaCommunity::Extended(c) => write!(f, "{}", c),
             MetaCommunity::Large(c) => write!(f, "{}", c),
+            MetaCommunity::Ipv6Extended(c) => write!(f, "{}", c),
         }
     }
 }

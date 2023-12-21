@@ -141,7 +141,7 @@ pub struct BgpElem {
     pub atomic: bool,
     /// The aggregated ASN of the item, represented as an optional [Asn] type.
     pub aggr_asn: Option<Asn>,
-    /// The aggregated IP address of the item, represented as an optional [BgpIdentifier], i.e. [Ipv4Addr].
+    /// The aggregated IP address of the item, represented as an optional [BgpIdentifier], i.e. `Ipv4Addr`.
     pub aggr_ip: Option<BgpIdentifier>,
     pub only_to_customer: Option<Asn>,
     /// unknown attributes formatted as (TYPE, RAW_BYTES)
