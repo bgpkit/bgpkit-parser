@@ -30,19 +30,20 @@ fn convert_timestamp(timestamp: f64) -> (u32, u32) {
 
 impl MrtRibEncoder {
     pub fn new() -> Self {
-        let index_table = PeerIndexTable {
-            collector_bgp_id: Ipv4Addr::from(0),
-            view_name: "bgpkit collector".to_string(),
-            id_peer_map: Default::default(),
-            peer_addr_id_map: Default::default(),
-        };
-        Self {
-            index_table,
-            per_prefix_entries_map: Default::default(),
-            timestamp: 0.0,
-        }
+        Self::default()
     }
 
+    pub fn reset(&mut self) {
+        self.index_table = PeerIndexTable::default();
+        self.per_prefix_entries_map = HashMap::default();
+        self.timestamp = 0.0;
+    }
+
+    /// Processes a BgpElem and updates the internal data structures.
+    ///
+    /// # Arguments
+    ///
+    /// * `elem` - A reference to a BgpElem that contains the information to be processed.
     pub fn process_elem(&mut self, elem: &BgpElem) {
         if self.timestamp == 0.0 {
             self.timestamp = elem.timestamp;
@@ -64,6 +65,14 @@ impl MrtRibEncoder {
         entries_map.insert(peer_id, entry);
     }
 
+    /// Export the data stored in the struct to a byte array.
+    ///
+    /// The function first encodes the peer-index-table data into a `MrtMessage` and appends it to the `BytesMut` object.
+    /// Then, for each prefix in the `per_prefix_entries_map`, it creates a `RibAfiEntries` object and encodes it as a `MrtMessage`.
+    /// The resulting `BytesMut` object is then converted to an immutable `Bytes` object using `freeze()` and returned.
+    ///
+    /// # Return
+    /// Returns a `Bytes` object containing the exported data as a byte array.
     pub fn export_bytes(&mut self) -> Bytes {
         let mut bytes = BytesMut::new();
 
@@ -120,9 +129,7 @@ impl MrtRibEncoder {
             bytes.extend(data_bytes);
         }
 
-        self.index_table = PeerIndexTable::default();
-        self.per_prefix_entries_map = HashMap::default();
-        self.timestamp = 0.0;
+        self.reset();
 
         bytes.freeze()
     }

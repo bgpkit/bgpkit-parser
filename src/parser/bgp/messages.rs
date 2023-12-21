@@ -370,6 +370,26 @@ impl BgpMessage {
     }
 }
 
+impl From<&BgpElem> for BgpUpdateMessage {
+    fn from(elem: &BgpElem) -> Self {
+        let (announced_prefixes, withdrawn_prefixes) = match elem.elem_type {
+            ElemType::ANNOUNCE => (vec![elem.prefix.clone()], vec![]),
+            ElemType::WITHDRAW => (vec![], vec![elem.prefix.clone()]),
+        };
+        BgpUpdateMessage {
+            withdrawn_prefixes,
+            attributes: Attributes::from(elem),
+            announced_prefixes,
+        }
+    }
+}
+
+impl From<BgpUpdateMessage> for BgpMessage {
+    fn from(value: BgpUpdateMessage) -> Self {
+        BgpMessage::Update(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

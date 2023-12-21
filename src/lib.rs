@@ -423,12 +423,13 @@ We support normal communities, extended communities, and large communities.
 #![allow(clippy::needless_range_loop)]
 
 #[cfg(feature = "parser")]
+pub mod encoder;
+#[cfg(feature = "parser")]
 pub mod error;
 #[cfg(feature = "models")]
 pub mod models;
 #[cfg(feature = "parser")]
 pub mod parser;
-mod encoder;
 
 #[cfg(feature = "models")]
 pub use models::BgpElem;

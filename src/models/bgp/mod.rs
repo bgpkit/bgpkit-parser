@@ -110,7 +110,7 @@ pub struct Capability {
     pub value: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpUpdateMessage {
     pub withdrawn_prefixes: Vec<NetworkPrefix>,
