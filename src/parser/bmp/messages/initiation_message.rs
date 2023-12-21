@@ -29,7 +29,7 @@ pub enum InitiationTlvType {
 
 /// Parse BMP initiation message
 ///
-/// https://www.rfc-editor.org/rfc/rfc7854#section-4.3
+/// <https://www.rfc-editor.org/rfc/rfc7854#section-4.3>
 pub fn parse_initiation_message(data: &mut Bytes) -> Result<InitiationMessage, ParserBmpError> {
     let mut tlvs = vec![];
 

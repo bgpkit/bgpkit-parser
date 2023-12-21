@@ -643,7 +643,6 @@ impl AsPath {
 
     /// Iterate through the originating ASNs of this path. This functionality is provided for
     /// completeness, but in almost all cases this iterator should only contain a single element.
-    /// Alternatively, [AsPath::get_singular_origin] can be used if
     pub fn iter_origins(&self) -> impl '_ + Iterator<Item = Asn> {
         let origin_slice = match self.segments.last() {
             Some(AsPathSegment::AsSequence(v)) => v.last().map(std::slice::from_ref).unwrap_or(&[]),

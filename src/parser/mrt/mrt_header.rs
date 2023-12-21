@@ -4,6 +4,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::Read;
 
 /// MRT common header [RFC6396][header].
+///
 /// [header]: https://tools.ietf.org/html/rfc6396#section-4.1
 ///
 /// A MRT record is constructed as the following:

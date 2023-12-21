@@ -93,7 +93,7 @@ pub fn parse_bgp_message(
 /// Parse BGP NOTIFICATION message.
 ///
 /// The BGP NOTIFICATION messages contains BGP error codes received from a connected BGP router. The
-/// error code is parsed into [BgpError](crate::models::error::BgpError) data structure and any unknown codes will produce warning
+/// error code is parsed into [BgpError] data structure and any unknown codes will produce warning
 /// messages, but not critical errors.
 ///
 pub fn parse_bgp_notification_message(
