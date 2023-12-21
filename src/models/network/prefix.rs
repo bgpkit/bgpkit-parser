@@ -4,7 +4,7 @@ use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-/// A representation of a IP prefix with optional path ID.
+/// A representation of a network prefix with an optional path ID.
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
@@ -49,13 +49,15 @@ impl NetworkPrefix {
     /// # Example
     ///
     /// ```rust
+    /// use std::str::FromStr;
     /// use bytes::Bytes;
     /// use ipnet::{IpNet, Ipv4Net};
+    /// use bgpkit_parser::models::NetworkPrefix;
     ///
-    /// let prefix = IpNet::V4(Ipv4Net::new([192, 168, 0, 0].into(), 24).unwrap());
-    /// let encoded_bytes = prefix.encode(true);
+    /// let prefix = NetworkPrefix::from_str("192.168.0.0/24").unwrap();
+    /// let encoded_bytes = prefix.encode(false);
     ///
-    /// assert_eq!(encoded_bytes, &[24, 192, 168, 0]);
+    /// assert_eq!(encoded_bytes.iter().as_slice(), &[24, 192, 168, 0]);
     /// ```
     pub fn encode(&self, add_path: bool) -> Bytes {
         let mut bytes = BytesMut::new();

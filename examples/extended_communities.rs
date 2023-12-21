@@ -20,7 +20,9 @@ fn main() {
             for c in cs {
                 match c {
                     MetaCommunity::Plain(_) => {}
-                    MetaCommunity::Extended(_) | MetaCommunity::Large(_) => {
+                    MetaCommunity::Extended(_)
+                    | MetaCommunity::Large(_)
+                    | MetaCommunity::Ipv6Extended(_) => {
                         log::info!("{}", &elem);
                     }
                 }
