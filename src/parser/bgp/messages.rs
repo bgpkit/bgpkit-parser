@@ -279,7 +279,7 @@ pub fn parse_bgp_update_message(
     add_path: bool,
     asn_len: &AsnLength,
 ) -> Result<BgpUpdateMessage, ParserError> {
-    // AFI for routes out side attributes are IPv4 ONLY.
+    // NOTE: AFI for routes out side attributes are IPv4 ONLY.
     let afi = Afi::Ipv4;
 
     // parse withdrawn prefixes nlri
@@ -372,14 +372,10 @@ impl BgpMessage {
 
 impl From<&BgpElem> for BgpUpdateMessage {
     fn from(elem: &BgpElem) -> Self {
-        let (announced_prefixes, withdrawn_prefixes) = match elem.elem_type {
-            ElemType::ANNOUNCE => (vec![elem.prefix], vec![]),
-            ElemType::WITHDRAW => (vec![], vec![elem.prefix]),
-        };
         BgpUpdateMessage {
-            withdrawn_prefixes,
+            withdrawn_prefixes: vec![],
             attributes: Attributes::from(elem),
-            announced_prefixes,
+            announced_prefixes: vec![],
         }
     }
 }

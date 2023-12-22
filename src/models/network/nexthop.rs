@@ -52,3 +52,12 @@ impl Display for NextHopAddress {
         }
     }
 }
+
+impl From<IpAddr> for NextHopAddress {
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V4(x) => NextHopAddress::Ipv4(x),
+            IpAddr::V6(x) => NextHopAddress::Ipv6(x),
+        }
+    }
+}

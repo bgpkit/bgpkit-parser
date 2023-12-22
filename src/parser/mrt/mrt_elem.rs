@@ -477,9 +477,18 @@ impl From<&BgpElem> for Attributes {
     fn from(value: &BgpElem) -> Self {
         let mut values = Vec::<AttributeValue>::new();
         let mut attributes = Attributes::default();
+        let prefix = value.prefix;
+
         if value.elem_type == ElemType::WITHDRAW {
+            values.push(AttributeValue::MpUnreachNlri(Nlri::new_unreachable(prefix)));
+            attributes.extend(values);
             return attributes;
         }
+
+        values.push(AttributeValue::MpReachNlri(Nlri::new_reachable(
+            prefix,
+            value.next_hop,
+        )));
 
         if let Some(v) = value.next_hop {
             values.push(AttributeValue::NextHop(v));

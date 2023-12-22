@@ -161,10 +161,20 @@ mod tests {
             dbg!(&parsed);
         }
 
-        let mut cursor = Cursor::new(bytes);
-        let parser = crate::BgpkitParser::from_reader(&mut cursor);
-        for elem in parser {
-            println!("{}", elem);
+        // v6
+        let mut encoder = MrtRibEncoder::new();
+        let mut elem = BgpElem::default();
+        elem.peer_ip = IpAddr::V6("::1".parse().unwrap());
+        elem.peer_asn = Asn::from(65000);
+        // ipv6 prefix
+        elem.prefix.prefix = "2001:db8::/32".parse().unwrap();
+        encoder.process_elem(&elem);
+        let bytes = encoder.export_bytes();
+
+        let mut cursor = Cursor::new(bytes.clone());
+        while cursor.has_remaining() {
+            let parsed = parse_mrt_record(&mut cursor).unwrap();
+            dbg!(&parsed);
         }
     }
 }

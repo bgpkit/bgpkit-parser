@@ -41,6 +41,35 @@ impl Nlri {
             None => panic!("unreachable NLRI "),
         }
     }
+
+    pub fn new_reachable(prefix: NetworkPrefix, next_hop: Option<IpAddr>) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        let afi = match prefix.prefix {
+            IpNet::V4(_) => Afi::Ipv4,
+            IpNet::V6(_) => Afi::Ipv6,
+        };
+        let safi = Safi::Unicast;
+        Nlri {
+            afi,
+            safi,
+            next_hop,
+            prefixes: vec![prefix],
+        }
+    }
+
+    pub fn new_unreachable(prefix: NetworkPrefix) -> Nlri {
+        let afi = match prefix.prefix {
+            IpNet::V4(_) => Afi::Ipv4,
+            IpNet::V6(_) => Afi::Ipv6,
+        };
+        let safi = Safi::Unicast;
+        Nlri {
+            afi,
+            safi,
+            next_hop: None,
+            prefixes: vec![prefix],
+        }
+    }
 }
 
 impl IntoIterator for Nlri {
