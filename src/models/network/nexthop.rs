@@ -61,3 +61,103 @@ impl From<IpAddr> for NextHopAddress {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn test_next_hop_address_is_link_local() {
+        let ipv4_addr = Ipv4Addr::new(169, 254, 0, 1);
+        let ipv6_addr = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0);
+        let ipv6_link_local_addrs = (
+            Ipv6Addr::new(0xfe80, 0, 0, 1, 0, 0, 0, 1),
+            Ipv6Addr::new(0xfe80, 0, 0, 2, 0, 0, 0, 1),
+        );
+
+        let next_hop_ipv4 = NextHopAddress::Ipv4(ipv4_addr);
+        let next_hop_ipv6 = NextHopAddress::Ipv6(ipv6_addr);
+        let next_hop_ipv6_link_local =
+            NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
+
+        assert!(next_hop_ipv4.is_link_local());
+        assert!(next_hop_ipv6.is_link_local());
+        assert!(next_hop_ipv6_link_local.is_link_local());
+    }
+
+    #[test]
+    fn test_next_hop_address_addr() {
+        let ipv4_addr = Ipv4Addr::new(192, 0, 2, 1);
+        let ipv6_addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let ipv6_link_local_addrs = (
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+        );
+
+        let next_hop_ipv4 = NextHopAddress::Ipv4(ipv4_addr);
+        let next_hop_ipv6 = NextHopAddress::Ipv6(ipv6_addr);
+        let next_hop_ipv6_link_local =
+            NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
+
+        assert_eq!(next_hop_ipv4.addr(), IpAddr::V4(ipv4_addr));
+        assert_eq!(next_hop_ipv6.addr(), IpAddr::V6(ipv6_addr));
+        assert_eq!(
+            next_hop_ipv6_link_local.addr(),
+            IpAddr::V6(ipv6_link_local_addrs.0)
+        );
+    }
+
+    #[test]
+    fn test_next_hop_address_from() {
+        let ipv4_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let ipv6_addr = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+
+        let next_hop_ipv4 = NextHopAddress::from(ipv4_addr);
+        let next_hop_ipv6 = NextHopAddress::from(ipv6_addr);
+
+        assert_eq!(next_hop_ipv4.addr(), ipv4_addr);
+        assert_eq!(next_hop_ipv6.addr(), ipv6_addr);
+    }
+
+    #[test]
+    fn test_debug_for_next_hop_address() {
+        let ipv4_addr = Ipv4Addr::new(192, 0, 2, 1);
+        let ipv6_addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let ipv6_link_local_addrs = (
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+        );
+
+        let next_hop_ipv4 = NextHopAddress::Ipv4(ipv4_addr);
+        let next_hop_ipv6 = NextHopAddress::Ipv6(ipv6_addr);
+        let next_hop_ipv6_link_local =
+            NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
+
+        assert_eq!(format!("{:?}", next_hop_ipv4), "192.0.2.1");
+        assert_eq!(format!("{:?}", next_hop_ipv6), "2001:db8::1");
+        assert_eq!(
+            format!("{:?}", next_hop_ipv6_link_local),
+            "Ipv6LinkLocal(fe80::, fe80::)"
+        );
+    }
+
+    #[test]
+    fn test_display_for_next_hop_address() {
+        let ipv4_addr = Ipv4Addr::new(192, 0, 2, 1);
+        let ipv6_addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let ipv6_link_local_addrs = (
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0),
+        );
+
+        let next_hop_ipv4 = NextHopAddress::Ipv4(ipv4_addr);
+        let next_hop_ipv6 = NextHopAddress::Ipv6(ipv6_addr);
+        let next_hop_ipv6_link_local =
+            NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
+
+        assert_eq!(format!("{}", next_hop_ipv4), "192.0.2.1");
+        assert_eq!(format!("{}", next_hop_ipv6), "2001:db8::1");
+        assert_eq!(format!("{}", next_hop_ipv6_link_local), "fe80::");
+    }
+}
