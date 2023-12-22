@@ -15,7 +15,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
         .with_fetch_max_bytes_per_partition(100_000)
         .with_retry_max_bytes_limit(1_000_000)
         .with_fallback_offset(FetchOffset::Earliest)
-        .with_offset_storage(GroupOffsetStorage::Kafka)
+        .with_offset_storage(Some(GroupOffsetStorage::Kafka))
         .create()?;
 
     loop {
