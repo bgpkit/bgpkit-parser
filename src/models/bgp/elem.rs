@@ -426,7 +426,7 @@ mod tests {
         let elem = BgpElem::default();
         assert_eq!(
             elem.to_psv().as_str(),
-            "A|0|0.0.0.0|0|0.0.0.0/0||||||||false|||"
+            "A|0|0.0.0.0|0|0.0.0.0/0||||0.0.0.0||||false|||"
         );
     }
 

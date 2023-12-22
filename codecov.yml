@@ -2,6 +2,7 @@ ignore:
   - "src/bin"
   - "src/lib.rs"
   - "src/error.rs"
+  - "src/models/err.rs"
 coverage:
   status:
     project:

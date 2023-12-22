@@ -8,7 +8,6 @@ pub mod error;
 pub mod role;
 
 pub use attributes::*;
-pub use capabilities::*;
 pub use community::*;
 pub use elem::*;
 pub use error::*;
