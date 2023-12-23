@@ -5,10 +5,7 @@ pub mod table_dump;
 pub mod table_dump_v2;
 
 pub use bgp4mp::*;
-use chrono::{DateTime, TimeZone, Utc};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use std::io;
-use std::io::Write;
 pub use table_dump::*;
 pub use table_dump_v2::*;
 
@@ -95,33 +92,6 @@ impl PartialEq for CommonHeader {
     }
 }
 
-impl CommonHeader {
-    /// Writes the binary representation of the header to the given writer.
-    pub fn write_header<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write_all(&self.timestamp.to_be_bytes())?;
-        writer.write_all(&(self.entry_type as u16).to_be_bytes())?;
-        writer.write_all(&self.entry_subtype.to_be_bytes())?;
-
-        match self.microsecond_timestamp {
-            None => writer.write_all(&self.length.to_be_bytes()),
-            Some(microseconds) => {
-                // When the microsecond timestamp is present, the length must be adjusted to account
-                // for the stace used by the extra timestamp data.
-                writer.write_all(&(self.length + 4).to_be_bytes())?;
-                writer.write_all(&microseconds.to_be_bytes())
-            }
-        }
-    }
-
-    pub fn get_datetime(&self) -> DateTime<Utc> {
-        let nanos = self
-            .microsecond_timestamp
-            .map(|x| 1000 * x)
-            .unwrap_or_default();
-        Utc.timestamp_nanos(1_000_000_000 * (self.timestamp as i64) + nanos as i64)
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
@@ -179,4 +149,75 @@ pub enum EntryType {
     ISIS_ET = 33,
     OSPFv3 = 48,
     OSPFv3_ET = 49,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Asn;
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_entry_type_serialize_and_deserialize() {
+        let types = vec![
+            EntryType::NULL,
+            EntryType::START,
+            EntryType::DIE,
+            EntryType::I_AM_DEAD,
+            EntryType::PEER_DOWN,
+            EntryType::BGP,
+            EntryType::RIP,
+            EntryType::IDRP,
+            EntryType::RIPNG,
+            EntryType::BGP4PLUS,
+            EntryType::BGP4PLUS_01,
+            EntryType::OSPFv2,
+            EntryType::TABLE_DUMP,
+            EntryType::TABLE_DUMP_V2,
+            EntryType::BGP4MP,
+            EntryType::BGP4MP_ET,
+            EntryType::ISIS,
+            EntryType::ISIS_ET,
+            EntryType::OSPFv3,
+            EntryType::OSPFv3_ET,
+        ];
+
+        for entry_type in types {
+            let serialized = serde_json::to_string(&entry_type).unwrap();
+            let deserialized: EntryType = serde_json::from_str(&serialized).unwrap();
+
+            assert_eq!(entry_type, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_serialization() {
+        use serde_json;
+        use std::net::IpAddr;
+        use std::str::FromStr;
+
+        let mrt_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 0,
+                microsecond_timestamp: None,
+                entry_type: EntryType::BGP4MP,
+                entry_subtype: 0,
+                length: 0,
+            },
+            message: MrtMessage::Bgp4Mp(Bgp4MpEnum::StateChange(Bgp4MpStateChange {
+                msg_type: Bgp4MpType::StateChange,
+                peer_asn: Asn::new_32bit(0),
+                local_asn: Asn::new_32bit(0),
+                interface_index: 1,
+                peer_addr: IpAddr::from_str("10.0.0.0").unwrap(),
+                local_addr: IpAddr::from_str("10.0.0.0").unwrap(),
+                old_state: BgpState::Idle,
+                new_state: BgpState::Connect,
+            })),
+        };
+
+        let serialized = serde_json::to_string(&mrt_record).unwrap();
+        let deserialized: MrtRecord = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(mrt_record, deserialized);
+    }
 }

@@ -95,3 +95,95 @@ pub const fn address_family(ip: &IpAddr) -> u16 {
         IpAddr::V6(_) => 2,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_msg_type() {
+        let state_change = Bgp4MpEnum::StateChange(Bgp4MpStateChange {
+            msg_type: Bgp4MpType::StateChange,
+            peer_asn: Asn::new_32bit(0),
+            local_asn: Asn::new_32bit(0),
+            interface_index: 1,
+            peer_addr: IpAddr::from_str("10.0.0.0").unwrap(),
+            local_addr: IpAddr::from_str("10.0.0.1").unwrap(),
+            old_state: BgpState::Idle,
+            new_state: BgpState::Connect,
+        });
+        assert_eq!(state_change.msg_type(), Bgp4MpType::StateChange);
+
+        let message = Bgp4MpEnum::Message(Bgp4MpMessage {
+            msg_type: Bgp4MpType::Message,
+            peer_asn: Asn::new_32bit(0),
+            local_asn: Asn::new_32bit(0),
+            interface_index: 1,
+            peer_ip: IpAddr::from_str("10.0.0.0").unwrap(),
+            local_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+            bgp_message: BgpMessage::Update(Default::default()),
+        });
+        assert_eq!(message.msg_type(), Bgp4MpType::Message);
+    }
+
+    #[test]
+    fn test_is_local() {
+        let mut message = Bgp4MpMessage {
+            msg_type: Bgp4MpType::Message,
+            peer_asn: Asn::new_32bit(0),
+            local_asn: Asn::new_32bit(0),
+            interface_index: 1,
+            peer_ip: IpAddr::from_str("10.0.0.0").unwrap(),
+            local_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+            bgp_message: BgpMessage::Update(Default::default()),
+        };
+        assert!(!message.is_local());
+
+        message.msg_type = Bgp4MpType::MessageLocal;
+        assert!(message.is_local());
+
+        message.msg_type = Bgp4MpType::MessageAs4Local;
+        assert!(message.is_local());
+
+        message.msg_type = Bgp4MpType::MessageLocalAddpath;
+        assert!(message.is_local());
+
+        message.msg_type = Bgp4MpType::MessageLocalAs4Addpath;
+        assert!(message.is_local());
+
+        message.msg_type = Bgp4MpType::MessageAs4;
+        assert!(!message.is_local());
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serialization() {
+        let state_change = Bgp4MpEnum::StateChange(Bgp4MpStateChange {
+            msg_type: Bgp4MpType::StateChange,
+            peer_asn: Asn::new_32bit(0),
+            local_asn: Asn::new_32bit(0),
+            interface_index: 1,
+            peer_addr: IpAddr::from_str("10.0.0.0").unwrap(),
+            local_addr: IpAddr::from_str("10.0.0.1").unwrap(),
+            old_state: BgpState::Idle,
+            new_state: BgpState::Connect,
+        });
+        let serialized = serde_json::to_string(&state_change).unwrap();
+        let deserialized: Bgp4MpEnum = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, state_change);
+
+        let message = Bgp4MpEnum::Message(Bgp4MpMessage {
+            msg_type: Bgp4MpType::Message,
+            peer_asn: Asn::new_32bit(0),
+            local_asn: Asn::new_32bit(0),
+            interface_index: 1,
+            peer_ip: IpAddr::from_str("10.0.0.0").unwrap(),
+            local_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+            bgp_message: BgpMessage::Update(Default::default()),
+        });
+        let serialized = serde_json::to_string(&message).unwrap();
+        let deserialized: Bgp4MpEnum = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, message);
+    }
+}

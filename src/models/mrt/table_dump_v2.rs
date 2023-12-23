@@ -214,3 +214,123 @@ impl Peer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Create a helper function to initialize Peer structure
+    fn create_peer() -> Peer {
+        let bgp_id = Ipv4Addr::from_str("1.1.1.1").unwrap();
+        let peer_address: IpAddr = Ipv4Addr::from_str("2.2.2.2").unwrap().into();
+        // Assuming Asn::new(u32) is defined.
+        let asn = Asn::new_32bit(65000);
+        Peer::new(bgp_id, peer_address, asn)
+    }
+
+    #[test]
+    fn test_peer_new() {
+        let peer = create_peer();
+        assert_eq!(peer.peer_type, PeerType::AS_SIZE_32BIT);
+        assert_eq!(peer.peer_bgp_id, Ipv4Addr::from_str("1.1.1.1").unwrap());
+        assert_eq!(
+            peer.peer_address,
+            IpAddr::V4(Ipv4Addr::from_str("2.2.2.2").unwrap())
+        );
+        assert_eq!(peer.peer_asn, Asn::new_32bit(65000));
+    }
+
+    #[test]
+    fn test_default_peer_index_table() {
+        let peer_index_table = PeerIndexTable::default();
+        assert_eq!(
+            peer_index_table.collector_bgp_id,
+            Ipv4Addr::from_str("0.0.0.0").unwrap()
+        );
+        assert_eq!(peer_index_table.view_name, "".to_string());
+        assert_eq!(peer_index_table.id_peer_map, HashMap::new());
+        assert_eq!(peer_index_table.peer_addr_id_map, HashMap::new());
+    }
+
+    #[test]
+    fn test_peer_type_flags() {
+        let mut peer_type = PeerType::empty();
+        assert_eq!(peer_type, PeerType::empty());
+
+        peer_type.insert(PeerType::AS_SIZE_32BIT);
+        assert_eq!(peer_type, PeerType::AS_SIZE_32BIT);
+
+        peer_type.insert(PeerType::ADDRESS_FAMILY_IPV6);
+        assert_eq!(
+            peer_type,
+            PeerType::AS_SIZE_32BIT | PeerType::ADDRESS_FAMILY_IPV6
+        );
+
+        peer_type.remove(PeerType::AS_SIZE_32BIT);
+        assert_eq!(peer_type, PeerType::ADDRESS_FAMILY_IPV6);
+
+        peer_type.remove(PeerType::ADDRESS_FAMILY_IPV6);
+        assert_eq!(peer_type, PeerType::empty());
+    }
+
+    #[test]
+    fn test_dump_type() {
+        let peer_index_table = TableDumpV2Message::PeerIndexTable(PeerIndexTable::default());
+        assert_eq!(
+            peer_index_table.dump_type(),
+            TableDumpV2Type::PeerIndexTable
+        );
+
+        let rib_afi = TableDumpV2Message::RibAfi(RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 1,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![],
+        });
+        assert_eq!(rib_afi.dump_type(), TableDumpV2Type::RibIpv4Unicast);
+
+        let rib_generic = TableDumpV2Message::RibGeneric(RibGenericEntries {
+            sequence_number: 1,
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            nlri: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![],
+        });
+        assert_eq!(rib_generic.dump_type(), TableDumpV2Type::RibGeneric);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serialization() {
+        let peer_index_table = TableDumpV2Message::PeerIndexTable(PeerIndexTable::default());
+        let serialized = serde_json::to_string(&peer_index_table).unwrap();
+        let deserialized: TableDumpV2Message = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, peer_index_table);
+
+        let rib_entry = RibEntry {
+            peer_index: 1,
+            originated_time: 1,
+            attributes: Attributes::default(),
+        };
+        let rib_afi = TableDumpV2Message::RibAfi(RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 1,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![rib_entry],
+        });
+        let serialized = serde_json::to_string(&rib_afi).unwrap();
+        let deserialized: TableDumpV2Message = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, rib_afi);
+
+        let rib_generic = TableDumpV2Message::RibGeneric(RibGenericEntries {
+            sequence_number: 1,
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            nlri: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![],
+        });
+        let serialized = serde_json::to_string(&rib_generic).unwrap();
+        let deserialized: TableDumpV2Message = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, rib_generic);
+    }
+}
