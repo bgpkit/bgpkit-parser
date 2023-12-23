@@ -19,7 +19,6 @@ pub struct TableDumpMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
     use std::str::FromStr;
 
     #[test]
@@ -45,6 +44,8 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn serialize_and_deserialize_table_dump_message() {
+        use serde_json;
+
         let table_dump_message = TableDumpMessage {
             view_number: 1,
             sequence_number: 1,

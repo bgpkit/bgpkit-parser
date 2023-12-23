@@ -191,6 +191,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn test_serialization() {
         use serde_json;
         use std::net::IpAddr;
