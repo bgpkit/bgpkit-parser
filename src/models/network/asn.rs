@@ -309,11 +309,23 @@ mod tests {
         let asn = Asn::new_32bit(64513);
         assert!(asn.is_reserved());
 
+        let asn = Asn::new_32bit(65535);
+        assert!(asn.is_reserved());
+
+        let asn = Asn::new_32bit(65536);
+        assert!(asn.is_reserved());
+
+        let asn = Asn::new_32bit(4200000000);
+        assert!(asn.is_reserved());
+
         let asn = Asn::new_32bit(4294967295);
         assert!(asn.is_reserved());
 
         let asn = Asn::new_32bit(112);
         assert!(asn.is_reserved());
+
+        let asn = Asn::new_32bit(400644);
+        assert!(!asn.is_reserved());
     }
 
     #[test]
@@ -338,6 +350,9 @@ mod tests {
 
         let asn = Asn::new_32bit(4200000001);
         assert!(asn.is_private());
+
+        let asn = Asn::new_32bit(400644);
+        assert!(!asn.is_private());
     }
 
     #[test]
@@ -373,9 +388,56 @@ mod tests {
         assert_eq!(12345, u32::from(&asn));
         assert_eq!(12345, i32::from(asn));
         assert_eq!(12345, i32::from(&asn));
+        assert_eq!(asn, 12345u16);
+        assert_eq!(asn, 12345u32);
 
         let asn = Asn::new_16bit(12345);
         assert_eq!(12345, u16::from(asn));
         assert_eq!(12345, u16::from(&asn));
+    }
+
+    #[test]
+    fn test_is_four_byte() {
+        let asn = Asn::new_32bit(12345);
+        assert!(asn.is_four_byte());
+        let asn = Asn::new_16bit(12345);
+        assert!(!asn.is_four_byte());
+    }
+
+    #[test]
+    fn test_asn_comparison() {
+        let asn1 = Asn::new_32bit(12345);
+        let asn2 = Asn::new_32bit(12345);
+        assert_eq!(asn1, asn2);
+        assert!(asn1 <= asn2);
+        assert!(asn1 >= asn2);
+
+        let asn3 = Asn::new_32bit(12346);
+        assert!(asn1 < asn3);
+        assert!(asn1 <= asn3);
+    }
+
+    #[test]
+    fn test_required_len() {
+        let asn = Asn::new_32bit(65536);
+        assert_eq!(AsnLength::Bits32, asn.required_len());
+        let asn = Asn::new_32bit(65535);
+        assert_eq!(AsnLength::Bits16, asn.required_len());
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_asn_length_serialization() {
+        let length_16bit = AsnLength::Bits16;
+        let serialized = serde_json::to_string(&length_16bit).unwrap();
+        assert_eq!(serialized, "\"Bits16\"");
+        let deserialized: AsnLength = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, length_16bit);
+
+        let length_32bit = AsnLength::Bits32;
+        let serialized = serde_json::to_string(&length_32bit).unwrap();
+        assert_eq!(serialized, "\"Bits32\"");
+        let deserialized: AsnLength = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, length_32bit);
     }
 }
