@@ -453,6 +453,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn test_serde() {
         let meta_community = MetaCommunity::Large(LargeCommunity::new(1, [2, 3]));
         let serialized = serde_json::to_string(&meta_community).unwrap();
