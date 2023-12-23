@@ -172,4 +172,18 @@ mod tests {
             BgpkitParser::from_reader(reader).into_elem_iter().count()
         );
     }
+
+    #[test]
+    fn test_new_cahced_with_reader() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+        let parser = BgpkitParser::new_cached(url, "/tmp/bgpkit-parser-tests")
+            .unwrap()
+            .enable_core_dump()
+            .disable_warnings();
+        let count = parser.into_elem_iter().count();
+        assert_eq!(8160, count);
+        let parser = BgpkitParser::new_cached(url, "/tmp/bgpkit-parser-tests").unwrap();
+        let count = parser.into_elem_iter().count();
+        assert_eq!(8160, count);
+    }
 }
