@@ -3,6 +3,7 @@ ignore:
   - "src/lib.rs"
   - "src/error.rs"
   - "src/models/err.rs"
+  - "src/parser/iters.rs"
 coverage:
   status:
     project:
