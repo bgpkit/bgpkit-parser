@@ -276,3 +276,26 @@ impl Attributes {
         bytes.freeze()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unknwon_attribute_type() {
+        let data = Bytes::from(vec![0x40, 0xFE, 0x00]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
+        assert!(attributes.is_ok());
+        let attributes = attributes.unwrap();
+        assert_eq!(attributes.inner.len(), 1);
+        assert_eq!(
+            attributes.inner[0].value.attr_type(),
+            AttrType::Unknown(254)
+        );
+    }
+}

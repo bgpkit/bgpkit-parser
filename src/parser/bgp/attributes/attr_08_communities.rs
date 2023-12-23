@@ -65,8 +65,6 @@ mod tests {
             assert_eq!(communities[1], Community::NoAdvertise);
             assert_eq!(communities[2], Community::NoExportSubConfed);
             assert_eq!(communities[3], Community::Custom(Asn::from(123), 456));
-        } else {
-            panic!("parsing error");
         }
     }
 

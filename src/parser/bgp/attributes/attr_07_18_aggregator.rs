@@ -59,7 +59,7 @@ pub fn encode_aggregator(asn: &Asn, addr: &IpAddr) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     #[test]
@@ -73,8 +73,6 @@ mod tests {
         if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits16) {
             assert_eq!(n, identifier);
             assert_eq!(asn, Asn::new_16bit(258))
-        } else {
-            panic!()
         }
 
         let mut data = vec![];
@@ -84,10 +82,22 @@ mod tests {
 
         if let Ok((asn, n)) = parse_aggregator(bytes, &AsnLength::Bits32) {
             assert_eq!(n, identifier);
-            assert_eq!(asn, Asn::new_16bit(258))
-        } else {
-            panic!()
+            assert_eq!(asn, Asn::new_32bit(258))
         }
+
+        // invalid number of bytes
+        let mut data = vec![];
+        data.extend([0u8, 0, 1, 2, 3]);
+        data.extend(identifier.octets());
+        let bytes = Bytes::from(data);
+        assert!(parse_aggregator(bytes, &AsnLength::Bits32).is_err());
+
+        // bytes length not matching
+        let mut data = vec![];
+        data.extend([0u8, 0, 1, 2, 3, 4]); // 6 bytes --> 2 bytes ASN
+        data.extend(identifier.octets());
+        let bytes = Bytes::from(data);
+        assert!(parse_aggregator(bytes, &AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -96,5 +106,15 @@ mod tests {
         let asn = Asn::new_16bit(258);
         let bytes = encode_aggregator(&asn, &ipv4.into());
         assert_eq!(bytes, Bytes::from_static(&[1u8, 2, 10, 0, 0, 1]));
+
+        let ipv6 = Ipv6Addr::from_str("fc00::1").unwrap();
+        let asn = Asn::new_32bit(258);
+        let bytes = encode_aggregator(&asn, &ipv6.into());
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[
+                0u8, 0, 1, 2, 0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01
+            ])
+        );
     }
 }

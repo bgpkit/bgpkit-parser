@@ -17,12 +17,10 @@ mod tests {
 
     #[test]
     fn test_parse_local_pref() {
-        if let Ok(AttributeValue::LocalPreference(123)) =
-            parse_local_pref(Bytes::from(vec![0, 0, 0, 123]))
-        {
-        } else {
-            panic!()
-        }
+        assert_eq!(
+            parse_local_pref(Bytes::from(vec![0, 0, 0, 123])).unwrap(),
+            AttributeValue::LocalPreference(123)
+        );
     }
 
     #[test]

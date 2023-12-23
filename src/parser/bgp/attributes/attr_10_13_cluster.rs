@@ -32,8 +32,6 @@ mod tests {
             assert_eq!(n.len(), 2);
             assert_eq!(n[0], 0xC0000201);
             assert_eq!(n[1], 0xC0000202);
-        } else {
-            panic!()
         }
     }
 

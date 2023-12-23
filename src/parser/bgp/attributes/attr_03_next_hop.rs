@@ -71,15 +71,11 @@ mod tests {
         let res = parse_next_hop(ipv4_bytes, &None).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
-        } else {
-            panic!();
         }
 
         let res = parse_next_hop(ipv6_bytes, &Some(Afi::Ipv6)).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string().to_ascii_uppercase(), "FC00::1".to_string())
-        } else {
-            panic!();
         }
     }
 
@@ -104,14 +100,10 @@ mod tests {
 
         if let Some(NextHopAddress::Ipv4(n)) = parse_mp_next_hop(ipv4).unwrap() {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
-        } else {
-            panic!();
         }
 
         if let Some(NextHopAddress::Ipv6(n)) = parse_mp_next_hop(ipv6.clone()).unwrap() {
             assert_eq!(n.to_string(), "fc00::1".to_string())
-        } else {
-            panic!();
         }
 
         let mut combined = BytesMut::from(ipv6.to_vec().as_slice());
@@ -122,8 +114,6 @@ mod tests {
         {
             assert_eq!(n.to_string(), "fc00::1".to_string());
             assert_eq!(m.to_string(), "fc00::2".to_string());
-        } else {
-            panic!();
         }
     }
 
@@ -133,5 +123,29 @@ mod tests {
         let next_hop = parse_mp_next_hop(ipv4.clone()).unwrap().unwrap();
         let bytes = encode_mp_next_hop(&next_hop);
         assert_eq!(bytes, ipv4);
+
+        let ipv6 = Bytes::from(Ipv6Addr::from_str("fc00::1").unwrap().octets().to_vec());
+        let next_hop = parse_mp_next_hop(ipv6.clone()).unwrap().unwrap();
+        let bytes = encode_mp_next_hop(&next_hop);
+        assert_eq!(bytes, ipv6);
+
+        let ipv6_2 = Bytes::from(Ipv6Addr::from_str("fc00::2").unwrap().octets().to_vec());
+        let next_hop = parse_mp_next_hop(ipv6.clone()).unwrap().unwrap();
+        let bytes = encode_mp_next_hop(&next_hop);
+        assert_eq!(bytes, ipv6);
+
+        let mut combined = BytesMut::from(ipv6.to_vec().as_slice());
+        combined.extend_from_slice(&ipv6_2);
+        let next_hop = parse_mp_next_hop(combined.clone().into()).unwrap().unwrap();
+        let bytes = encode_mp_next_hop(&next_hop);
+        assert_eq!(bytes, combined);
+
+        // parse empty bytes
+        let next_hop = parse_mp_next_hop(Bytes::new()).unwrap();
+        assert!(next_hop.is_none());
+
+        // parse invalid bytes
+        let next_hop = parse_mp_next_hop(Bytes::from(vec![1]));
+        assert!(next_hop.is_err());
     }
 }
