@@ -153,12 +153,11 @@ pub enum EntryType {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::models::Asn;
 
     #[test]
     #[cfg(feature = "serde")]
     fn test_entry_type_serialize_and_deserialize() {
+        use super::*;
         let types = vec![
             EntryType::NULL,
             EntryType::START,
@@ -193,6 +192,7 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn test_serialization() {
+        use super::*;
         use serde_json;
         use std::net::IpAddr;
         use std::str::FromStr;

@@ -23,7 +23,7 @@ pub enum RouteMirroringValue {
     Information(RouteMirroringInfo),
 }
 
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum RouteMirroringInfo {
     ErroredPdu = 0,
@@ -58,4 +58,61 @@ pub fn parse_route_mirroring(
         }
     }
     Ok(RouteMirroring { tlvs })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::{BufMut, BytesMut};
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_route_mirroring_bgp_messsage() {
+        let bgp_message = BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp_message_bytes = bgp_message.encode(false, AsnLength::Bits32);
+        let expected_asn_len = AsnLength::Bits32;
+        let actual_info_len = bgp_message_bytes.len() as u16;
+
+        let mut message = BytesMut::new();
+        message.put_u16(0);
+        message.put_u16(actual_info_len);
+        message.put_slice(&bgp_message_bytes);
+        let mut data = message.freeze();
+        let result = parse_route_mirroring(&mut data, &expected_asn_len);
+
+        match result {
+            Ok(route_mirroring) => {
+                assert_eq!(route_mirroring.tlvs.len(), 1);
+                let tlv = &route_mirroring.tlvs[0];
+                assert_eq!(tlv.info_len, actual_info_len);
+            }
+            Err(_) => assert!(false),
+        }
+    }
+
+    #[test]
+    fn route_mirroring_information() {
+        let mut message = BytesMut::new();
+        message.put_u16(1);
+        message.put_u16(2);
+        message.put_u16(0);
+        let mut data = message.freeze();
+        let result = parse_route_mirroring(&mut data, &AsnLength::Bits32).unwrap();
+        assert_eq!(result.tlvs.len(), 1);
+        let tlv = &result.tlvs[0];
+        assert_eq!(tlv.info_len, 2);
+        match &tlv.value {
+            RouteMirroringValue::Information(info) => {
+                assert_eq!(info, &RouteMirroringInfo::ErroredPdu)
+            }
+            _ => assert!(false),
+        }
+    }
 }

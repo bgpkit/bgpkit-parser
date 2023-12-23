@@ -19,7 +19,7 @@ pub struct TerminationTlv {
 ///Type-Length-Value Type
 ///
 /// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum TerminationTlvType {
     String = 0,
@@ -45,4 +45,48 @@ pub fn parse_termination_message(data: &mut Bytes) -> Result<TerminationMessage,
     }
 
     Ok(TerminationMessage { tlvs })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_parse_termination_message() {
+        // Create a Bytes object to simulate the incoming data
+        let mut data = Bytes::copy_from_slice(&[
+            0, 0, // info_type: String
+            0, 5, // info_len: 5
+            67, 79, 68, 69, 83, // info: "CODES"
+            0, 1, // info_type: Reason
+            0, 4, // info_len: 4
+            84, 69, 83, 84, // info: "TEST"
+        ]);
+
+        // Check if parse_termination_message correctly reads the data
+        let result = parse_termination_message(&mut data);
+        match result {
+            Ok(termination_message) => {
+                assert_eq!(termination_message.tlvs.len(), 2);
+
+                // tlvs[0] assertions
+                assert_eq!(
+                    termination_message.tlvs[0].info_type,
+                    TerminationTlvType::String
+                );
+                assert_eq!(termination_message.tlvs[0].info_len, 5);
+                assert_eq!(termination_message.tlvs[0].info, "CODES");
+
+                // tlvs[1] assertions
+                assert_eq!(
+                    termination_message.tlvs[1].info_type,
+                    TerminationTlvType::Reason
+                );
+                assert_eq!(termination_message.tlvs[1].info_len, 4);
+                assert_eq!(termination_message.tlvs[1].info, "TEST");
+            }
+            Err(e) => panic!("Failed to parse: {}", e),
+        }
+    }
 }

@@ -64,3 +64,72 @@ pub fn parse_peer_down_notification(
     };
     Ok(PeerDownNotification { reason, data })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BufMut;
+
+    #[test]
+    fn test_parse_peer_down_notification() {
+        // Test with reason `1`
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(1);
+        data.put_slice(&[0u8; 10]);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_ok());
+        let peer_down_notification = result.unwrap();
+        assert_eq!(peer_down_notification.reason, 1);
+        assert_eq!(peer_down_notification.data.unwrap(), vec![0u8; 10]);
+
+        // Test with reason `2`
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(2);
+        data.put_slice(&[0u8; 10]);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_ok());
+        let peer_down_notification = result.unwrap();
+        assert_eq!(peer_down_notification.reason, 2);
+        assert_eq!(peer_down_notification.data.unwrap(), vec![0u8; 10]);
+
+        // Test with reason `3`
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(3);
+        data.put_slice(&[0u8; 10]);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_ok());
+        let peer_down_notification = result.unwrap();
+        assert_eq!(peer_down_notification.reason, 3);
+        assert_eq!(peer_down_notification.data.unwrap(), vec![0u8; 10]);
+
+        // Test with reason `4`
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(4);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_ok());
+        let peer_down_notification = result.unwrap();
+        assert_eq!(peer_down_notification.reason, 4);
+        assert!(peer_down_notification.data.is_none());
+
+        // Test with reason `5`
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(5);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_ok());
+        let peer_down_notification = result.unwrap();
+        assert_eq!(peer_down_notification.reason, 5);
+        assert!(peer_down_notification.data.is_none());
+
+        // Test with invalid reason
+        let mut data = bytes::BytesMut::new();
+        data.put_u8(6);
+        let mut data = data.freeze();
+        let result = parse_peer_down_notification(&mut data);
+        assert!(result.is_err());
+    }
+}

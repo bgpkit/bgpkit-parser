@@ -9,7 +9,7 @@ pub struct InitiationMessage {
     pub tlvs: Vec<InitiationTlv>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct InitiationTlv {
     pub info_type: InitiationTlvType,
     pub info_len: u16,
@@ -19,7 +19,7 @@ pub struct InitiationTlv {
 ///Type-Length-Value Type
 ///
 /// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum InitiationTlvType {
     String = 0,
@@ -49,4 +49,46 @@ pub fn parse_initiation_message(data: &mut Bytes) -> Result<InitiationMessage, P
     }
 
     Ok(InitiationMessage { tlvs })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::{BufMut, BytesMut};
+
+    #[test]
+    fn test_parse_initiation_message() {
+        let mut buffer = BytesMut::new();
+        buffer.put_u16(1); // InitiationTlvType::SysDescr
+        buffer.put_u16(5); // Length of following info
+        buffer.put_slice(b"Test1"); // Info
+
+        let mut bytes = buffer.freeze();
+
+        match parse_initiation_message(&mut bytes) {
+            Ok(initiation_message) => {
+                for tlv in initiation_message.tlvs {
+                    assert_eq!(tlv.info_type, InitiationTlvType::SysDescr);
+                    assert_eq!(tlv.info_len, 5);
+                    assert_eq!(tlv.info, "Test1".to_string());
+                }
+            }
+            Err(_) => panic!("Failed to parse initiation message"),
+        }
+    }
+
+    #[test]
+    fn test_debug() {
+        let initiation_message = InitiationMessage {
+            tlvs: vec![InitiationTlv {
+                info_type: InitiationTlvType::SysDescr,
+                info_len: 5,
+                info: "Test1".to_string(),
+            }],
+        };
+        assert_eq!(
+            format!("{:?}", initiation_message),
+            "InitiationMessage { tlvs: [InitiationTlv { info_type: SysDescr, info_len: 5, info: \"Test1\" }] }"
+        );
+    }
 }

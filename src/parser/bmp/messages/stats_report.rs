@@ -20,7 +20,7 @@ pub struct StatCounter {
 /// Stats counter types enum
 ///
 /// Types of BMP statistics are listed here: <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types>
-#[derive(Debug, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum StatType {
     PrefixesRejectedByInboundPolicy = 0,
@@ -73,4 +73,50 @@ pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpErro
         stats_count,
         counters,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::{BufMut, BytesMut};
+
+    // Check parsing data
+    #[test]
+    fn test_parse_stats_report() {
+        let mut data = BytesMut::new();
+        data.put_u32(1);
+        data.put_u16(0);
+        data.put_u16(4);
+        data.put_u32(1234);
+
+        let result = parse_stats_report(&mut data.freeze());
+        match result {
+            Ok(report) => {
+                assert_eq!(report.stats_count, 1);
+                assert_eq!(
+                    report.counters[0].stat_type,
+                    StatType::PrefixesRejectedByInboundPolicy
+                );
+                assert_eq!(report.counters[0].stat_len, 4);
+                match report.counters[0].stat_data {
+                    StatsData::Counter(value) => assert_eq!(value, 1234),
+                    _ => panic!("Unexpected StatsData!"),
+                }
+            }
+            Err(_) => panic!("Error parsing stats!"),
+        }
+    }
+
+    // Check parsing error
+    #[test]
+    fn test_parse_stats_report_error() {
+        let mut data = BytesMut::new();
+        data.put_u32(1);
+        data.put_u16(0);
+        data.put_u16(6);
+        data.put_u32(1234);
+
+        let result = parse_stats_report(&mut data.freeze());
+        assert!(result.is_err());
+    }
 }

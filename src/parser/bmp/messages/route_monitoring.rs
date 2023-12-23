@@ -52,4 +52,20 @@ mod tests {
         };
         assert!(!mon_msg.is_end_of_rib());
     }
+
+    #[test]
+    fn test_debug() {
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::default(),
+            announced_prefixes: vec![],
+        };
+        let mon_msg = RouteMonitoring {
+            bgp_message: BgpMessage::Update(msg),
+        };
+        assert_eq!(
+            format!("{:?}", mon_msg),
+            "RouteMonitoring { bgp_message: Update(BgpUpdateMessage { withdrawn_prefixes: [], attributes: Attributes { inner: [] }, announced_prefixes: [] }) }"
+        );
+    }
 }
