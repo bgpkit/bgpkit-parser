@@ -453,6 +453,7 @@ impl AsPath {
     /// ```rust
     /// # use bgpkit_parser::models::{AsPath, AsPathSegment};
     /// let mut a = AsPath::from_segments(vec![
+    ///     AsPathSegment::sequence([]),
     ///     AsPathSegment::sequence([1, 2]),
     ///     AsPathSegment::sequence([]),
     ///     AsPathSegment::sequence([2]),
@@ -989,8 +990,16 @@ mod tests {
     #[test]
     fn test_get_origin() {
         let aspath = AsPath::from_sequence([1, 2, 3, 5]);
-        let origins = aspath.get_origin_opt();
-        assert_eq!(origins.unwrap(), 5);
+        let origin = aspath.get_origin_opt();
+        assert_eq!(origin.unwrap(), 5);
+
+        let aspath = AsPath::from_segments(vec![AsPathSegment::set([1, 2, 3, 5])]);
+        let origin = aspath.get_origin_opt();
+        assert!(origin.is_none());
+
+        let aspath = AsPath::from_segments(vec![AsPathSegment::set([1])]);
+        let origin = aspath.get_origin_opt();
+        assert_eq!(origin.unwrap(), 1);
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3, 5]),
@@ -998,21 +1007,46 @@ mod tests {
         ]);
         let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
         assert_eq!(origins, vec![7, 8]);
+
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2, 3, 5]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)]),
+        ]);
+        let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
+        assert_eq!(origins, Vec::<u32>::new());
     }
 
     #[test]
     fn test_get_collector() {
         let aspath = AsPath::from_sequence([1, 2, 3, 5]);
-        let origins = aspath.get_collector_opt();
-        assert_eq!(origins.unwrap(), 1);
+        let collector = aspath.get_collector_opt();
+        dbg!(&collector);
+        assert_eq!(collector.unwrap(), 1);
+
+        let aspath = AsPath::from_segments(vec![AsPathSegment::set([7])]);
+        let collector = aspath.get_collector_opt();
+        assert_eq!(collector.unwrap(), 7);
+
+        let aspath = AsPath::from_segments(vec![AsPathSegment::set([7, 8])]);
+        let collector = aspath.get_collector_opt();
+        assert!(collector.is_none());
     }
 
     #[test]
     fn test_aspath_route_iter() {
+        let path = AsPath::from_segments(vec![AsPathSegment::sequence([3, 4])]);
+        let mut routes = HashSet::new();
+        for route in &path {
+            assert!(routes.insert(route));
+        }
+        assert_eq!(1, routes.len());
+
         let path = AsPath::from_segments(vec![
             AsPathSegment::set([3, 4]),
             AsPathSegment::set([5, 6]),
             AsPathSegment::sequence([7, 8]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)]),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(9)]),
         ]);
         assert_eq!(path.route_len(), 4);
 
@@ -1046,5 +1080,149 @@ mod tests {
             Asn::from(7),
             Asn::from(8)
         ]));
+    }
+
+    #[test]
+    fn test_segment() {
+        let path_segment = AsPathSegment::sequence([1, 2, 3, 4]);
+        assert_eq!(path_segment.len(), 4);
+
+        // test iter
+        let mut iter = path_segment.iter();
+        assert_eq!(iter.next(), Some(&Asn::new_32bit(1)));
+        assert_eq!(iter.next(), Some(&Asn::new_32bit(2)));
+        assert_eq!(iter.next(), Some(&Asn::new_32bit(3)));
+        assert_eq!(iter.next(), Some(&Asn::new_32bit(4)));
+        assert_eq!(iter.next(), None);
+
+        // test iter_mut
+        let mut path_segment = AsPathSegment::sequence([1]);
+        let mut iter_mut = path_segment.iter_mut();
+        assert_eq!(iter_mut.next(), Some(&mut Asn::new_32bit(1)));
+        assert_eq!(iter_mut.next(), None);
+
+        // test is_confed
+        assert!(AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)]).is_confed());
+        assert!(AsPathSegment::ConfedSet(vec![Asn::new_32bit(1)]).is_confed());
+    }
+
+    #[test]
+    fn test_coalesce() {
+        let mut a = AsPath::from_segments(vec![
+            AsPathSegment::sequence([]),
+            AsPathSegment::sequence([1, 2]),
+            AsPathSegment::sequence([]),
+            AsPathSegment::sequence([2]),
+            AsPathSegment::set([2]),
+            AsPathSegment::set([5, 3, 3, 2]),
+        ]);
+
+        let expected = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2, 2]),
+            AsPathSegment::set([2]),
+            AsPathSegment::set([5, 3, 3, 2]),
+        ]);
+
+        a.coalesce();
+        assert_eq!(a, expected);
+    }
+
+    #[test]
+    fn test_confed_set_dedup() {
+        let mut path_segment = AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(1)]);
+        path_segment.dedup();
+        assert_eq!(
+            path_segment,
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)])
+        );
+
+        let mut path_segment = AsPathSegment::ConfedSet(vec![
+            Asn::new_32bit(1),
+            Asn::new_32bit(2),
+            Asn::new_32bit(2),
+        ]);
+        path_segment.dedup();
+        assert_eq!(
+            path_segment,
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)])
+        );
+    }
+
+    #[test]
+    fn test_segment_to_u32() {
+        let path_segment = AsPathSegment::sequence([1, 2, 3, 3]);
+        assert_eq!(path_segment.to_u32_vec_opt(false), Some(vec![1, 2, 3, 3]));
+        assert_eq!(path_segment.to_u32_vec_opt(true), Some(vec![1, 2, 3]));
+
+        let path_segment = AsPathSegment::set([1, 2, 3, 3]);
+        assert_eq!(path_segment.to_u32_vec_opt(false), None);
+        assert_eq!(path_segment.to_u32_vec_opt(true), None);
+    }
+
+    #[test]
+    fn test_as_ref() {
+        let path_segment = AsPathSegment::sequence([1, 2]);
+        assert_eq!(
+            path_segment.as_ref(),
+            &[Asn::new_32bit(1), Asn::new_32bit(2)]
+        );
+
+        let path_segment = AsPathSegment::set([1, 2]);
+        assert_eq!(
+            path_segment.as_ref(),
+            &[Asn::new_32bit(1), Asn::new_32bit(2)]
+        );
+
+        let path_segment =
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1), Asn::new_32bit(2)]);
+        assert_eq!(
+            path_segment.as_ref(),
+            &[Asn::new_32bit(1), Asn::new_32bit(2)]
+        );
+
+        let path_segment = AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)]);
+        assert_eq!(
+            path_segment.as_ref(),
+            &[Asn::new_32bit(1), Asn::new_32bit(2)]
+        );
+    }
+
+    #[test]
+    fn test_hashing() {
+        let path_segment = AsPathSegment::sequence([1, 2]);
+        let path_segment2 = AsPathSegment::sequence([1, 2]);
+
+        let hashset = std::iter::once(path_segment).collect::<HashSet<_>>();
+        assert!(hashset.contains(&path_segment2));
+    }
+
+    #[test]
+    fn test_equality() {
+        let path_segment = AsPathSegment::sequence([1, 2]);
+        let path_segment2 = AsPathSegment::sequence([1, 2]);
+
+        assert_eq!(path_segment, path_segment2);
+
+        let path_segment = AsPathSegment::sequence([1, 2]);
+        let path_segment2 = AsPathSegment::set([1, 2, 3]);
+        assert_ne!(path_segment, path_segment2);
+
+        // test equality of AS path longer than 32 ASNs
+        let path_segment = AsPathSegment::sequence((1..33).collect::<Vec<_>>());
+        let path_segment2 = AsPathSegment::sequence((1..33).collect::<Vec<_>>());
+        assert_eq!(path_segment, path_segment2);
+    }
+
+    #[test]
+    fn test_as_path_display() {
+        let path = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2]),
+            AsPathSegment::set([3, 4]),
+            AsPathSegment::sequence([5, 6]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(7)]),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(8)]),
+        ]);
+
+        assert_eq!(path.to_string(), "1 2 {3,4} 5 6 {7} 8");
     }
 }

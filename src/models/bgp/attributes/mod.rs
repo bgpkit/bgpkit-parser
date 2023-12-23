@@ -559,3 +559,303 @@ pub struct AttrRaw {
     pub attr_type: AttrType,
     pub bytes: Vec<u8>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_attr_type() {
+        let attr_value = AttributeValue::Origin(Origin::IGP);
+        assert_eq!(attr_value.attr_type(), AttrType::ORIGIN);
+    }
+
+    #[test]
+    fn test_attr_category() {
+        let attr_value = AttributeValue::Origin(Origin::IGP);
+        let category = attr_value.attr_category().unwrap();
+        assert_eq!(category, AttributeCategory::WellKnownMandatory);
+    }
+
+    #[test]
+    fn test_default_flags() {
+        let attr_value = AttributeValue::Origin(Origin::IGP);
+        let flags = attr_value.default_flags();
+        assert_eq!(flags, AttrFlags::TRANSITIVE);
+    }
+
+    #[test]
+    fn test_get_attr() {
+        let attribute = Attribute {
+            value: AttributeValue::Origin(Origin::IGP),
+            flag: AttrFlags::TRANSITIVE,
+        };
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(attribute.clone());
+
+        assert_eq!(attributes.get_attr(AttrType::ORIGIN), Some(attribute));
+    }
+
+    #[test]
+    fn test_has_attr() {
+        let attribute = Attribute {
+            value: AttributeValue::Origin(Origin::IGP),
+            flag: AttrFlags::TRANSITIVE,
+        };
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(attribute);
+
+        assert_eq!(attributes.has_attr(AttrType::ORIGIN), true);
+    }
+
+    #[test]
+    fn test_getting_all_attributes() {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(Attribute {
+            value: AttributeValue::Origin(Origin::IGP),
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::AsPath {
+                path: AsPath::new(),
+                is_as4: false,
+            },
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::NextHop(IpAddr::from_str("10.0.0.0").unwrap()),
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::MultiExitDiscriminator(1),
+            flag: AttrFlags::TRANSITIVE,
+        });
+
+        attributes.add_attr(Attribute {
+            value: AttributeValue::LocalPreference(1),
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::OnlyToCustomer(Asn::new_32bit(1)),
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::AtomicAggregate,
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::Clusters(vec![1, 2, 3]),
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::Aggregator {
+                asn: Asn::new_32bit(1),
+                id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
+                is_as4: false,
+            },
+            flag: AttrFlags::TRANSITIVE,
+        });
+        attributes.add_attr(Attribute {
+            value: AttributeValue::OriginatorId(Ipv4Addr::from_str("0.0.0.0").unwrap()),
+            flag: AttrFlags::TRANSITIVE,
+        });
+
+        assert_eq!(attributes.origin(), Origin::IGP);
+        assert_eq!(attributes.as_path(), Some(&AsPath::new()));
+        assert_eq!(
+            attributes.next_hop(),
+            Some(IpAddr::from_str("10.0.0.0").unwrap())
+        );
+        assert_eq!(attributes.multi_exit_discriminator(), Some(1));
+        assert_eq!(attributes.local_preference(), Some(1));
+        assert_eq!(attributes.only_to_customer(), Some(Asn::new_32bit(1)));
+        assert!(attributes.atomic_aggregate());
+        assert_eq!(attributes.clusters(), Some(vec![1_u32, 2, 3].as_slice()));
+        assert_eq!(
+            attributes.aggregator(),
+            Some((Asn::new_32bit(1), Ipv4Addr::from_str("0.0.0.0").unwrap()))
+        );
+        assert_eq!(
+            attributes.origin_id(),
+            Some(Ipv4Addr::from_str("0.0.0.0").unwrap().into())
+        );
+
+        let aspath_attr = attributes.get_attr(AttrType::AS_PATH).unwrap();
+        assert!(aspath_attr.is_transitive());
+        assert!(!aspath_attr.is_extended());
+        assert!(!aspath_attr.is_partial());
+        assert!(!aspath_attr.is_optional());
+
+        for attr in attributes.iter() {
+            println!("{:?}", attr);
+        }
+    }
+
+    #[test]
+    fn test_from() {
+        let origin = Origin::IGP;
+        let attr_value = AttributeValue::from(origin);
+        assert_eq!(attr_value, AttributeValue::Origin(Origin::IGP));
+
+        let aspath = AsPath::new();
+        let attr_value = AttributeValue::from(aspath);
+        assert_eq!(
+            attr_value,
+            AttributeValue::AsPath {
+                path: AsPath::new(),
+                is_as4: false
+            }
+        );
+    }
+
+    #[test]
+    fn test_well_known_mandatory_attrs() {
+        let origin_attr = AttributeValue::Origin(Origin::IGP);
+        assert_eq!(
+            origin_attr.attr_category(),
+            Some(AttributeCategory::WellKnownMandatory)
+        );
+        let as_path_attr = AttributeValue::AsPath {
+            path: AsPath::new(),
+            is_as4: false,
+        };
+        assert_eq!(
+            as_path_attr.attr_category(),
+            Some(AttributeCategory::WellKnownMandatory)
+        );
+        let next_hop_attr = AttributeValue::NextHop(IpAddr::from_str("10.0.0.0").unwrap());
+        assert_eq!(
+            next_hop_attr.attr_category(),
+            Some(AttributeCategory::WellKnownMandatory)
+        );
+        let local_preference_attr = AttributeValue::LocalPreference(1);
+        assert_eq!(
+            local_preference_attr.attr_category(),
+            Some(AttributeCategory::WellKnownMandatory)
+        );
+    }
+
+    #[test]
+    fn test_well_known_discretionary_attrs() {
+        let atomic_aggregate_attr = AttributeValue::AtomicAggregate;
+        assert_eq!(
+            atomic_aggregate_attr.attr_category(),
+            Some(AttributeCategory::WellKnownDiscretionary)
+        );
+    }
+
+    #[test]
+    fn test_optional_transitive_attrs() {
+        let as_path_attr = AttributeValue::AsPath {
+            path: AsPath::new(),
+            is_as4: true,
+        };
+        assert_eq!(
+            as_path_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let aggregator_attr = AttributeValue::Aggregator {
+            asn: Asn::new_32bit(1),
+            id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
+            is_as4: false,
+        };
+        assert_eq!(
+            aggregator_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let only_to_customer_attr = AttributeValue::OnlyToCustomer(Asn::new_32bit(1));
+        assert_eq!(
+            only_to_customer_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let communities_attr =
+            AttributeValue::Communities(vec![Community::Custom(Asn::new_32bit(1), 1)]);
+        assert_eq!(
+            communities_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let extended_communities_attr =
+            AttributeValue::ExtendedCommunities(vec![ExtendedCommunity::Raw([0; 8])]);
+        assert_eq!(
+            extended_communities_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let large_communities_attr =
+            AttributeValue::LargeCommunities(vec![LargeCommunity::new(1, [1, 1])]);
+        assert_eq!(
+            large_communities_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        let aggregator_attr = AttributeValue::Aggregator {
+            asn: Asn::new_32bit(1),
+            id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
+            is_as4: true,
+        };
+        assert_eq!(
+            aggregator_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+    }
+
+    #[test]
+    fn test_optional_non_transitive_attrs() {
+        let multi_exit_discriminator_attr = AttributeValue::MultiExitDiscriminator(1);
+        assert_eq!(
+            multi_exit_discriminator_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+        let originator_id_attr =
+            AttributeValue::OriginatorId(Ipv4Addr::from_str("0.0.0.0").unwrap());
+        assert_eq!(
+            originator_id_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+        let clusters_attr = AttributeValue::Clusters(vec![1, 2, 3]);
+        assert_eq!(
+            clusters_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+        let mp_unreach_nlri_attr = AttributeValue::MpReachNlri(Nlri::new_unreachable(
+            NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+        ));
+        assert_eq!(
+            mp_unreach_nlri_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+
+        let mp_reach_nlri_attr = AttributeValue::MpUnreachNlri(Nlri::new_unreachable(
+            NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+        ));
+        assert_eq!(
+            mp_reach_nlri_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        let attributes = Attributes::from_iter(vec![
+            Attribute {
+                value: AttributeValue::Origin(Origin::IGP),
+                flag: AttrFlags::TRANSITIVE,
+            },
+            Attribute {
+                value: AttributeValue::AsPath {
+                    path: AsPath::new(),
+                    is_as4: false,
+                },
+                flag: AttrFlags::TRANSITIVE,
+            },
+        ]);
+
+        let serialized = serde_json::to_string(&attributes).unwrap();
+        let deserialized: Attributes = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(attributes, deserialized);
+    }
+}
