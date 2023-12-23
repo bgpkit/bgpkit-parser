@@ -207,8 +207,8 @@ mod tests {
             },
             message: MrtMessage::Bgp4Mp(Bgp4MpEnum::StateChange(Bgp4MpStateChange {
                 msg_type: Bgp4MpType::StateChange,
-                peer_asn: Asn::new_32bit(0),
-                local_asn: Asn::new_32bit(0),
+                peer_asn: crate::models::Asn::new_32bit(0),
+                local_asn: crate::models::Asn::new_32bit(0),
                 interface_index: 1,
                 peer_addr: IpAddr::from_str("10.0.0.0").unwrap(),
                 local_addr: IpAddr::from_str("10.0.0.0").unwrap(),
