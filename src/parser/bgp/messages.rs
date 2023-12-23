@@ -104,7 +104,7 @@ pub fn parse_bgp_notification_message(
 
     Ok(BgpNotificationMessage {
         error: BgpError::new(error_code, error_subcode),
-        data: input.read_n_bytes(input.len() - 2)?,
+        data: input.read_n_bytes(input.len())?,
     })
 }
 
@@ -389,6 +389,7 @@ impl From<BgpUpdateMessage> for BgpMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     #[test]
@@ -453,5 +454,132 @@ mod tests {
             announced_prefixes: vec![],
         };
         assert!(!msg.is_end_of_rib());
+    }
+
+    #[test]
+    fn test_invlaid_length() {
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, // length
+            0x05, // type
+        ]);
+        let mut data = bytes.clone();
+        assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_err());
+
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x28, // length
+            0x05, // type
+        ]);
+        let mut data = bytes.clone();
+        assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_err());
+    }
+
+    #[test]
+    fn test_invlaid_type() {
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x28, // length
+            0x05, // type
+        ]);
+        let mut data = bytes.clone();
+        assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_err());
+    }
+
+    #[test]
+    fn test_parse_bgp_notification_message() {
+        let bytes = Bytes::from_static(&[
+            0x01, // error code
+            0x02, // error subcode
+            0x00, 0x00, // data
+        ]);
+        let msg = parse_bgp_notification_message(bytes).unwrap();
+        matches!(
+            msg.error,
+            BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH)
+        );
+        assert_eq!(msg.data, Bytes::from_static(&[0x00, 0x00]));
+    }
+
+    #[test]
+    fn test_encode_bgp_notification_messsage() {
+        let msg = BgpNotificationMessage {
+            error: BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH),
+            data: vec![0x00, 0x00],
+        };
+        let bytes = msg.encode();
+        assert_eq!(bytes, Bytes::from_static(&[0x01, 0x02, 0x00, 0x00]));
+    }
+
+    #[test]
+    fn test_parse_bgp_open_message() {
+        let bytes = Bytes::from_static(&[
+            0x04, // version
+            0x00, 0x01, // asn
+            0x00, 0xb4, // hold time
+            0xc0, 0x00, 0x02, 0x01, // sender ip
+            0x00, // opt params length
+        ]);
+        let msg = parse_bgp_open_message(&mut bytes.clone()).unwrap();
+        assert_eq!(msg.version, 4);
+        assert_eq!(msg.asn, Asn::new_16bit(1));
+        assert_eq!(msg.hold_time, 180);
+        assert_eq!(msg.sender_ip, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(msg.extended_length, false);
+        assert_eq!(msg.opt_params.len(), 0);
+    }
+
+    #[test]
+    fn test_encode_bgp_open_message() {
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        };
+        let bytes = msg.encode();
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[
+                0x04, // version
+                0x00, 0x01, // asn
+                0x00, 0xb4, // hold time
+                0xc0, 0x00, 0x02, 0x01, // sender ip
+                0x00, // opt params length
+            ])
+        );
+    }
+
+    #[test]
+    fn test_encode_bgp_notification_message() {
+        let bgp_message = BgpMessage::Notification(BgpNotificationMessage {
+            error: BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH),
+            data: vec![0x00, 0x00],
+        });
+        let bytes = bgp_message.encode(false, AsnLength::Bits16);
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x17, 0x03, 0x01, 0x02, 0x00, 0x00
+            ])
+        );
+    }
+
+    #[test]
+    fn test_bgp_message_from_bgp_update_message() {
+        let msg = BgpMessage::from(BgpUpdateMessage::default());
+        assert!(matches!(msg, BgpMessage::Update(_)));
     }
 }
