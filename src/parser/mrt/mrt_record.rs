@@ -5,6 +5,7 @@ use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
 };
+use crate::utils::convert_timestamp;
 use bytes::{BufMut, Bytes, BytesMut};
 use log::warn;
 use std::convert::TryFrom;
@@ -152,13 +153,6 @@ impl MrtRecord {
     }
 }
 
-// convert f64 timestamp into u32 seconds and u32 microseconds
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
-}
-
 impl TryFrom<&BmpMessage> for MrtRecord {
     type Error = String;
 
@@ -208,5 +202,51 @@ impl TryFrom<&BmpMessage> for MrtRecord {
             common_header: mrt_header,
             message: mrt_message,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
+    use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_try_from_bmp_message() {
+        let bmp_message = BmpMessage {
+            common_header: BmpCommonHeader {
+                version: 0,
+                msg_len: 0,
+                msg_type: BmpMsgType::RouteMonitoring,
+            },
+            per_peer_header: Some(BmpPerPeerHeader {
+                peer_asn: Asn::new_32bit(0),
+                peer_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+                peer_bgp_id: Ipv4Addr::from_str("10.0.0.2").unwrap(),
+                timestamp: 0.0,
+                peer_type: BmpPeerType::Global,
+                peer_flags: PerPeerFlags::PeerFlags(PeerFlags::empty()),
+                peer_distinguisher: 0,
+            }),
+            message_body: MessageBody::RouteMonitoring(RouteMonitoring {
+                bgp_message: BgpMessage::KeepAlive,
+            }),
+        };
+
+        let mrt_record = MrtRecord::try_from(&bmp_message).unwrap();
+        assert_eq!(mrt_record.common_header.entry_type, EntryType::BGP4MP_ET);
+    }
+
+    #[test]
+    fn test_parse_mrt_body() {
+        let mut data = BytesMut::new();
+        data.put_u16(0);
+        data.put_u16(0);
+        data.put_u32(0);
+        data.put_u16(0);
+
+        let result = parse_mrt_body(0, 0, data.freeze());
+        assert!(result.is_err());
     }
 }

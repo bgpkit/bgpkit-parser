@@ -8,6 +8,7 @@ use crate::models::{
     Attributes, BgpElem, CommonHeader, EntryType, MrtMessage, NetworkPrefix, Peer, PeerIndexTable,
     RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
 };
+use crate::utils::convert_timestamp;
 use bytes::{Bytes, BytesMut};
 use ipnet::IpNet;
 use std::collections::HashMap;
@@ -20,12 +21,6 @@ pub struct MrtRibEncoder {
     per_prefix_entries_map: HashMap<IpNet, HashMap<u16, RibEntry>>,
 
     timestamp: f64,
-}
-
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
 }
 
 impl MrtRibEncoder {

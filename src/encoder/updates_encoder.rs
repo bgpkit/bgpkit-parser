@@ -5,14 +5,9 @@ use crate::models::{
     Asn, Bgp4MpEnum, Bgp4MpMessage, Bgp4MpType, BgpMessage, BgpUpdateMessage, CommonHeader,
     EntryType, MrtMessage,
 };
+use crate::utils::convert_timestamp;
 use crate::BgpElem;
 use bytes::{Bytes, BytesMut};
-
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
-}
 
 #[derive(Debug, Default)]
 pub struct MrtUpdatesEncoder {

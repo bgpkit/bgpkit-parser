@@ -326,6 +326,33 @@ pub fn crc32(input: &str) -> String {
     format!("{:08x}", !crc)
 }
 
+/// Convert a f64 timestamp into u32 seconds and u32 microseconds.
+///
+/// # Arguments
+///
+/// * `timestamp` - The timestamp to convert.
+///
+/// # Returns
+///
+/// A tuple containing the converted seconds and microseconds.
+///
+/// # Example
+///
+/// ```rust
+/// use bgpkit_parser::utils::convert_timestamp;
+///
+/// let timestamp = 1609459200.123456;
+/// let (seconds, microseconds) = convert_timestamp(timestamp);
+/// assert_eq!(seconds, 1609459200);
+/// assert_eq!(microseconds, 123456);
+/// ```
+// convert f64 timestamp into u32 seconds and u32 microseconds
+pub fn convert_timestamp(timestamp: f64) -> (u32, u32) {
+    let seconds = timestamp as u32;
+    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
+    (seconds, microseconds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

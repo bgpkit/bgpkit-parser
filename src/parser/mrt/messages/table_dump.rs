@@ -151,3 +151,100 @@ impl TableDumpMessage {
         bytes.freeze()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::{BufMut, BytesMut};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    const VIEW_NUMBER: u16 = 0;
+    const SEQUENCE_NUMBER: u16 = 0;
+    const IPV4_PREFIX: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
+    const IPV6_PREFIX: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0);
+    const PREFIX_LEN: u8 = 0;
+    const STATUS: u8 = 0;
+    const TIME: u64 = 0;
+    const PEER_IPV4: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
+    const PEER_IPV6: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0);
+    const PEER_ASN_16BIT: u16 = 0;
+    const ATTRIBUTE_LENGTH: usize = 0;
+    const DUMMY_ATTRIBUTES: &[u8] = &[];
+
+    #[test]
+    fn test_parse_table_dump_message_ipv4() {
+        let mut bytes_mut = BytesMut::new();
+        // Populate the bytes_mut with the same sequence that parse_table_dump_message() expects to parse
+        bytes_mut.put_u16(VIEW_NUMBER);
+        bytes_mut.put_u16(SEQUENCE_NUMBER);
+        bytes_mut.put_u32(IPV4_PREFIX.into());
+        bytes_mut.put_u8(PREFIX_LEN);
+        bytes_mut.put_u8(STATUS);
+        bytes_mut.put_u32(TIME as u32);
+        bytes_mut.put_u32(PEER_IPV4.into());
+        bytes_mut.put_u16(PEER_ASN_16BIT);
+        bytes_mut.put_u16(ATTRIBUTE_LENGTH as u16);
+        bytes_mut.put_slice(DUMMY_ATTRIBUTES);
+
+        // Convert from BytesMut to Bytes
+        let bytes = bytes_mut.freeze();
+
+        let table_dump_message_res = parse_table_dump_message(1, bytes.clone());
+        assert!(
+            table_dump_message_res.is_ok(),
+            "Failed to parse TABLE_DUMP_V1 message"
+        );
+
+        let table_dump_message = table_dump_message_res.unwrap();
+        assert_eq!(
+            table_dump_message.view_number, VIEW_NUMBER,
+            "VIEW_NUMBER mismatch"
+        );
+        assert_eq!(
+            table_dump_message.sequence_number, SEQUENCE_NUMBER,
+            "SEQUENCE_NUMBER mismatch"
+        );
+        // Add more assertions here as per your actual requirements
+        let encoded = table_dump_message.encode();
+        assert_eq!(encoded, bytes);
+    }
+    #[test]
+    fn test_parse_table_dump_message_ipv6() {
+        let mut bytes_mut = BytesMut::new();
+        // Populate the bytes_mut with the same sequence that parse_table_dump_message() expects to parse
+        bytes_mut.put_u16(VIEW_NUMBER);
+        bytes_mut.put_u16(SEQUENCE_NUMBER);
+        bytes_mut.put_u128(IPV6_PREFIX.into());
+        bytes_mut.put_u8(PREFIX_LEN);
+        bytes_mut.put_u8(STATUS);
+        bytes_mut.put_u32(TIME as u32);
+        bytes_mut.put_u128(PEER_IPV6.into());
+        bytes_mut.put_u16(PEER_ASN_16BIT);
+        bytes_mut.put_u16(ATTRIBUTE_LENGTH as u16);
+        bytes_mut.put_slice(DUMMY_ATTRIBUTES);
+
+        // Convert from BytesMut to Bytes
+        let bytes = bytes_mut.freeze();
+
+        let table_dump_message_res = parse_table_dump_message(2, bytes.clone());
+        assert!(
+            table_dump_message_res.is_ok(),
+            "Failed to parse TABLE_DUMP_V1 message"
+        );
+
+        let table_dump_message = table_dump_message_res.unwrap();
+        assert_eq!(
+            table_dump_message.view_number, VIEW_NUMBER,
+            "VIEW_NUMBER mismatch"
+        );
+        assert_eq!(
+            table_dump_message.sequence_number, SEQUENCE_NUMBER,
+            "SEQUENCE_NUMBER mismatch"
+        );
+        // Add more assertions here as per your actual requirements
+
+        // test encoding
+        let encoded = table_dump_message.encode();
+        assert_eq!(encoded, bytes);
+    }
+}

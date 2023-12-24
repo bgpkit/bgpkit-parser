@@ -1,4 +1,4 @@
-use crate::bmp::messages::headers::PeerType;
+use crate::bmp::messages::headers::BmpPeerType;
 use crate::bmp::messages::initiation_message::InitiationTlvType;
 use crate::bmp::messages::route_mirroring::RouteMirroringInfo;
 use crate::bmp::messages::termination_message::TerminationTlvType;
@@ -56,8 +56,8 @@ impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
     }
 }
 
-impl From<TryFromPrimitiveError<PeerType>> for ParserBmpError {
-    fn from(_: TryFromPrimitiveError<PeerType>) -> Self {
+impl From<TryFromPrimitiveError<BmpPeerType>> for ParserBmpError {
+    fn from(_: TryFromPrimitiveError<BmpPeerType>) -> Self {
         ParserBmpError::InvalidOpenBmpHeader
     }
 }
@@ -119,7 +119,7 @@ mod tests {
             ParserBmpError::InvalidOpenBmpHeader
         );
         assert_eq!(
-            ParserBmpError::from(TryFromPrimitiveError::<PeerType>::new(0)),
+            ParserBmpError::from(TryFromPrimitiveError::<BmpPeerType>::new(0)),
             ParserBmpError::InvalidOpenBmpHeader
         );
         assert_eq!(

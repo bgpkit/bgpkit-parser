@@ -97,7 +97,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 /// ```
 #[derive(Debug)]
 pub struct BmpPerPeerHeader {
-    pub peer_type: PeerType,
+    pub peer_type: BmpPeerType,
     pub peer_flags: PerPeerFlags,
     pub peer_distinguisher: u64,
     pub peer_ip: IpAddr,
@@ -126,7 +126,7 @@ impl BmpPerPeerHeader {
 /// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum PeerType {
+pub enum BmpPeerType {
     Global = 0,
     RD = 1,
     Local = 2,
@@ -220,10 +220,10 @@ impl LocalRibPeerFlags {
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
-    let peer_type = PeerType::try_from(data.read_u8()?)?;
+    let peer_type = BmpPeerType::try_from(data.read_u8()?)?;
 
     match peer_type {
-        PeerType::Global | PeerType::RD | PeerType::Local => {
+        BmpPeerType::Global | BmpPeerType::RD | BmpPeerType::Local => {
             let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
 
             let peer_distinguisher = data.read_u64()?;
@@ -259,7 +259,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
                 timestamp,
             })
         }
-        PeerType::LocalRib => {
+        BmpPeerType::LocalRib => {
             let local_rib_peer_flags = LocalRibPeerFlags::from_bits_retain(data.read_u8()?);
 
             let peer_distinguisher = data.read_u64()?;
@@ -306,7 +306,7 @@ mod tests {
     fn test_bmp_per_peer_header_basics() {
         // test AFI checking
         let per_peer_header = BmpPerPeerHeader {
-            peer_type: PeerType::Global,
+            peer_type: BmpPeerType::Global,
             peer_flags: PerPeerFlags::LocalRibPeerFlags(LocalRibPeerFlags::empty()),
             peer_distinguisher: 0,
             peer_ip: IpAddr::V4(Ipv4Addr::from(0)),
@@ -367,7 +367,7 @@ mod tests {
         let header =
             parse_per_peer_header(&mut bytes).expect("Failed to parse local rib per peer header");
 
-        assert_eq!(header.peer_type, PeerType::LocalRib);
+        assert_eq!(header.peer_type, BmpPeerType::LocalRib);
         assert_eq!(
             header.peer_flags,
             PerPeerFlags::LocalRibPeerFlags(LocalRibPeerFlags::empty())
