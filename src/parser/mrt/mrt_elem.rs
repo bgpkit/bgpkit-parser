@@ -495,9 +495,13 @@ impl From<&BgpElem> for Attributes {
         }
 
         if let Some(v) = value.as_path.as_ref() {
+            let is_as4 = match v.get_origin_opt() {
+                None => true,
+                Some(asn) => asn.is_four_byte(),
+            };
             values.push(AttributeValue::AsPath {
                 path: v.clone(),
-                is_as4: false,
+                is_as4,
             });
         }
 
@@ -546,7 +550,7 @@ impl From<&BgpElem> for Attributes {
             values.push(AttributeValue::Aggregator {
                 asn: v,
                 id: value.aggr_ip.unwrap(),
-                is_as4: true,
+                is_as4: v.is_four_byte(),
             });
         }
 
@@ -568,5 +572,168 @@ impl From<&BgpElem> for Attributes {
 
         attributes.extend(values);
         attributes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BgpkitParser;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::str::FromStr;
+
+    #[test]
+    fn test_option_to_string() {
+        let o1 = Some(1);
+        let o2: Option<u32> = None;
+        assert_eq!(option_to_string(&o1), "1");
+        assert_eq!(option_to_string(&o2), "");
+    }
+
+    #[test]
+    fn test_record_to_elems() {
+        let url_table_dump_v1 = "https://data.ris.ripe.net/rrc00/2003.01/bview.20030101.0000.gz";
+        let url_table_dump_v2 = "https://data.ris.ripe.net/rrc00/2023.01/bview.20230101.0000.gz";
+        let url_bgp4mp = "https://data.ris.ripe.net/rrc00/2021.10/updates.20211001.0000.gz";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url_table_dump_v1).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+        let elems = elementor.record_to_elems(record);
+        assert_eq!(elems.len(), 1);
+
+        let parser = BgpkitParser::new(url_table_dump_v2).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let peer_index_table = record_iter.next().unwrap();
+        let _elems = elementor.record_to_elems(peer_index_table);
+        let record = record_iter.next().unwrap();
+        let elems = elementor.record_to_elems(record);
+        assert!(elems.len() >= 1);
+
+        let parser = BgpkitParser::new(url_bgp4mp).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+        let elems = elementor.record_to_elems(record);
+        assert!(elems.len() >= 1);
+    }
+
+    #[test]
+    fn test_attributes_from_bgp_elem() {
+        let mut elem = BgpElem {
+            timestamp: 0.0,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+            peer_asn: Asn::new_32bit(65000),
+            prefix: NetworkPrefix::from_str("10.0.1.0/24").unwrap(),
+            next_hop: Some(IpAddr::from_str("10.0.0.2").unwrap()),
+            as_path: Some(AsPath::from_sequence([65000, 65001, 65002])),
+            origin: Some(Origin::EGP),
+            origin_asns: Some(vec![Asn::new_32bit(65000)]),
+            local_pref: Some(100),
+            med: Some(200),
+            communities: Some(vec![
+                MetaCommunity::Plain(Community::NoAdvertise),
+                MetaCommunity::Extended(ExtendedCommunity::Raw([0, 0, 0, 0, 0, 0, 0, 0])),
+                MetaCommunity::Large(LargeCommunity {
+                    global_admin: 0,
+                    local_data: [0, 0],
+                }),
+                MetaCommunity::Ipv6Extended(Ipv6AddrExtCommunity {
+                    community_type: ExtendedCommunityType::TransitiveTwoOctetAs,
+                    subtype: 0,
+                    global_admin: Ipv6Addr::from_str("2001:db8::").unwrap(),
+                    local_admin: [0, 0],
+                }),
+            ]),
+            atomic: false,
+            aggr_asn: Some(Asn::new_32bit(65000)),
+            aggr_ip: Some(Ipv4Addr::from_str("10.2.0.0").unwrap()),
+            only_to_customer: Some(Asn::new_32bit(65000)),
+            unknown: Some(vec![AttrRaw {
+                attr_type: AttrType::RESERVED,
+                bytes: vec![],
+            }]),
+            deprecated: Some(vec![AttrRaw {
+                attr_type: AttrType::RESERVED,
+                bytes: vec![],
+            }]),
+        };
+
+        let _attributes = Attributes::from(&elem);
+        elem.elem_type = ElemType::WITHDRAW;
+        let _attributes = Attributes::from(&elem);
+    }
+
+    #[test]
+    fn test_get_relevant_attributes() {
+        let attributes = vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65000, 65001, 65002]),
+                is_as4: true,
+            },
+            AttributeValue::NextHop(IpAddr::from_str("10.0.0.1").unwrap()),
+            AttributeValue::MultiExitDiscriminator(100),
+            AttributeValue::LocalPreference(200),
+            AttributeValue::AtomicAggregate,
+            AttributeValue::Aggregator {
+                asn: Asn::new_32bit(65000),
+                id: Ipv4Addr::from_str("10.0.0.1").unwrap(),
+                is_as4: false,
+            },
+            AttributeValue::Communities(vec![Community::NoExport]),
+            AttributeValue::ExtendedCommunities(vec![ExtendedCommunity::Raw([
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ])]),
+            AttributeValue::LargeCommunities(vec![LargeCommunity {
+                global_admin: 0,
+                local_data: [0, 0],
+            }]),
+            AttributeValue::Ipv6AddressSpecificExtendedCommunities(vec![Ipv6AddrExtCommunity {
+                community_type: ExtendedCommunityType::TransitiveTwoOctetAs,
+                subtype: 0,
+                global_admin: Ipv6Addr::from_str("2001:db8::").unwrap(),
+                local_admin: [0, 0],
+            }]),
+            AttributeValue::MpReachNlri(Nlri::new_reachable(
+                NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+                Some(IpAddr::from_str("10.0.0.1").unwrap()),
+            )),
+            AttributeValue::MpUnreachNlri(Nlri::new_unreachable(
+                NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            )),
+            AttributeValue::OnlyToCustomer(Asn::new_32bit(65000)),
+            AttributeValue::Unknown(AttrRaw {
+                attr_type: AttrType::RESERVED,
+                bytes: vec![],
+            }),
+            AttributeValue::Deprecated(AttrRaw {
+                attr_type: AttrType::RESERVED,
+                bytes: vec![],
+            }),
+        ]
+        .into_iter()
+        .map(|v| Attribute::from(v))
+        .collect::<Vec<Attribute>>();
+
+        let attributes = Attributes::from(attributes);
+
+        let (
+            _as_path,
+            _as4_path, // Table dump v1 does not have 4-byte AS number
+            _origin,
+            _next_hop,
+            _local_pref,
+            _med,
+            _communities,
+            _atomic,
+            _aggregator,
+            _announced,
+            _withdrawn,
+            _only_to_customer,
+            _unknown,
+            _deprecated,
+        ) = get_relevant_attributes(attributes);
     }
 }
