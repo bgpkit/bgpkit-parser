@@ -1,4 +1,4 @@
-use crate::bmp::messages::headers::PeerType;
+use crate::bmp::messages::headers::BmpPeerType;
 use crate::bmp::messages::initiation_message::InitiationTlvType;
 use crate::bmp::messages::route_mirroring::RouteMirroringInfo;
 use crate::bmp::messages::termination_message::TerminationTlvType;
@@ -8,7 +8,7 @@ use num_enum::TryFromPrimitiveError;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ParserBmpError {
     InvalidOpenBmpHeader,
     UnsupportedOpenBmpMessage,
@@ -56,8 +56,8 @@ impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
     }
 }
 
-impl From<TryFromPrimitiveError<PeerType>> for ParserBmpError {
-    fn from(_: TryFromPrimitiveError<PeerType>) -> Self {
+impl From<TryFromPrimitiveError<BmpPeerType>> for ParserBmpError {
+    fn from(_: TryFromPrimitiveError<BmpPeerType>) -> Self {
         ParserBmpError::InvalidOpenBmpHeader
     }
 }
@@ -77,5 +77,62 @@ impl From<TryFromPrimitiveError<RouteMirroringInfo>> for ParserBmpError {
 impl From<TryFromPrimitiveError<TerminationTlvType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<TerminationTlvType>) -> Self {
         ParserBmpError::CorruptedBmpMessage
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parser_error_display() {
+        assert_eq!(
+            ParserBmpError::InvalidOpenBmpHeader.to_string(),
+            "Invalid OpenBMP header"
+        );
+        assert_eq!(
+            ParserBmpError::UnsupportedOpenBmpMessage.to_string(),
+            "Unsupported OpenBMP message"
+        );
+        assert_eq!(
+            ParserBmpError::CorruptedBmpMessage.to_string(),
+            "Corrupted BMP message"
+        );
+        assert_eq!(
+            ParserBmpError::TruncatedBmpMessage.to_string(),
+            "Truncated BMP message"
+        );
+    }
+
+    #[test]
+    fn test_error_conversions() {
+        assert_eq!(
+            ParserBmpError::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            ParserBmpError::InvalidOpenBmpHeader
+        );
+        assert_eq!(
+            ParserBmpError::from(ParserError::ParseError("test".to_string())),
+            ParserBmpError::CorruptedBmpMessage
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<BmpMsgType>::new(0)),
+            ParserBmpError::InvalidOpenBmpHeader
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<BmpPeerType>::new(0)),
+            ParserBmpError::InvalidOpenBmpHeader
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<InitiationTlvType>::new(0)),
+            ParserBmpError::CorruptedBmpMessage
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<RouteMirroringInfo>::new(0)),
+            ParserBmpError::CorruptedBmpMessage
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<TerminationTlvType>::new(0)),
+            ParserBmpError::CorruptedBmpMessage
+        );
     }
 }

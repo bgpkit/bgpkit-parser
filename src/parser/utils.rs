@@ -325,3 +325,271 @@ pub fn crc32(input: &str) -> String {
 
     format!("{:08x}", !crc)
 }
+
+/// Convert a f64 timestamp into u32 seconds and u32 microseconds.
+///
+/// # Arguments
+///
+/// * `timestamp` - The timestamp to convert.
+///
+/// # Returns
+///
+/// A tuple containing the converted seconds and microseconds.
+///
+/// # Example
+///
+/// ```rust
+/// use bgpkit_parser::utils::convert_timestamp;
+///
+/// let timestamp = 1609459200.123456;
+/// let (seconds, microseconds) = convert_timestamp(timestamp);
+/// assert_eq!(seconds, 1609459200);
+/// assert_eq!(microseconds, 123456);
+/// ```
+// convert f64 timestamp into u32 seconds and u32 microseconds
+pub fn convert_timestamp(timestamp: f64) -> (u32, u32) {
+    let seconds = timestamp as u32;
+    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
+    (seconds, microseconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_read_u8() {
+        let mut buf = Bytes::from_static(&[0x12]);
+        assert_eq!(buf.read_u8().unwrap(), 0x12);
+    }
+
+    #[test]
+    fn test_read_u16() {
+        let mut buf = Bytes::from_static(&[0x12, 0x34]);
+        assert_eq!(buf.read_u16().unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_read_u32() {
+        let mut buf = Bytes::from_static(&[0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(buf.read_u32().unwrap(), 0x12345678);
+    }
+
+    #[test]
+    fn test_read_u64() {
+        let mut buf = Bytes::from_static(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]);
+        assert_eq!(buf.read_u64().unwrap(), 0x123456789ABCDEF0);
+    }
+
+    #[test]
+    fn test_read_ipv4_address() {
+        let mut buf = Bytes::from_static(&[0xC0, 0xA8, 0x01, 0x01]);
+        assert_eq!(
+            buf.read_ipv4_address().unwrap(),
+            Ipv4Addr::new(192, 168, 1, 1)
+        );
+    }
+
+    #[test]
+    fn test_read_ipv6_address() {
+        let mut buf = Bytes::from_static(&[
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73, 0x34,
+        ]);
+        assert_eq!(
+            buf.read_ipv6_address().unwrap(),
+            Ipv6Addr::new(0x2001, 0x0DB8, 0x85A3, 0x0000, 0x0000, 0x8A2E, 0x0370, 0x7334)
+        );
+    }
+
+    #[test]
+    fn test_read_address() {
+        let mut buf = Bytes::from_static(&[0xC0, 0xA8, 0x01, 0x01]);
+        assert_eq!(
+            buf.read_address(&Afi::Ipv4).unwrap(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        );
+
+        let mut buf = Bytes::from_static(&[
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73, 0x34,
+        ]);
+        assert_eq!(
+            buf.read_address(&Afi::Ipv6).unwrap(),
+            IpAddr::V6(Ipv6Addr::new(
+                0x2001, 0x0DB8, 0x85A3, 0x0000, 0x0000, 0x8A2E, 0x0370, 0x7334
+            ))
+        );
+    }
+
+    #[test]
+    fn test_read_asn() {
+        let mut buf = Bytes::from_static(&[0x00, 0x01]);
+        assert_eq!(buf.read_asn(AsnLength::Bits16).unwrap(), Asn::new_16bit(1));
+
+        let mut buf = Bytes::from_static(&[0x00, 0x00, 0x01, 0x00]);
+        assert_eq!(
+            buf.read_asn(AsnLength::Bits32).unwrap(),
+            Asn::new_32bit(256)
+        );
+    }
+
+    #[test]
+    fn read_asns() {
+        let mut buf = Bytes::from_static(&[0x00, 0x01, 0x00, 0x00]);
+        assert_eq!(
+            buf.read_asns(&AsnLength::Bits16, 2).unwrap(),
+            vec![Asn::new_16bit(1), Asn::new_16bit(0)]
+        );
+    }
+
+    #[test]
+    fn test_read_afi() {
+        let mut buf = Bytes::from_static(&[0x00, 0x01]);
+        assert_eq!(buf.read_afi().unwrap(), Afi::Ipv4);
+
+        let mut buf = Bytes::from_static(&[0x00, 0x02]);
+        assert_eq!(buf.read_afi().unwrap(), Afi::Ipv6);
+    }
+
+    #[test]
+    fn test_read_safi() {
+        let mut buf = Bytes::from_static(&[0x01]);
+        assert_eq!(buf.read_safi().unwrap(), Safi::Unicast);
+
+        let mut buf = Bytes::from_static(&[0x02]);
+        assert_eq!(buf.read_safi().unwrap(), Safi::Multicast);
+    }
+
+    #[test]
+    fn test_has_n_remaining() {
+        let mut buf = Bytes::from_static(&[0x12, 0x34, 0x56, 0x78]);
+        assert!(buf.has_n_remaining(4).is_ok());
+        assert!(buf.has_n_remaining(5).is_err());
+
+        let _ = buf.read_u8().unwrap();
+        assert!(buf.has_n_remaining(3).is_ok());
+        assert!(buf.has_n_remaining(4).is_err());
+    }
+
+    #[test]
+    fn test_read_ipv4_prefix() {
+        let mut buf = Bytes::from_static(&[0xC0, 0xA8, 0x01, 0x01, 0x18]);
+        assert_eq!(
+            buf.read_ipv4_prefix().unwrap(),
+            Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 24).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_read_ipv6_prefix() {
+        let mut buf = Bytes::from_static(&[
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73, 0x34, 0x40,
+        ]);
+        assert_eq!(
+            buf.read_ipv6_prefix().unwrap(),
+            Ipv6Net::new(
+                Ipv6Addr::new(0x2001, 0x0DB8, 0x85A3, 0x0000, 0x0000, 0x8A2E, 0x0370, 0x7334),
+                64
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_read_n_bytes() {
+        let mut buf = Bytes::from_static(&[0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(buf.read_n_bytes(4).unwrap(), vec![0x12, 0x34, 0x56, 0x78]);
+    }
+
+    #[test]
+    fn test_read_n_bytes_to_string() {
+        let mut buf = Bytes::from_static(&[0x48, 0x65, 0x6C, 0x6C, 0x6F]); // "Hello" in ASCII
+        assert_eq!(buf.read_n_bytes_to_string(5).unwrap(), "Hello");
+    }
+
+    #[test]
+    fn test_crc32() {
+        assert_eq!(crc32("Hello, World!"), "ec4ac3d0");
+    }
+
+    #[test]
+    fn test_read_nlri_prefix() {
+        let mut buf = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01]);
+        let expected = NetworkPrefix::new(
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+            0,
+        );
+        assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, false).unwrap(), expected);
+
+        let mut buf = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
+        let expected = NetworkPrefix::new(
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+            1,
+        );
+        assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, true).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_encode_asn() {
+        let asn = Asn::new_32bit(1);
+        let asn_len = AsnLength::Bits32;
+        let expected = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(encode_asn(&asn, &asn_len), expected);
+
+        let asn = Asn::new_16bit(1);
+        let asn_len = AsnLength::Bits16;
+        let expected = Bytes::from_static(&[0x00, 0x01]);
+        assert_eq!(encode_asn(&asn, &asn_len), expected);
+    }
+
+    #[test]
+    fn test_encode_ipaddr() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let expected = vec![192, 168, 1, 1];
+        assert_eq!(encode_ipaddr(&addr), expected);
+
+        let addr = IpAddr::V6(Ipv6Addr::new(
+            0x2001, 0x0DB8, 0x85A3, 0x0000, 0x0000, 0x8A2E, 0x0370, 0x7334,
+        ));
+        let expected = vec![
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73, 0x34,
+        ];
+        assert_eq!(encode_ipaddr(&addr), expected);
+    }
+
+    #[test]
+    fn test_encode_nlri_prefixes() {
+        let prefixes = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                0,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                0,
+            ),
+        ];
+        let expected = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01, 0x18, 0xC0, 0xA8, 0x02]);
+        assert_eq!(encode_nlri_prefixes(&prefixes, false), expected);
+
+        let prefixes = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                1,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                1,
+            ),
+        ];
+        let expected = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01, 0x00, 0x00, 0x00, 0x01, 0x18, 0xC0,
+            0xA8, 0x02,
+        ]);
+        assert_eq!(encode_nlri_prefixes(&prefixes, true), expected);
+    }
+}

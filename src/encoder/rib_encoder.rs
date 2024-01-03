@@ -8,6 +8,7 @@ use crate::models::{
     Attributes, BgpElem, CommonHeader, EntryType, MrtMessage, NetworkPrefix, Peer, PeerIndexTable,
     RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
 };
+use crate::utils::convert_timestamp;
 use bytes::{Bytes, BytesMut};
 use ipnet::IpNet;
 use std::collections::HashMap;
@@ -20,12 +21,6 @@ pub struct MrtRibEncoder {
     per_prefix_entries_map: HashMap<IpNet, HashMap<u16, RibEntry>>,
 
     timestamp: f64,
-}
-
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
 }
 
 impl MrtRibEncoder {
@@ -161,10 +156,20 @@ mod tests {
             dbg!(&parsed);
         }
 
-        let mut cursor = Cursor::new(bytes);
-        let parser = crate::BgpkitParser::from_reader(&mut cursor);
-        for elem in parser {
-            println!("{}", elem);
+        // v6
+        let mut encoder = MrtRibEncoder::new();
+        let mut elem = BgpElem::default();
+        elem.peer_ip = IpAddr::V6("::1".parse().unwrap());
+        elem.peer_asn = Asn::from(65000);
+        // ipv6 prefix
+        elem.prefix.prefix = "2001:db8::/32".parse().unwrap();
+        encoder.process_elem(&elem);
+        let bytes = encoder.export_bytes();
+
+        let mut cursor = Cursor::new(bytes.clone());
+        while cursor.has_remaining() {
+            let parsed = parse_mrt_record(&mut cursor).unwrap();
+            dbg!(&parsed);
         }
     }
 }

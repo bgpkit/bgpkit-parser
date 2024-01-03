@@ -222,4 +222,25 @@ mod tests {
         let encoded_bytes = encode_as_path(&path, AsnLength::Bits32);
         assert_eq!(data, encoded_bytes);
     }
+
+    #[test]
+    fn test_encode_confed() {
+        let data = Bytes::from(vec![
+            3, // Confed Sequence
+            1, // 1 AS in path
+            0, 1,
+        ]);
+        let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        assert_eq!(data, encoded_bytes);
+
+        let data = Bytes::from(vec![
+            4, // Confed Set
+            1, // 1 AS in path
+            0, 1,
+        ]);
+        let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        assert_eq!(data, encoded_bytes);
+    }
 }

@@ -23,3 +23,39 @@ impl Display for Origin {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        use serde_json;
+
+        let origin = Origin::IGP;
+        let serialized = serde_json::to_string(&origin).unwrap();
+        let deserialized: Origin = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(origin, deserialized);
+
+        let origin = Origin::EGP;
+        let serialized = serde_json::to_string(&origin).unwrap();
+        let deserialized: Origin = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(origin, deserialized);
+
+        let origin = Origin::INCOMPLETE;
+        let serialized = serde_json::to_string(&origin).unwrap();
+        let deserialized: Origin = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(origin, deserialized);
+    }
+
+    #[test]
+    fn test_display() {
+        let origin = Origin::IGP;
+        assert_eq!(format!("{}", origin), "IGP");
+        let origin = Origin::EGP;
+        assert_eq!(format!("{}", origin), "EGP");
+        let origin = Origin::INCOMPLETE;
+        assert_eq!(format!("{}", origin), "INCOMPLETE");
+    }
+}

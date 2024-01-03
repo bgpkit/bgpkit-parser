@@ -175,7 +175,7 @@ impl Default for BgpElem {
             peer_ip: IpAddr::from_str("0.0.0.0").unwrap(),
             peer_asn: 0.into(),
             prefix: NetworkPrefix::from_str("0.0.0.0/0").unwrap(),
-            next_hop: None,
+            next_hop: Some(IpAddr::from_str("0.0.0.0").unwrap()),
             as_path: None,
             origin_asns: None,
             origin: None,
@@ -426,7 +426,7 @@ mod tests {
         let elem = BgpElem::default();
         assert_eq!(
             elem.to_psv().as_str(),
-            "A|0|0.0.0.0|0|0.0.0.0/0||||||||false|||"
+            "A|0|0.0.0.0|0|0.0.0.0/0||||0.0.0.0||||false|||"
         );
     }
 

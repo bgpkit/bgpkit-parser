@@ -41,6 +41,35 @@ impl Nlri {
             None => panic!("unreachable NLRI "),
         }
     }
+
+    pub fn new_reachable(prefix: NetworkPrefix, next_hop: Option<IpAddr>) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        let afi = match prefix.prefix {
+            IpNet::V4(_) => Afi::Ipv4,
+            IpNet::V6(_) => Afi::Ipv6,
+        };
+        let safi = Safi::Unicast;
+        Nlri {
+            afi,
+            safi,
+            next_hop,
+            prefixes: vec![prefix],
+        }
+    }
+
+    pub fn new_unreachable(prefix: NetworkPrefix) -> Nlri {
+        let afi = match prefix.prefix {
+            IpNet::V4(_) => Afi::Ipv4,
+            IpNet::V6(_) => Afi::Ipv6,
+        };
+        let safi = Safi::Unicast;
+        Nlri {
+            afi,
+            safi,
+            next_hop: None,
+            prefixes: vec![prefix],
+        }
+    }
 }
 
 impl IntoIterator for Nlri {
@@ -101,5 +130,75 @@ impl MpUnreachableNlri {
             safi,
             prefixes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn nlri_is_ipv4() {
+        let nlri = Nlri::new_reachable(
+            NetworkPrefix::from_str("10.0.2.0/24").unwrap(),
+            Some("10.0.2.1".parse().unwrap()),
+        );
+
+        assert!(nlri.is_ipv4());
+    }
+
+    #[test]
+    fn nlri_is_ipv6() {
+        let nlri = Nlri::new_unreachable(NetworkPrefix::from_str("2001:db8::/32").unwrap());
+
+        assert!(nlri.is_ipv6());
+    }
+
+    #[test]
+    fn nlri_is_reachable() {
+        let nlri = Nlri::new_reachable(
+            NetworkPrefix::from_str("10.0.2.0/24").unwrap(),
+            Some("10.0.2.1".parse().unwrap()),
+        );
+
+        assert_eq!(nlri.is_reachable(), true);
+    }
+
+    #[test]
+    #[should_panic]
+    fn nlri_next_hop_addr_unreachable() {
+        let nlri = Nlri::new_unreachable(NetworkPrefix::from_str("10.0.2.0/24").unwrap());
+
+        let _ = nlri.next_hop_addr();
+    }
+
+    #[test]
+    fn mp_reachable_nlri_new() {
+        let next_hop_addr = IpAddr::from_str("10.0.2.1").unwrap();
+        let nlri = MpReachableNlri::new(
+            Afi::Ipv4,
+            Safi::Unicast,
+            NextHopAddress::from(next_hop_addr),
+            vec![NetworkPrefix::from_str("10.0.2.0/24").unwrap()],
+        );
+
+        assert_eq!(nlri.afi, Afi::Ipv4);
+        assert_eq!(nlri.safi, Safi::Unicast);
+        assert_eq!(nlri.next_hop.addr(), next_hop_addr);
+        assert_eq!(nlri.prefixes.len(), 1);
+    }
+
+    #[test]
+    fn mp_unreachable_nlri_new() {
+        let nlri = MpUnreachableNlri::new(
+            Afi::Ipv4,
+            Safi::Unicast,
+            vec![NetworkPrefix::from_str("10.0.2.0/24").unwrap()],
+        );
+
+        assert_eq!(nlri.afi, Afi::Ipv4);
+        assert_eq!(nlri.safi, Safi::Unicast);
+        assert_eq!(nlri.prefixes.len(), 1);
     }
 }

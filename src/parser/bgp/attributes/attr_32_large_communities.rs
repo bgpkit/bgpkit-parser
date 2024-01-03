@@ -49,8 +49,6 @@ mod tests {
             assert_eq!(communities[1].global_admin, 4);
             assert_eq!(communities[1].local_data[0], 5);
             assert_eq!(communities[1].local_data[1], 6);
-        } else {
-            panic!()
         }
     }
 

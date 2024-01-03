@@ -136,4 +136,23 @@ mod tests {
             BgpCapabilityType::FQDN_CAPABILITY
         );
     }
+
+    #[test]
+    fn test_reserved_for_experimental() {
+        let experimental_ranges = [239..=254];
+        for code in <[_; 1]>::into_iter(experimental_ranges).flatten() {
+            let ty = BgpCapabilityType::from(code);
+            assert_eq!(ty, BgpCapabilityType::Unknown(code));
+            assert!(ty.is_reserved_for_experimental_use());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        let ty = BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4;
+        let serialized = serde_json::to_string(&ty).unwrap();
+        let deserialized: BgpCapabilityType = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(ty, deserialized);
+    }
 }

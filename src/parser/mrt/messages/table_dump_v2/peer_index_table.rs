@@ -218,4 +218,45 @@ mod tests {
         let parsed_index_table = parse_peer_index_table(&mut encoded.clone()).unwrap();
         assert_eq!(index_table, parsed_index_table);
     }
+
+    #[test]
+    fn test_get_peer_by_id() {
+        let mut index_table = PeerIndexTable {
+            collector_bgp_id: Ipv4Addr::from(1234),
+            view_name: String::from("example"),
+            id_peer_map: HashMap::new(),
+            peer_addr_id_map: Default::default(),
+        };
+
+        let peer1 = Peer::new(
+            Ipv4Addr::from(1234),
+            IpAddr::from_str("10.0.0.1").unwrap(),
+            Asn::new_32bit(1234),
+        );
+        let peer2 = Peer::new(
+            Ipv4Addr::from(12345),
+            IpAddr::from_str("10.0.0.2").unwrap(),
+            Asn::new_32bit(12345),
+        );
+
+        let peer1_id = index_table.add_peer(peer1);
+        let peer2_id = index_table.add_peer(peer2);
+
+        assert_eq!(
+            index_table.get_peer_by_id(&peer1_id),
+            Some(&Peer::new(
+                Ipv4Addr::from(1234),
+                IpAddr::from_str("10.0.0.1").unwrap(),
+                Asn::new_32bit(1234),
+            ))
+        );
+        assert_eq!(
+            index_table.get_peer_by_id(&peer2_id),
+            Some(&Peer::new(
+                Ipv4Addr::from(12345),
+                IpAddr::from_str("10.0.0.2").unwrap(),
+                Asn::new_32bit(12345),
+            ))
+        );
+    }
 }

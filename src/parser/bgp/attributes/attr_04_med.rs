@@ -17,12 +17,10 @@ mod tests {
 
     #[test]
     fn test_parse_med() {
-        if let Ok(AttributeValue::MultiExitDiscriminator(123)) =
-            parse_med(Bytes::from(vec![0, 0, 0, 123]))
-        {
-        } else {
-            panic!()
-        }
+        assert_eq!(
+            parse_med(Bytes::from(vec![0, 0, 0, 123])).unwrap(),
+            AttributeValue::MultiExitDiscriminator(123)
+        );
     }
 
     #[test]

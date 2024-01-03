@@ -22,7 +22,7 @@ use std::net::{IpAddr, Ipv4Addr};
 ///       *  Type = 5: Termination Message
 ///       *  Type = 6: Route Mirroring Message
 /// ```
-#[derive(Debug, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum BmpMsgType {
     RouteMonitoring = 0,
@@ -48,7 +48,7 @@ pub enum BmpMsgType {
 ///      |   Msg. Type   |
 ///      +---------------+
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BmpCommonHeader {
     pub version: u8,
     pub msg_len: u32,
@@ -97,7 +97,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 /// ```
 #[derive(Debug)]
 pub struct BmpPerPeerHeader {
-    pub peer_type: PeerType,
+    pub peer_type: BmpPeerType,
     pub peer_flags: PerPeerFlags,
     pub peer_distinguisher: u64,
     pub peer_ip: IpAddr,
@@ -124,16 +124,16 @@ impl BmpPerPeerHeader {
 ///
 /// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
 /// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash)]
 #[repr(u8)]
-pub enum PeerType {
+pub enum BmpPeerType {
     Global = 0,
     RD = 1,
     Local = 2,
     LocalRib = 3,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PerPeerFlags {
     PeerFlags(PeerFlags),
     LocalRibPeerFlags(LocalRibPeerFlags),
@@ -220,10 +220,10 @@ impl LocalRibPeerFlags {
 }
 
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
-    let peer_type = PeerType::try_from(data.read_u8()?)?;
+    let peer_type = BmpPeerType::try_from(data.read_u8()?)?;
 
     match peer_type {
-        PeerType::Global | PeerType::RD | PeerType::Local => {
+        BmpPeerType::Global | BmpPeerType::RD | BmpPeerType::Local => {
             let peer_flags = PeerFlags::from_bits_retain(data.read_u8()?);
 
             let peer_distinguisher = data.read_u64()?;
@@ -259,7 +259,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
                 timestamp,
             })
         }
-        PeerType::LocalRib => {
+        BmpPeerType::LocalRib => {
             let local_rib_peer_flags = LocalRibPeerFlags::from_bits_retain(data.read_u8()?);
 
             let peer_distinguisher = data.read_u64()?;
@@ -285,5 +285,95 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
                 timestamp,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_header_error() {
+        let mut data = Bytes::from(vec![0, 0, 0, 0, 0]);
+        assert!(parse_bmp_common_header(&mut data).is_err(),);
+        assert_eq!(
+            parse_bmp_common_header(&mut data).unwrap_err(),
+            ParserBmpError::CorruptedBmpMessage
+        );
+    }
+
+    #[test]
+    fn test_bmp_per_peer_header_basics() {
+        // test AFI checking
+        let per_peer_header = BmpPerPeerHeader {
+            peer_type: BmpPeerType::Global,
+            peer_flags: PerPeerFlags::LocalRibPeerFlags(LocalRibPeerFlags::empty()),
+            peer_distinguisher: 0,
+            peer_ip: IpAddr::V4(Ipv4Addr::from(0)),
+            peer_asn: Default::default(),
+            peer_bgp_id: Ipv4Addr::from(0),
+            timestamp: 0.0,
+        };
+        assert_eq!(per_peer_header.afi(), Afi::Ipv4);
+
+        // check ASN length
+        assert_eq!(per_peer_header.asn_length(), AsnLength::Bits32);
+    }
+
+    #[test]
+    fn test_peer_flags() {
+        let mut flags = PeerFlags::empty();
+        assert_eq!(flags.address_family(), Afi::Ipv4);
+        assert_eq!(flags.asn_length(), AsnLength::Bits32);
+        assert!(!flags.is_adj_rib_out());
+        assert!(!flags.is_post_policy());
+
+        flags |= PeerFlags::ADDRESS_FAMILY_IPV6;
+        assert_eq!(flags.address_family(), Afi::Ipv6);
+
+        flags |= PeerFlags::AS_SIZE_16BIT;
+        assert_eq!(flags.asn_length(), AsnLength::Bits16);
+
+        flags |= PeerFlags::IS_ADJ_RIB_OUT;
+        assert!(flags.is_adj_rib_out());
+
+        flags |= PeerFlags::IS_POST_POLICY;
+        assert!(flags.is_post_policy());
+    }
+
+    #[test]
+    fn test_local_rib_peer_flags() {
+        let mut flags = LocalRibPeerFlags::empty();
+        assert!(!flags.is_filtered());
+
+        flags |= LocalRibPeerFlags::IS_FILTERED;
+        assert!(flags.is_filtered());
+    }
+
+    #[test]
+    fn test_parsing_local_rib_per_peer_header() {
+        let input_data = vec![
+            3, // PeerType::LocalRib
+            0, // LocalRibPeerFlags is empty
+            0, 0, 0, 0, 0, 0, 0, 1, // Peer Distinguisher
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // advance 16 bytes
+            0, 0, 0, 1, // Peer ASN
+            192, 168, 1, 1, // Peer BGP ID
+            0, 0, 0, 10, // Timestamp (seconds)
+            0, 0, 0, 100, // Timestamp (microseconds)
+        ];
+
+        let mut bytes = Bytes::from(input_data);
+        let header =
+            parse_per_peer_header(&mut bytes).expect("Failed to parse local rib per peer header");
+
+        assert_eq!(header.peer_type, BmpPeerType::LocalRib);
+        assert_eq!(
+            header.peer_flags,
+            PerPeerFlags::LocalRibPeerFlags(LocalRibPeerFlags::empty())
+        );
+        assert_eq!(header.peer_asn, Asn::new_32bit(1));
+        assert_eq!(header.peer_bgp_id, Ipv4Addr::new(192, 168, 1, 1));
+        assert_eq!(header.timestamp, 10.0001);
     }
 }

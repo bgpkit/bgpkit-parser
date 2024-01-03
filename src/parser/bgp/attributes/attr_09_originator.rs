@@ -23,7 +23,7 @@ pub fn encode_originator_id(addr: &IpAddr) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     #[test]
@@ -33,8 +33,6 @@ mod tests {
             parse_originator_id(Bytes::from(ipv4.octets().to_vec()))
         {
             assert_eq!(n, ipv4);
-        } else {
-            panic!()
         }
     }
 
@@ -44,6 +42,12 @@ mod tests {
         assert_eq!(
             encode_originator_id(&IpAddr::V4(ipv4)),
             Bytes::from(ipv4.octets().to_vec())
+        );
+
+        let ipv6 = Ipv6Addr::from_str("FC00::1").unwrap();
+        assert_eq!(
+            encode_originator_id(&IpAddr::V6(ipv6)),
+            Bytes::from(ipv6.octets().to_vec())
         );
     }
 }

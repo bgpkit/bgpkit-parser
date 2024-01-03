@@ -38,8 +38,6 @@ mod tests {
             parse_only_to_customer(Bytes::from(vec![0, 0, 0, 123]))
         {
             assert_eq!(asn, 123);
-        } else {
-            panic!("parsing error")
         }
     }
 

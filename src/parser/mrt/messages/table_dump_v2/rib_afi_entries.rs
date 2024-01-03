@@ -1,7 +1,6 @@
 use crate::bgp::attributes::parse_attributes;
 use crate::models::{
-    Afi, AsnLength, MrtMessage, MrtRecord, NetworkPrefix, RibAfiEntries, RibEntry, Safi,
-    TableDumpV2Message, TableDumpV2Type,
+    Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
 };
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -177,19 +176,54 @@ impl RibEntry {
     }
 }
 
-impl TryFrom<MrtRecord> for RibAfiEntries {
-    type Error = String;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn try_from(mrt_record: MrtRecord) -> Result<Self, Self::Error> {
-        match mrt_record.message {
-            MrtMessage::TableDumpMessage(_) => {}
-            MrtMessage::TableDumpV2Message(m) => match m {
-                TableDumpV2Message::PeerIndexTable(_) => {}
-                TableDumpV2Message::RibAfi(_) => {}
-                TableDumpV2Message::RibGeneric(_) => {}
-            },
-            MrtMessage::Bgp4Mp(_) => {}
-        }
-        todo!()
+    #[test]
+    fn test_extract_afi_safi_from_rib_type() {
+        let rib_type = TableDumpV2Type::RibIpv4Unicast;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv4);
+        assert_eq!(safi, Safi::Unicast);
+
+        let rib_type = TableDumpV2Type::RibIpv4Multicast;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv4);
+        assert_eq!(safi, Safi::Multicast);
+
+        let rib_type = TableDumpV2Type::RibIpv6Unicast;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv6);
+        assert_eq!(safi, Safi::Unicast);
+
+        let rib_type = TableDumpV2Type::RibIpv6Multicast;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv6);
+        assert_eq!(safi, Safi::Multicast);
+
+        let rib_type = TableDumpV2Type::RibIpv4UnicastAddPath;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv4);
+        assert_eq!(safi, Safi::Unicast);
+
+        let rib_type = TableDumpV2Type::RibIpv4MulticastAddPath;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv4);
+        assert_eq!(safi, Safi::Multicast);
+
+        let rib_type = TableDumpV2Type::RibIpv6UnicastAddPath;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv6);
+        assert_eq!(safi, Safi::Unicast);
+
+        let rib_type = TableDumpV2Type::RibIpv6MulticastAddPath;
+        let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type).unwrap();
+        assert_eq!(afi, Afi::Ipv6);
+        assert_eq!(safi, Safi::Multicast);
+
+        let rib_type = TableDumpV2Type::RibGeneric;
+        let res = extract_afi_safi_from_rib_type(&rib_type);
+        assert!(res.is_err());
     }
 }

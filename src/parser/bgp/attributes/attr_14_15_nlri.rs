@@ -107,14 +107,6 @@ pub fn parse_nlri(
         })),
     }
 }
-/// Encode a NLRI attribute for TableDump V2 format.
-///
-/// Table dump V2 have the prefixes and AFI/SAFI information encoded before the attribute, and
-/// therefore not encoding them here.
-#[allow(unused_variables, dead_code)]
-pub fn encode_nlri_table_v2(nlri: &Nlri) -> Bytes {
-    todo!()
-}
 
 /// Encode a NLRI attribute.
 pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Bytes {
@@ -189,9 +181,68 @@ mod tests {
                 nlri.prefixes,
                 vec![NetworkPrefix::from_str("192.0.2.0/24").unwrap()]
             );
-        } else {
-            panic!("Unexpected result: {:?}", res);
         }
+    }
+
+    #[test]
+    fn test_parsing_nlri_passed_in_afi() {
+        let test_bytes = Bytes::from(vec![
+            0x00, 0x01, // address family: IPv4
+            0x01, // safi: unicast
+            0x04, // next hop length: 4
+            0xC0, 0x00, 0x02, 0x01, // next hop: 192.0.2.1
+            0x00, // reserved
+            // NLRI
+            0x18, // 24 bits prefix length
+            0xC0, 0x00, 0x02, // 192.0.2
+        ]);
+        let res = parse_nlri(
+            test_bytes,
+            &Some(Afi::Ipv4),
+            &Some(Safi::Unicast),
+            &None,
+            true,
+            false,
+        );
+
+        if let Ok(AttributeValue::MpReachNlri(nlri)) = res {
+            assert_eq!(nlri.afi, Afi::Ipv4);
+            assert_eq!(nlri.safi, Safi::Unicast);
+            assert_eq!(
+                nlri.next_hop,
+                Some(NextHopAddress::Ipv4(
+                    Ipv4Addr::from_str("192.0.2.1").unwrap()
+                ))
+            );
+            assert_eq!(
+                nlri.prefixes,
+                vec![NetworkPrefix::from_str("192.0.2.0/24").unwrap()]
+            );
+        }
+    }
+
+    #[test]
+    fn test_parsing_nlri_errors() {
+        // wrong next hop
+        let test_bytes = Bytes::from(vec![
+            0x00, 0x01, // address family: IPv4
+            0x01, // safi: unicast
+            0x04, // next hop length: 4
+            0xC0, 0x00, 0x02, // next hop: 192.0.2.??
+            0x00, // reserved
+            // NLRI
+            0x18, // 24 bits prefix length
+            0xC0, 0x00, 0x02, // 192.0.2
+        ]);
+        let res = parse_nlri(
+            test_bytes,
+            &Some(Afi::Ipv4),
+            &Some(Safi::Unicast),
+            &None,
+            true,
+            false,
+        );
+        assert!(res.is_err());
     }
 
     #[test]

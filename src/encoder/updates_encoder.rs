@@ -5,14 +5,9 @@ use crate::models::{
     Asn, Bgp4MpEnum, Bgp4MpMessage, Bgp4MpType, BgpMessage, BgpUpdateMessage, CommonHeader,
     EntryType, MrtMessage,
 };
+use crate::utils::convert_timestamp;
 use crate::BgpElem;
 use bytes::{Bytes, BytesMut};
-
-fn convert_timestamp(timestamp: f64) -> (u32, u32) {
-    let seconds = timestamp as u32;
-    let microseconds = ((timestamp - seconds as f64) * 1_000_000.0) as u32;
-    (seconds, microseconds)
-}
 
 #[derive(Debug, Default)]
 pub struct MrtUpdatesEncoder {
@@ -82,6 +77,7 @@ impl MrtUpdatesEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::NetworkPrefix;
     use crate::parse_mrt_record;
     use bytes::Buf;
     use std::io::Cursor;
@@ -103,11 +99,22 @@ mod tests {
             let parsed = parse_mrt_record(&mut cursor).unwrap();
             dbg!(&parsed);
         }
+    }
 
-        let mut cursor = Cursor::new(bytes);
-        let parser = crate::BgpkitParser::from_reader(&mut cursor);
-        for elem in parser {
-            println!("{}", elem);
+    #[test]
+    fn test_encoding_updates_v6() {
+        let mut encoder = MrtUpdatesEncoder::new();
+        let mut elem = BgpElem::default();
+        elem.peer_ip = IpAddr::V6("::1".parse().unwrap());
+        elem.peer_asn = Asn::from(65000);
+        // ipv6 prefix
+        elem.prefix = NetworkPrefix::from_str("2001:db8::/32").unwrap();
+        encoder.process_elem(&elem);
+        let bytes = encoder.export_bytes();
+        let mut cursor = Cursor::new(bytes.clone());
+        while cursor.has_remaining() {
+            let parsed = parse_mrt_record(&mut cursor).unwrap();
+            dbg!(&parsed);
         }
     }
 }

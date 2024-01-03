@@ -307,3 +307,183 @@ impl Display for MetaCommunity {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_large_community_new() {
+        let global_admin = 56;
+        let local_data = [3, 4];
+        let large_comm = LargeCommunity::new(global_admin, local_data);
+        assert_eq!(large_comm.global_admin, global_admin);
+        assert_eq!(large_comm.local_data, local_data);
+    }
+
+    #[test]
+    fn test_extended_community_community_type() {
+        let two_octet_as_ext_comm = TwoOctetAsExtCommunity {
+            subtype: 0,
+            global_admin: Asn::new_32bit(0),
+            local_admin: [0; 4],
+        };
+        let extended_community = ExtendedCommunity::TransitiveTwoOctetAs(two_octet_as_ext_comm);
+        assert_eq!(
+            extended_community.community_type(),
+            ExtendedCommunityType::TransitiveTwoOctetAs
+        );
+    }
+
+    #[test]
+    fn test_display_community() {
+        assert_eq!(format!("{}", Community::NoExport), "no-export");
+        assert_eq!(format!("{}", Community::NoAdvertise), "no-advertise");
+        assert_eq!(
+            format!("{}", Community::NoExportSubConfed),
+            "no-export-sub-confed"
+        );
+        assert_eq!(
+            format!("{}", Community::Custom(Asn::new_32bit(64512), 100)),
+            "64512:100"
+        );
+    }
+
+    #[test]
+    fn test_display_large_community() {
+        let large_community = LargeCommunity::new(1, [2, 3]);
+        assert_eq!(format!("{}", large_community), "lg:1:2:3");
+    }
+
+    #[test]
+    fn test_display_extended_community() {
+        let two_octet_as_ext_comm = TwoOctetAsExtCommunity {
+            subtype: 0,
+            global_admin: Asn::new_32bit(0),
+            local_admin: [0; 4],
+        };
+        let extended_community = ExtendedCommunity::TransitiveTwoOctetAs(two_octet_as_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecas2:0:0:0:00000000");
+
+        let two_octet_as_ext_comm = TwoOctetAsExtCommunity {
+            subtype: 0,
+            global_admin: Asn::new_32bit(0),
+            local_admin: [0; 4],
+        };
+        let extended_community = ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet_as_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecas2:64:0:0:00000000");
+
+        let ipv4_ext_comm = Ipv4AddrExtCommunity {
+            subtype: 1,
+            global_admin: "192.168.1.1".parse().unwrap(),
+            local_admin: [5, 6],
+        };
+        let extended_community = ExtendedCommunity::TransitiveIpv4Addr(ipv4_ext_comm);
+        assert_eq!(
+            format!("{}", extended_community),
+            "ecv4:1:1:192.168.1.1:0506"
+        );
+
+        let ipv4_ext_comm = Ipv4AddrExtCommunity {
+            subtype: 1,
+            global_admin: "192.168.1.1".parse().unwrap(),
+            local_admin: [5, 6],
+        };
+        let extended_community = ExtendedCommunity::NonTransitiveIpv4Addr(ipv4_ext_comm);
+        assert_eq!(
+            format!("{}", extended_community),
+            "ecv4:65:1:192.168.1.1:0506"
+        );
+
+        let four_octet_as_ext_comm = FourOctetAsExtCommunity {
+            subtype: 2,
+            global_admin: Asn::new_32bit(64512),
+            local_admin: [7, 8],
+        };
+        let extended_community = ExtendedCommunity::TransitiveFourOctetAs(four_octet_as_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecas4:2:2:64512:0708");
+
+        let four_octet_as_ext_comm = FourOctetAsExtCommunity {
+            subtype: 2,
+            global_admin: Asn::new_32bit(64512),
+            local_admin: [7, 8],
+        };
+        let extended_community =
+            ExtendedCommunity::NonTransitiveFourOctetAs(four_octet_as_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecas4:66:2:64512:0708");
+
+        let opaque_ext_comm = OpaqueExtCommunity {
+            subtype: 3,
+            value: [9, 10, 11, 12, 13, 14],
+        };
+        let extended_community = ExtendedCommunity::TransitiveOpaque(opaque_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecop:3:3:090A0B0C0D0E");
+
+        let opaque_ext_comm = OpaqueExtCommunity {
+            subtype: 3,
+            value: [9, 10, 11, 12, 13, 14],
+        };
+        let extended_community = ExtendedCommunity::NonTransitiveOpaque(opaque_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecop:67:3:090A0B0C0D0E");
+
+        let raw_ext_comm = [0, 1, 2, 3, 4, 5, 6, 7];
+        let extended_community = ExtendedCommunity::Raw(raw_ext_comm);
+        assert_eq!(format!("{}", extended_community), "ecraw:0001020304050607");
+    }
+
+    #[test]
+    fn test_display_ipv6_addr_ext_community() {
+        let ipv6_addr_ext_comm = Ipv6AddrExtCommunity {
+            community_type: ExtendedCommunityType::TransitiveTwoOctetAs,
+            subtype: 0,
+            global_admin: "2001:db8::8a2e:370:7334".parse().unwrap(),
+            local_admin: [0, 1],
+        };
+        assert_eq!(
+            format!("{}", ipv6_addr_ext_comm),
+            "ecv6:0:0:2001:db8::8a2e:370:7334:0001"
+        );
+    }
+
+    #[test]
+    fn test_display_meta_community() {
+        let large_community = LargeCommunity::new(1, [2, 3]);
+        let meta_community = MetaCommunity::Large(large_community);
+        assert_eq!(format!("{}", meta_community), "lg:1:2:3");
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        let meta_community = MetaCommunity::Large(LargeCommunity::new(1, [2, 3]));
+        let serialized = serde_json::to_string(&meta_community).unwrap();
+        let deserialized: MetaCommunity = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(meta_community, deserialized);
+
+        let meta_community = MetaCommunity::Extended(ExtendedCommunity::TransitiveTwoOctetAs(
+            TwoOctetAsExtCommunity {
+                subtype: 0,
+                global_admin: Asn::new_32bit(0),
+                local_admin: [0; 4],
+            },
+        ));
+        let serialized = serde_json::to_string(&meta_community).unwrap();
+        let deserialized: MetaCommunity = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(meta_community, deserialized);
+
+        let meta_community = MetaCommunity::Plain(Community::NoExport);
+        let serialized = serde_json::to_string(&meta_community).unwrap();
+        let deserialized: MetaCommunity = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(meta_community, deserialized);
+
+        let meta_community = MetaCommunity::Ipv6Extended(Ipv6AddrExtCommunity {
+            community_type: ExtendedCommunityType::TransitiveTwoOctetAs,
+            subtype: 0,
+            global_admin: "2001:db8::8a2e:370:7334".parse().unwrap(),
+            local_admin: [0, 1],
+        });
+        let serialized = serde_json::to_string(&meta_community).unwrap();
+        let deserialized: MetaCommunity = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(meta_community, deserialized);
+    }
+}

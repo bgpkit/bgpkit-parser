@@ -205,6 +205,7 @@ mod tests {
 
     #[test]
     fn test_parse_extended_communities_two_octet_as() {
+        // test Transitive Two Octet AS Specific
         let data: Vec<u8> = vec![
             0x00, // Transitive Two Octet AS Specific
             0x02, // Route Target
@@ -220,11 +221,26 @@ mod tests {
                 assert_eq!(community.subtype, 0x02);
                 assert_eq!(community.global_admin, Asn::new_16bit(1));
                 assert_eq!(community.local_admin, [0x00, 0x00, 0x00, 0x01]);
-            } else {
-                panic!("Unexpected community type");
             }
-        } else {
-            panic!("Unexpected attribute type");
+        }
+
+        // test Nontransitive Two Octet AS Specific
+        let data: Vec<u8> = vec![
+            0x40, // Nontransitive Two Octet AS Specific
+            0x02, // Route Target
+            0x00, 0x01, // AS 1
+            0x00, 0x00, 0x00, 0x01, // Local Admin 1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(data)).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::NonTransitiveTwoOctetAs(community) = &communities[0] {
+                assert_eq!(community.subtype, 0x02);
+                assert_eq!(community.global_admin, Asn::new_16bit(1));
+                assert_eq!(community.local_admin, [0x00, 0x00, 0x00, 0x01]);
+            }
         }
     }
 
@@ -329,5 +345,26 @@ mod tests {
         } else {
             panic!("Unexpected attribute type");
         }
+    }
+
+    #[test]
+    fn test_encode_raw_extended_community() {
+        let community = ExtendedCommunity::Raw([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+        let bytes = encode_extended_communities(&vec![community]);
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07])
+        );
+    }
+
+    #[test]
+    fn test_encode_ipv6_extended_communites() {
+        let community = Ipv6AddrExtCommunity {
+            community_type: ExtendedCommunityType::NonTransitiveTwoOctetAs,
+            subtype: 0x02,
+            global_admin: Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
+            local_admin: [0x00, 0x01],
+        };
+        let _bytes = encode_ipv6_extended_communities(&vec![community]);
     }
 }

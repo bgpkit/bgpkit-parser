@@ -129,4 +129,7 @@ mod tests {
         let _header = parse_openbmp_header(&mut data).unwrap();
         let _msg = parse_bmp_msg(&mut data).unwrap();
     }
+
+    #[test]
+    fn parse_peer_up_notification() {}
 }

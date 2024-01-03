@@ -134,3 +134,62 @@ mod serde_impl {
         }
     }
 }
+
+// Here's the test code appended at the end of your source code
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fromstr() {
+        let prefix_str = "192.168.0.0/24";
+        let network_prefix = NetworkPrefix::from_str(prefix_str).unwrap();
+        assert_eq!(
+            network_prefix.prefix,
+            IpNet::from_str("192.168.0.0/24").unwrap()
+        );
+        assert_eq!(network_prefix.path_id, 0);
+    }
+
+    #[test]
+    fn test_encode() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, 1);
+        let _encoded = network_prefix.encode(true);
+    }
+
+    #[test]
+    fn test_display() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, 1);
+        assert_eq!(network_prefix.to_string(), "192.168.0.0/24");
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serialization() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, 1);
+        let serialized = serde_json::to_string(&network_prefix).unwrap();
+        assert_eq!(serialized, "{\"prefix\":\"192.168.0.0/24\",\"path_id\":1}");
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_deserialization() {
+        let serialized = "{\"prefix\":\"192.168.0.0/24\",\"path_id\":1}";
+        let deserialized: NetworkPrefix = serde_json::from_str(serialized).unwrap();
+        assert_eq!(
+            deserialized.prefix,
+            IpNet::from_str("192.168.0.0/24").unwrap()
+        );
+        assert_eq!(deserialized.path_id, 1);
+    }
+
+    #[test]
+    fn test_debug() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, 1);
+        assert_eq!(format!("{:?}", network_prefix), "192.168.0.0/24#1");
+    }
+}

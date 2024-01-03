@@ -8,7 +8,6 @@ pub mod error;
 pub mod role;
 
 pub use attributes::*;
-pub use capabilities::*;
 pub use community::*;
 pub use elem::*;
 pub use error::*;
@@ -123,4 +122,68 @@ pub struct BgpUpdateMessage {
 pub struct BgpNotificationMessage {
     pub error: BgpError,
     pub data: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_type() {
+        let open = BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        assert_eq!(open.msg_type(), BgpMessageType::OPEN);
+
+        let update = BgpMessage::Update(BgpUpdateMessage::default());
+        assert_eq!(update.msg_type(), BgpMessageType::UPDATE);
+
+        let notification = BgpMessage::Notification(BgpNotificationMessage {
+            error: BgpError::Unknown(0, 0),
+            data: vec![],
+        });
+        assert_eq!(notification.msg_type(), BgpMessageType::NOTIFICATION);
+
+        let keepalive = BgpMessage::KeepAlive;
+        assert_eq!(keepalive.msg_type(), BgpMessageType::KEEPALIVE);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde() {
+        let open = BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let serialized = serde_json::to_string(&open).unwrap();
+        let deserialized: BgpMessage = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(open, deserialized);
+
+        let update = BgpMessage::Update(BgpUpdateMessage::default());
+        let serialized = serde_json::to_string(&update).unwrap();
+        let deserialized: BgpMessage = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(update, deserialized);
+
+        let notification = BgpMessage::Notification(BgpNotificationMessage {
+            error: BgpError::Unknown(0, 0),
+            data: vec![],
+        });
+        let serialized = serde_json::to_string(&notification).unwrap();
+        let deserialized: BgpMessage = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(notification, deserialized);
+
+        let keepalive = BgpMessage::KeepAlive;
+        let serialized = serde_json::to_string(&keepalive).unwrap();
+        let deserialized: BgpMessage = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(keepalive, deserialized);
+    }
 }
