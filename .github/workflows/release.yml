@@ -35,6 +35,6 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bgpkit-parser
-          features: vendored-openssl
+          features: cli,vendored-openssl
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
