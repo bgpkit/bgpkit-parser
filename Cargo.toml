@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.10.0-alpha.8"
+version = "0.10.0-beta.1"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 license = "MIT"
@@ -44,6 +44,7 @@ serde_json = {version = "1.0", optional = true } # RIS Live parsing
 ####################
 env_logger = {version="0.10", optional=true}
 clap = {version= "4.0", features=["derive"], optional=true}
+openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [features]
 default = ["parser", "native-tls"]
@@ -85,6 +86,9 @@ native-tls = [
 rustls = [
     "oneio/lib-rustls",
 ]
+
+# vendored openssl
+vendored-openssl = ["openssl"]
 
 [[bench]]
 name = "internals"
