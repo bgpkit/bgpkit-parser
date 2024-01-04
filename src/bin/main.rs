@@ -10,7 +10,7 @@ use ipnet::IpNet;
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
 #[derive(Parser, Debug)]
-#[clap(name = "bgpkit-parser-cli")]
+#[clap(author, version, about, long_about = None)]
 struct Opts {
     /// File path to a MRT file, local or remote.
     #[clap(name = "FILE")]
