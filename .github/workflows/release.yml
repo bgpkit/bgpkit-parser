@@ -9,7 +9,19 @@ on:
       - v[0-9]+.*
 
 jobs:
+  release-format-check:
+    runs-on: self-hosted
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Run format check
+      run: cargo fmt --check
+
+    - name: Run cargo-readme check
+      run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md
+
   create-release:
+    needs: release-format-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +29,19 @@ jobs:
         with:
           changelog: CHANGELOG.md
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  cargo-publish:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to crates.io
+        run: >
+          cargo publish
+          --all-features
+          --verbose
+          --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
 
   upload-assets:
     needs: create-release

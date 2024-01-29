@@ -5,24 +5,19 @@ on:
     branches: [ main ]
     paths:
       - '**.rs'
-      - 'README.md'
   pull_request:
     branches: [ main ]
     paths-ignore:
-      - 'README.md'
       - '**.rs'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  cargo-fmt-check:
     runs-on: self-hosted
     steps:
     - uses: actions/checkout@v2
 
     - name: Run format check
       run: cargo fmt --check
-
-    - name: Run cargo-readme check
-      run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md
