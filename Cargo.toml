@@ -34,7 +34,7 @@ bitflags = {version="2.3.3", features = ["serde"], optional = true}
 bytes = {version = "1.4.0", optional = true}
 hex= {version = "0.4.3", optional = true} # bmp/openbmp parsing
 log= {version = "0.4", optional = true }
-oneio = {version= "0.15", default-features = false, features = ["remote", "compressions"], optional = true }
+oneio = {version= "0.16.0", default-features = false, features = ["lib-core"], optional = true }
 regex = {version = "1", optional = true} # used in parser filter
 chrono = {version="0.4.24", optional = true} # parser filter
 serde_json = {version = "1.0", optional = true } # RIS Live parsing
@@ -44,10 +44,9 @@ serde_json = {version = "1.0", optional = true } # RIS Live parsing
 ####################
 env_logger = {version="0.10", optional=true}
 clap = {version= "4.0", features=["derive"], optional=true}
-openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [features]
-default = ["parser", "native-tls"]
+default = ["parser", "rustls"]
 models = [
     "num_enum",
     "num_enum/complex-expressions",
@@ -81,14 +80,11 @@ serde = [
     "ipnet/serde",
 ]
 native-tls = [
-    "oneio/lib-native-tls",
+    "oneio/native-tls",
 ]
 rustls = [
-    "oneio/lib-rustls",
+    "oneio/rustls",
 ]
-
-# vendored openssl
-vendored-openssl = ["openssl"]
 
 [[bench]]
 name = "internals"
@@ -100,7 +96,7 @@ harness = false
 
 [dev-dependencies]
 anyhow = "1"
-bgpkit-broker = "0.6.2"
+bgpkit-broker = "0.7.0-beta.5"
 kafka = "0.10.0"
 tungstenite= "0.21.0"
 url = "2.1.0"
