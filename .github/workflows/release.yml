@@ -35,6 +35,7 @@ jobs:
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: bgpkit-parser
+          checksum: sha256
           features: cli
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
