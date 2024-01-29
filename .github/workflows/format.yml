@@ -3,12 +3,14 @@ name: formatting
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - '**/*.md'
+    paths:
+      - '**.rs'
+      - 'README.md'
   pull_request:
     branches: [ main ]
     paths-ignore:
-      - '**/*.md'
+      - 'README.md'
+      - '**.rs'
 
 env:
   CARGO_TERM_COLOR: always
