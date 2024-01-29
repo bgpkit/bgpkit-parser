@@ -154,19 +154,14 @@ mod tests {
     #[test]
     fn test_new_with_reader() {
         // bzip2 reader for compressed file
-        let http_stream = ureq::get("http://archive.routeviews.org/route-views.ny/bgpdata/2023.02/UPDATES/updates.20230215.0630.bz2")
-            .call().unwrap().into_reader();
-        let reader = bzip2::read::BzDecoder::new(http_stream);
+        let reader = oneio::get_reader("http://archive.routeviews.org/route-views.ny/bgpdata/2023.02/UPDATES/updates.20230215.0630.bz2").unwrap();
         assert_eq!(
             12683,
             BgpkitParser::from_reader(reader).into_elem_iter().count()
         );
 
         // remote reader for uncompressed updates file
-        let reader = ureq::get("https://spaces.bgpkit.org/parser/update-example")
-            .call()
-            .unwrap()
-            .into_reader();
+        let reader = oneio::get_reader("https://spaces.bgpkit.org/parser/update-example").unwrap();
         assert_eq!(
             8160,
             BgpkitParser::from_reader(reader).into_elem_iter().count()
