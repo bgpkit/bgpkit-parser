@@ -11,7 +11,6 @@ use std::{error::Error, fmt, io};
 #[derive(Debug)]
 pub enum ParserError {
     IoError(io::Error),
-    IoNotEnoughBytes(),
     EofError(io::Error),
     OneIoError(OneIoError),
     EofExpected,
@@ -50,7 +49,6 @@ impl Display for ParserError {
             ParserError::EofExpected => write!(f, "Error: reach end of file"),
             ParserError::OneIoError(e) => write!(f, "Error: {}", e),
             ParserError::FilterError(e) => write!(f, "Error: {}", e),
-            ParserError::IoNotEnoughBytes() => write!(f, "Error: Not enough bytes to read"),
         }
     }
 }

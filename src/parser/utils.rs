@@ -14,7 +14,7 @@ use log::debug;
 use std::net::IpAddr;
 
 use crate::error::ParserError;
-use crate::ParserError::IoNotEnoughBytes;
+use crate::ParserError::TruncatedMsg;
 
 impl ReadUtils for Bytes {}
 
@@ -22,8 +22,12 @@ impl ReadUtils for Bytes {}
 pub trait ReadUtils: Buf {
     #[inline]
     fn has_n_remaining(&self, n: usize) -> Result<(), ParserError> {
-        if self.remaining() < n {
-            Err(IoNotEnoughBytes())
+        let remaining = self.remaining();
+        if remaining < n {
+            Err(TruncatedMsg(format!(
+                "not enough bytes to read. remaining: {}, required: {}",
+                remaining, n
+            )))
         } else {
             Ok(())
         }
