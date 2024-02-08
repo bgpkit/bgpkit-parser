@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.0-beta.3 - 2024-02-08
+
+### Highlights
+
+`Bytes::split_to` will panic if not enough bytes available. 
+We added multiple safety checks to make sure enough bytes are available before calling `.split_to()` function.
+If not enough bytes available, it will send out a `TruncatedMsg` error.
+The current iterator will catch the error and skip the remainder of the message.
+
+### Breaking changes
+
+- remove `IoNotEnoughBytes`, and use `TruncatedMsg` when not enough bytes available to read
+
+### Other changes
+
+- bump `bytes` crate version to `1.5.0`
+
 ## v0.10.0-beta.2 - 2024-01-29
 
 ### Highlights
