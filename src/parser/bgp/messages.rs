@@ -76,6 +76,7 @@ pub fn parse_bgp_message(
             data.remaining()
         );
     }
+    data.has_n_remaining(bgp_msg_length)?;
     let mut msg_data = data.split_to(bgp_msg_length);
 
     Ok(match msg_type {
@@ -279,11 +280,12 @@ pub fn parse_bgp_update_message(
     add_path: bool,
     asn_len: &AsnLength,
 ) -> Result<BgpUpdateMessage, ParserError> {
-    // NOTE: AFI for routes out side attributes are IPv4 ONLY.
+    // NOTE: AFI for routes outside attributes are IPv4 ONLY.
     let afi = Afi::Ipv4;
 
-    // parse withdrawn prefixes nlri
+    // parse withdrawn prefixes NLRI
     let withdrawn_bytes_length = input.read_u16()? as usize;
+    input.has_n_remaining(withdrawn_bytes_length)?;
     let withdrawn_bytes = input.split_to(withdrawn_bytes_length);
     let withdrawn_prefixes = read_nlri(withdrawn_bytes, &afi, add_path)?;
 

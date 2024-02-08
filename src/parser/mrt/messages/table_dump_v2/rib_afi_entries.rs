@@ -125,10 +125,7 @@ pub fn parse_rib_entry(
     }
     let attribute_length = input.read_u16()? as usize;
 
-    if input.remaining() < attribute_length {
-        return Err(ParserError::TruncatedMsg("truncated msg".to_string()));
-    }
-
+    input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
     let attributes = parse_attributes(
         attr_data_slice,

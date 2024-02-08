@@ -127,6 +127,7 @@ pub fn parse_attributes(
         }
 
         // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
+        data.has_n_remaining(attr_length)?;
         let mut attr_data = data.split_to(attr_length);
 
         let attr = match attr_type {
