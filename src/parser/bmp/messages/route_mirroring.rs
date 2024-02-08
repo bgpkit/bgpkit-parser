@@ -39,6 +39,7 @@ pub fn parse_route_mirroring(
         match data.read_u16()? {
             0 => {
                 let info_len = data.read_u16()?;
+                data.has_n_remaining(info_len as usize)?;
                 let mut bytes = data.split_to(info_len as usize);
                 let value = parse_bgp_message(&mut bytes, false, asn_len)?;
                 tlvs.push(RouteMirroringTlv {

@@ -4,6 +4,7 @@ Provides parsing for BMP and OpenBMP binary-formatted messages.
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;
 pub use crate::parser::bmp::openbmp::parse_openbmp_header;
+use crate::utils::ReadUtils;
 use bytes::Bytes;
 
 pub mod error;
@@ -24,7 +25,9 @@ pub fn parse_openbmp_msg(mut data: Bytes) -> Result<BmpMessage, ParserBmpError> 
 pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
     let common_header = parse_bmp_common_header(data)?;
 
-    let mut content = data.split_to(common_header.msg_len as usize - 6);
+    let content_length = common_header.msg_len as usize - 6;
+    data.has_n_remaining(content_length)?;
+    let mut content = data.split_to(content_length);
 
     // if total_len>common_header.msg_len {
     //     // truncated message
