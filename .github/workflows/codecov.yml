@@ -2,12 +2,12 @@ name: codecov
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
+    paths:
+      - '**.rs'
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - '**.md'
+    paths:
+      - '**.rs'
 jobs:
   # Run code coverage using cargo-llvm-cov then upload to codecov.io
   job_code_coverage:
