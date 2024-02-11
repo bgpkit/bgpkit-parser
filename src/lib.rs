@@ -45,7 +45,7 @@ total: 255849
 [BGPKIT Broker][broker-repo] library provides search API for all RouteViews and RIPE RIS MRT data files. Using the
 broker's Rust API ([`bgpkit-broker`][broker-crates-io]), we can easily compile a list of MRT files that we are interested
 in for any time period and any data type (`update` or `rib`). This allows users to gather information without needing to
-know about locations of specific data files.
+know about the locations of specific data files.
 
 [broker-repo]: https://github.com/bgpkit/bgpkit-broker
 [broker-crates-io]: https://crates.io/crates/bgpkit-broker
@@ -90,7 +90,7 @@ for item in broker.into_iter().take(2) {
 
 ## Filtering BGP Messages
 
-BGPKIT Parser also has built-in [Filter] mechanism. When creating a new [`BgpkitParser`] instance,
+BGPKIT Parser also has a built-in [Filter] mechanism. When creating a new [`BgpkitParser`] instance,
 once can also call `add_filter` function to customize the parser to only show matching messages
 when iterating through [BgpElem]s.
 
@@ -99,7 +99,7 @@ For all types of filters, check out the [Filter] enum documentation.
 ```no_run
 use bgpkit_parser::BgpkitParser;
 
-/// This example shows how to parse a MRT file and filter by prefix.
+/// This example shows how to parse an MRT file and filter by prefix.
 env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
 log::info!("downloading updates file");
@@ -235,47 +235,64 @@ drop(mrt_writer);
 
 `bgpkit-parser` is bundled with a utility commandline tool `bgpkit-parser-cli`.
 
+## Installation
+
+### Install compiled binaries
+
+You can install the compiled `bgpkit-parser` CLI binaries with the following methods:
+- **Homebrew** (macOS): `brew install bgpkit/tap/bgpkit-parser`
+- [**Cargo binstall**](binstall): `cargo binstall bgpkit-parser`
+
+[binstall]: https://github.com/cargo-bins/cargo-binstall
+
+### From source
+
 You can install the tool by running
 ```bash
 cargo install bgpkit-parser --features cli
 ```
 or checkout this repository and run
 ```bash
-cargo install --path ./bgpkit-parser --features cli
+cargo install --path . --features cli
 ```
 
+## Usage
+
+Run `bgpkit-parser --help` to see the full list of options.
+
 ```text
-➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
+MRT/BGP/BMP data processing library
 
-Mingwei Zhang <mingwei@bgpkit.com>
+Usage: bgpkit-parser [OPTIONS] <FILE>
 
-bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
+Arguments:
+  <FILE>  File path to a MRT file, local or remote
 
-USAGE:
-    bgpkit-parser-cli [FLAGS] [OPTIONS] <FILE>
+Options:
+  -c, --cache-dir <CACHE_DIR>    Set the cache directory for caching remote files. Default behavior does not enable caching
+      --json                     Output as JSON objects
+      --psv                      Output as full PSV entries with header
+      --pretty                   Pretty-print JSON output
+  -e, --elems-count              Count BGP elems
+  -r, --records-count            Count MRT records
+  -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
+  -p, --prefix <PREFIX>          Filter by network prefix
+  -s, --include-super            Include super-prefix when filtering
+  -S, --include-sub              Include sub-prefix when filtering
+  -j, --peer-ip <PEER_IP>        Filter by peer IP address
+  -J, --peer-asn <PEER_ASN>      Filter by peer ASN
+  -m, --elem-type <ELEM_TYPE>    Filter by elem type: announce (a) or withdraw (w)
+  -t, --start-ts <START_TS>      Filter by start unix timestamp inclusive
+  -T, --end-ts <END_TS>          Filter by end unix timestamp inclusive
+  -a, --as-path <AS_PATH>        Filter by AS path regex string
+  -h, --help                     Print help
+  -V, --version                  Print version
 
-FLAGS:
-    -e, --elems-count      Count BGP elems
-    -h, --help             Prints help information
-        --json             Output as JSON objects
-        --pretty           Pretty-print JSON output
-    -r, --records-count    Count MRT records
-    -V, --version          Prints version information
-
-OPTIONS:
-    -a, --as-path <as-path>          Filter by AS path regex string
-    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
-    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
-    -o, --origin-asn <origin-asn>    Filter by origin AS Number
-    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
-    -j, --peer-ip <peer-ip>          Filter by peer IP address
-    -p, --prefix <prefix>            Filter by network prefix
-    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
 ```
 
 # Data Representation
 
-There are two key data structure to understand for the parsing results: [MrtRecord] and [BgpElem].
+There are two key data structures to understand for the parsing results: [MrtRecord] and [BgpElem].
 
 ## `MrtRecord`: unmodified MRT information representation
 
