@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.1 - 2024-02-23
+
+### Highlights
+
+* updating `oneio` to `v0.16.2`
+  * switching to `flate2` with `zlib-ng` for handling `gzip` files, which is significantly faster than the default pure-Rust implementation
+
 ## v0.10.0 - 2024-02-12
 
 Version 0.10.0 is a major release with a lot of changes and improvements.
