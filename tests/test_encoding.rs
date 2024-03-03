@@ -61,7 +61,7 @@ mod tests {
         let input_records: Vec<MrtRecord> =
             BgpkitParser::new(url).unwrap().into_record_iter().collect();
 
-        let dir = tempdir::TempDir::new("test_encode_table_dump_v1").unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
         let tempfile = dir
             .path()
             .join("test_encode_table_dump_v1.mrt")
