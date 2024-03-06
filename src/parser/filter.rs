@@ -1,7 +1,7 @@
 /*!
 ## Message Filters
 
-The filters package defines a number of available filters that users can utilize, and implements
+The filter module defines a number of available filters that users can use, and implements
 the filtering mechanism for [BgpElem].
 
 The available filters are:
@@ -13,9 +13,10 @@ The available filters are:
 - `type` -- message type (`withdraw` or `announce`)
 - `ts_start` -- start and end unix timestamp
 - `as_path` -- regular expression for AS path string
+- `ip_version` -- IP version (`ipv4` or `ipv6`)
 
-[Filter::new] function takes a `str` for filter type and `str` for filter value and returns a Result
-of a [Filter] or a parsing error.
+[Filter::new] function takes a `str` as the filter type and `str` as the filter value and returns a
+Result of a [Filter] or a parsing error.
 
 [BgpkitParser](crate::BgpkitParser) implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
 and returns a new parser with specified filter added. See the example below.
@@ -70,6 +71,7 @@ use std::str::FromStr;
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
 /// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+/// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
@@ -78,9 +80,16 @@ pub enum Filter {
     PeerIps(Vec<IpAddr>),
     PeerAsn(u32),
     Type(ElemType),
+    IpVersion(IpVersion),
     TsStart(f64),
     TsEnd(f64),
     AsPath(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpVersion {
+    Ipv4,
+    Ipv6,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +206,14 @@ impl Filter {
                     filter_value
                 ))),
             },
+            "ip_version" | "ip" => match filter_value {
+                "4" | "v4" | "ipv4" => Ok(Filter::IpVersion(IpVersion::Ipv4)),
+                "6" | "v6" | "ipv6" => Ok(Filter::IpVersion(IpVersion::Ipv6)),
+                _ => Err(FilterError(format!(
+                    "cannot parse IP version from {}",
+                    filter_value
+                ))),
+            },
             _ => Err(FilterError(format!("unknown filter type: {}", filter_type))),
         }
     }
@@ -285,6 +302,10 @@ impl Filterable for BgpElem {
                     false
                 }
             }
+            Filter::IpVersion(version) => match version {
+                IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
+                IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
+            },
         }
     }
 
@@ -554,6 +575,12 @@ mod tests {
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
         assert!(elem.match_filter(&filter));
+
+        let filter = Filter::new("ip_version", "4").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        let filter = Filter::new("ip", "ipv6").unwrap();
+        assert!(!elem.match_filter(&filter));
     }
 
     #[test]

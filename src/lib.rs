@@ -241,9 +241,7 @@ drop(mrt_writer);
 
 You can install the compiled `bgpkit-parser` CLI binaries with the following methods:
 - **Homebrew** (macOS): `brew install bgpkit/tap/bgpkit-parser`
-- [**Cargo binstall**](binstall): `cargo binstall bgpkit-parser`
-
-[binstall]: https://github.com/cargo-bins/cargo-binstall
+- [**Cargo binstall**](https://github.com/cargo-bins/cargo-binstall): `cargo binstall bgpkit-parser`
 
 ### From source
 
@@ -277,6 +275,8 @@ Options:
   -r, --records-count            Count MRT records
   -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
   -p, --prefix <PREFIX>          Filter by network prefix
+  -4, --ipv4-only                Filter by IPv4 only
+  -6, --ipv6-only                Filter by IPv6 only
   -s, --include-super            Include super-prefix when filtering
   -S, --include-sub              Include sub-prefix when filtering
   -j, --peer-ip <PEER_IP>        Filter by peer IP address
