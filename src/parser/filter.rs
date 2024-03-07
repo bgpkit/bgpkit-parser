@@ -406,6 +406,9 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_errors() {}
+
+    #[test]
     fn test_parsing_time_str() {
         let ts = chrono::NaiveDateTime::from_str("2021-11-20T19:49:58").unwrap();
         assert_eq!(parse_time_str("1637437798"), Some(ts));
@@ -506,6 +509,30 @@ mod tests {
                 PrefixMatchType::Exact
             )
         );
+        let filter = Filter::new("prefix_super", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSuper
+            )
+        );
+        let filter = Filter::new("prefix_sub", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSub
+            )
+        );
+        let filter = Filter::new("prefix_super_sub", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSuperSub
+            )
+        );
 
         let filter = Filter::new("peer_ip", "192.168.1.1").unwrap();
         assert_eq!(
@@ -527,6 +554,20 @@ mod tests {
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
         assert_eq!(filter, Filter::AsPath(r" ?174 1916 52888$".to_string()));
+
+        assert!(Filter::new("origin_asn", "not a number").is_err());
+        assert!(Filter::new("peer_asn", "not a number").is_err());
+        assert!(Filter::new("ts_start", "not a number").is_err());
+        assert!(Filter::new("ts_end", "not a number").is_err());
+        assert!(Filter::new("prefix", "not a prefix").is_err());
+        assert!(Filter::new("prefix_super", "not a prefix").is_err());
+        assert!(Filter::new("prefix_sub", "not a prefix").is_err());
+        assert!(Filter::new("peer_ip", "not a IP").is_err());
+        assert!(Filter::new("peer_ips", "not,a,IP").is_err());
+        assert!(Filter::new("type", "not a type").is_err());
+        assert!(Filter::new("as_path", "[abc").is_err());
+        assert!(Filter::new("ip_version", "5").is_err());
+        assert!(Filter::new("unknown_filter", "some_value").is_err());
     }
 
     #[test]
