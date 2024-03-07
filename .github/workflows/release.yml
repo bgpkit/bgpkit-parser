@@ -16,7 +16,7 @@ jobs:
       - name: Run format check
         run: cargo fmt --check
       - name: Run cargo-readme check
-        run: cargo readme > TMP_README.md && diff -b TMP_README.md README.md
+        run: cargo install cargo-readme && cargo readme > TMP_README.md && diff -b TMP_README.md README.md
 
   security-audit:
     needs: release-format-check
