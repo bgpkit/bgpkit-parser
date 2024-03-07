@@ -1,7 +1,7 @@
 /*!
 ## Message Filters
 
-The filters package defines a number of available filters that users can utilize, and implements
+The filter module defines a number of available filters that users can use, and implements
 the filtering mechanism for [BgpElem].
 
 The available filters are:
@@ -13,9 +13,10 @@ The available filters are:
 - `type` -- message type (`withdraw` or `announce`)
 - `ts_start` -- start and end unix timestamp
 - `as_path` -- regular expression for AS path string
+- `ip_version` -- IP version (`ipv4` or `ipv6`)
 
-[Filter::new] function takes a `str` for filter type and `str` for filter value and returns a Result
-of a [Filter] or a parsing error.
+[Filter::new] function takes a `str` as the filter type and `str` as the filter value and returns a
+Result of a [Filter] or a parsing error.
 
 [BgpkitParser](crate::BgpkitParser) implements the function `add_filter("filter_type", "filter_value")` that takes the parser's ownership itself
 and returns a new parser with specified filter added. See the example below.
@@ -70,6 +71,7 @@ use std::str::FromStr;
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
 /// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+/// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
@@ -78,9 +80,16 @@ pub enum Filter {
     PeerIps(Vec<IpAddr>),
     PeerAsn(u32),
     Type(ElemType),
+    IpVersion(IpVersion),
     TsStart(f64),
     TsEnd(f64),
     AsPath(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpVersion {
+    Ipv4,
+    Ipv6,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,7 +102,7 @@ pub enum PrefixMatchType {
 
 fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
     if let Ok(t) = time_str.parse::<f64>() {
-        return chrono::NaiveDateTime::from_timestamp_opt(t as i64, 0);
+        return chrono::DateTime::from_timestamp(t as i64, 0).map(|t| t.naive_utc());
     }
     if let Ok(t) = chrono::DateTime::parse_from_rfc3339(time_str) {
         return Some(t.naive_utc());
@@ -177,14 +186,14 @@ impl Filter {
                 ))),
             },
             "ts_start" | "start_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsStart(t.timestamp() as f64)),
+                Some(t) => Ok(Filter::TsStart(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
                     "cannot parse TsStart filter from {}",
                     filter_value
                 ))),
             },
             "ts_end" | "end_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsEnd(t.timestamp() as f64)),
+                Some(t) => Ok(Filter::TsEnd(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
                     "cannot parse TsEnd filter from {}",
                     filter_value
@@ -194,6 +203,14 @@ impl Filter {
                 Ok(_v) => Ok(Filter::AsPath(filter_value.to_string())),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse AS path regex from {}",
+                    filter_value
+                ))),
+            },
+            "ip_version" | "ip" => match filter_value {
+                "4" | "v4" | "ipv4" => Ok(Filter::IpVersion(IpVersion::Ipv4)),
+                "6" | "v6" | "ipv6" => Ok(Filter::IpVersion(IpVersion::Ipv6)),
+                _ => Err(FilterError(format!(
+                    "cannot parse IP version from {}",
                     filter_value
                 ))),
             },
@@ -285,6 +302,10 @@ impl Filterable for BgpElem {
                     false
                 }
             }
+            Filter::IpVersion(version) => match version {
+                IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
+                IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
+            },
         }
     }
 
@@ -383,6 +404,9 @@ mod tests {
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 3393 + 834);
     }
+
+    #[test]
+    fn test_filter_errors() {}
 
     #[test]
     fn test_parsing_time_str() {
@@ -485,6 +509,30 @@ mod tests {
                 PrefixMatchType::Exact
             )
         );
+        let filter = Filter::new("prefix_super", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSuper
+            )
+        );
+        let filter = Filter::new("prefix_sub", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSub
+            )
+        );
+        let filter = Filter::new("prefix_super_sub", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::IncludeSuperSub
+            )
+        );
 
         let filter = Filter::new("peer_ip", "192.168.1.1").unwrap();
         assert_eq!(
@@ -506,6 +554,20 @@ mod tests {
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
         assert_eq!(filter, Filter::AsPath(r" ?174 1916 52888$".to_string()));
+
+        assert!(Filter::new("origin_asn", "not a number").is_err());
+        assert!(Filter::new("peer_asn", "not a number").is_err());
+        assert!(Filter::new("ts_start", "not a number").is_err());
+        assert!(Filter::new("ts_end", "not a number").is_err());
+        assert!(Filter::new("prefix", "not a prefix").is_err());
+        assert!(Filter::new("prefix_super", "not a prefix").is_err());
+        assert!(Filter::new("prefix_sub", "not a prefix").is_err());
+        assert!(Filter::new("peer_ip", "not a IP").is_err());
+        assert!(Filter::new("peer_ips", "not,a,IP").is_err());
+        assert!(Filter::new("type", "not a type").is_err());
+        assert!(Filter::new("as_path", "[abc").is_err());
+        assert!(Filter::new("ip_version", "5").is_err());
+        assert!(Filter::new("unknown_filter", "some_value").is_err());
     }
 
     #[test]
@@ -554,6 +616,12 @@ mod tests {
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
         assert!(elem.match_filter(&filter));
+
+        let filter = Filter::new("ip_version", "4").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        let filter = Filter::new("ip", "ipv6").unwrap();
+        assert!(!elem.match_filter(&filter));
     }
 
     #[test]

@@ -62,6 +62,14 @@ struct Filters {
     #[clap(short = 'S', long)]
     include_sub: bool,
 
+    /// Filter by IPv4 only
+    #[clap(short = '4', long)]
+    ipv4_only: bool,
+
+    /// Filter by IPv6 only
+    #[clap(short = '6', long)]
+    ipv6_only: bool,
+
     /// Filter by peer IP address
     #[clap(short = 'j', long)]
     peer_ip: Vec<IpAddr>,
@@ -94,12 +102,12 @@ fn main() {
 
     let file_path = opts.file_path.to_str().unwrap();
 
-    let mut parser = match {
-        match opts.cache_dir {
-            None => BgpkitParser::new(file_path),
-            Some(c) => BgpkitParser::new_cached(file_path, c.to_str().unwrap()),
-        }
-    } {
+    let parser_opt = match opts.cache_dir {
+        None => BgpkitParser::new(file_path),
+        Some(c) => BgpkitParser::new_cached(file_path, c.to_str().unwrap()),
+    };
+
+    let mut parser = match parser_opt {
         Ok(p) => p,
         Err(err) => {
             eprintln!("{}", err);
@@ -145,6 +153,22 @@ fn main() {
     }
     if let Some(v) = opts.filters.end_ts {
         parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
+    }
+
+    match (opts.filters.ipv4_only, opts.filters.ipv6_only) {
+        (true, true) => {
+            eprintln!("Error: --ipv4-only and --ipv6-only cannot be used together");
+            std::process::exit(1);
+        }
+        (false, false) => {
+            // no filters on IP version, skip
+        }
+        (true, false) => {
+            parser = parser.add_filter("ip_version", "ipv4").unwrap();
+        }
+        (false, true) => {
+            parser = parser.add_filter("ip_version", "ipv6").unwrap();
+        }
     }
 
     match (opts.elems_count, opts.records_count) {
