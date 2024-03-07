@@ -102,12 +102,12 @@ fn main() {
 
     let file_path = opts.file_path.to_str().unwrap();
 
-    let mut parser = match {
-        match opts.cache_dir {
-            None => BgpkitParser::new(file_path),
-            Some(c) => BgpkitParser::new_cached(file_path, c.to_str().unwrap()),
-        }
-    } {
+    let parser_opt = match opts.cache_dir {
+        None => BgpkitParser::new(file_path),
+        Some(c) => BgpkitParser::new_cached(file_path, c.to_str().unwrap()),
+    };
+
+    let mut parser = match parser_opt {
         Ok(p) => p,
         Err(err) => {
             eprintln!("{}", err);

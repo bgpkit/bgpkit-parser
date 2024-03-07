@@ -102,7 +102,7 @@ pub enum PrefixMatchType {
 
 fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
     if let Ok(t) = time_str.parse::<f64>() {
-        return chrono::NaiveDateTime::from_timestamp_opt(t as i64, 0);
+        return chrono::DateTime::from_timestamp(t as i64, 0).map(|t| t.naive_utc());
     }
     if let Ok(t) = chrono::DateTime::parse_from_rfc3339(time_str) {
         return Some(t.naive_utc());
@@ -186,14 +186,14 @@ impl Filter {
                 ))),
             },
             "ts_start" | "start_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsStart(t.timestamp() as f64)),
+                Some(t) => Ok(Filter::TsStart(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
                     "cannot parse TsStart filter from {}",
                     filter_value
                 ))),
             },
             "ts_end" | "end_ts" => match parse_time_str(filter_value) {
-                Some(t) => Ok(Filter::TsEnd(t.timestamp() as f64)),
+                Some(t) => Ok(Filter::TsEnd(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
                     "cannot parse TsEnd filter from {}",
                     filter_value
