@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.2 - 2024-03-06
+
+### Highlights
+
+* added new `ip_version` filter type with values of `ipv4` or `ipv6`
+  * library users can use this filter to filter BGP messages by IP version 
+  * CLI users can specify `-4` or `-6` to filter BGP messages by IP version
+* add new dependency security checkups using `cargo audit`
+  * all new releases will need to pass `cargo audit` checks before being published
+  * weekly `cargo audit` checks added to the CI pipeline
+
 ## v0.10.1 - 2024-02-23
 
 ### Highlights
