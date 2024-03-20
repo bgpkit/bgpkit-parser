@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.4 - 2024-03-20
+
+### Hot fix
+
+* update `oneio` to `v0.16.4`
+  * add `http2` and `charset` feature flag to `reqwest`
+
 ## v0.10.3 - 2024-03-20
 
 ### Highlights
