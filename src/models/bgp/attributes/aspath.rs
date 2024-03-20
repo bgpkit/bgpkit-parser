@@ -612,31 +612,38 @@ impl AsPath {
     /// ```
     pub fn merge_aspath_as4path(aspath: &AsPath, as4path: &AsPath) -> Option<AsPath> {
         if aspath.route_len() < as4path.route_len() {
+            // Per RFC6793, if 2-byte AS path is shorter than 4-byte AS path, ignore 4-byte AS path
             return Some(aspath.clone());
         }
 
         let mut as4iter = as4path.segments.iter();
-        let mut as4seg = as4iter.next();
         let mut new_segs: Vec<AsPathSegment> = vec![];
-        if as4seg.is_none() {
-            new_segs.extend(aspath.segments.clone());
-            return Some(AsPath { segments: new_segs });
-        }
 
         for seg in &aspath.segments {
-            let as4seg_unwrapped = as4seg.unwrap();
-            if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
-                (seg, as4seg_unwrapped)
-            {
-                let diff_len = seq.len() - seq4.len();
-                let mut new_seq: Vec<Asn> = vec![];
-                new_seq.extend(seq.iter().take(diff_len));
-                new_seq.extend(seq4);
-                new_segs.push(AsPathSegment::AsSequence(new_seq));
-            } else {
-                new_segs.push(as4seg_unwrapped.clone());
-            }
-            as4seg = as4iter.next();
+            match as4iter.next() {
+                None => {
+                    new_segs.push(seg.clone());
+                }
+                Some(as4seg_unwrapped) => {
+                    if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
+                        (seg, as4seg_unwrapped)
+                    {
+                        let diff_len = seq.len() as i32 - seq4.len() as i32;
+                        if diff_len > 0 {
+                            // 2-byte ASN path is longer than 4-byte ASN path
+                            // we take the leading part of 2-byte ASN path and prepend it to 4-byte ASN path
+                            let mut new_seq: Vec<Asn> = vec![];
+                            new_seq.extend(seq.iter().take(diff_len as usize));
+                            new_seq.extend(seq4);
+                            new_segs.push(AsPathSegment::AsSequence(new_seq));
+                        } else {
+                            new_segs.push(AsPathSegment::AsSequence(seq.clone()));
+                        }
+                    } else {
+                        new_segs.push(as4seg_unwrapped.clone());
+                    }
+                }
+            };
         }
 
         Some(AsPath { segments: new_segs })
@@ -985,6 +992,51 @@ mod tests {
         let as4path = AsPath::from_sequence([2, 3, 7]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
         assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2, 3, 7]));
+
+        let aspath = AsPath::from_sequence([1, 2]);
+        let as4path = AsPath::from_sequence([2, 3, 7]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2]));
+
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2, 3, 5]),
+            AsPathSegment::set([7, 8]),
+        ]);
+        let as4path = AsPath::from_sequence([6, 7, 8]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
+        assert_eq!(newpath.segments.len(), 2);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 6, 7, 8]));
+        assert_eq!(newpath.segments[1], AsPathSegment::set([7, 8]));
+
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2]),
+            AsPathSegment::sequence([3, 5]),
+            AsPathSegment::set([13, 14]),
+        ]);
+        let as4path = AsPath::from_segments(vec![
+            AsPathSegment::sequence([8, 4, 6]),
+            AsPathSegment::set([11, 12]),
+        ]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
+        assert_eq!(newpath.segments.len(), 3);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2]));
+        assert_eq!(newpath.segments[1], AsPathSegment::set([11, 12]));
+        assert_eq!(newpath.segments[2], AsPathSegment::set([13, 14]));
+
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2, 3]),
+            AsPathSegment::sequence([5]),
+            AsPathSegment::set([13, 14]),
+        ]);
+        let as4path = AsPath::from_segments(vec![
+            AsPathSegment::sequence([7, 8]),
+            AsPathSegment::set([11, 12]),
+        ]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path).unwrap();
+        assert_eq!(newpath.segments.len(), 3);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 7, 8]));
+        assert_eq!(newpath.segments[1], AsPathSegment::set([11, 12]));
+        assert_eq!(newpath.segments[2], AsPathSegment::set([13, 14]));
     }
 
     #[test]
