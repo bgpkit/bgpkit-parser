@@ -612,31 +612,32 @@ impl AsPath {
     /// ```
     pub fn merge_aspath_as4path(aspath: &AsPath, as4path: &AsPath) -> Option<AsPath> {
         if aspath.route_len() < as4path.route_len() {
+            // Per RFC6793, if 2-byte AS path is shorter than 4-byte AS path, ignore 4-byte AS path
             return Some(aspath.clone());
         }
 
         let mut as4iter = as4path.segments.iter();
-        let mut as4seg = as4iter.next();
         let mut new_segs: Vec<AsPathSegment> = vec![];
-        if as4seg.is_none() {
-            new_segs.extend(aspath.segments.clone());
-            return Some(AsPath { segments: new_segs });
-        }
 
         for seg in &aspath.segments {
-            let as4seg_unwrapped = as4seg.unwrap();
-            if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
-                (seg, as4seg_unwrapped)
-            {
-                let diff_len = seq.len() - seq4.len();
-                let mut new_seq: Vec<Asn> = vec![];
-                new_seq.extend(seq.iter().take(diff_len));
-                new_seq.extend(seq4);
-                new_segs.push(AsPathSegment::AsSequence(new_seq));
-            } else {
-                new_segs.push(as4seg_unwrapped.clone());
-            }
-            as4seg = as4iter.next();
+            match as4iter.next() {
+                None => {
+                    new_segs.push(seg.clone());
+                }
+                Some(as4seg_unwrapped) => {
+                    if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
+                        (seg, as4seg_unwrapped)
+                    {
+                        let diff_len = seq.len() - seq4.len();
+                        let mut new_seq: Vec<Asn> = vec![];
+                        new_seq.extend(seq.iter().take(diff_len));
+                        new_seq.extend(seq4);
+                        new_segs.push(AsPathSegment::AsSequence(new_seq));
+                    } else {
+                        new_segs.push(as4seg_unwrapped.clone());
+                    }
+                }
+            };
         }
 
         Some(AsPath { segments: new_segs })
