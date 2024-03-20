@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.3 - 2024-03-20
+
+### Highlights
+
+* fixed an panic issue when sometimes merging AS path segments of 4-byte ASN path and 2-byte ASN path
+  * see issue [#156](https://github.com/bgpkit/bgpkit-parser/issues/156) for details
+* update `oneio` to `v0.16.3`
+  * gzip decompression depends on `flate2`'s `rust-backend` feature instead of `zlib-ng` which requires `cmake` to build
+
 ## v0.10.2 - 2024-03-06
 
 ### Highlights
