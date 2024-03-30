@@ -7,10 +7,10 @@
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use itertools::Itertools;
-use log::warn;
+use log::{error, warn};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 pub struct Elementor {
     peer_table: Option<PeerIndexTable>,
@@ -198,7 +198,7 @@ impl Elementor {
             (None, None) => None,
             (Some(v), None) => Some(v),
             (None, Some(v)) => Some(v),
-            (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap()),
+            (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2)),
         };
 
         let origin_asns = path
@@ -359,12 +359,19 @@ impl Elementor {
                         let prefix = t.prefix;
                         for e in t.rib_entries {
                             let pid = e.peer_index;
-                            let peer = self
-                                .peer_table
-                                .as_ref()
-                                .unwrap()
-                                .get_peer_by_id(&pid)
-                                .unwrap();
+                            let peer = match self.peer_table.as_ref() {
+                                None => {
+                                    error!("peer_table is None");
+                                    break;
+                                }
+                                Some(table) => match table.get_peer_by_id(&pid) {
+                                    None => {
+                                        error!("peer ID {} not found in peer_index table", pid);
+                                        break;
+                                    }
+                                    Some(peer) => peer,
+                                },
+                            };
                             let (
                                 as_path,
                                 as4_path, // Table dump v1 does not have 4-byte AS number
@@ -387,7 +394,7 @@ impl Elementor {
                                 (Some(v), None) => Some(v),
                                 (None, Some(v)) => Some(v),
                                 (Some(v1), Some(v2)) => {
-                                    Some(AsPath::merge_aspath_as4path(&v1, &v2).unwrap())
+                                    Some(AsPath::merge_aspath_as4path(&v1, &v2))
                                 }
                             };
 
@@ -547,9 +554,13 @@ impl From<&BgpElem> for Attributes {
         }
 
         if let Some(v) = value.aggr_asn {
+            let aggregator_id = match value.aggr_ip {
+                Some(v) => v,
+                None => Ipv4Addr::UNSPECIFIED,
+            };
             values.push(AttributeValue::Aggregator {
                 asn: v,
-                id: value.aggr_ip.unwrap(),
+                id: aggregator_id,
                 is_as4: v.is_four_byte(),
             });
         }
