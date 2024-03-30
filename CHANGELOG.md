@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.6 - 2024-03-30
+
+### Bug fix
+
+* fixed an code panic issue where malformed RIB dump entry with non-existing peer ID causes a panic
+    * also removed a number of unwraps in the code to handle errors more gracefully
+    * see issue [#157](https://github.com/bgpkit/bgpkit-parser/issues/158) for details
+
 ## v0.10.5 - 2024-03-26
 
 ### Highlights
