@@ -331,21 +331,41 @@ impl BgpUpdateMessage {
     /// <https://datatracker.ietf.org/doc/html/rfc4724#section-2>
     /// End-of-rib message is a special update message that contains no NLRI or withdrawal NLRI prefixes.
     pub fn is_end_of_rib(&self) -> bool {
-        let mut is_end_of_rib = true;
+        // there are two cases for end-of-rib message:
+        // 1. IPv4 unicast address family: no announced, no withdrawn, no attributes
+        // 2. Other cases: no announced, no withdrawal, only MP_UNREACH_NRLI with no prefixes
+
         if !self.announced_prefixes.is_empty() || !self.withdrawn_prefixes.is_empty() {
-            is_end_of_rib = false;
+            // has announced or withdrawal IPv4 unicast prefixes:
+            // definitely not end-of-rib
+
+            return false;
         }
-        if let Some(nlri) = self.attributes.get_reachable_nlri() {
-            if !nlri.prefixes.is_empty() {
-                is_end_of_rib = false;
+
+        if self.attributes.inner.is_empty() {
+            // no attributes, no prefixes:
+            // case 1 end-of-rib
+            return true;
+        }
+
+        // has some attributes, it can only be withdrawal with no prefixes
+
+        if self.attributes.inner.len() > 1 {
+            // has more than one attributes, not end-of-rib
+            return false;
+        }
+
+        // has only one attribute, check if it is withdrawal attribute
+        if let AttributeValue::MpUnreachNlri(nlri) = &self.attributes.inner.first().unwrap().value {
+            if nlri.prefixes.is_empty() {
+                // the only attribute is MP_UNREACH_NLRI with no prefixes:
+                // case 2 end-of-rib
+                return true;
             }
         }
-        if let Some(nlri) = self.attributes.get_unreachable_nlri() {
-            if !nlri.prefixes.is_empty() {
-                is_end_of_rib = false;
-            }
-        }
-        is_end_of_rib
+
+        // all other cases: not end-of-rib
+        false
     }
 }
 
@@ -396,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_end_of_rib() {
-        // empty attributes
+        // No prefixes and empty attributes: end-of-rib
         let attrs = Attributes::default();
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -405,8 +425,8 @@ mod tests {
         };
         assert!(msg.is_end_of_rib());
 
-        // NLRI attribute with empty prefixes
-        let attrs = Attributes::from_iter(vec![AttributeValue::MpReachNlri(Nlri {
+        // single MP_UNREACH_NLRI attribute with no prefixes: end-of-rib
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpUnreachNlri(Nlri {
             afi: Afi::Ipv4,
             safi: Safi::Unicast,
             next_hop: None,
@@ -419,11 +439,35 @@ mod tests {
         };
         assert!(msg.is_end_of_rib());
 
-        // message with announced or withdrawal prefixes
+        // message with announced prefixes
+        let prefix = NetworkPrefix::from_str("192.168.1.0/24").unwrap();
+        let attrs = Attributes::default();
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![prefix],
+        };
+        assert!(!msg.is_end_of_rib());
+
+        // message with withdrawn prefixes
         let prefix = NetworkPrefix::from_str("192.168.1.0/24").unwrap();
         let attrs = Attributes::default();
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![prefix],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib());
+
+        // NLRI attribute with empty prefixes: NOT end-of-rib
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpReachNlri(Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: None,
+            prefixes: vec![],
+        })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
             attributes: attrs,
             announced_prefixes: vec![],
         };
@@ -450,6 +494,23 @@ mod tests {
             next_hop: None,
             prefixes: vec![prefix],
         })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib());
+
+        // message with more than one attributes
+        let attrs = Attributes::from_iter(vec![
+            AttributeValue::MpUnreachNlri(Nlri {
+                afi: Afi::Ipv4,
+                safi: Safi::Unicast,
+                next_hop: None,
+                prefixes: vec![],
+            }),
+            AttributeValue::AtomicAggregate,
+        ]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
             attributes: attrs,
