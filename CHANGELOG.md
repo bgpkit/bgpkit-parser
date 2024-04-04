@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.7 - 2024-03-30
+
+### Highlights
+
+* improve end-of-RIB marker detection ([#161](https://github.com/bgpkit/bgpkit-parser/pull/161))
+
 ## v0.10.6 - 2024-03-30
 
 ### Bug fix
