@@ -4,16 +4,32 @@ use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TerminationMessage {
     pub tlvs: Vec<TerminationTlv>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TerminationTlv {
     pub info_type: TerminationTlvType,
     pub info_len: u16,
-    pub info: String,
+    pub info_value: TerminationTlvValue,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TerminationTlvValue {
+    String(String),
+    Reason(TerminationReason),
+}
+
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[repr(u16)]
+pub enum TerminationReason {
+    AdministrativelyClosed = 0,
+    UnspecifiedReason = 1,
+    OutOfResources = 2,
+    RedundantConnection = 3,
+    PermanentlyAdministrativelyClosed = 4,
 }
 
 ///Type-Length-Value Type
@@ -36,11 +52,20 @@ pub fn parse_termination_message(data: &mut Bytes) -> Result<TerminationMessage,
             // not enough bytes to read
             break;
         }
-        let info = data.read_n_bytes_to_string(info_len as usize)?;
+        let info_value = match info_type {
+            TerminationTlvType::String => {
+                let info = data.read_n_bytes_to_string(info_len as usize)?;
+                TerminationTlvValue::String(info)
+            }
+            TerminationTlvType::Reason => {
+                let reason = TerminationReason::try_from(data.read_u16()?)?;
+                TerminationTlvValue::Reason(reason)
+            }
+        };
         tlvs.push(TerminationTlv {
             info_type,
             info_len,
-            info,
+            info_value,
         })
     }
 
@@ -60,8 +85,8 @@ mod tests {
             0, 5, // info_len: 5
             67, 79, 68, 69, 83, // info: "CODES"
             0, 1, // info_type: Reason
-            0, 4, // info_len: 4
-            84, 69, 83, 84, // info: "TEST"
+            0, 2, // info_len: 2
+            0, 1, // info: UnspecifiedReason
         ]);
 
         // Check if parse_termination_message correctly reads the data
@@ -76,15 +101,21 @@ mod tests {
                     TerminationTlvType::String
                 );
                 assert_eq!(termination_message.tlvs[0].info_len, 5);
-                assert_eq!(termination_message.tlvs[0].info, "CODES");
+                assert_eq!(
+                    termination_message.tlvs[0].info_value,
+                    TerminationTlvValue::String("CODES".to_string())
+                );
 
                 // tlvs[1] assertions
                 assert_eq!(
                     termination_message.tlvs[1].info_type,
                     TerminationTlvType::Reason
                 );
-                assert_eq!(termination_message.tlvs[1].info_len, 4);
-                assert_eq!(termination_message.tlvs[1].info, "TEST");
+                assert_eq!(termination_message.tlvs[1].info_len, 2);
+                assert_eq!(
+                    termination_message.tlvs[1].info_value,
+                    TerminationTlvValue::Reason(TerminationReason::UnspecifiedReason)
+                );
             }
             Err(e) => panic!("Failed to parse: {}", e),
         }

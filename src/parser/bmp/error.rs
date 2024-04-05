@@ -1,7 +1,9 @@
 use crate::bmp::messages::headers::BmpPeerType;
 use crate::bmp::messages::initiation_message::InitiationTlvType;
+use crate::bmp::messages::peer_down_notification::PeerDownReason;
+use crate::bmp::messages::peer_up_notification::PeerUpTlvType;
 use crate::bmp::messages::route_mirroring::RouteMirroringInfo;
-use crate::bmp::messages::termination_message::TerminationTlvType;
+use crate::bmp::messages::termination_message::{TerminationReason, TerminationTlvType};
 use crate::bmp::messages::BmpMsgType;
 use crate::ParserError;
 use num_enum::TryFromPrimitiveError;
@@ -12,6 +14,8 @@ use std::fmt::{Display, Formatter};
 pub enum ParserBmpError {
     InvalidOpenBmpHeader,
     UnsupportedOpenBmpMessage,
+    UnknownTlvType,
+    UnknownTlvValue,
     CorruptedBmpMessage,
     TruncatedBmpMessage,
 }
@@ -30,6 +34,12 @@ impl Display for ParserBmpError {
             }
             ParserBmpError::TruncatedBmpMessage => {
                 write!(f, "Truncated BMP message")
+            }
+            ParserBmpError::UnknownTlvType => {
+                write!(f, "Unknown TLV type")
+            }
+            ParserBmpError::UnknownTlvValue => {
+                write!(f, "Unknown TLV value")
             }
         }
     }
@@ -58,13 +68,19 @@ impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
 
 impl From<TryFromPrimitiveError<BmpPeerType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<BmpPeerType>) -> Self {
-        ParserBmpError::InvalidOpenBmpHeader
+        ParserBmpError::CorruptedBmpMessage
     }
 }
 
 impl From<TryFromPrimitiveError<InitiationTlvType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<InitiationTlvType>) -> Self {
-        ParserBmpError::CorruptedBmpMessage
+        ParserBmpError::UnknownTlvType
+    }
+}
+
+impl From<TryFromPrimitiveError<PeerUpTlvType>> for ParserBmpError {
+    fn from(_: TryFromPrimitiveError<PeerUpTlvType>) -> Self {
+        ParserBmpError::UnknownTlvType
     }
 }
 
@@ -76,7 +92,19 @@ impl From<TryFromPrimitiveError<RouteMirroringInfo>> for ParserBmpError {
 
 impl From<TryFromPrimitiveError<TerminationTlvType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<TerminationTlvType>) -> Self {
-        ParserBmpError::CorruptedBmpMessage
+        ParserBmpError::UnknownTlvType
+    }
+}
+
+impl From<TryFromPrimitiveError<TerminationReason>> for ParserBmpError {
+    fn from(_: TryFromPrimitiveError<TerminationReason>) -> Self {
+        ParserBmpError::UnknownTlvValue
+    }
+}
+
+impl From<TryFromPrimitiveError<PeerDownReason>> for ParserBmpError {
+    fn from(_: TryFromPrimitiveError<PeerDownReason>) -> Self {
+        ParserBmpError::UnknownTlvValue
     }
 }
 
@@ -102,6 +130,14 @@ mod tests {
             ParserBmpError::TruncatedBmpMessage.to_string(),
             "Truncated BMP message"
         );
+        assert_eq!(
+            ParserBmpError::UnknownTlvType.to_string(),
+            "Unknown TLV type"
+        );
+        assert_eq!(
+            ParserBmpError::UnknownTlvValue.to_string(),
+            "Unknown TLV value"
+        );
     }
 
     #[test]
@@ -120,11 +156,11 @@ mod tests {
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<BmpPeerType>::new(0)),
-            ParserBmpError::InvalidOpenBmpHeader
+            ParserBmpError::CorruptedBmpMessage
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<InitiationTlvType>::new(0)),
-            ParserBmpError::CorruptedBmpMessage
+            ParserBmpError::UnknownTlvType
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<RouteMirroringInfo>::new(0)),
@@ -132,7 +168,19 @@ mod tests {
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<TerminationTlvType>::new(0)),
-            ParserBmpError::CorruptedBmpMessage
+            ParserBmpError::UnknownTlvType
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<PeerUpTlvType>::new(0)),
+            ParserBmpError::UnknownTlvType
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<TerminationReason>::new(0)),
+            ParserBmpError::UnknownTlvValue
+        );
+        assert_eq!(
+            ParserBmpError::from(TryFromPrimitiveError::<PeerDownReason>::new(0)),
+            ParserBmpError::UnknownTlvValue
         );
     }
 }

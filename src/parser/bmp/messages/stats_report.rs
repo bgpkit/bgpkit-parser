@@ -3,18 +3,26 @@ use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct StatsReport {
     pub stats_count: u32,
     pub counters: Vec<StatCounter>,
 }
 
 /// Statistics count values
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct StatCounter {
     pub stat_type: StatType,
     pub stat_len: u16,
     pub stat_data: StatsData,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StatsData {
+    Counter(u32),
+    Gauge(u64),
+    AfiSafiGauge(u16, u8, u64),
+    Unknown(Vec<u8>),
 }
 
 /// Stats counter types enum
@@ -43,14 +51,6 @@ pub enum StatType {
     RoutesInPerAfiSafiPostPolicyAdjRibOut = 17,
     #[num_enum(catch_all)]
     Other(u16) = 65535,
-}
-
-#[derive(Debug)]
-pub enum StatsData {
-    Counter(u32),
-    Gauge(u64),
-    AfiSafiGauge(u16, u8, u64),
-    Unknown(Vec<u8>),
 }
 
 pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpError> {
