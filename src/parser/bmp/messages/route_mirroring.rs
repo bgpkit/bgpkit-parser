@@ -6,18 +6,18 @@ use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RouteMirroring {
     pub tlvs: Vec<RouteMirroringTlv>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RouteMirroringTlv {
     pub info_len: u16,
     pub value: RouteMirroringValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RouteMirroringValue {
     BgpMessage(BgpMessage),
     Information(RouteMirroringInfo),

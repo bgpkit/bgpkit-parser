@@ -4,7 +4,7 @@ use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InitiationMessage {
     pub tlvs: Vec<InitiationTlv>,
 }
@@ -18,13 +18,15 @@ pub struct InitiationTlv {
 
 ///Type-Length-Value Type
 ///
-/// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
+/// https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[repr(u16)]
 pub enum InitiationTlvType {
     String = 0,
     SysDescr = 1,
     SysName = 2,
+    VrTableName = 3,
+    AdminLabel = 4,
 }
 
 /// Parse BMP initiation message

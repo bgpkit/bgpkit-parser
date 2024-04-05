@@ -3,7 +3,7 @@ use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
 use bytes::Bytes;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RouteMonitoring {
     pub bgp_message: BgpMessage,
 }

@@ -95,7 +95,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 ///      |                  Timestamp (microseconds)                     |
 ///      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BmpPerPeerHeader {
     pub peer_type: BmpPeerType,
     pub peer_flags: PerPeerFlags,
@@ -124,7 +124,7 @@ impl BmpPerPeerHeader {
 ///
 /// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
 /// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
-#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Clone)]
 #[repr(u8)]
 pub enum BmpPeerType {
     Global = 0,

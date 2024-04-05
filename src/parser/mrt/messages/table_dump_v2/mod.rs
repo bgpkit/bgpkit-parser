@@ -60,7 +60,6 @@ mod tests {
     #[test]
     fn test_unsupported_type() {
         let msg = parse_table_dump_v2_message(7, Bytes::new());
-        dbg!(&msg);
         assert!(msg.is_err());
     }
 }

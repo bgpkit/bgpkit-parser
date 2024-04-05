@@ -3,9 +3,10 @@ use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::IpAddr;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct PeerUpNotification {
     pub local_addr: IpAddr,
     pub local_port: u16,
@@ -15,9 +16,22 @@ pub struct PeerUpNotification {
     pub tlvs: Vec<PeerUpNotificationTlv>,
 }
 
-#[derive(Debug)]
+///Type-Length-Value Type
+///
+/// https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[repr(u16)]
+pub enum PeerUpTlvType {
+    String = 0,
+    SysDescr = 1,
+    SysName = 2,
+    VrTableName = 3,
+    AdminLabel = 4,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct PeerUpNotificationTlv {
-    pub info_type: u16,
+    pub info_type: PeerUpTlvType,
     pub info_len: u16,
     pub info_value: String,
 }
@@ -44,7 +58,7 @@ pub fn parse_peer_up_notification(
     // let received_open = parse_bgp_open_message(data)?;
     let mut tlvs = vec![];
     while data.remaining() >= 4 {
-        let info_type = data.read_u16()?;
+        let info_type = PeerUpTlvType::try_from(data.read_u16()?)?;
         let info_len = data.read_u16()?;
         let info_value = data.read_n_bytes_to_string(info_len as usize)?;
         tlvs.push(PeerUpNotificationTlv {
@@ -114,12 +128,12 @@ mod tests {
 
                 // Continue to check other values from peer_notification like sent_open, received_open, tlvs
                 let tlv = peer_notification.tlvs.first().unwrap();
-                assert_eq!(tlv.info_type, 1);
+                assert_eq!(tlv.info_type, PeerUpTlvType::SysDescr);
                 assert_eq!(tlv.info_len, 2);
                 assert_eq!(tlv.info_value, "\u{0}\u{3}");
             }
             Err(_) => {
-                assert!(false, "parse_peer_up_notification should return Ok");
+                panic!("parse_peer_up_notification should return Ok");
             }
         }
     }
