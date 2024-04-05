@@ -1,6 +1,6 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 #[derive(Debug)]
@@ -49,6 +49,8 @@ pub enum StatType {
 pub enum StatsData {
     Counter(u32),
     Gauge(u64),
+    AfiSafiGauge(u16, u8, u64),
+    Unknown(Vec<u8>),
 }
 
 pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpError> {
@@ -57,10 +59,21 @@ pub fn parse_stats_report(data: &mut Bytes) -> Result<StatsReport, ParserBmpErro
     for _ in 0..stats_count {
         let stat_type = StatType::from(data.read_u16()?);
         let stat_len = data.read_u16()?;
+        data.has_n_remaining(stat_len as usize)?;
         let stat_data = match stat_len {
             4 => StatsData::Counter(data.read_u32()?),
             8 => StatsData::Gauge(data.read_u64()?),
-            _ => return Err(ParserBmpError::CorruptedBmpMessage),
+            11 => {
+                let afi = data.read_u16()?;
+                let safi = data.read_u8()?;
+                let value = data.read_u64()?;
+                StatsData::AfiSafiGauge(afi, safi, value)
+            }
+            _ => {
+                let mut unknown = vec![0; stat_len as usize];
+                data.copy_to_slice(&mut unknown);
+                StatsData::Unknown(unknown)
+            }
         };
         counters.push(StatCounter {
             stat_type,
@@ -80,9 +93,8 @@ mod tests {
     use super::*;
     use bytes::{BufMut, BytesMut};
 
-    // Check parsing data
     #[test]
-    fn test_parse_stats_report() {
+    fn test_parse_stats_report_counter() {
         let mut data = BytesMut::new();
         data.put_u32(1);
         data.put_u16(0);
@@ -100,6 +112,90 @@ mod tests {
                 assert_eq!(report.counters[0].stat_len, 4);
                 match report.counters[0].stat_data {
                     StatsData::Counter(value) => assert_eq!(value, 1234),
+                    _ => panic!("Unexpected StatsData!"),
+                }
+            }
+            Err(_) => panic!("Error parsing stats!"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stats_report_gauge() {
+        let mut data = BytesMut::new();
+        data.put_u32(1);
+        data.put_u16(0);
+        data.put_u16(8);
+        data.put_u64(1234);
+
+        let result = parse_stats_report(&mut data.freeze());
+        match result {
+            Ok(report) => {
+                assert_eq!(report.stats_count, 1);
+                assert_eq!(
+                    report.counters[0].stat_type,
+                    StatType::PrefixesRejectedByInboundPolicy
+                );
+                assert_eq!(report.counters[0].stat_len, 8);
+                match report.counters[0].stat_data {
+                    StatsData::Gauge(value) => assert_eq!(value, 1234),
+                    _ => panic!("Unexpected StatsData!"),
+                }
+            }
+            Err(_) => panic!("Error parsing stats!"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stats_report_afi_safi_gauge() {
+        let mut data = BytesMut::new();
+        data.put_u32(1);
+        data.put_u16(9);
+        data.put_u16(11);
+        data.put_u16(1);
+        data.put_u8(2);
+        data.put_u64(1234);
+
+        let result = parse_stats_report(&mut data.freeze());
+        match result {
+            Ok(report) => {
+                assert_eq!(report.stats_count, 1);
+                assert_eq!(
+                    report.counters[0].stat_type,
+                    StatType::RoutesInPerAfiSafiAdjRibIn
+                );
+                assert_eq!(report.counters[0].stat_len, 11);
+                match report.counters[0].stat_data {
+                    StatsData::AfiSafiGauge(afi, safi, value) => {
+                        assert_eq!(afi, 1);
+                        assert_eq!(safi, 2);
+                        assert_eq!(value, 1234)
+                    }
+                    _ => panic!("Unexpected StatsData!"),
+                }
+            }
+            Err(_) => panic!("Error parsing stats!"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stats_report_unknown() {
+        let mut data = BytesMut::new();
+        data.put_u32(1);
+        data.put_u16(100);
+        data.put_u16(1);
+        data.put_u8(3);
+
+        let result = parse_stats_report(&mut data.freeze());
+        match result {
+            Ok(report) => {
+                assert_eq!(report.stats_count, 1);
+                assert_eq!(report.counters[0].stat_type, StatType::Other(100));
+                assert_eq!(report.counters[0].stat_len, 1);
+                match &report.counters[0].stat_data {
+                    StatsData::Unknown(data_vec) => {
+                        assert_eq!(data_vec.len(), 1);
+                        assert_eq!(data_vec[0], 3);
+                    }
                     _ => panic!("Unexpected StatsData!"),
                 }
             }
