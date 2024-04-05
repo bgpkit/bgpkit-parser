@@ -1072,7 +1072,6 @@ mod tests {
     fn test_get_collector() {
         let aspath = AsPath::from_sequence([1, 2, 3, 5]);
         let collector = aspath.get_collector_opt();
-        dbg!(&collector);
         assert_eq!(collector.unwrap(), 1);
 
         let aspath = AsPath::from_segments(vec![AsPathSegment::set([7])]);

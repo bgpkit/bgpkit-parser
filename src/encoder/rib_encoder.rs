@@ -152,8 +152,7 @@ mod tests {
 
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
-            let parsed = parse_mrt_record(&mut cursor).unwrap();
-            dbg!(&parsed);
+            let _parsed = parse_mrt_record(&mut cursor).unwrap();
         }
 
         // v6
@@ -168,8 +167,7 @@ mod tests {
 
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
-            let parsed = parse_mrt_record(&mut cursor).unwrap();
-            dbg!(&parsed);
+            let _parsed = parse_mrt_record(&mut cursor).unwrap();
         }
     }
 }
