@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.8 -2024-04-05
+
+### Highlights
+
+* improve support for more BMP data types and better error
+  handling ([#163](https://github.com/bgpkit/bgpkit-parser/pull/163))
+    * added explicit enum `PeerDownReason`, `TerminationReason`, `PeerUpTlvType` instead of saving them as integers
+    * added support for AFI-SAFI gauge for `StatisticsReport` message
+        * this fixes issue [#162](https://github.com/bgpkit/bgpkit-parser/pull/162)
+    * added `UnknownTlvType` and `UnknownTlvValue` errors for parsing BMP TLV records
+    * added `Clone` and `PartialEq` derives to most of the BMP message structs
+
 ## v0.10.7 - 2024-03-30
 
 ### Highlights
