@@ -1,4 +1,4 @@
-use bgpkit_parser::parser::bmp::messages::MessageBody;
+use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
 use bgpkit_parser::Elementor;
 pub use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header};
 use bytes::Bytes;
@@ -34,7 +34,7 @@ fn consume_and_print(group: String, topic: String, brokers: Vec<String>) -> Resu
                 match bmp_msg {
                     Ok(msg) => {
                         let per_peer_header = msg.per_peer_header.unwrap();
-                        if let MessageBody::RouteMonitoring(m) = msg.message_body {
+                        if let BmpMessageBody::RouteMonitoring(m) = msg.message_body {
                             for elem in Elementor::bgp_to_elems(
                                 m.bgp_message,
                                 header.timestamp,

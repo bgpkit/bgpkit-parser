@@ -47,7 +47,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
-                message_body: MessageBody::RouteMonitoring(msg),
+                message_body: BmpMessageBody::RouteMonitoring(msg),
             })
         }
         BmpMsgType::RouteMirroringMessage => {
@@ -56,7 +56,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
-                message_body: MessageBody::RouteMirroring(msg),
+                message_body: BmpMessageBody::RouteMirroring(msg),
             })
         }
         BmpMsgType::StatisticsReport => {
@@ -65,7 +65,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
-                message_body: MessageBody::StatsReport(msg),
+                message_body: BmpMessageBody::StatsReport(msg),
             })
         }
         BmpMsgType::PeerDownNotification => {
@@ -74,7 +74,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
-                message_body: MessageBody::PeerDownNotification(msg),
+                message_body: BmpMessageBody::PeerDownNotification(msg),
             })
         }
         BmpMsgType::PeerUpNotification => {
@@ -87,7 +87,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: Some(per_peer_header),
-                message_body: MessageBody::PeerUpNotification(msg),
+                message_body: BmpMessageBody::PeerUpNotification(msg),
             })
         }
         BmpMsgType::InitiationMessage => {
@@ -95,7 +95,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: None,
-                message_body: MessageBody::InitiationMessage(msg),
+                message_body: BmpMessageBody::InitiationMessage(msg),
             })
         }
         BmpMsgType::TerminationMessage => {
@@ -103,7 +103,7 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
             Ok(BmpMessage {
                 common_header,
                 per_peer_header: None,
-                message_body: MessageBody::TerminationMessage(msg),
+                message_body: BmpMessageBody::TerminationMessage(msg),
             })
         }
     }

@@ -24,11 +24,11 @@ pub(crate) mod termination_message;
 pub struct BmpMessage {
     pub common_header: BmpCommonHeader,
     pub per_peer_header: Option<BmpPerPeerHeader>,
-    pub message_body: MessageBody,
+    pub message_body: BmpMessageBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum MessageBody {
+pub enum BmpMessageBody {
     PeerUpNotification(PeerUpNotification),
     PeerDownNotification(PeerDownNotification),
     InitiationMessage(InitiationMessage),

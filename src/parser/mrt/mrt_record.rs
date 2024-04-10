@@ -1,5 +1,5 @@
 use super::mrt_header::parse_common_header;
-use crate::bmp::messages::{BmpMessage, MessageBody};
+use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::ParserError;
 use crate::models::*;
 use crate::parser::{
@@ -158,7 +158,7 @@ impl TryFrom<&BmpMessage> for MrtRecord {
 
     fn try_from(bmp_message: &BmpMessage) -> Result<Self, Self::Error> {
         let bgp_message = match &bmp_message.message_body {
-            MessageBody::RouteMonitoring(m) => &m.bgp_message,
+            BmpMessageBody::RouteMonitoring(m) => &m.bgp_message,
             _ => return Err("unsupported bmp message type".to_string()),
         };
         let bmp_header = match &bmp_message.per_peer_header {
@@ -229,7 +229,7 @@ mod tests {
                 peer_flags: PerPeerFlags::PeerFlags(PeerFlags::empty()),
                 peer_distinguisher: 0,
             }),
-            message_body: MessageBody::RouteMonitoring(RouteMonitoring {
+            message_body: BmpMessageBody::RouteMonitoring(RouteMonitoring {
                 bgp_message: BgpMessage::KeepAlive,
             }),
         };
