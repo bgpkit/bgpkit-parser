@@ -20,14 +20,14 @@ pub(crate) mod route_monitoring;
 pub(crate) mod stats_report;
 pub(crate) mod termination_message;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BmpMessage {
     pub common_header: BmpCommonHeader,
     pub per_peer_header: Option<BmpPerPeerHeader>,
     pub message_body: MessageBody,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MessageBody {
     PeerUpNotification(PeerUpNotification),
     PeerDownNotification(PeerDownNotification),
