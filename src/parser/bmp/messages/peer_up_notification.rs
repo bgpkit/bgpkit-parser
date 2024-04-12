@@ -7,6 +7,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::IpAddr;
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerUpNotification {
     pub local_addr: IpAddr,
     pub local_port: u16,
@@ -20,6 +21,7 @@ pub struct PeerUpNotification {
 ///
 /// https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum PeerUpTlvType {
     String = 0,
@@ -30,6 +32,7 @@ pub enum PeerUpTlvType {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerUpNotificationTlv {
     pub info_type: PeerUpTlvType,
     pub info_len: u16,

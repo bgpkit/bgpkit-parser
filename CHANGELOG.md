@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### BMP messages SDK improvements
+
+* expose all pub structs and enums for BMP messages
+    * this allows users to access struct definitions and operate on them directly
+* added `Copy` to `BmpMsgType`, `BmpPeerType` and `BmpPerPeerHeader`, `PerPeerFlags`, `BmpPeerType`
+* implemented `Default`, `PartialEq`, `Eq` and `Hash` for `BmpPerPeerHeader`
+    * this allows users and compare and hash `BmpPerPeerHeader` structs
+    * also implemented `.strip_timestamp()` to remove the timestamp from the `BmpPerPeerHeader` struct for cases where
+      the timestamp is not needed
+* rename `MessageBody` to `BmpMessageBody`
+* derive `Clone`, `PartialEq` to `BmpMessage` and `MessageBody`
+
 ## v0.10.8 -2024-04-05
 
 ### Highlights

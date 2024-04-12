@@ -5,6 +5,7 @@ use bitflags::bitflags;
 use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 
 /// BMP message type enum.
@@ -22,7 +23,8 @@ use std::net::{IpAddr, Ipv4Addr};
 ///       *  Type = 5: Termination Message
 ///       *  Type = 6: Route Mirroring Message
 /// ```
-#[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum BmpMsgType {
     RouteMonitoring = 0,
@@ -48,7 +50,8 @@ pub enum BmpMsgType {
 ///      |   Msg. Type   |
 ///      +---------------+
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BmpCommonHeader {
     pub version: u8,
     pub msg_len: u32,
@@ -74,6 +77,14 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 
 /// BMP Per-peer Header
 ///
+/// Features:
+/// * 42 bytes total size
+/// * Hash and PartialEq implemented without considering the timestamp
+///   * i.e., two headers are equal if all fields except the timestamp are equal
+/// * implements Copy and Clone
+///
+/// <https://www.rfc-editor.org/rfc/rfc7854#section-4.2>
+///
 /// ```text
 ///       0                   1                   2                   3
 ///       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -95,7 +106,8 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 ///      |                  Timestamp (microseconds)                     |
 ///      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BmpPerPeerHeader {
     pub peer_type: BmpPeerType,
     pub peer_flags: PerPeerFlags,
@@ -106,12 +118,64 @@ pub struct BmpPerPeerHeader {
     pub timestamp: f64,
 }
 
+impl Default for BmpPerPeerHeader {
+    fn default() -> Self {
+        BmpPerPeerHeader {
+            peer_type: BmpPeerType::Global,
+            peer_flags: PerPeerFlags::PeerFlags(PeerFlags::empty()),
+            peer_distinguisher: 0,
+            peer_ip: IpAddr::V4(Ipv4Addr::from(0)),
+            peer_asn: Default::default(),
+            peer_bgp_id: Ipv4Addr::from(0),
+            timestamp: 0.0,
+        }
+    }
+}
+
+impl PartialEq for BmpPerPeerHeader {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer_type == other.peer_type
+            && self.peer_flags == other.peer_flags
+            && self.peer_distinguisher == other.peer_distinguisher
+            && self.peer_ip == other.peer_ip
+            && self.peer_asn == other.peer_asn
+            && self.peer_bgp_id == other.peer_bgp_id
+            && self.timestamp == other.timestamp
+    }
+}
+
+impl Eq for BmpPerPeerHeader {}
+
+impl Hash for BmpPerPeerHeader {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.peer_type.hash(state);
+        self.peer_flags.hash(state);
+        self.peer_distinguisher.hash(state);
+        self.peer_ip.hash(state);
+        self.peer_asn.hash(state);
+        self.peer_bgp_id.hash(state);
+        self.timestamp.to_bits().hash(state);
+    }
+}
+
 impl BmpPerPeerHeader {
+    /// Returns the AFI of the peer IP address
     #[inline]
     pub fn afi(&self) -> Afi {
         Afi::from(self.peer_ip)
     }
 
+    /// Strip the timestamp from the header.
+    ///
+    /// This is useful when comparing two headers where the timestamp is not important.
+    pub fn strip_timestamp(&self) -> BmpPerPeerHeader {
+        BmpPerPeerHeader {
+            timestamp: 0.0,
+            ..*self
+        }
+    }
+
+    /// Returns the ASN length based on the peer flags
     pub fn asn_length(&self) -> AsnLength {
         match self.peer_flags {
             PerPeerFlags::PeerFlags(f) => f.asn_length(),
@@ -124,7 +188,8 @@ impl BmpPerPeerHeader {
 ///
 /// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
 /// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
-#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Copy, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum BmpPeerType {
     Global = 0,
@@ -133,7 +198,8 @@ pub enum BmpPeerType {
     LocalRib = 3,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PerPeerFlags {
     PeerFlags(PeerFlags),
     LocalRibPeerFlags(LocalRibPeerFlags),
@@ -174,6 +240,11 @@ bitflags! {
 }
 
 impl PeerFlags {
+    /// Returns the address family for the `Peer` object.
+    ///
+    /// # Returns
+    /// - `Afi::Ipv6` if the `PeerFlags` contains the `ADDRESS_FAMILY_IPV6` flag.
+    /// - `Afi::Ipv4` otherwise.
     pub const fn address_family(&self) -> Afi {
         if self.contains(PeerFlags::ADDRESS_FAMILY_IPV6) {
             return Afi::Ipv6;
@@ -182,6 +253,12 @@ impl PeerFlags {
         Afi::Ipv4
     }
 
+    /// Determines the length of the ASN (Abstract Syntax Notation) based on peer flags.
+    ///
+    /// # Returns
+    ///
+    /// - `AsnLength::Bits16` if the `PeerFlags` contains the `AS_SIZE_16BIT` flag.
+    /// - `AsnLength::Bits32` otherwise.
     pub const fn asn_length(&self) -> AsnLength {
         if self.contains(PeerFlags::AS_SIZE_16BIT) {
             return AsnLength::Bits16;
@@ -219,6 +296,17 @@ impl LocalRibPeerFlags {
     }
 }
 
+/// Parses a BMP per-peer header from the provided byte data.
+///
+/// # Arguments
+///
+/// * `data` - A mutable reference to the byte data representing the per-peer header.
+///
+/// # Returns
+///
+/// * `Ok(BmpPerPeerHeader)` - If the parsing is successful, returns the parsed per-peer header.
+/// * `Err(ParserBmpError)` - If an error occurs during parsing, returns the corresponding error.
+///
 pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, ParserBmpError> {
     let peer_type = BmpPeerType::try_from(data.read_u8()?)?;
 
@@ -375,5 +463,21 @@ mod tests {
         assert_eq!(header.peer_asn, Asn::new_32bit(1));
         assert_eq!(header.peer_bgp_id, Ipv4Addr::new(192, 168, 1, 1));
         assert_eq!(header.timestamp, 10.0001);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_equality_hash() {
+        let header1 = BmpPerPeerHeader::default();
+
+        let mut header2 = BmpPerPeerHeader::default();
+        header2.timestamp = 1.0;
+
+        assert_ne!(header1, header2);
+        assert_eq!(header1.strip_timestamp(), header2.strip_timestamp());
+
+        let mut hashmap = std::collections::HashMap::new();
+        hashmap.insert(header1.strip_timestamp(), 1);
+        assert_eq!(hashmap.get(&header2.strip_timestamp()), Some(&1));
     }
 }

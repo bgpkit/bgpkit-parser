@@ -4,6 +4,7 @@ use bytes::{Buf, Bytes};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StatsReport {
     pub stats_count: u32,
     pub counters: Vec<StatCounter>,
@@ -11,6 +12,7 @@ pub struct StatsReport {
 
 /// Statistics count values
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StatCounter {
     pub stat_type: StatType,
     pub stat_len: u16,
@@ -18,6 +20,7 @@ pub struct StatCounter {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StatsData {
     Counter(u32),
     Gauge(u64),
@@ -29,6 +32,7 @@ pub enum StatsData {
 ///
 /// Types of BMP statistics are listed here: <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#statistics-types>
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum StatType {
     PrefixesRejectedByInboundPolicy = 0,

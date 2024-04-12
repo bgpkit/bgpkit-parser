@@ -4,12 +4,14 @@ use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerDownNotification {
     pub reason: PeerDownReason,
     pub data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum PeerDownReason {
     Reserved = 0,

@@ -4,6 +4,7 @@ use crate::parser::bmp::error::ParserBmpError;
 use bytes::Bytes;
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RouteMonitoring {
     pub bgp_message: BgpMessage,
 }
