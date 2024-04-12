@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.10.9 - 2024-04-12
 
 ### BMP messages SDK improvements
 
@@ -17,7 +17,7 @@ All notable changes to this project will be documented in this file.
 * derive `Clone`, `PartialEq` to `BmpMessage` and `MessageBody`
 * added serialization/deserialization support for `BmpMessage` and `BmpMessageBody`
 
-## v0.10.8 -2024-04-05
+## v0.10.8 - 2024-04-05
 
 ### Highlights
 
