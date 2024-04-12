@@ -5,11 +5,13 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TerminationMessage {
     pub tlvs: Vec<TerminationTlv>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TerminationTlv {
     pub info_type: TerminationTlvType,
     pub info_len: u16,
@@ -17,12 +19,14 @@ pub struct TerminationTlv {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TerminationTlvValue {
     String(String),
     Reason(TerminationReason),
 }
 
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum TerminationReason {
     AdministrativelyClosed = 0,
@@ -36,6 +40,7 @@ pub enum TerminationReason {
 ///
 /// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum TerminationTlvType {
     String = 0,

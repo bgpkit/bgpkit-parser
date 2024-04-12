@@ -21,6 +21,7 @@ pub(crate) mod stats_report;
 pub(crate) mod termination_message;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BmpMessage {
     pub common_header: BmpCommonHeader,
     pub per_peer_header: Option<BmpPerPeerHeader>,
@@ -28,6 +29,7 @@ pub struct BmpMessage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BmpMessageBody {
     PeerUpNotification(PeerUpNotification),
     PeerDownNotification(PeerDownNotification),

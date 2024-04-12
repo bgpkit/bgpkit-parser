@@ -5,11 +5,13 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InitiationMessage {
     pub tlvs: Vec<InitiationTlv>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InitiationTlv {
     pub info_type: InitiationTlvType,
     pub info_len: u16,
@@ -20,6 +22,7 @@ pub struct InitiationTlv {
 ///
 /// https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum InitiationTlvType {
     String = 0,

@@ -24,6 +24,7 @@ use std::net::{IpAddr, Ipv4Addr};
 ///       *  Type = 6: Route Mirroring Message
 /// ```
 #[derive(Debug, Clone, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum BmpMsgType {
     RouteMonitoring = 0,
@@ -50,6 +51,7 @@ pub enum BmpMsgType {
 ///      +---------------+
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BmpCommonHeader {
     pub version: u8,
     pub msg_len: u32,
@@ -105,6 +107,7 @@ pub fn parse_bmp_common_header(data: &mut Bytes) -> Result<BmpCommonHeader, Pars
 ///      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// ```
 #[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BmpPerPeerHeader {
     pub peer_type: BmpPeerType,
     pub peer_flags: PerPeerFlags,
@@ -186,6 +189,7 @@ impl BmpPerPeerHeader {
 /// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
 /// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
 #[derive(Debug, Copy, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum BmpPeerType {
     Global = 0,
@@ -195,6 +199,7 @@ pub enum BmpPeerType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PerPeerFlags {
     PeerFlags(PeerFlags),
     LocalRibPeerFlags(LocalRibPeerFlags),
