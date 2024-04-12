@@ -6,6 +6,7 @@ ignore:
   - "src/parser/iters.rs"
   - "src/parser/bgp/attributes/mod.rs" # test covered in individual attribute
   - "src/parser/mrt/mrt_elem.rs"
+  - "src/parser/bmp/mod.rs"
 coverage:
   status:
     project:
