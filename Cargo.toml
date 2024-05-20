@@ -24,7 +24,7 @@ required-features = ["cli"]
 ####################
 num_enum = { version = "0.7", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-itertools = { version = "0.12", optional = true }
+itertools = { version = "0.13", optional = true }
 ipnet = { version = "2.7", optional = true }
 bitflags = { version = "2.3.3", features = ["serde"], optional = true }
 
