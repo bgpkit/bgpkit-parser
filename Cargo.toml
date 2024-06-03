@@ -106,7 +106,7 @@ harness = false
 anyhow = "1"
 bgpkit-broker = "0.7.0-beta.5"
 kafka = "0.10.0"
-tungstenite = "0.21.0"
+tungstenite = "0.23.0"
 url = "2.1.0"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 rayon = "1.5.1"
