@@ -10,7 +10,6 @@ Here is an example parsing stream data from one collector:
 use bgpkit_parser::parse_ris_live_message;
 use serde_json::json;
 use tungstenite::{connect, Message};
-use url::Url;
 
 const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
 
@@ -20,7 +19,7 @@ const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-par
 fn main() {
     // connect to RIPE RIS Live websocket server
     let (mut socket, _response) =
-        connect(Url::parse(RIS_LIVE_URL).unwrap())
+        connect(RIS_LIVE_URL)
             .expect("Can't connect to RIS Live websocket server");
 
     // subscribe to messages from one collector
