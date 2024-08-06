@@ -178,7 +178,7 @@ impl Attributes {
 
     /// Get the `NEXT_HOP` attribute if present.
     ///
-    /// > **Note:** Even when this attribute is not present, the next hop address may still be
+    /// **Note**: Even when this attribute is not present, the next hop address may still be
     /// attainable from the `MP_REACH_NLRI` attribute.
     pub fn next_hop(&self) -> Option<IpAddr> {
         self.inner.iter().find_map(|x| match &x.value {
