@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.10 - 2024-08-05
+
+### Highlights
+
+* update `oneio` to v0.17.0
+    * now users can set env var `ONEIO_ACCEPT_INVALID_CERTS=true` to disable certificate validation, useful in some
+      environment where users do not manage certificates
+
 ## v0.10.9 - 2024-04-12
 
 ### BMP messages SDK improvements

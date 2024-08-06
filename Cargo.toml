@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.10.9"
+version = "0.10.10"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 license = "MIT"
