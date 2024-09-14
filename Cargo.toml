@@ -46,8 +46,7 @@ env_logger = { version = "0.11", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
 
 [features]
-default = ["parser", "remote"]
-remote = ["oneio/remote", "rustls"]
+default = ["parser", "rustls"]
 models = [
     "num_enum",
     "num_enum/complex-expressions",
@@ -81,9 +80,11 @@ serde = [
     "ipnet/serde",
 ]
 native-tls = [
+    "oneio/remote",
     "oneio/native-tls",
 ]
 rustls = [
+    "oneio/remote",
     "oneio/rustls",
 ]
 
