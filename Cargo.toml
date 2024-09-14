@@ -34,7 +34,7 @@ bitflags = { version = "2.6", features = ["serde"], optional = true }
 bytes = { version = "1.7", optional = true }
 hex = { version = "0.4.3", optional = true } # bmp/openbmp parsing
 log = { version = "0.4", optional = true }
-oneio = { version = "0.17.0", default-features = false, features = ["remote", "gz", "bz"], optional = true }
+oneio = { version = "0.17.0", default-features = false, features = ["gz", "bz"] }
 regex = { version = "1", optional = true } # used in parser filter
 chrono = { version = "0.4.38", optional = true } # parser filter
 serde_json = { version = "1.0", optional = true } # RIS Live parsing
@@ -46,7 +46,8 @@ env_logger = { version = "0.11", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
 
 [features]
-default = ["parser", "rustls"]
+default = ["parser", "remote"]
+remote = ["oneio/remote", "rustls"]
 models = [
     "num_enum",
     "num_enum/complex-expressions",

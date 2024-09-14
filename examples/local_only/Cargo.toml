@@ -1,0 +1,7 @@
+[package]
+name = "local_only"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bgpkit-parser = { path = "../..", default-features = false, features = ["parser"] }
