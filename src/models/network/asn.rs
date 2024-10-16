@@ -1,3 +1,4 @@
+#[cfg(feature = "parser")]
 use bytes::{BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
@@ -274,6 +275,7 @@ impl FromStr for Asn {
     }
 }
 
+#[cfg(feature = "parser")]
 impl Asn {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
@@ -291,6 +293,7 @@ mod tests {
     use crate::parser::ReadUtils;
     use std::str::FromStr;
 
+    #[cfg(feature = "parser")]
     #[test]
     fn test_asn_encode() {
         let asn = Asn::new_32bit(123);

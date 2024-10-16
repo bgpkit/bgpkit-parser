@@ -413,14 +413,11 @@ We support normal communities, extended communities, and large communities.
 pub mod encoder;
 #[cfg(feature = "parser")]
 pub mod error;
-#[cfg(feature = "models")]
 pub mod models;
 #[cfg(feature = "parser")]
 pub mod parser;
 
-#[cfg(feature = "models")]
 pub use models::BgpElem;
-#[cfg(feature = "models")]
 pub use models::MrtRecord;
 #[cfg(feature = "parser")]
 pub use parser::*;

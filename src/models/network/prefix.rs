@@ -1,4 +1,5 @@
 use crate::models::BgpModelsError;
+#[cfg(feature = "parser")]
 use bytes::{BufMut, Bytes, BytesMut};
 use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
@@ -36,6 +37,7 @@ impl NetworkPrefix {
         NetworkPrefix { prefix, path_id }
     }
 
+    #[cfg(feature = "parser")]
     /// Encodes the IPNet prefix into a byte slice.
     ///
     /// # Arguments
