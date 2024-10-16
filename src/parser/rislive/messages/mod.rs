@@ -1,20 +1,12 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-pub mod pong;
-pub mod raw_bytes;
-pub mod ris_error;
-pub mod ris_message;
-pub mod ris_rrc_list;
-pub mod ris_subscribe_ok;
+pub mod client;
+pub mod server;
 
 use serde::{Deserialize, Serialize};
 
-pub use pong::Pong;
-pub use ris_error::RisError;
-pub use ris_message::RisMessage;
-pub use ris_message::RisMessageEnum;
-pub use ris_rrc_list::RisRrcList;
-pub use ris_subscribe_ok::RisSubscribeOk;
+pub use client::*;
+pub use server::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]

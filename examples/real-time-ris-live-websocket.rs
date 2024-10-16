@@ -1,5 +1,5 @@
 use bgpkit_parser::parse_ris_live_message;
-use serde_json::json;
+use bgpkit_parser::rislive::messages::{RisLiveClientMessage, RisSubscribe};
 use tungstenite::{connect, Message};
 
 const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
@@ -13,9 +13,8 @@ fn main() {
         connect(RIS_LIVE_URL).expect("Can't connect to RIS Live websocket server");
 
     // subscribe to messages from one collector
-    // let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
-    let msg = json!({"type": "ris_subscribe", "data": null}).to_string();
-    socket.send(Message::Text(msg)).unwrap();
+    let msg = RisSubscribe::new().host("rrc21");
+    socket.send(Message::Text(msg.to_json_string())).unwrap();
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
