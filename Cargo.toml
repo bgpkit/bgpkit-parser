@@ -54,7 +54,6 @@ default = ["parser", "rustls"]
 parser = [
     "bytes",
     "chrono",
-    "env_logger",
     "regex",
 ]
 cli = [

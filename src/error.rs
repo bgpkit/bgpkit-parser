@@ -3,6 +3,7 @@ error module defines the error types used in bgpkit-parser.
 */
 use crate::models::{Afi, Bgp4MpType, BgpState, EntryType, Safi, TableDumpV2Type};
 use num_enum::TryFromPrimitiveError;
+#[cfg(feature = "oneio")]
 use oneio::OneIoError;
 use std::fmt::{Display, Formatter};
 use std::io::ErrorKind;
@@ -12,6 +13,7 @@ use std::{error::Error, fmt, io};
 pub enum ParserError {
     IoError(io::Error),
     EofError(io::Error),
+    #[cfg(feature = "oneio")]
     OneIoError(OneIoError),
     EofExpected,
     ParseError(String),
@@ -47,12 +49,14 @@ impl Display for ParserError {
             ParserError::TruncatedMsg(s) => write!(f, "Error: {}", s),
             ParserError::Unsupported(s) => write!(f, "Error: {}", s),
             ParserError::EofExpected => write!(f, "Error: reach end of file"),
+            #[cfg(feature = "oneio")]
             ParserError::OneIoError(e) => write!(f, "Error: {}", e),
             ParserError::FilterError(e) => write!(f, "Error: {}", e),
         }
     }
 }
 
+#[cfg(feature = "oneio")]
 impl From<OneIoError> for ParserErrorWithBytes {
     fn from(error: OneIoError) -> Self {
         ParserErrorWithBytes {
@@ -62,6 +66,7 @@ impl From<OneIoError> for ParserErrorWithBytes {
     }
 }
 
+#[cfg(feature = "oneio")]
 impl From<OneIoError> for ParserError {
     fn from(error: OneIoError) -> Self {
         ParserError::OneIoError(error)

@@ -114,7 +114,9 @@ impl<R: Read> Iterator for RecordIterator<R> {
                             }
                             None
                         }
-                        ParserError::OneIoError(_) | ParserError::FilterError(_) => {
+                        #[cfg(feature = "oneio")]
+                        ParserError::OneIoError(_) => None,
+                        ParserError::FilterError(_) => {
                             // this should not happen at this stage
                             None
                         }
