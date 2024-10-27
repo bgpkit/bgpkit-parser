@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.10.11 - 2024-10-27
+
+### Highlights
+
+* Improved RIS Live message types and handling
+* clean up dependencies
+    * `models` feature is removed, and all dependencies are now required dependencies for the crate
+    * `models` module no-longer requires dependencies introduced by parser, like `bytes` for encoding
+* decouple `oneio` from `parser` feature
+    * `oneio` is no-longer a required dependency for the parser
+    * users can now use `parser` feature without `oneio` (with `--no-default-features` specified)
+        * to create a new parser, one needs to user `BgpkitParser::from_reader` function instead of `BgpkitParser::new`
+    * downstream libraries that only utilize parser code (such as RIS Live parsing) no-longer have to depend on oneio
+* improve RouteViews Kafka example by allowing wildcard topic subscription
+
+### Bug fixes
+
+* fixed an issue where when merging `AS_PATH` and `AS4_PATH` segments, the parser incorrectly uses `AS_PATH` segment
+  content
+    * this issue may manifest as `AS_TRANS` (`AS23456`) appearing in the AS path while the correct 32-bit ASN has been
+      sent in `AS4_PATH`
+
 ## v0.10.11-beta.1 - 2024-10-16
 
 ### Highlights
