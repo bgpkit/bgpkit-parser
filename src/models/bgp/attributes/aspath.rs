@@ -636,8 +636,10 @@ impl AsPath {
                             new_seq.extend(seq.iter().take(diff_len as usize));
                             new_seq.extend(seq4);
                             new_segs.push(AsPathSegment::AsSequence(new_seq));
-                        } else {
+                        } else if diff_len < 0 {
                             new_segs.push(AsPathSegment::AsSequence(seq.clone()));
+                        } else {
+                            new_segs.push(AsPathSegment::AsSequence(seq4.clone()));
                         }
                     } else {
                         new_segs.push(as4seg_unwrapped.clone());
@@ -997,6 +999,12 @@ mod tests {
         let as4path = AsPath::from_sequence([2, 3, 7]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
         assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2]));
+
+        // when the sequence length is the same, the as4path should be used
+        let aspath = AsPath::from_sequence([1, 2]);
+        let as4path = AsPath::from_sequence([3, 4]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([3, 4]));
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3, 5]),
