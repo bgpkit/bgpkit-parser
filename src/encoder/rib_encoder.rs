@@ -141,9 +141,11 @@ mod tests {
     #[test]
     fn test_encoding_rib() {
         let mut encoder = MrtRibEncoder::new();
-        let mut elem = BgpElem::default();
-        elem.peer_ip = IpAddr::V4("10.0.0.1".parse().unwrap());
-        elem.peer_asn = Asn::from(65000);
+        let mut elem = BgpElem {
+            peer_ip: IpAddr::V4("10.0.0.1".parse().unwrap()),
+            peer_asn: Asn::from(65000),
+            ..Default::default()
+        };
         elem.prefix.prefix = "10.250.0.0/24".parse().unwrap();
         encoder.process_elem(&elem);
         elem.prefix.prefix = "10.251.0.0/24".parse().unwrap();
@@ -157,9 +159,11 @@ mod tests {
 
         // v6
         let mut encoder = MrtRibEncoder::new();
-        let mut elem = BgpElem::default();
-        elem.peer_ip = IpAddr::V6("::1".parse().unwrap());
-        elem.peer_asn = Asn::from(65000);
+        let mut elem = BgpElem {
+            peer_ip: IpAddr::V6("::1".parse().unwrap()),
+            peer_asn: Asn::from(65000),
+            ..Default::default()
+        };
         // ipv6 prefix
         elem.prefix.prefix = "2001:db8::/32".parse().unwrap();
         encoder.process_elem(&elem);
