@@ -99,6 +99,7 @@ name = "bench_main"
 harness = false
 
 [dev-dependencies]
+regex = "1"
 anyhow = "1"
 bgpkit-broker = "0.7.0-beta.5"
 kafka = "0.10.0"
