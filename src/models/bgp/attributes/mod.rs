@@ -609,7 +609,7 @@ mod tests {
         let mut attributes = Attributes::default();
         attributes.add_attr(attribute);
 
-        assert_eq!(attributes.has_attr(AttrType::ORIGIN), true);
+        assert!(attributes.has_attr(AttrType::ORIGIN));
     }
 
     #[test]
@@ -681,7 +681,7 @@ mod tests {
         );
         assert_eq!(
             attributes.origin_id(),
-            Some(Ipv4Addr::from_str("0.0.0.0").unwrap().into())
+            Some(Ipv4Addr::from_str("0.0.0.0").unwrap())
         );
 
         let aspath_attr = attributes.get_attr(AttrType::AS_PATH).unwrap();

@@ -620,13 +620,13 @@ mod tests {
         let _elems = elementor.record_to_elems(peer_index_table);
         let record = record_iter.next().unwrap();
         let elems = elementor.record_to_elems(record);
-        assert!(elems.len() >= 1);
+        assert!(!elems.is_empty());
 
         let parser = BgpkitParser::new(url_bgp4mp).unwrap();
         let mut record_iter = parser.into_record_iter();
         let record = record_iter.next().unwrap();
         let elems = elementor.record_to_elems(record);
-        assert!(elems.len() >= 1);
+        assert!(!elems.is_empty());
     }
 
     #[test]
@@ -725,7 +725,7 @@ mod tests {
             }),
         ]
         .into_iter()
-        .map(|v| Attribute::from(v))
+        .map(Attribute::from)
         .collect::<Vec<Attribute>>();
 
         let attributes = Attributes::from(attributes);

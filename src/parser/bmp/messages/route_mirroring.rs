@@ -98,7 +98,7 @@ mod tests {
                 let tlv = &route_mirroring.tlvs[0];
                 assert_eq!(tlv.info_len, actual_info_len);
             }
-            Err(_) => assert!(false),
+            Err(_) => panic!("Error parsing route mirroring"),
         }
     }
 
@@ -117,7 +117,7 @@ mod tests {
             RouteMirroringValue::Information(info) => {
                 assert_eq!(info, &RouteMirroringInfo::ErroredPdu)
             }
-            _ => assert!(false),
+            _ => panic!("Expected RouteMirroringValue::Information"),
         }
     }
 }

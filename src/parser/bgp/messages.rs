@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(msg.asn, Asn::new_16bit(1));
         assert_eq!(msg.hold_time, 180);
         assert_eq!(msg.sender_ip, Ipv4Addr::new(192, 0, 2, 1));
-        assert_eq!(msg.extended_length, false);
+        assert!(!msg.extended_length);
         assert_eq!(msg.opt_params.len(), 0);
     }
 

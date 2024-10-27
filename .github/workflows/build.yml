@@ -17,19 +17,19 @@ jobs:
   build:
     runs-on: self-hosted
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Build
-      run: cargo build
+      - name: Build
+        run: cargo build
 
-    - name: Build cli
-      run: cargo build --features cli
+      - name: Build cli
+        run: cargo build --features cli
 
-    - name: Build no-default-features
-      run: cargo build --no-default-features
+      - name: Build no-default-features
+        run: cargo build --no-default-features
 
-    - name: Run tests
-      run: cargo test --all-features
+      - name: Run tests
+        run: cargo test --all-features
 
-    - name: Run clippy
-      run: cargo clippy --all-features -- -D warnings
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings

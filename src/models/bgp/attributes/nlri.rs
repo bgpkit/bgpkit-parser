@@ -162,7 +162,7 @@ mod tests {
             Some("10.0.2.1".parse().unwrap()),
         );
 
-        assert_eq!(nlri.is_reachable(), true);
+        assert!(nlri.is_reachable());
     }
 
     #[test]
