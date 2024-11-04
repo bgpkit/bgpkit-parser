@@ -28,6 +28,9 @@ jobs:
       - name: Build no-default-features
         run: cargo build --no-default-features
 
+      - name: Build examples
+        run: cargo build --examples
+
       - name: Run tests
         run: cargo test --all-features
 
