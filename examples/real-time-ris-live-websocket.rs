@@ -2,7 +2,7 @@ use bgpkit_parser::parse_ris_live_message;
 use bgpkit_parser::rislive::messages::{RisLiveClientMessage, RisSubscribe};
 use tungstenite::{connect, Message};
 
-const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
+const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=bgpkit-parser-example";
 
 /// This is an example of subscribing to RIS-Live's streaming data from one host (`rrc21`).
 ///
