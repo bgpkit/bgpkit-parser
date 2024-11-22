@@ -8,13 +8,13 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
+use crate::error::ParserError;
 use crate::models::*;
+use crate::ParserError::TruncatedMsg;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::debug;
+use regex::Regex;
 use std::net::IpAddr;
-
-use crate::error::ParserError;
-use crate::ParserError::TruncatedMsg;
 
 impl ReadUtils for Bytes {}
 
@@ -357,6 +357,40 @@ pub fn convert_timestamp(timestamp: f64) -> (u32, u32) {
     (seconds, microseconds)
 }
 
+#[derive(Debug, Clone)]
+pub struct ComparableRegex {
+    pattern: String,
+    regex: Regex,
+}
+
+impl PartialEq for ComparableRegex {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern == other.pattern
+    }
+}
+
+impl ComparableRegex {
+    pub fn new(pattern: &str) -> Result<Self, ParserError> {
+        let regex = match Regex::new(pattern) {
+            Ok(r) => r,
+            Err(_) => {
+                return Err(ParserError::FilterError(format!(
+                    "Invalid regex pattern: {}",
+                    pattern
+                )))
+            }
+        };
+        Ok(ComparableRegex {
+            pattern: pattern.to_string(),
+            regex,
+        })
+    }
+
+    pub fn is_match(&self, text: &str) -> bool {
+        self.regex.is_match(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,5 +629,34 @@ mod tests {
             0xA8, 0x02,
         ]);
         assert_eq!(encode_nlri_prefixes(&prefixes, true), expected);
+    }
+
+    #[test]
+    fn test_comparable_regex_functionality() {
+        // Test valid pattern creation
+        let regex1 = ComparableRegex::new(r"\d+").unwrap();
+        let regex2 = ComparableRegex::new(r"\d+").unwrap();
+        let regex3 = ComparableRegex::new(r"\w+").unwrap();
+
+        // Verify pattern storage
+        assert_eq!(regex1.pattern, r"\d+");
+        assert_eq!(regex3.pattern, r"\w+");
+
+        // Verify equality with same pattern
+        assert_eq!(regex1, regex2);
+
+        // Verify inequality with different patterns
+        assert_ne!(regex1, regex3);
+
+        // Verify regex matching functionality
+        assert!(regex1.regex.is_match("123"));
+        assert!(!regex1.regex.is_match("abc"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid regex pattern")]
+    fn test_comparable_regex_invalid_pattern_panic() {
+        // Test invalid pattern creation
+        ComparableRegex::new(r"(\d+").unwrap(); // Unclosed parenthesis should panic
     }
 }

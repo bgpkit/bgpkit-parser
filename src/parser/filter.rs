@@ -53,10 +53,10 @@ later releases.
 
 */
 use crate::models::*;
+use crate::parser::ComparableRegex;
 use crate::ParserError;
 use crate::ParserError::FilterError;
 use ipnet::IpNet;
-use regex::Regex;
 use std::net::IpAddr;
 use std::str::FromStr;
 
@@ -70,7 +70,7 @@ use std::str::FromStr;
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
-/// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+/// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
@@ -83,7 +83,7 @@ pub enum Filter {
     IpVersion(IpVersion),
     TsStart(f64),
     TsEnd(f64),
-    AsPath(String),
+    AsPath(ComparableRegex),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,8 +199,8 @@ impl Filter {
                     filter_value
                 ))),
             },
-            "as_path" => match Regex::from_str(filter_value) {
-                Ok(_v) => Ok(Filter::AsPath(filter_value.to_string())),
+            "as_path" => match ComparableRegex::new(filter_value) {
+                Ok(v) => Ok(Filter::AsPath(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse AS path regex from {}",
                     filter_value
@@ -296,8 +296,7 @@ impl Filterable for BgpElem {
             Filter::TsEnd(v) => self.timestamp <= *v,
             Filter::AsPath(v) => {
                 if let Some(path) = &self.as_path {
-                    let re = Regex::new(v).unwrap();
-                    re.is_match(path.to_string().as_str())
+                    v.is_match(path.to_string().as_str())
                 } else {
                     false
                 }
@@ -362,7 +361,7 @@ mod tests {
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 24);
 
-        let filters = vec![Filter::AsPath(r" ?174 1916 52888$".to_string())];
+        let filters = vec![Filter::new("as_path", r" ?174 1916 52888$").unwrap()];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 12);
 
@@ -553,7 +552,10 @@ mod tests {
         assert_eq!(filter, Filter::TsEnd(1637437798_f64));
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
-        assert_eq!(filter, Filter::AsPath(r" ?174 1916 52888$".to_string()));
+        assert_eq!(
+            filter,
+            Filter::AsPath(ComparableRegex::new(r" ?174 1916 52888$").unwrap())
+        );
 
         assert!(Filter::new("origin_asn", "not a number").is_err());
         assert!(Filter::new("peer_asn", "not a number").is_err());
