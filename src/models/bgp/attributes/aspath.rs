@@ -1269,7 +1269,7 @@ mod tests {
         assert_eq!(as_path.to_u32_vec_opt(false), Some(vec![4, 2, 3, 3, 1]));
         assert_eq!(as_path.to_u32_vec_opt(true), Some(vec![4, 2, 3, 1]));
 
-        // should the path containing any non-convertable segments, return None
+        // should the path containing any non-convertible segments, return None
         let as_path = AsPath::from_segments(vec![
             AsPathSegment::set([4, 2]),
             AsPathSegment::sequence([2, 3, 3]),
