@@ -386,8 +386,8 @@ impl ComparableRegex {
         })
     }
 
-    pub fn is_match(&self, text: &str) -> bool {
-        self.regex.is_match(text)
+    pub fn is_match<S: AsRef<str>>(&self, text: S) -> bool {
+        self.regex.is_match(text.as_ref())
     }
 }
 

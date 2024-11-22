@@ -71,6 +71,7 @@ use std::str::FromStr;
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
 /// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
+/// - `community` (`ComparableRegex`) -- regular expression for community string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
@@ -84,6 +85,7 @@ pub enum Filter {
     TsStart(f64),
     TsEnd(f64),
     AsPath(ComparableRegex),
+    Community(ComparableRegex),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +208,13 @@ impl Filter {
                     filter_value
                 ))),
             },
+            "community" => match ComparableRegex::new(filter_value) {
+                Ok(v) => Ok(Filter::Community(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse Community regex from {}",
+                    filter_value
+                ))),
+            },
             "ip_version" | "ip" => match filter_value {
                 "4" | "v4" | "ipv4" => Ok(Filter::IpVersion(IpVersion::Ipv4)),
                 "6" | "v6" | "ipv6" => Ok(Filter::IpVersion(IpVersion::Ipv6)),
@@ -301,6 +310,13 @@ impl Filterable for BgpElem {
                     false
                 }
             }
+            Filter::Community(r) => {
+                if let Some(communities) = &self.communities {
+                    communities.iter().any(|c| r.is_match(c.to_string()))
+                } else {
+                    false
+                }
+            }
             Filter::IpVersion(version) => match version {
                 IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
                 IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
@@ -364,6 +380,21 @@ mod tests {
         let filters = vec![Filter::new("as_path", r" ?174 1916 52888$").unwrap()];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 12);
+
+        // filter by community starting with some value
+        let filters = vec![Filter::new("community", r"60924:.*").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 4243);
+
+        // filter by community ending with some value
+        let filters = vec![Filter::new("community", r".+:784$").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 107);
+
+        // filter by community with large community (i.e. with 3 values, separated by ':')
+        let filters = vec![Filter::new("community", r"\d+:\d+:\d+$").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 4397);
 
         let filters = vec![
             Filter::TsStart(1637437798_f64),
