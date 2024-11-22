@@ -26,8 +26,7 @@ pub enum Community {
 ///
 /// ## Display
 ///
-/// Large community is displayed as `lg:GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`, where `lg`
-/// is a prefix for large community.
+/// Large community is displayed as `GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LargeCommunity {
@@ -92,16 +91,6 @@ pub enum ExtendedCommunityType {
 ///       (*) Present for Extended types only, used for the Value field
 ///           otherwise.
 /// ```
-///
-/// ## Display
-///
-/// When output, the extended communities has the following string prefixes to indicate the sub type:
-/// - `ecas2:` stands for `Extended Community AS Specific 2-octet`
-/// - `ecas4:` stands for `Extended Community AS Specific 4-octet`
-/// - `ecv4:` stands for `Extended Community IPv4 Specific`
-/// - `ecv6:` stands for `Extended Community IPv6 Specific`
-/// - `ecop:` stands for `Extended Community Opaque`
-/// - `ecraw:` stands for `Extended Community Raw`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExtendedCommunity {
@@ -224,7 +213,7 @@ impl Display for LargeCommunity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "lg:{}:{}:{}",
+            "{}:{}:{}",
             self.global_admin, self.local_data[0], self.local_data[1]
         )
     }
@@ -238,7 +227,7 @@ impl Display for ExtendedCommunity {
             | ExtendedCommunity::NonTransitiveTwoOctetAs(ec) => {
                 write!(
                     f,
-                    "ecas2:{}:{}:{}:{}",
+                    "{}:{}:{}:{}",
                     ec_type,
                     ec.subtype,
                     ec.global_admin,
@@ -249,7 +238,7 @@ impl Display for ExtendedCommunity {
             | ExtendedCommunity::NonTransitiveIpv4Addr(ec) => {
                 write!(
                     f,
-                    "ecv4:{}:{}:{}:{}",
+                    "{}:{}:{}:{}",
                     ec_type,
                     ec.subtype,
                     ec.global_admin,
@@ -260,7 +249,7 @@ impl Display for ExtendedCommunity {
             | ExtendedCommunity::NonTransitiveFourOctetAs(ec) => {
                 write!(
                     f,
-                    "ecas4:{}:{}:{}:{}",
+                    "{}:{}:{}:{}",
                     ec_type,
                     ec.subtype,
                     ec.global_admin,
@@ -269,16 +258,10 @@ impl Display for ExtendedCommunity {
             }
             ExtendedCommunity::TransitiveOpaque(ec)
             | ExtendedCommunity::NonTransitiveOpaque(ec) => {
-                write!(
-                    f,
-                    "ecop:{}:{}:{}",
-                    ec_type,
-                    ec.subtype,
-                    ToHexString(&ec.value)
-                )
+                write!(f, "{}:{}:{}", ec_type, ec.subtype, ToHexString(&ec.value))
             }
             ExtendedCommunity::Raw(ec) => {
-                write!(f, "ecraw:{}", ToHexString(ec))
+                write!(f, "{}", ToHexString(ec))
             }
         }
     }
@@ -288,7 +271,7 @@ impl Display for Ipv6AddrExtCommunity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ecv6:{}:{}:{}:{}",
+            "{}:{}:{}:{}",
             u8::from(self.community_type),
             self.subtype,
             self.global_admin,
@@ -352,7 +335,7 @@ mod tests {
     #[test]
     fn test_display_large_community() {
         let large_community = LargeCommunity::new(1, [2, 3]);
-        assert_eq!(format!("{}", large_community), "lg:1:2:3");
+        assert_eq!(format!("{}", large_community), "1:2:3");
     }
 
     #[test]
@@ -363,7 +346,7 @@ mod tests {
             local_admin: [0; 4],
         };
         let extended_community = ExtendedCommunity::TransitiveTwoOctetAs(two_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecas2:0:0:0:00000000");
+        assert_eq!(format!("{}", extended_community), "0:0:0:00000000");
 
         let two_octet_as_ext_comm = TwoOctetAsExtCommunity {
             subtype: 0,
@@ -371,7 +354,7 @@ mod tests {
             local_admin: [0; 4],
         };
         let extended_community = ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecas2:64:0:0:00000000");
+        assert_eq!(format!("{}", extended_community), "64:0:0:00000000");
 
         let ipv4_ext_comm = Ipv4AddrExtCommunity {
             subtype: 1,
@@ -379,10 +362,7 @@ mod tests {
             local_admin: [5, 6],
         };
         let extended_community = ExtendedCommunity::TransitiveIpv4Addr(ipv4_ext_comm);
-        assert_eq!(
-            format!("{}", extended_community),
-            "ecv4:1:1:192.168.1.1:0506"
-        );
+        assert_eq!(format!("{}", extended_community), "1:1:192.168.1.1:0506");
 
         let ipv4_ext_comm = Ipv4AddrExtCommunity {
             subtype: 1,
@@ -390,10 +370,7 @@ mod tests {
             local_admin: [5, 6],
         };
         let extended_community = ExtendedCommunity::NonTransitiveIpv4Addr(ipv4_ext_comm);
-        assert_eq!(
-            format!("{}", extended_community),
-            "ecv4:65:1:192.168.1.1:0506"
-        );
+        assert_eq!(format!("{}", extended_community), "65:1:192.168.1.1:0506");
 
         let four_octet_as_ext_comm = FourOctetAsExtCommunity {
             subtype: 2,
@@ -401,7 +378,7 @@ mod tests {
             local_admin: [7, 8],
         };
         let extended_community = ExtendedCommunity::TransitiveFourOctetAs(four_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecas4:2:2:64512:0708");
+        assert_eq!(format!("{}", extended_community), "2:2:64512:0708");
 
         let four_octet_as_ext_comm = FourOctetAsExtCommunity {
             subtype: 2,
@@ -410,25 +387,25 @@ mod tests {
         };
         let extended_community =
             ExtendedCommunity::NonTransitiveFourOctetAs(four_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecas4:66:2:64512:0708");
+        assert_eq!(format!("{}", extended_community), "66:2:64512:0708");
 
         let opaque_ext_comm = OpaqueExtCommunity {
             subtype: 3,
             value: [9, 10, 11, 12, 13, 14],
         };
         let extended_community = ExtendedCommunity::TransitiveOpaque(opaque_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecop:3:3:090A0B0C0D0E");
+        assert_eq!(format!("{}", extended_community), "3:3:090A0B0C0D0E");
 
         let opaque_ext_comm = OpaqueExtCommunity {
             subtype: 3,
             value: [9, 10, 11, 12, 13, 14],
         };
         let extended_community = ExtendedCommunity::NonTransitiveOpaque(opaque_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecop:67:3:090A0B0C0D0E");
+        assert_eq!(format!("{}", extended_community), "67:3:090A0B0C0D0E");
 
         let raw_ext_comm = [0, 1, 2, 3, 4, 5, 6, 7];
         let extended_community = ExtendedCommunity::Raw(raw_ext_comm);
-        assert_eq!(format!("{}", extended_community), "ecraw:0001020304050607");
+        assert_eq!(format!("{}", extended_community), "0001020304050607");
     }
 
     #[test]
@@ -441,7 +418,7 @@ mod tests {
         };
         assert_eq!(
             format!("{}", ipv6_addr_ext_comm),
-            "ecv6:0:0:2001:db8::8a2e:370:7334:0001"
+            "0:0:2001:db8::8a2e:370:7334:0001"
         );
     }
 
@@ -449,7 +426,7 @@ mod tests {
     fn test_display_meta_community() {
         let large_community = LargeCommunity::new(1, [2, 3]);
         let meta_community = MetaCommunity::Large(large_community);
-        assert_eq!(format!("{}", meta_community), "lg:1:2:3");
+        assert_eq!(format!("{}", meta_community), "1:2:3");
     }
 
     #[test]
