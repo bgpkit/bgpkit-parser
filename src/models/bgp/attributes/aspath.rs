@@ -1277,6 +1277,21 @@ mod tests {
         ]);
         assert_eq!(as_path.to_u32_vec_opt(false), None);
         assert_eq!(as_path.to_u32_vec_opt(true), None);
+
+        // other corner cases
+
+        // empty path
+        let as_path = AsPath::from_segments(vec![]);
+        assert_eq!(as_path.to_u32_vec_opt(false), None);
+        assert_eq!(as_path.to_u32_vec_opt(true), None);
+
+        // path with federation segments
+        let as_path = AsPath::from_segments(vec![
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)]),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(3), Asn::new_32bit(4)]),
+        ]);
+        assert_eq!(as_path.to_u32_vec_opt(false), None);
+        assert_eq!(as_path.to_u32_vec_opt(true), None);
     }
 
     #[test]
