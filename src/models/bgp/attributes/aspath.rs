@@ -145,6 +145,15 @@ impl AsPathSegment {
                 }
                 Some(p)
             }
+            AsPathSegment::AsSet(v) => {
+                if v.len() == 1 {
+                    // if the segment is an AS_SET and the length is 1, we can consider this a
+                    // single ASN path vector
+                    Some(vec![v[0].into()])
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -689,9 +698,32 @@ impl AsPath {
     }
 
     pub fn to_u32_vec_opt(&self, dedup: bool) -> Option<Vec<u32>> {
-        match self.segments.last() {
-            None => None,
-            Some(v) => v.to_u32_vec_opt(dedup),
+        let mut path = vec![];
+
+        // Iterate over the segments in reverse order
+        for seg in self.segments.iter().rev() {
+            if let Some(p) = seg.to_u32_vec_opt(dedup) {
+                // for each segment, we also reverse the order of ASNs so that we will eventually
+                // get a reversed AS path stored in `path`.
+                path.extend(p.iter().rev());
+            } else {
+                // If we encounter a segment that cannot be converted to a u32, we return None.
+                // This is because the path is not a simple sequence of ASNs, and returning partial
+                // AS path would be misleading.
+                return None;
+            }
+        }
+
+        match path.is_empty() {
+            true => {
+                // empty path is not a valid AS path
+                None
+            }
+            false => {
+                // reverse the order of ASNs to get the original path
+                path.reverse();
+                Some(path)
+            }
         }
     }
 }
@@ -1212,14 +1244,54 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_to_u32() {
+    fn test_path_to_u32() {
+        // regular sequence
         let path_segment = AsPathSegment::sequence([1, 2, 3, 3]);
         assert_eq!(path_segment.to_u32_vec_opt(false), Some(vec![1, 2, 3, 3]));
         assert_eq!(path_segment.to_u32_vec_opt(true), Some(vec![1, 2, 3]));
 
+        // regular set: should return None
         let path_segment = AsPathSegment::set([1, 2, 3, 3]);
         assert_eq!(path_segment.to_u32_vec_opt(false), None);
         assert_eq!(path_segment.to_u32_vec_opt(true), None);
+
+        // singular set: should be converted to singleton vector
+        let path_segment = AsPathSegment::set([1]);
+        assert_eq!(path_segment.to_u32_vec_opt(false), Some(vec![1]));
+        assert_eq!(path_segment.to_u32_vec_opt(true), Some(vec![1]));
+
+        // combination of a sequence and a few singleton sets, should be merged into a single vector
+        let as_path = AsPath::from_segments(vec![
+            AsPathSegment::set([4]),
+            AsPathSegment::sequence([2, 3, 3]),
+            AsPathSegment::set([1]),
+        ]);
+        assert_eq!(as_path.to_u32_vec_opt(false), Some(vec![4, 2, 3, 3, 1]));
+        assert_eq!(as_path.to_u32_vec_opt(true), Some(vec![4, 2, 3, 1]));
+
+        // should the path containing any non-convertible segments, return None
+        let as_path = AsPath::from_segments(vec![
+            AsPathSegment::set([4, 2]),
+            AsPathSegment::sequence([2, 3, 3]),
+            AsPathSegment::set([1]),
+        ]);
+        assert_eq!(as_path.to_u32_vec_opt(false), None);
+        assert_eq!(as_path.to_u32_vec_opt(true), None);
+
+        // other corner cases
+
+        // empty path
+        let as_path = AsPath::from_segments(vec![]);
+        assert_eq!(as_path.to_u32_vec_opt(false), None);
+        assert_eq!(as_path.to_u32_vec_opt(true), None);
+
+        // path with federation segments
+        let as_path = AsPath::from_segments(vec![
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)]),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(3), Asn::new_32bit(4)]),
+        ]);
+        assert_eq!(as_path.to_u32_vec_opt(false), None);
+        assert_eq!(as_path.to_u32_vec_opt(true), None);
     }
 
     #[test]
