@@ -51,6 +51,10 @@ clap = { version = "4.5", features = ["derive"], optional = true }
 
 [features]
 default = ["parser", "rustls"]
+
+# parsing local files only, removing dependencies for handling remote files
+local = ["parser", "oneio"]
+
 parser = [
     "bytes",
     "chrono",

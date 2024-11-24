@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bgpkit-parser = { path = "../..", default-features = false, features = ["parser"] }
+bgpkit-parser = { path = "../..", default-features = false, features = ["local"] }
