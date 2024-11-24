@@ -93,6 +93,10 @@ struct Filters {
     /// Filter by AS path regex string
     #[clap(short = 'a', long)]
     as_path: Option<String>,
+
+    /// Filter by AS path regex string
+    #[clap(short = 'C', long)]
+    community: Option<String>,
 }
 
 fn main() {
@@ -117,6 +121,9 @@ fn main() {
 
     if let Some(v) = opts.filters.as_path {
         parser = parser.add_filter("as_path", v.as_str()).unwrap();
+    }
+    if let Some(v) = opts.filters.community {
+        parser = parser.add_filter("community", v.as_str()).unwrap();
     }
     if let Some(v) = opts.filters.origin_asn {
         parser = parser

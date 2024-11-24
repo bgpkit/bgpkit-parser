@@ -23,7 +23,7 @@ and returns a new parser with specified filter added. See the example below.
 
 ### Example
 
-```rust,no_run
+```no_run
 use bgpkit_parser::BgpkitParser;
 
 /// This example shows how to parse a MRT file and filter by prefix.
@@ -53,10 +53,10 @@ later releases.
 
 */
 use crate::models::*;
+use crate::parser::ComparableRegex;
 use crate::ParserError;
 use crate::ParserError::FilterError;
 use ipnet::IpNet;
-use regex::Regex;
 use std::net::IpAddr;
 use std::str::FromStr;
 
@@ -70,7 +70,8 @@ use std::str::FromStr;
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
-/// - `as_path` (`AsPath(Regex)`) -- regular expression for AS path string
+/// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
+/// - `community` (`ComparableRegex`) -- regular expression for community string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
@@ -83,7 +84,8 @@ pub enum Filter {
     IpVersion(IpVersion),
     TsStart(f64),
     TsEnd(f64),
-    AsPath(String),
+    AsPath(ComparableRegex),
+    Community(ComparableRegex),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,10 +201,17 @@ impl Filter {
                     filter_value
                 ))),
             },
-            "as_path" => match Regex::from_str(filter_value) {
-                Ok(_v) => Ok(Filter::AsPath(filter_value.to_string())),
+            "as_path" => match ComparableRegex::new(filter_value) {
+                Ok(v) => Ok(Filter::AsPath(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse AS path regex from {}",
+                    filter_value
+                ))),
+            },
+            "community" => match ComparableRegex::new(filter_value) {
+                Ok(v) => Ok(Filter::Community(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse Community regex from {}",
                     filter_value
                 ))),
             },
@@ -296,8 +305,14 @@ impl Filterable for BgpElem {
             Filter::TsEnd(v) => self.timestamp <= *v,
             Filter::AsPath(v) => {
                 if let Some(path) = &self.as_path {
-                    let re = Regex::new(v).unwrap();
-                    re.is_match(path.to_string().as_str())
+                    v.is_match(path.to_string().as_str())
+                } else {
+                    false
+                }
+            }
+            Filter::Community(r) => {
+                if let Some(communities) = &self.communities {
+                    communities.iter().any(|c| r.is_match(c.to_string()))
                 } else {
                     false
                 }
@@ -322,7 +337,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_filter() {
+    fn test_filters_on_mrt_file() {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url).unwrap();
         let elems = parser.into_elem_iter().collect::<Vec<BgpElem>>();
@@ -362,9 +377,24 @@ mod tests {
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 24);
 
-        let filters = vec![Filter::AsPath(r" ?174 1916 52888$".to_string())];
+        let filters = vec![Filter::new("as_path", r" ?174 1916 52888$").unwrap()];
         let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count, 12);
+
+        // filter by community starting with some value
+        let filters = vec![Filter::new("community", r"60924:.*").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 4243);
+
+        // filter by community ending with some value
+        let filters = vec![Filter::new("community", r".+:784$").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 107);
+
+        // filter by community with large community (i.e. with 3 values, separated by ':')
+        let filters = vec![Filter::new("community", r"\d+:\d+:\d+$").unwrap()];
+        let count = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count, 4397);
 
         let filters = vec![
             Filter::TsStart(1637437798_f64),
@@ -406,7 +436,17 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_errors() {}
+    fn test_filter_incorrect_filters() {
+        // filter by community with large community (i.e. with 3 values, separated by ':')
+        let incorrect_filters = [
+            Filter::new("community", r"[abc"),
+            Filter::new("as_path", r"[0-9"),
+            Filter::new("prefix_super_sub", "-192.-168.-1.1/24"),
+        ];
+        assert!(incorrect_filters
+            .iter()
+            .all(|f| matches!(f, Err(FilterError(_)))));
+    }
 
     #[test]
     fn test_parsing_time_str() {
@@ -553,7 +593,10 @@ mod tests {
         assert_eq!(filter, Filter::TsEnd(1637437798_f64));
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
-        assert_eq!(filter, Filter::AsPath(r" ?174 1916 52888$".to_string()));
+        assert_eq!(
+            filter,
+            Filter::AsPath(ComparableRegex::new(r" ?174 1916 52888$").unwrap())
+        );
 
         assert!(Filter::new("origin_asn", "not a number").is_err());
         assert!(Filter::new("peer_asn", "not a number").is_err());
@@ -583,7 +626,10 @@ mod tests {
             origin: None,
             local_pref: None,
             med: None,
-            communities: None,
+            communities: Some(vec![MetaCommunity::Large(LargeCommunity::new(
+                12345,
+                [678910, 111213],
+            ))]),
             atomic: false,
             aggr_asn: None,
             aggr_ip: None,
@@ -593,70 +639,53 @@ mod tests {
             deprecated: None,
         };
 
+        let mut filters = vec![];
+
         let filter = Filter::new("origin_asn", "12345").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
+        let filter = Filter::new("origin_asn", "678910").unwrap();
+        assert!(!elem.match_filter(&filter));
+
         let filter = Filter::new("prefix", "192.168.1.0/24").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("peer_ip", "192.168.1.1").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("peer_asn", "12345").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("type", "a").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("ts_start", "1637437798").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("ts_end", "1637437798").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("as_path", r" ?174 1916 52888$").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("ip_version", "4").unwrap();
+        filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
         let filter = Filter::new("ip", "ipv6").unwrap();
         assert!(!elem.match_filter(&filter));
-    }
 
-    #[test]
-    fn test_filterable_match_filters() {
-        let elem = BgpElem {
-            timestamp: 1637437798_f64,
-            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
-            peer_asn: Asn::new_32bit(12345),
-            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), 0),
-            next_hop: None,
-            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
-            origin_asns: Some(vec![Asn::new_16bit(12345)]),
-            origin: None,
-            local_pref: None,
-            med: None,
-            communities: None,
-            atomic: false,
-            aggr_asn: None,
-            aggr_ip: None,
-            only_to_customer: None,
-            unknown: None,
-            elem_type: ElemType::ANNOUNCE,
-            deprecated: None,
-        };
-
-        let filters = vec![
-            Filter::new("origin_asn", "12345").unwrap(),
-            Filter::new("prefix", "192.168.1.0/24").unwrap(),
-            Filter::new("peer_ip", "192.168.1.1").unwrap(),
-            Filter::new("peer_asn", "12345").unwrap(),
-            Filter::new("type", "a").unwrap(),
-            Filter::new("ts_start", "1637437798").unwrap(),
-            Filter::new("ts_end", "1637437798").unwrap(),
-            Filter::new("as_path", r" ?174 1916 52888$").unwrap(),
-        ];
+        let filter = Filter::new("community", r"12345:678910:111213$").unwrap();
+        filters.push(filter.clone());
+        assert!(elem.match_filter(&filter));
 
         assert!(elem.match_filters(&filters));
     }
