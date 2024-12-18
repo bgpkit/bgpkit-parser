@@ -15,9 +15,9 @@ env:
 
 jobs:
   cargo-fmt-check:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Run format check
-      run: cargo fmt --check
+      - name: Run format check
+        run: cargo fmt --check
