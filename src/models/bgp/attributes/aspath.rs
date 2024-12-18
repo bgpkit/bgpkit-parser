@@ -304,7 +304,7 @@ struct AsPathNumberedRouteIter<'a> {
     route_num: u64,
 }
 
-impl<'a> Iterator for AsPathNumberedRouteIter<'a> {
+impl Iterator for AsPathNumberedRouteIter<'_> {
     type Item = Asn;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -343,7 +343,7 @@ pub struct AsPathRouteIter<'a, D> {
     _phantom: PhantomData<D>,
 }
 
-impl<'a, D> Iterator for AsPathRouteIter<'a, D>
+impl<D> Iterator for AsPathRouteIter<'_, D>
 where
     D: FromIterator<Asn>,
 {

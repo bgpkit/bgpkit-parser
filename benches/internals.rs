@@ -14,7 +14,7 @@ fn preload_min_for_n_entries<R: Read>(input_reader: R, n: usize) -> Vec<u8> {
         copy: &'a mut Vec<u8>,
     }
 
-    impl<'a, R: Read> Read for CopyReader<'a, R> {
+    impl<R: Read> Read for CopyReader<'_, R> {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             let bytes_read = self.input.read(buf)?;
             self.copy.extend_from_slice(&buf[..bytes_read]);

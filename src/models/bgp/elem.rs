@@ -204,7 +204,7 @@ impl Default for BgpElem {
 /// - `0: &'a Option<T>`: The reference to the wrapped `Option` value.
 struct OptionToStr<'a, T>(&'a Option<T>);
 
-impl<'a, T: Display> Display for OptionToStr<'a, T> {
+impl<T: Display> Display for OptionToStr<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             None => Ok(()),
@@ -220,7 +220,7 @@ impl<'a, T: Display> Display for OptionToStr<'a, T> {
 /// of the `BgpElem` struct into a printable format.
 struct OptionToStrVec<'a, T>(&'a Option<Vec<T>>);
 
-impl<'a, T: Display> Display for OptionToStrVec<'a, T> {
+impl<T: Display> Display for OptionToStrVec<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             None => Ok(()),
