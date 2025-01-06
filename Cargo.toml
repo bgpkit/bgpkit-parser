@@ -23,7 +23,7 @@ required-features = ["cli"]
 # BGP models #
 ##############
 ipnet = "2.10"
-itertools = "0.13"
+itertools = "0.14"
 log = "0.4"
 num_enum = { version = "0.7", features = ["complex-expressions"] }
 bitflags = { version = "2.6", features = ["serde"] }
