@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.11.0 -2025-02-26
+
+### Breaking changes
+
+* removing string format prefix like `lg:` or `ecv6` for large and extended communities
+    * users who work with community value strings will have a unified experience for all community values
+    * users can still use SDK to match and check different types of community values
+
+### Highlights
+
+* storing AS path filter regex object for reuse
+    * this will improve filter performance
+* allow filter messages by community values
+    * by converting community values to string and do string comparison
+* add `local` flag to allow local-only processing
+    * this removes dependencies like `reqwest`
+* support converting singleton AsSet to Vec<u32>
+    * when calling `to_u32_vec_opt` on AS path object, singleton AsSet will be treated as single ASN
+
+### Bug fixes
+
+* fixed a bug where RIS-live withdrawal messages were not properly parsed
+
+### Documentation
+
+* add new RIS-Live async example
+
+### Maintenance
+
+* update dependencies
+* add `.env` to gitignore
+* remote unnecessary life-time annotations
+
 ## v0.10.11 - 2024-10-27
 
 ### Highlights
