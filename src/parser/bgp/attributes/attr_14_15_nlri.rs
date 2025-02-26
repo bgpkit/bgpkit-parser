@@ -59,10 +59,7 @@ pub fn parse_nlri(
         let next_hop_length = input.read_u8()? as usize;
         input.has_n_remaining(next_hop_length)?;
         let next_hop_bytes = input.split_to(next_hop_length);
-        next_hop = match parse_mp_next_hop(next_hop_bytes) {
-            Ok(x) => x,
-            Err(e) => return Err(e),
-        };
+        next_hop = parse_mp_next_hop(next_hop_bytes)?;
     }
 
     let prefixes = match prefixes {

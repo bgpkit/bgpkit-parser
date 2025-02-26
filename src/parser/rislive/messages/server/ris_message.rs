@@ -1,3 +1,6 @@
+/// `ris_message`: Message from a particular RIS Route Collector
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message.schema.json>
 use crate::models::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,9 +20,15 @@ pub struct RisMessage {
     pub msg: Option<RisMessageEnum>,
 }
 
+/// `ris_message`: Message from a particular RIS Route Collector
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum RisMessageEnum {
+    /// Update message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-UPDATE.schema.json>
     UPDATE {
         path: Option<AsPath>,
         community: Option<Vec<(u32, u16)>>,
@@ -27,8 +36,15 @@ pub enum RisMessageEnum {
         med: Option<u32>,
         aggregator: Option<String>,
         announcements: Option<Vec<Announcement>>,
+        withdrawals: Option<Vec<String>>,
     },
+    /// KeepAlive message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-KEEPALIVE.schema.json>
     KEEPALIVE {},
+    /// Open message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-OPEN.schema.json>
     OPEN {
         direction: String,
         version: u8,
@@ -37,14 +53,19 @@ pub enum RisMessageEnum {
         router_id: String,
         capabilities: Value,
     },
-    NOTIFICATION {
-        notification: Notification,
-    },
-    RIS_PEER_STATE {
-        state: String,
-    },
+    /// Notification message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-NOTIFICATION.schema.json>
+    NOTIFICATION { notification: Notification },
+    /// RIS Peer State message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-RIS_PEER_STATE.schema.json>
+    RIS_PEER_STATE { state: String },
 }
 
+/// Notification message content
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-NOTIFICATION.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Notification {
     pub code: u32,
@@ -52,12 +73,14 @@ pub struct Notification {
     pub data: Option<String>,
 }
 
+/// Update message announcement content
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-UPDATE.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Announcement {
     #[serde(with = "as_str")]
     pub next_hop: IpAddr,
     pub prefixes: Vec<String>,
-    pub withdrawals: Option<Vec<String>>,
 }
 
 mod as_str {
@@ -89,6 +112,7 @@ mod as_str {
 #[cfg(test)]
 mod tests {
     use crate::parser::rislive::messages::ris_message::RisMessage;
+    use crate::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
     #[test]
     fn test_deserialize_update() {
@@ -127,5 +151,28 @@ mod tests {
         {"timestamp":1568365292.84,"peer":"192.0.2.1","peer_asn":"64496","id":"00-192-0-2-0-180513","host":"rrc00","type":"RIS_PEER_STATE","state":"connected"}
 "#;
         let _msg: RisMessage = serde_json::from_str(msg_str).unwrap();
+    }
+
+    #[test]
+    fn test_withdrawals() {
+        let msg_str = r#"{ "type": "ris_message", "data": { "timestamp": 1740561857.910, "peer": "2606:6dc0:1301::1", "peer_asn": "13781", "id": "2606:6dc0:1301::1-019541923d760008", "host": "rrc25.ripe.net", "type": "UPDATE", "path": [], "community": [], "announcements": [], "withdrawals": [ "2605:de00:bb:0:0:0:0:0/48" ] } }"#;
+        let msg: RisLiveMessage = serde_json::from_str(msg_str).unwrap();
+        if let RisLiveMessage::RisMessage(msg) = msg {
+            assert!(msg.msg.is_some());
+            assert!(matches!(msg.msg, Some(RisMessageEnum::UPDATE { .. })));
+            match msg.msg.unwrap() {
+                RisMessageEnum::UPDATE { withdrawals, .. } => {
+                    assert!(withdrawals.is_some());
+                    let withdrawals = withdrawals.unwrap();
+                    assert_eq!(withdrawals.len(), 1);
+                    assert_eq!(withdrawals[0], "2605:de00:bb:0:0:0:0:0/48");
+                }
+                _ => {
+                    panic!("incorrect message type")
+                }
+            }
+        } else {
+            panic!("incorrect message type");
+        }
     }
 }
