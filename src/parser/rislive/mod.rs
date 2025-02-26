@@ -57,6 +57,22 @@ macro_rules! unwrap_or_return {
     };
 }
 
+/// parse prefix string into IpNet
+fn parse_prefix(prefix_str: &str) -> Result<IpNet, ParserRisliveError> {
+    let p = match prefix_str.parse::<IpNet>() {
+        Ok(net) => net,
+        Err(_) => {
+            if prefix_str == "eor" {
+                return Err(ParserRisliveError::ElemEndOfRibPrefix);
+            }
+            return Err(ParserRisliveError::ElemIncorrectPrefix(
+                prefix_str.to_string(),
+            ));
+        }
+    };
+    Ok(p)
+}
+
 /// This function parses one message and returns a result of a vector of [BgpElem]s or an error
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg_string = msg_str.to_string();
@@ -137,17 +153,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     if let Some(announcements) = announcements {
                         for announcement in announcements {
                             for prefix in &announcement.prefixes {
-                                let p = match prefix.parse::<IpNet>() {
-                                    Ok(net) => net,
-                                    Err(_) => {
-                                        if prefix == "eor" {
-                                            return Err(ParserRisliveError::ElemEndOfRibPrefix);
-                                        }
-                                        return Err(ParserRisliveError::ElemIncorrectPrefix(
-                                            prefix.to_string(),
-                                        ));
-                                    }
-                                };
+                                let p = parse_prefix(prefix.as_str())?;
                                 elems.push(BgpElem {
                                     timestamp: ris_msg.timestamp,
                                     elem_type: ElemType::ANNOUNCE,
@@ -178,17 +184,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     if let Some(withdrawals) = withdrawals {
                         for prefix in withdrawals {
                             // create new elems for withdrawals and push to elems
-                            let p = match prefix.parse::<IpNet>() {
-                                Ok(net) => net,
-                                Err(_) => {
-                                    if prefix == "eor" {
-                                        return Err(ParserRisliveError::ElemEndOfRibPrefix);
-                                    }
-                                    return Err(ParserRisliveError::ElemIncorrectPrefix(
-                                        prefix.to_string(),
-                                    ));
-                                }
-                            };
+                            let p = parse_prefix(prefix.as_str())?;
                             elems.push(BgpElem {
                                 timestamp: ris_msg.timestamp,
                                 elem_type: ElemType::WITHDRAW,
@@ -270,5 +266,44 @@ mod tests {
         for elem in msg {
             println!("{}", elem);
         }
+    }
+
+    #[test]
+    fn test_ris_live_with_withdrawals() {
+        // correct prefix
+        let msg_str = r#"{ "type": "ris_message", "data": { "timestamp": 1740561857.910, "peer": "2606:6dc0:1301::1", "peer_asn": "13781", "id": "2606:6dc0:1301::1-019541923d760008", "host": "rrc25.ripe.net", "type": "UPDATE", "path": [], "community": [], "announcements": [], "withdrawals": [ "2605:de00:bb:0:0:0:0:0/48" ] } }"#;
+        let elems = parse_ris_live_message(msg_str).unwrap();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    }
+
+    #[test]
+    fn test_parse_prefix() {
+        // parse correct ipv4 prefix
+        let prefix_str = "192.0.2.0/24".to_string();
+        let parse_result = parse_prefix(&prefix_str);
+        assert!(parse_result.is_ok());
+        assert_eq!(parse_result.unwrap().to_string().as_str(), &prefix_str);
+
+        // parse correct ipv6 prefix
+        let prefix_str = "2001:db8::/32".to_string();
+        let parse_result = parse_prefix(&prefix_str);
+        assert!(parse_result.is_ok());
+        assert_eq!(parse_result.unwrap().to_string().as_str(), &prefix_str);
+
+        // parse incorrect ipv4 prefix
+        let prefix_str = "192.0.2.0/38".to_string();
+        let parse_result = parse_prefix(&prefix_str);
+        assert!(parse_result.is_err());
+        matches!(
+            parse_result,
+            Err(ParserRisliveError::ElemIncorrectPrefix(_))
+        );
+
+        // parse eof string
+        let prefix_str = "eor".to_string();
+        let parse_result = parse_prefix(&prefix_str);
+        assert!(parse_result.is_err());
+        matches!(parse_result, Err(ParserRisliveError::ElemEndOfRibPrefix));
     }
 }
