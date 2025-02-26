@@ -48,6 +48,7 @@ mod tests {
                 med: None,
                 aggregator: None,
                 announcements: None,
+                withdrawals: None,
             }),
         };
 

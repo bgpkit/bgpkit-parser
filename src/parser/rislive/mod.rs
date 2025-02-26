@@ -85,6 +85,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     med,
                     aggregator,
                     announcements,
+                    withdrawals,
                 } => {
                     let mut elems: Vec<BgpElem> = vec![];
 
@@ -171,6 +172,46 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                     deprecated: None,
                                 });
                             }
+                        }
+                    }
+
+                    if let Some(withdrawals) = withdrawals {
+                        for prefix in withdrawals {
+                            // create new elems for withdrawals and push to elems
+                            let p = match prefix.parse::<IpNet>() {
+                                Ok(net) => net,
+                                Err(_) => {
+                                    if prefix == "eor" {
+                                        return Err(ParserRisliveError::ElemEndOfRibPrefix);
+                                    }
+                                    return Err(ParserRisliveError::ElemIncorrectPrefix(
+                                        prefix.to_string(),
+                                    ));
+                                }
+                            };
+                            elems.push(BgpElem {
+                                timestamp: ris_msg.timestamp,
+                                elem_type: ElemType::WITHDRAW,
+                                peer_ip: ris_msg.peer,
+                                peer_asn: ris_msg.peer_asn,
+                                prefix: NetworkPrefix {
+                                    prefix: p,
+                                    path_id: 0,
+                                },
+                                next_hop: None,
+                                as_path: None,
+                                origin_asns: None,
+                                origin: None,
+                                local_pref: None,
+                                med: None,
+                                communities: None,
+                                atomic: false,
+                                aggr_asn: None,
+                                aggr_ip: None,
+                                only_to_customer: None,
+                                unknown: None,
+                                deprecated: None,
+                            })
                         }
                     }
 
