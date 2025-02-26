@@ -1,3 +1,6 @@
+/// `ris_message`: Message from a particular RIS Route Collector
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message.schema.json>
 use crate::models::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,9 +20,15 @@ pub struct RisMessage {
     pub msg: Option<RisMessageEnum>,
 }
 
+/// `ris_message`: Message from a particular RIS Route Collector
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum RisMessageEnum {
+    /// Update message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-UPDATE.schema.json>
     UPDATE {
         path: Option<AsPath>,
         community: Option<Vec<(u32, u16)>>,
@@ -29,7 +38,13 @@ pub enum RisMessageEnum {
         announcements: Option<Vec<Announcement>>,
         withdrawals: Option<Vec<String>>,
     },
+    /// KeepAlive message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-KEEPALIVE.schema.json>
     KEEPALIVE {},
+    /// Open message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-OPEN.schema.json>
     OPEN {
         direction: String,
         version: u8,
@@ -38,14 +53,19 @@ pub enum RisMessageEnum {
         router_id: String,
         capabilities: Value,
     },
-    NOTIFICATION {
-        notification: Notification,
-    },
-    RIS_PEER_STATE {
-        state: String,
-    },
+    /// Notification message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-NOTIFICATION.schema.json>
+    NOTIFICATION { notification: Notification },
+    /// RIS Peer State message
+    ///
+    /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-RIS_PEER_STATE.schema.json>
+    RIS_PEER_STATE { state: String },
 }
 
+/// Notification message content
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-NOTIFICATION.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Notification {
     pub code: u32,
@@ -53,6 +73,9 @@ pub struct Notification {
     pub data: Option<String>,
 }
 
+/// Update message announcement content
+///
+/// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-UPDATE.schema.json>
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Announcement {
     #[serde(with = "as_str")]
