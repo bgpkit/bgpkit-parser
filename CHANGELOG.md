@@ -2,7 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.11.0 -2025-02-26
+## v0.11.1 - 2025-06-06
+
+### Bug fixes
+
+* Fixed an issue where IPv6 NLRI next-hop addresses were not properly passed to `BgpElem` objects.
+    * The fix ensures that the `next_hop` value is extracted from either `NEXT_HOP` or `MP_REACHABLE_NLRI` BGP
+      attribute, and is correctly set in the `BgpElem` object.
+    * Fixes issue [#211](https://github.com/bgpkit/bgpkit-parser/issues/211)
+    * Thanks [m-appel](https://github.com/m-appel) for reporting this issue!
+
+### Maintenance
+
+* Apply `cargo clippy` lints to the codebase
+* Add more tests to improve code coverage
+
+## v0.11.0 - 2025-02-26
 
 ### Breaking changes
 
