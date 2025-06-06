@@ -67,17 +67,11 @@ pub trait ReadUtils: Buf {
         match afi {
             Afi::Ipv4 => match self.read_ipv4_address() {
                 Ok(ip) => Ok(IpAddr::V4(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv4 address".to_string(),
-                )),
+                _ => Err(io::Error::other("Cannot parse IPv4 address")),
             },
             Afi::Ipv6 => match self.read_ipv6_address() {
                 Ok(ip) => Ok(IpAddr::V6(ip)),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Cannot parse IPv6 address".to_string(),
-                )),
+                _ => Err(io::Error::other("Cannot parse IPv6 address")),
             },
         }
     }
@@ -98,7 +92,7 @@ pub trait ReadUtils: Buf {
         let mask = self.read_u8()?;
         match Ipv4Net::new(addr, mask) {
             Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
+            Err(_) => Err(io::Error::other("Invalid prefix mask").into()),
         }
     }
 
@@ -107,7 +101,7 @@ pub trait ReadUtils: Buf {
         let mask = self.read_u8()?;
         match Ipv6Net::new(addr, mask) {
             Ok(n) => Ok(n),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid prefix mask").into()),
+            Err(_) => Err(io::Error::other("Invalid prefix mask").into()),
         }
     }
 
@@ -164,7 +158,7 @@ pub trait ReadUtils: Buf {
         let bit_len = self.read_u8()?;
 
         // Convert to bytes
-        let byte_len: usize = (bit_len as usize + 7) / 8;
+        let byte_len: usize = (bit_len as usize).div_ceil(8);
         let addr: IpAddr = match afi {
             Afi::Ipv4 => {
                 // 4 bytes -- u32
@@ -459,6 +453,15 @@ mod tests {
                 0x2001, 0x0DB8, 0x85A3, 0x0000, 0x0000, 0x8A2E, 0x0370, 0x7334
             ))
         );
+
+        let mut buf = Bytes::from_static(&[0xC0, 0xA8, 0x01]);
+        assert!(buf.read_address(&Afi::Ipv4).is_err());
+
+        let mut buf = Bytes::from_static(&[
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73,
+        ]);
+        assert!(buf.read_address(&Afi::Ipv6).is_err());
     }
 
     #[test]
@@ -518,6 +521,10 @@ mod tests {
             buf.read_ipv4_prefix().unwrap(),
             Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 24).unwrap()
         );
+
+        // Test with invalid IPv4 prefix mask, /33
+        let mut buf = Bytes::from_static(&[0xC0, 0xA8, 0x01, 0x01, 0x21]);
+        assert!(buf.read_ipv4_prefix().is_err());
     }
 
     #[test]
@@ -534,6 +541,13 @@ mod tests {
             )
             .unwrap()
         );
+
+        // Test with invalid IPv6 prefix mask, /129
+        let mut buf = Bytes::from_static(&[
+            0x20, 0x01, 0x0D, 0xB8, 0x85, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x8A, 0x2E, 0x03, 0x70,
+            0x73, 0x34, 0x81,
+        ]);
+        assert!(buf.read_ipv6_prefix().is_err());
     }
 
     #[test]

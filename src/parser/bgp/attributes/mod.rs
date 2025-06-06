@@ -198,9 +198,9 @@ pub fn parse_attributes(
             Err(e) => {
                 if partial {
                     // it's ok to have errors when reading partial bytes
-                    debug!("PARTIAL: {}", e.to_string());
+                    debug!("PARTIAL: {}", e);
                 } else {
-                    debug!("{}", e.to_string());
+                    debug!("{}", e);
                 }
                 continue;
             }

@@ -117,6 +117,17 @@ fn get_relevant_attributes(
         false => None,
     };
 
+    // If the next_hop is not set, we try to get it from the announced NLRI.
+    let next_hop = next_hop.or_else(|| {
+        announced.as_ref().and_then(|v| {
+            v.next_hop.as_ref().map(|h| match h {
+                NextHopAddress::Ipv4(v) => IpAddr::from(*v),
+                NextHopAddress::Ipv6(v) => IpAddr::from(*v),
+                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(*v),
+            })
+        })
+    });
+
     (
         as_path,
         as4_path,
@@ -746,5 +757,65 @@ mod tests {
             _unknown,
             _deprecated,
         ) = get_relevant_attributes(attributes);
+    }
+
+    #[test]
+    fn test_next_hop_from_nlri() {
+        let attributes = vec![AttributeValue::NextHop(
+            IpAddr::from_str("10.0.0.1").unwrap(),
+        )]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+
+        let attributes = Attributes::from(attributes);
+
+        let (
+            _as_path,
+            _as4_path, // Table dump v1 does not have 4-byte AS number
+            _origin,
+            next_hop,
+            _local_pref,
+            _med,
+            _communities,
+            _atomic,
+            _aggregator,
+            _announced,
+            _withdrawn,
+            _only_to_customer,
+            _unknown,
+            _deprecated,
+        ) = get_relevant_attributes(attributes);
+
+        assert_eq!(next_hop, Some(IpAddr::from_str("10.0.0.1").unwrap()));
+
+        let attributes = vec![AttributeValue::MpReachNlri(Nlri::new_reachable(
+            NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            Some(IpAddr::from_str("10.0.0.2").unwrap()),
+        ))]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+
+        let attributes = Attributes::from(attributes);
+
+        let (
+            _as_path,
+            _as4_path, // Table dump v1 does not have 4-byte AS number
+            _origin,
+            next_hop,
+            _local_pref,
+            _med,
+            _communities,
+            _atomic,
+            _aggregator,
+            _announced,
+            _withdrawn,
+            _only_to_customer,
+            _unknown,
+            _deprecated,
+        ) = get_relevant_attributes(attributes);
+
+        assert_eq!(next_hop, Some(IpAddr::from_str("10.0.0.2").unwrap()));
     }
 }

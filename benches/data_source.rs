@@ -1,7 +1,7 @@
 use md5::Digest;
 use oneio::get_reader;
 use std::fs::{create_dir_all, File};
-use std::io::{self, BufWriter, ErrorKind, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
@@ -119,8 +119,7 @@ impl<W: Write> Write for HashingWriter<W> {
 fn download_file<P: AsRef<Path>>(url: &str, target: P) -> io::Result<Digest> {
     let target_path = target.as_ref().to_str().unwrap().to_string();
 
-    oneio::download(url, target_path.as_str(), None)
-        .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+    oneio::download(url, target_path.as_str(), None).map_err(io::Error::other)?;
 
     let mut reader = get_reader(target_path.as_str()).unwrap();
     let mut writer = HashingWriter {
