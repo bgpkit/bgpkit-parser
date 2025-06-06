@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn test_error_conversions() {
         assert_eq!(
-            ParserBmpError::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            ParserBmpError::from(std::io::Error::other("test")),
             ParserBmpError::InvalidOpenBmpHeader
         );
         assert_eq!(
