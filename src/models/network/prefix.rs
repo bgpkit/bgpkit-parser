@@ -70,7 +70,7 @@ impl NetworkPrefix {
         // encode prefix
 
         let bit_len = self.prefix.prefix_len();
-        let byte_len = ((bit_len + 7) / 8) as usize;
+        let byte_len = bit_len.div_ceil(8) as usize;
         bytes.put_u8(bit_len);
 
         match self.prefix {
