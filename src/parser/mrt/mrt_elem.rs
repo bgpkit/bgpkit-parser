@@ -118,24 +118,15 @@ fn get_relevant_attributes(
     };
 
     // If the next_hop is not set, we try to get it from the announced NLRI.
-    let next_hop = match next_hop {
-        None => {
-            if let Some(v) = &announced {
-                if let Some(h) = v.next_hop {
-                    match h {
-                        NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
-                        NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
-                        NextHopAddress::Ipv6LinkLocal(v, _) => Some(IpAddr::from(v)),
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-        Some(v) => Some(v),
-    };
+    let next_hop = next_hop.or_else(|| {
+        announced.as_ref().and_then(|v| {
+            v.next_hop.as_ref().map(|h| match h {
+                NextHopAddress::Ipv4(v) => IpAddr::from(*v),
+                NextHopAddress::Ipv6(v) => IpAddr::from(*v),
+                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(*v),
+            })
+        })
+    });
 
     (
         as_path,
