@@ -408,6 +408,7 @@ We support normal communities, extended communities, and large communities.
 )]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::needless_range_loop)]
+#![allow(clippy::uninlined_format_args)]
 
 #[cfg(feature = "parser")]
 pub mod encoder;
