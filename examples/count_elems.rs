@@ -4,5 +4,5 @@ use bgpkit_parser::BgpkitParser;
 fn main() {
     let url = "http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2";
     let count = BgpkitParser::new(url).unwrap().into_iter().count();
-    println!("{}", count);
+    println!("{count}");
 }

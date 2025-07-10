@@ -691,7 +691,7 @@ mod tests {
         assert!(!aspath_attr.is_optional());
 
         for attr in attributes.iter() {
-            println!("{:?}", attr);
+            println!("{attr:?}");
         }
     }
 

@@ -43,15 +43,15 @@ impl Error for ParserErrorWithBytes {}
 impl Display for ParserError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ParserError::IoError(e) => write!(f, "Error: {}", e),
-            ParserError::EofError(e) => write!(f, "Error: {}", e),
-            ParserError::ParseError(s) => write!(f, "Error: {}", s),
-            ParserError::TruncatedMsg(s) => write!(f, "Error: {}", s),
-            ParserError::Unsupported(s) => write!(f, "Error: {}", s),
+            ParserError::IoError(e) => write!(f, "Error: {e}"),
+            ParserError::EofError(e) => write!(f, "Error: {e}"),
+            ParserError::ParseError(s) => write!(f, "Error: {s}"),
+            ParserError::TruncatedMsg(s) => write!(f, "Error: {s}"),
+            ParserError::Unsupported(s) => write!(f, "Error: {s}"),
             ParserError::EofExpected => write!(f, "Error: reach end of file"),
             #[cfg(feature = "oneio")]
-            ParserError::OneIoError(e) => write!(f, "Error: {}", e),
-            ParserError::FilterError(e) => write!(f, "Error: {}", e),
+            ParserError::OneIoError(e) => write!(f, "Error: {e}"),
+            ParserError::FilterError(e) => write!(f, "Error: {e}"),
         }
     }
 }

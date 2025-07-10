@@ -122,7 +122,7 @@ mod tests {
                     TerminationTlvValue::Reason(TerminationReason::UnspecifiedReason)
                 );
             }
-            Err(e) => panic!("Failed to parse: {}", e),
+            Err(e) => panic!("Failed to parse: {e}"),
         }
     }
 }

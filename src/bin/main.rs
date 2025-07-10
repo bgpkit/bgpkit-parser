@@ -114,7 +114,7 @@ fn main() {
     let mut parser = match parser_opt {
         Ok(p) => p,
         Err(err) => {
-            eprintln!("{}", err);
+            eprintln!("{err}");
             std::process::exit(1);
         }
     };
@@ -186,8 +186,8 @@ fn main() {
                 records_count += 1;
                 elems_count += elementor.record_to_elems(record).len();
             }
-            println!("total records: {}", records_count);
-            println!("total elems:   {}", elems_count);
+            println!("total records: {records_count}");
+            println!("total elems:   {elems_count}");
         }
         (false, true) => {
             println!("total records: {}", parser.into_record_iter().count());
@@ -216,7 +216,7 @@ fn main() {
                 };
                 if let Err(e) = writeln!(stdout, "{}", &output_str) {
                     if e.kind() != std::io::ErrorKind::BrokenPipe {
-                        eprintln!("{}", e);
+                        eprintln!("{e}");
                     }
                     std::process::exit(1);
                 }

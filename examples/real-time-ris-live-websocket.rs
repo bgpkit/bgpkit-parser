@@ -24,11 +24,11 @@ fn main() {
         match parse_ris_live_message(msg.as_str()) {
             Ok(elems) => {
                 for elem in elems {
-                    println!("{}", elem);
+                    println!("{elem}");
                 }
             }
             Err(error) => {
-                println!("{:?}", error);
+                println!("{error:?}");
             }
         }
     }

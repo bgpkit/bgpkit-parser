@@ -363,9 +363,9 @@ mod tests {
         let asn = Asn::from_str("AS12345").unwrap();
         assert_eq!(12345, asn.to_u32());
         let asn = Asn::new_32bit(12345);
-        assert_eq!("12345", format!("{}", asn));
+        assert_eq!("12345", format!("{asn}"));
         let asn = Asn::new_32bit(12345);
-        assert_eq!("12345", format!("{:?}", asn));
+        assert_eq!("12345", format!("{asn:?}"));
     }
 
     #[test]

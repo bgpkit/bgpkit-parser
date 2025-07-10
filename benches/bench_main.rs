@@ -117,7 +117,7 @@ fn benchmark(c: &mut Criterion) {
                 programs_to_test.push((program, path));
             }
             Err(err) => {
-                println!("Unable to locate executable for {}: {}", name, err);
+                println!("Unable to locate executable for {name}: {err}");
             }
         }
     }

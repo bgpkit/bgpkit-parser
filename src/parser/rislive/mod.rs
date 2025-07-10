@@ -231,7 +231,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -242,7 +242,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -253,7 +253,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -264,7 +264,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 

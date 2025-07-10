@@ -25,8 +25,7 @@ pub trait ReadUtils: Buf {
         let remaining = self.remaining();
         if remaining < n {
             Err(TruncatedMsg(format!(
-                "not enough bytes to read. remaining: {}, required: {}",
-                remaining, n
+                "not enough bytes to read. remaining: {remaining}, required: {n}"
             )))
         } else {
             Ok(())
@@ -164,8 +163,7 @@ pub trait ReadUtils: Buf {
                 // 4 bytes -- u32
                 if byte_len > 4 {
                     return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
+                        "Invalid byte length for IPv4 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
                     )));
                 }
                 let mut buff = [0; 4];
@@ -179,8 +177,7 @@ pub trait ReadUtils: Buf {
                 // 16 bytes
                 if byte_len > 16 {
                     return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
+                        "Invalid byte length for IPv6 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
                     )));
                 }
                 self.has_n_remaining(byte_len)?;
@@ -195,8 +192,7 @@ pub trait ReadUtils: Buf {
             Ok(p) => p,
             Err(_) => {
                 return Err(ParserError::ParseError(format!(
-                    "Invalid network prefix length: {}",
-                    bit_len
+                    "Invalid network prefix length: {bit_len}"
                 )))
             }
         };
@@ -369,8 +365,7 @@ impl ComparableRegex {
             Ok(r) => r,
             Err(_) => {
                 return Err(ParserError::FilterError(format!(
-                    "Invalid regex pattern: {}",
-                    pattern
+                    "Invalid regex pattern: {pattern}"
                 )))
             }
         };

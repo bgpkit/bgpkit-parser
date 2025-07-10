@@ -19,10 +19,10 @@ fn handle_client(mut stream: TcpStream) {
                 // Convert the received data to a hexadecimal string
                 let hex_string = buffer[..bytes_read]
                     .iter()
-                    .map(|b| format!("{:02X}", b))
+                    .map(|b| format!("{b:02X}"))
                     .collect::<Vec<String>>()
                     .join(" ");
-                println!("Received data (hex): {}", hex_string);
+                println!("Received data (hex): {hex_string}");
 
                 let mut data = Bytes::from(buffer[..bytes_read].to_vec());
                 while data.remaining() > 0 {
@@ -36,7 +36,7 @@ fn handle_client(mut stream: TcpStream) {
                 }
             }
             Err(e) => {
-                eprintln!("Error reading from socket: {}", e);
+                eprintln!("Error reading from socket: {e}");
                 break;
             }
         }
@@ -58,7 +58,7 @@ fn main() {
                 child_thread.join().expect("Thread panicked");
             }
             Err(e) => {
-                eprintln!("Error accepting connection: {}", e);
+                eprintln!("Error accepting connection: {e}");
             }
         }
     }

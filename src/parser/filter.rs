@@ -118,43 +118,37 @@ impl Filter {
             "origin_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::OriginAsn(v)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse origin asn from {}",
-                    filter_value
+                    "cannot parse origin asn from {filter_value}"
                 ))),
             },
             "prefix" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::Exact)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
+                    "cannot parse prefix from {filter_value}"
                 ))),
             },
             "prefix_super" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSuper)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
+                    "cannot parse prefix from {filter_value}"
                 ))),
             },
             "prefix_sub" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSub)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
+                    "cannot parse prefix from {filter_value}"
                 ))),
             },
             "prefix_super_sub" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::IncludeSuperSub)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse prefix from {}",
-                    filter_value
+                    "cannot parse prefix from {filter_value}"
                 ))),
             },
             "peer_ip" => match IpAddr::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerIp(v)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse peer IP from {}",
-                    filter_value
+                    "cannot parse peer IP from {filter_value}"
                 ))),
             },
             "peer_ips" => {
@@ -164,8 +158,7 @@ impl Filter {
                         Ok(v) => ips.push(v),
                         Err(_) => {
                             return Err(FilterError(format!(
-                                "cannot parse peer IP from {}",
-                                ip_str
+                                "cannot parse peer IP from {ip_str}"
                             )))
                         }
                     }
@@ -175,55 +168,48 @@ impl Filter {
             "peer_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerAsn(v)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse peer asn from {}",
-                    filter_value
+                    "cannot parse peer asn from {filter_value}"
                 ))),
             },
             "type" => match filter_value {
                 "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
                 "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
                 _ => Err(FilterError(format!(
-                    "cannot parse elem type from {}",
-                    filter_value
+                    "cannot parse elem type from {filter_value}"
                 ))),
             },
             "ts_start" | "start_ts" => match parse_time_str(filter_value) {
                 Some(t) => Ok(Filter::TsStart(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
-                    "cannot parse TsStart filter from {}",
-                    filter_value
+                    "cannot parse TsStart filter from {filter_value}"
                 ))),
             },
             "ts_end" | "end_ts" => match parse_time_str(filter_value) {
                 Some(t) => Ok(Filter::TsEnd(t.and_utc().timestamp() as f64)),
                 None => Err(FilterError(format!(
-                    "cannot parse TsEnd filter from {}",
-                    filter_value
+                    "cannot parse TsEnd filter from {filter_value}"
                 ))),
             },
             "as_path" => match ComparableRegex::new(filter_value) {
                 Ok(v) => Ok(Filter::AsPath(v)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse AS path regex from {}",
-                    filter_value
+                    "cannot parse AS path regex from {filter_value}"
                 ))),
             },
             "community" => match ComparableRegex::new(filter_value) {
                 Ok(v) => Ok(Filter::Community(v)),
                 Err(_) => Err(FilterError(format!(
-                    "cannot parse Community regex from {}",
-                    filter_value
+                    "cannot parse Community regex from {filter_value}"
                 ))),
             },
             "ip_version" | "ip" => match filter_value {
                 "4" | "v4" | "ipv4" => Ok(Filter::IpVersion(IpVersion::Ipv4)),
                 "6" | "v6" | "ipv6" => Ok(Filter::IpVersion(IpVersion::Ipv6)),
                 _ => Err(FilterError(format!(
-                    "cannot parse IP version from {}",
-                    filter_value
+                    "cannot parse IP version from {filter_value}"
                 ))),
             },
-            _ => Err(FilterError(format!("unknown filter type: {}", filter_type))),
+            _ => Err(FilterError(format!("unknown filter type: {filter_type}"))),
         }
     }
 }

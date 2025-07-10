@@ -270,7 +270,7 @@ mod tests {
             assert_eq!(nlri.prefixes[0], prefix);
             assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
         } else {
-            panic!("Unexpected result: {:?}", res);
+            panic!("Unexpected result: {res:?}");
         }
     }
 

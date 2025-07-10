@@ -29,8 +29,7 @@ fn extract_afi_safi_from_rib_type(rib_type: &TableDumpV2Type) -> Result<(Afi, Sa
         }
         _ => {
             return Err(ParserError::ParseError(format!(
-                "wrong RIB type for parsing: {:?}",
-                rib_type
+                "wrong RIB type for parsing: {rib_type:?}"
             )))
         }
     };

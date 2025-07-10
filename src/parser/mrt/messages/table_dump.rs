@@ -51,8 +51,7 @@ pub fn parse_table_dump_message(
         2 => Afi::Ipv6,
         _ => {
             return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
+                "Invalid subtype found for TABLE_DUMP (V1) message: {sub_type}"
             )))
         }
     };

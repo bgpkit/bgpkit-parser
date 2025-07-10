@@ -87,12 +87,12 @@ fn add_suffix_to_filename(filename: &str, suffix: &str) -> String {
     let mut parts: Vec<&str> = filename.split('.').collect(); // Split filename by dots
     if parts.len() > 1 {
         let last_part = parts.pop().unwrap(); // Remove the last part (suffix) from the parts vector
-        let new_last_part = format!("{}.{}", suffix, last_part); // Add the suffix to the last part
+        let new_last_part = format!("{suffix}.{last_part}"); // Add the suffix to the last part
         parts.push(&new_last_part); // Add the updated last part back to the parts vector
         parts.join(".") // Join the parts back into a filename string with dots
     } else {
         // If the filename does not have any dots, simply append the suffix to the end
-        format!("{}.{}", filename, suffix)
+        format!("{filename}.{suffix}")
     }
 }
 

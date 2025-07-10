@@ -36,9 +36,9 @@ impl NextHopAddress {
 impl Debug for NextHopAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            NextHopAddress::Ipv4(x) => write!(f, "{}", x),
-            NextHopAddress::Ipv6(x) => write!(f, "{}", x),
-            NextHopAddress::Ipv6LinkLocal(x, y) => write!(f, "Ipv6LinkLocal({}, {})", x, y),
+            NextHopAddress::Ipv4(x) => write!(f, "{x}"),
+            NextHopAddress::Ipv6(x) => write!(f, "{x}"),
+            NextHopAddress::Ipv6LinkLocal(x, y) => write!(f, "Ipv6LinkLocal({x}, {y})"),
         }
     }
 }
@@ -46,9 +46,9 @@ impl Debug for NextHopAddress {
 impl Display for NextHopAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            NextHopAddress::Ipv4(v) => write!(f, "{}", v),
-            NextHopAddress::Ipv6(v) => write!(f, "{}", v),
-            NextHopAddress::Ipv6LinkLocal(v, _) => write!(f, "{}", v),
+            NextHopAddress::Ipv4(v) => write!(f, "{v}"),
+            NextHopAddress::Ipv6(v) => write!(f, "{v}"),
+            NextHopAddress::Ipv6LinkLocal(v, _) => write!(f, "{v}"),
         }
     }
 }
@@ -134,10 +134,10 @@ mod tests {
         let next_hop_ipv6_link_local =
             NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
 
-        assert_eq!(format!("{:?}", next_hop_ipv4), "192.0.2.1");
-        assert_eq!(format!("{:?}", next_hop_ipv6), "2001:db8::1");
+        assert_eq!(format!("{next_hop_ipv4:?}"), "192.0.2.1");
+        assert_eq!(format!("{next_hop_ipv6:?}"), "2001:db8::1");
         assert_eq!(
-            format!("{:?}", next_hop_ipv6_link_local),
+            format!("{next_hop_ipv6_link_local:?}"),
             "Ipv6LinkLocal(fe80::, fe80::)"
         );
     }
@@ -156,8 +156,8 @@ mod tests {
         let next_hop_ipv6_link_local =
             NextHopAddress::Ipv6LinkLocal(ipv6_link_local_addrs.0, ipv6_link_local_addrs.1);
 
-        assert_eq!(format!("{}", next_hop_ipv4), "192.0.2.1");
-        assert_eq!(format!("{}", next_hop_ipv6), "2001:db8::1");
-        assert_eq!(format!("{}", next_hop_ipv6_link_local), "fe80::");
+        assert_eq!(format!("{next_hop_ipv4}"), "192.0.2.1");
+        assert_eq!(format!("{next_hop_ipv6}"), "2001:db8::1");
+        assert_eq!(format!("{next_hop_ipv6_link_local}"), "fe80::");
     }
 }

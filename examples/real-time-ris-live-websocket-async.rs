@@ -30,11 +30,11 @@ async fn main() {
         match parse_ris_live_message(msg_str.as_str()) {
             Ok(elems) => {
                 for elem in elems {
-                    println!("{}", elem);
+                    println!("{elem}");
                 }
             }
             Err(err) => {
-                eprintln!("{}", err);
+                eprintln!("{err}");
             }
         }
     }
