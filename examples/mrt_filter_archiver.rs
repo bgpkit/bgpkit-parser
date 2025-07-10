@@ -36,9 +36,7 @@ fn main() {
     // make sure to properly flush bytes from writer
     drop(mrt_writer);
 
-    println!(
-        "Found and archived {records_count} MRT records, {elems_count} BGP messages"
-    );
+    println!("Found and archived {records_count} MRT records, {elems_count} BGP messages");
 
     let elems = bgpkit_parser::BgpkitParser::new(OUTPUT_FILE)
         .unwrap()

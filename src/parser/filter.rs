@@ -157,9 +157,7 @@ impl Filter {
                     match IpAddr::from_str(ip_str) {
                         Ok(v) => ips.push(v),
                         Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse peer IP from {ip_str}"
-                            )))
+                            return Err(FilterError(format!("cannot parse peer IP from {ip_str}")))
                         }
                     }
                 }
