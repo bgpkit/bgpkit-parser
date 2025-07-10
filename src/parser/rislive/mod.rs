@@ -24,10 +24,10 @@ fn main() {
 
     // subscribe to messages from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
-    socket.write_message(Message::Text(msg)).unwrap();
+    socket.send(Message::Text(msg.into())).unwrap();
 
     loop {
-        let msg = socket.read_message().expect("Error reading message").to_string();
+        let msg = socket.read().expect("Error reading message").to_string();
         if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);

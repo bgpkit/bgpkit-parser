@@ -14,7 +14,9 @@ fn main() {
 
     // subscribe to messages from one collector
     let msg = RisSubscribe::new().host("rrc21");
-    socket.send(Message::Text(msg.to_json_string())).unwrap();
+    socket
+        .send(Message::Text(msg.to_json_string().into()))
+        .unwrap();
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
