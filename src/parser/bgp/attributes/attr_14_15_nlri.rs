@@ -331,4 +331,90 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn test_parsing_unreachable_nlri() {
+        // Test unreachable NLRI (withdrawals)
+        let test_bytes = Bytes::from(vec![
+            0x00, 0x01, // address family: IPv4
+            0x01, // safi: unicast
+            // No next hop for unreachable NLRI
+            // No reserved byte for unreachable NLRI
+            // NLRI
+            0x18, // 24 bits prefix length
+            0xC0, 0x00, 0x02, // 192.0.2
+        ]);
+        let res = parse_nlri(test_bytes, &None, &None, &None, false, false);
+
+        if let Ok(AttributeValue::MpUnreachNlri(nlri)) = res {
+            assert_eq!(nlri.afi, Afi::Ipv4);
+            assert_eq!(nlri.safi, Safi::Unicast);
+            assert_eq!(nlri.next_hop, None);
+            assert_eq!(
+                nlri.prefixes,
+                vec![NetworkPrefix::from_str("192.0.2.0/24").unwrap()]
+            );
+        } else {
+            panic!("Unexpected result: {res:?}");
+        }
+    }
+
+    #[test]
+    fn test_encode_unreachable_nlri() {
+        // Test encoding unreachable NLRI (withdrawals)
+        let nlri = Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: None,
+            prefixes: vec![NetworkPrefix {
+                prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
+                path_id: 0,
+            }],
+        };
+        let bytes = encode_nlri(&nlri, false, false);
+        assert_eq!(
+            bytes,
+            Bytes::from(vec![
+                0x00, 0x01, // address family: IPv4
+                0x01, // safi: unicast
+                // No next hop for unreachable NLRI
+                // No reserved byte for unreachable NLRI
+                // NLRI
+                0x18, // 24 bits prefix length
+                0xC0, 0x00, 0x01, // 192.0.1
+            ])
+        );
+
+        // Test that the encoded bytes can be parsed back correctly
+        let parsed_nlri = parse_nlri(bytes, &None, &None, &None, false, false).unwrap();
+        assert_eq!(parsed_nlri, AttributeValue::MpUnreachNlri(nlri));
+
+        // Test with next_hop set (should be encoded for unreachable NLRI)
+        let nlri_with_next_hop = Nlri {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            next_hop: Some(NextHopAddress::Ipv4(
+                Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            )),
+            prefixes: vec![NetworkPrefix {
+                prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
+                path_id: 0,
+            }],
+        };
+        let bytes = encode_nlri(&nlri_with_next_hop, false, false);
+        // The encoded bytes should include the next_hop
+        assert_eq!(
+            bytes,
+            Bytes::from(vec![
+                0x00, 0x01, // address family: IPv4
+                0x01, // safi: unicast
+                0x04, // next hop length: 4
+                0x0A, 0x00, 0x00, 0x01, // next hop: 10.0.0.1
+                // No reserved byte for unreachable NLRI
+                // NLRI
+                0x18, // 24 bits prefix length
+                0xC0, 0x00, 0x01, // 192.0.1
+            ])
+        );
+    }
 }

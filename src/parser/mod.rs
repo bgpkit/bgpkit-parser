@@ -184,4 +184,37 @@ mod tests {
         let count = parser.into_elem_iter().count();
         assert_eq!(8160, count);
     }
+
+    #[test]
+    fn test_add_suffix_to_filename() {
+        // Test with a filename that has dots
+        let filename = "example.txt";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.suffix.txt");
+
+        // Test with a filename that has multiple dots
+        let filename = "example.tar.gz";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.tar.suffix.gz");
+
+        // Test with a filename that has no dots
+        let filename = "example";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.suffix");
+
+        // Test with an empty filename
+        let filename = "";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, ".suffix");
+
+        // Test with an empty suffix
+        let filename = "example.txt";
+        let suffix = "";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example..txt");
+    }
 }

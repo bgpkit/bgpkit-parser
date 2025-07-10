@@ -668,4 +668,64 @@ mod tests {
         // Test invalid pattern creation
         ComparableRegex::new(r"(\d+").unwrap(); // Unclosed parenthesis should panic
     }
+
+    #[test]
+    fn test_parse_nlri_list() {
+        // Test normal case with add_path=false
+        let input = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01, 0x18, 0xC0, 0xA8, 0x02]);
+        let expected = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                0,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                0,
+            ),
+        ];
+        assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
+
+        // Test normal case with add_path=true
+        let input = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01, 0x00, 0x00, 0x00, 0x02, 0x18, 0xC0,
+            0xA8, 0x02,
+        ]);
+        let expected = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                1,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                2,
+            ),
+        ];
+        assert_eq!(parse_nlri_list(input, true, &Afi::Ipv4).unwrap(), expected);
+
+        // Test the auto-detection of add_path when first byte is 0
+        let input = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
+        let expected = vec![NetworkPrefix::new(
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+            1,
+        )];
+        assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_convert_timestamp() {
+        // Test integer timestamp
+        let (seconds, microseconds) = convert_timestamp(1609459200.0);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 0);
+
+        // Test fractional timestamp
+        let (seconds, microseconds) = convert_timestamp(1609459200.123456);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 123456);
+
+        // Test rounding
+        let (seconds, microseconds) = convert_timestamp(1609459200.1234567);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 123456); // Should round to microseconds
+    }
 }

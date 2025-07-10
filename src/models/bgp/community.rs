@@ -430,6 +430,30 @@ mod tests {
     }
 
     #[test]
+    fn test_to_hex_string() {
+        // Test empty array
+        assert_eq!(format!("{}", ToHexString(&[])), "");
+
+        // Test single byte
+        assert_eq!(format!("{}", ToHexString(&[0x0A])), "0A");
+
+        // Test multiple bytes
+        assert_eq!(format!("{}", ToHexString(&[0x0A, 0x0B, 0x0C])), "0A0B0C");
+
+        // Test zero byte
+        assert_eq!(format!("{}", ToHexString(&[0x00])), "00");
+
+        // Test byte with value > 0x0F (needs two hex digits)
+        assert_eq!(format!("{}", ToHexString(&[0x10])), "10");
+
+        // Test mixed bytes
+        assert_eq!(
+            format!("{}", ToHexString(&[0x00, 0x0F, 0x10, 0xFF])),
+            "000F10FF"
+        );
+    }
+
+    #[test]
     #[cfg(feature = "serde")]
     fn test_serde() {
         let meta_community = MetaCommunity::Large(LargeCommunity::new(1, [2, 3]));
