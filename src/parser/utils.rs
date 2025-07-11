@@ -166,11 +166,9 @@ pub trait ReadUtils: Buf {
                         "Invalid byte length for IPv4 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
                     )));
                 }
-                let mut buff = [0; 4];
                 self.has_n_remaining(byte_len)?;
-                for i in 0..byte_len {
-                    buff[i] = self.get_u8();
-                }
+                let mut buff = [0; 4];
+                self.copy_to_slice(&mut buff[..byte_len]);
                 IpAddr::V4(Ipv4Addr::from(buff))
             }
             Afi::Ipv6 => {
@@ -182,9 +180,7 @@ pub trait ReadUtils: Buf {
                 }
                 self.has_n_remaining(byte_len)?;
                 let mut buff = [0; 16];
-                for i in 0..byte_len {
-                    buff[i] = self.get_u8();
-                }
+                self.copy_to_slice(&mut buff[..byte_len]);
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
