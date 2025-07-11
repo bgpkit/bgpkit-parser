@@ -14,7 +14,6 @@ pub use error::*;
 pub use role::*;
 
 use crate::models::network::*;
-use crate::Elementor;
 use capabilities::BgpCapabilityType;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
