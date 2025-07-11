@@ -14,6 +14,7 @@ pub use error::*;
 pub use role::*;
 
 use crate::models::network::*;
+use crate::Elementor;
 use capabilities::BgpCapabilityType;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
@@ -111,9 +112,27 @@ pub struct Capability {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// BGP Update Message.
+///
+/// Corresponding RFC section: <https://datatracker.ietf.org/doc/html/rfc4271#section-4.3>
 pub struct BgpUpdateMessage {
+    /// Withdrawn prefixes.
+    ///
+    /// WARN: directly accessing this field is not recommended because other withdrawn prefixes
+    /// may be present in the attribute [AttributeValue::MpUnreachNlri].
+    ///
+    /// See [Elementor::bgp_update_to_elems] for the implementation of getting all prefixes.
     pub withdrawn_prefixes: Vec<NetworkPrefix>,
+
+    /// BGP path attributes.
     pub attributes: Attributes,
+
+    /// Network prefixes that are being advertised.
+    ///
+    /// WARN: directly accessing this field is not recommended because other advertised prefixes
+    /// may be present in the attribute [AttributeValue::MpReachNlri].
+    ///
+    /// See [Elementor::bgp_update_to_elems] for the implementation of getting all prefixes.
     pub announced_prefixes: Vec<NetworkPrefix>,
 }
 
