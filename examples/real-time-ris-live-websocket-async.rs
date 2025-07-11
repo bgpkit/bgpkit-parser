@@ -15,7 +15,7 @@ async fn main() {
     let msg = RisSubscribe::new().host("rrc21");
     let (mut write, mut read) = ws_stream.split();
     write
-        .send(Message::Text(msg.to_json_string()))
+        .send(Message::Text(msg.to_json_string().into()))
         .await
         .unwrap();
 
@@ -30,11 +30,11 @@ async fn main() {
         match parse_ris_live_message(msg_str.as_str()) {
             Ok(elems) => {
                 for elem in elems {
-                    println!("{}", elem);
+                    println!("{elem}");
                 }
             }
             Err(err) => {
-                eprintln!("{}", err);
+                eprintln!("{err}");
             }
         }
     }

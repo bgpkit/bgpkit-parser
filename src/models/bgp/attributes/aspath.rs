@@ -764,10 +764,10 @@ impl Display for AsPath {
                 AsPathSegment::AsSequence(v) | AsPathSegment::ConfedSequence(v) => {
                     let mut asn_iter = v.iter();
                     if let Some(first_element) = asn_iter.next() {
-                        write!(f, "{}", first_element)?;
+                        write!(f, "{first_element}")?;
 
                         for asn in asn_iter {
-                            write!(f, " {}", asn)?;
+                            write!(f, " {asn}")?;
                         }
                     }
                 }
@@ -775,10 +775,10 @@ impl Display for AsPath {
                     write!(f, "{{")?;
                     let mut asn_iter = v.iter();
                     if let Some(first_element) = asn_iter.next() {
-                        write!(f, "{}", first_element)?;
+                        write!(f, "{first_element}")?;
 
                         for asn in asn_iter {
-                            write!(f, ",{}", asn)?;
+                            write!(f, ",{asn}")?;
                         }
                     }
                     write!(f, "}}")?;

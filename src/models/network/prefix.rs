@@ -192,6 +192,6 @@ mod tests {
     fn test_debug() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
         let network_prefix = NetworkPrefix::new(prefix, 1);
-        assert_eq!(format!("{:?}", network_prefix), "192.168.0.0/24#1");
+        assert_eq!(format!("{network_prefix:?}"), "192.168.0.0/24#1");
     }
 }

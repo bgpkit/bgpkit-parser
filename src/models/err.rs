@@ -11,7 +11,7 @@ impl Display for BgpModelsError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             BgpModelsError::PrefixParsingError(msg) => {
-                write!(f, "cannot convert str to IP prefix: {}", msg)
+                write!(f, "cannot convert str to IP prefix: {msg}")
             }
         }
     }

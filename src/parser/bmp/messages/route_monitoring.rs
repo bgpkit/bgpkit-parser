@@ -65,7 +65,7 @@ mod tests {
             bgp_message: BgpMessage::Update(msg),
         };
         assert_eq!(
-            format!("{:?}", mon_msg),
+            format!("{mon_msg:?}"),
             "RouteMonitoring { bgp_message: Update(BgpUpdateMessage { withdrawn_prefixes: [], attributes: Attributes { inner: [] }, announced_prefixes: [] }) }"
         );
     }

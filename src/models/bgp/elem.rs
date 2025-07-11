@@ -208,7 +208,7 @@ impl<T: Display> Display for OptionToStr<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             None => Ok(()),
-            Some(x) => write!(f, "{}", x),
+            Some(x) => write!(f, "{x}"),
         }
     }
 }

@@ -19,7 +19,7 @@ impl Display for ParserRisliveError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ParserRisliveError::IncorrectJson(msg) => {
-                write!(f, "incorrect json message: {}", msg)
+                write!(f, "incorrect json message: {msg}")
             }
             ParserRisliveError::IncorrectRawBytes => {
                 write!(f, "incorrect raw bytes")
@@ -31,16 +31,16 @@ impl Display for ParserRisliveError {
                 write!(f, "irregular ris live format")
             }
             ParserRisliveError::ElemIncorrectPrefix(msg) => {
-                write!(f, "incorrect prefix string: {}", msg)
+                write!(f, "incorrect prefix string: {msg}")
             }
             ParserRisliveError::ElemUnknownOriginType(msg) => {
-                write!(f, "unknown origin type: {}", msg)
+                write!(f, "unknown origin type: {msg}")
             }
             ParserRisliveError::ElemIncorrectAggregator(msg) => {
-                write!(f, "incorrect aggregator string: {}", msg)
+                write!(f, "incorrect aggregator string: {msg}")
             }
             ParserRisliveError::ElemIncorrectIp(msg) => {
-                write!(f, "incorrect IP string: {}", msg)
+                write!(f, "incorrect IP string: {msg}")
             }
             ParserRisliveError::ElemEndOfRibPrefix => {
                 write!(f, "found 'eor' (End of RIB) prefix")
@@ -104,30 +104,30 @@ mod tests {
     #[test]
     fn test_ris_live_error_debug() {
         let err = ParserRisliveError::IncorrectJson("test".to_string());
-        assert_eq!(format!("{:?}", err), "IncorrectJson(\"test\")");
+        assert_eq!(format!("{err:?}"), "IncorrectJson(\"test\")");
 
         let err = ParserRisliveError::IncorrectRawBytes;
-        assert_eq!(format!("{:?}", err), "IncorrectRawBytes");
+        assert_eq!(format!("{err:?}"), "IncorrectRawBytes");
 
         let err = ParserRisliveError::UnsupportedMessage;
-        assert_eq!(format!("{:?}", err), "UnsupportedMessage");
+        assert_eq!(format!("{err:?}"), "UnsupportedMessage");
 
         let err = ParserRisliveError::IrregularRisLiveFormat;
-        assert_eq!(format!("{:?}", err), "IrregularRisLiveFormat");
+        assert_eq!(format!("{err:?}"), "IrregularRisLiveFormat");
 
         let err = ParserRisliveError::ElemIncorrectPrefix("test".to_string());
-        assert_eq!(format!("{:?}", err), "ElemIncorrectPrefix(\"test\")");
+        assert_eq!(format!("{err:?}"), "ElemIncorrectPrefix(\"test\")");
 
         let err = ParserRisliveError::ElemUnknownOriginType("test".to_string());
-        assert_eq!(format!("{:?}", err), "ElemUnknownOriginType(\"test\")");
+        assert_eq!(format!("{err:?}"), "ElemUnknownOriginType(\"test\")");
 
         let err = ParserRisliveError::ElemIncorrectAggregator("test".to_string());
-        assert_eq!(format!("{:?}", err), "ElemIncorrectAggregator(\"test\")");
+        assert_eq!(format!("{err:?}"), "ElemIncorrectAggregator(\"test\")");
 
         let err = ParserRisliveError::ElemIncorrectIp("test".to_string());
-        assert_eq!(format!("{:?}", err), "ElemIncorrectIp(\"test\")");
+        assert_eq!(format!("{err:?}"), "ElemIncorrectIp(\"test\")");
 
         let err = ParserRisliveError::ElemEndOfRibPrefix;
-        assert_eq!(format!("{:?}", err), "ElemEndOfRibPrefix");
+        assert_eq!(format!("{err:?}"), "ElemEndOfRibPrefix");
     }
 }

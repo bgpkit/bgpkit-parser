@@ -118,8 +118,7 @@ pub fn parse_mrt_body(
         v => {
             // deprecated
             return Err(ParserError::Unsupported(format!(
-                "unsupported MRT type: {:?}",
-                v
+                "unsupported MRT type: {v:?}"
             )));
         }
     };

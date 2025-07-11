@@ -51,8 +51,7 @@ pub fn parse_table_dump_message(
         2 => Afi::Ipv6,
         _ => {
             return Err(ParserError::ParseError(format!(
-                "Invalid subtype found for TABLE_DUMP (V1) message: {}",
-                sub_type
+                "Invalid subtype found for TABLE_DUMP (V1) message: {sub_type}"
             )))
         }
     };
@@ -246,5 +245,40 @@ mod tests {
         // test encoding
         let encoded = table_dump_message.encode();
         assert_eq!(encoded, bytes);
+    }
+
+    #[test]
+    fn test_parse_table_dump_message_invalid_subtype() {
+        // Create a simple byte array for testing
+        let mut bytes_mut = BytesMut::new();
+        bytes_mut.put_u16(VIEW_NUMBER);
+        bytes_mut.put_u16(SEQUENCE_NUMBER);
+        let bytes = bytes_mut.freeze();
+
+        // Test with an invalid sub_type (not 1 or 2)
+        let result = parse_table_dump_message(0, bytes.clone());
+        assert!(result.is_err(), "Expected error for invalid sub_type");
+
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(
+                msg.contains("Invalid subtype"),
+                "Expected error message to mention invalid subtype"
+            );
+        } else {
+            panic!("Expected ParseError for invalid sub_type");
+        }
+
+        // Test with another invalid sub_type
+        let result = parse_table_dump_message(3, bytes);
+        assert!(result.is_err(), "Expected error for invalid sub_type");
+
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(
+                msg.contains("Invalid subtype"),
+                "Expected error message to mention invalid subtype"
+            );
+        } else {
+            panic!("Expected ParseError for invalid sub_type");
+        }
     }
 }

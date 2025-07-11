@@ -25,8 +25,7 @@ pub trait ReadUtils: Buf {
         let remaining = self.remaining();
         if remaining < n {
             Err(TruncatedMsg(format!(
-                "not enough bytes to read. remaining: {}, required: {}",
-                remaining, n
+                "not enough bytes to read. remaining: {remaining}, required: {n}"
             )))
         } else {
             Ok(())
@@ -164,30 +163,24 @@ pub trait ReadUtils: Buf {
                 // 4 bytes -- u32
                 if byte_len > 4 {
                     return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv4 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
+                        "Invalid byte length for IPv4 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
                     )));
                 }
-                let mut buff = [0; 4];
                 self.has_n_remaining(byte_len)?;
-                for i in 0..byte_len {
-                    buff[i] = self.get_u8();
-                }
+                let mut buff = [0; 4];
+                self.copy_to_slice(&mut buff[..byte_len]);
                 IpAddr::V4(Ipv4Addr::from(buff))
             }
             Afi::Ipv6 => {
                 // 16 bytes
                 if byte_len > 16 {
                     return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv6 prefix. byte_len: {}, bit_len: {}",
-                        byte_len, bit_len
+                        "Invalid byte length for IPv6 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
                     )));
                 }
                 self.has_n_remaining(byte_len)?;
                 let mut buff = [0; 16];
-                for i in 0..byte_len {
-                    buff[i] = self.get_u8();
-                }
+                self.copy_to_slice(&mut buff[..byte_len]);
                 IpAddr::V6(Ipv6Addr::from(buff))
             }
         };
@@ -195,8 +188,7 @@ pub trait ReadUtils: Buf {
             Ok(p) => p,
             Err(_) => {
                 return Err(ParserError::ParseError(format!(
-                    "Invalid network prefix length: {}",
-                    bit_len
+                    "Invalid network prefix length: {bit_len}"
                 )))
             }
         };
@@ -369,8 +361,7 @@ impl ComparableRegex {
             Ok(r) => r,
             Err(_) => {
                 return Err(ParserError::FilterError(format!(
-                    "Invalid regex pattern: {}",
-                    pattern
+                    "Invalid regex pattern: {pattern}"
                 )))
             }
         };
@@ -672,5 +663,65 @@ mod tests {
     fn test_comparable_regex_invalid_pattern_panic() {
         // Test invalid pattern creation
         ComparableRegex::new(r"(\d+").unwrap(); // Unclosed parenthesis should panic
+    }
+
+    #[test]
+    fn test_parse_nlri_list() {
+        // Test normal case with add_path=false
+        let input = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01, 0x18, 0xC0, 0xA8, 0x02]);
+        let expected = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                0,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                0,
+            ),
+        ];
+        assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
+
+        // Test normal case with add_path=true
+        let input = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01, 0x00, 0x00, 0x00, 0x02, 0x18, 0xC0,
+            0xA8, 0x02,
+        ]);
+        let expected = vec![
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+                1,
+            ),
+            NetworkPrefix::new(
+                IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
+                2,
+            ),
+        ];
+        assert_eq!(parse_nlri_list(input, true, &Afi::Ipv4).unwrap(), expected);
+
+        // Test the auto-detection of add_path when first byte is 0
+        let input = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
+        let expected = vec![NetworkPrefix::new(
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
+            1,
+        )];
+        assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_convert_timestamp() {
+        // Test integer timestamp
+        let (seconds, microseconds) = convert_timestamp(1609459200.0);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 0);
+
+        // Test fractional timestamp
+        let (seconds, microseconds) = convert_timestamp(1609459200.123456);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 123456);
+
+        // Test rounding
+        let (seconds, microseconds) = convert_timestamp(1609459200.1234567);
+        assert_eq!(seconds, 1609459200);
+        assert_eq!(microseconds, 123456); // Should round to microseconds
     }
 }

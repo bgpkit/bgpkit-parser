@@ -24,10 +24,10 @@ fn main() {
 
     // subscribe to messages from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
-    socket.write_message(Message::Text(msg)).unwrap();
+    socket.send(Message::Text(msg.into())).unwrap();
 
     loop {
-        let msg = socket.read_message().expect("Error reading message").to_string();
+        let msg = socket.read().expect("Error reading message").to_string();
         if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);
@@ -231,7 +231,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -242,7 +242,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -253,7 +253,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -264,7 +264,7 @@ mod tests {
         "#;
         let msg = parse_ris_live_message(msg_str).unwrap();
         for elem in msg {
-            println!("{}", elem);
+            println!("{elem}");
         }
     }
 
@@ -305,5 +305,62 @@ mod tests {
         let parse_result = parse_prefix(&prefix_str);
         assert!(parse_result.is_err());
         matches!(parse_result, Err(ParserRisliveError::ElemEndOfRibPrefix));
+    }
+
+    #[test]
+    fn test_unknown_origin_type() {
+        // Test with an unknown origin type
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1636247118.76,"peer":"2001:7f8:24::82","peer_asn":"58299","id":"20-5761-238131559","host":"rrc20","type":"UPDATE","path":[58299,49981,397666],"origin":"unknown","announcements":[{"next_hop":"2001:7f8:24::82","prefixes":["2602:fd9e:f00::/40"]}]}}
+        "#;
+
+        let result = parse_ris_live_message(msg_str);
+        assert!(result.is_err());
+
+        if let Err(ParserRisliveError::ElemUnknownOriginType(origin_type)) = result {
+            assert_eq!(origin_type, "unknown");
+        } else {
+            panic!("Expected ElemUnknownOriginType error");
+        }
+    }
+
+    #[test]
+    fn test_incorrect_aggregator_format() {
+        // Test with an incorrect aggregator format (missing colon)
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1636247118.76,"peer":"2001:7f8:24::82","peer_asn":"58299","id":"20-5761-238131559","host":"rrc20","type":"UPDATE","path":[58299,49981,397666],"origin":"igp","aggregator":"65000-8.42.232.1","announcements":[{"next_hop":"2001:7f8:24::82","prefixes":["2602:fd9e:f00::/40"]}]}}
+        "#;
+
+        let result = parse_ris_live_message(msg_str);
+        assert!(result.is_err());
+
+        if let Err(ParserRisliveError::ElemIncorrectAggregator(aggregator)) = result {
+            assert_eq!(aggregator, "65000-8.42.232.1");
+        } else {
+            panic!("Expected ElemIncorrectAggregator error");
+        }
+    }
+
+    #[test]
+    fn test_non_ris_message() {
+        // Test with a non-RIS message
+        let msg_str = r#"
+        {"type": "other_message","data":{}}
+        "#;
+
+        let result = parse_ris_live_message(msg_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_non_update_message() {
+        // Test with a RIS message that is not an UPDATE message
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1636247118.76,"peer":"2001:7f8:24::82","peer_asn":"58299","id":"20-5761-238131559","host":"rrc20","type":"OTHER","msg":{"type":"OTHER"}}}
+        "#;
+
+        let result = parse_ris_live_message(msg_str);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
     }
 }

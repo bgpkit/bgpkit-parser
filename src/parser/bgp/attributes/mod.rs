@@ -185,8 +185,7 @@ pub fn parse_attributes(
             }
             AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
             _ => Err(ParserError::Unsupported(format!(
-                "unsupported attribute type: {:?}",
-                attr_type
+                "unsupported attribute type: {attr_type:?}"
             ))),
         };
 

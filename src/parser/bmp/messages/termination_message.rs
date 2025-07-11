@@ -122,7 +122,59 @@ mod tests {
                     TerminationTlvValue::Reason(TerminationReason::UnspecifiedReason)
                 );
             }
-            Err(e) => panic!("Failed to parse: {}", e),
+            Err(e) => panic!("Failed to parse: {e}"),
         }
+    }
+
+    #[test]
+    fn test_parse_termination_message_truncated() {
+        // Test case where there's not enough bytes to read for a TLV
+
+        // Case 1: Not enough bytes for info_len
+        let mut data = Bytes::copy_from_slice(&[
+            0, 0, // info_type: String
+            0, // Only one byte for info_len, should be two
+        ]);
+
+        let result = parse_termination_message(&mut data);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().tlvs.len(), 0);
+
+        // Case 2: Not enough bytes for info_value
+        let mut data = Bytes::copy_from_slice(&[
+            0, 0, // info_type: String
+            0, 5, // info_len: 5
+            67, 79, 68, // Only 3 bytes for info_value, should be 5
+        ]);
+
+        let result = parse_termination_message(&mut data);
+        // This should still succeed, but with an empty TLV list
+        // because the function breaks out of the loop when there's not enough bytes
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().tlvs.len(), 0);
+
+        // Case 3: Not enough bytes for the second TLV's info_value
+        let mut data = Bytes::copy_from_slice(&[
+            0, 0, // info_type: String
+            0, 5, // info_len: 5
+            67, 79, 68, 69, 83, // info: "CODES"
+            0, 1, // info_type: Reason
+            0, 2, // info_len: 2
+            0, // Only one byte for info_value, should be two
+        ]);
+
+        let result = parse_termination_message(&mut data);
+        // This should still succeed, but with only the first TLV
+        assert!(result.is_ok());
+        let termination_message = result.unwrap();
+        assert_eq!(termination_message.tlvs.len(), 1);
+        assert_eq!(
+            termination_message.tlvs[0].info_type,
+            TerminationTlvType::String
+        );
+        assert_eq!(
+            termination_message.tlvs[0].info_value,
+            TerminationTlvValue::String("CODES".to_string())
+        );
     }
 }

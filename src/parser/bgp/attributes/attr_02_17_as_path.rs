@@ -34,8 +34,7 @@ fn parse_as_path_segment(
         AS_PATH_CONFED_SEQUENCE => Ok(AsPathSegment::ConfedSequence(path)),
         AS_PATH_CONFED_SET => Ok(AsPathSegment::ConfedSet(path)),
         _ => Err(ParserError::ParseError(format!(
-            "Invalid AS path segment type: {}",
-            segment_type
+            "Invalid AS path segment type: {segment_type}"
         ))),
     }
 }

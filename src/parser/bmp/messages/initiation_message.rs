@@ -92,7 +92,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            format!("{:?}", initiation_message),
+            format!("{initiation_message:?}"),
             "InitiationMessage { tlvs: [InitiationTlv { info_type: SysDescr, info_len: 5, info: \"Test1\" }] }"
         );
     }

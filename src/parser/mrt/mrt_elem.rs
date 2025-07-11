@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr};
 
+#[derive(Default, Debug, Clone)]
 pub struct Elementor {
     peer_table: Option<PeerIndexTable>,
 }
@@ -156,7 +157,7 @@ fn get_relevant_attributes(
 
 impl Elementor {
     pub fn new() -> Elementor {
-        Elementor { peer_table: None }
+        Self::default()
     }
 
     /// Convert a [BgpMessage] to a vector of [BgpElem]s.

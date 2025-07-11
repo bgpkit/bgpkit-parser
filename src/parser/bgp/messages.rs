@@ -49,8 +49,7 @@ pub fn parse_bgp_message(
     let length = data.get_u16();
     if !(19..=4096).contains(&length) {
         return Err(ParserError::ParseError(format!(
-            "invalid BGP message length {}",
-            length
+            "invalid BGP message length {length}"
         )));
     }
 

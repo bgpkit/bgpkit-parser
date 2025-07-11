@@ -87,12 +87,12 @@ fn add_suffix_to_filename(filename: &str, suffix: &str) -> String {
     let mut parts: Vec<&str> = filename.split('.').collect(); // Split filename by dots
     if parts.len() > 1 {
         let last_part = parts.pop().unwrap(); // Remove the last part (suffix) from the parts vector
-        let new_last_part = format!("{}.{}", suffix, last_part); // Add the suffix to the last part
+        let new_last_part = format!("{suffix}.{last_part}"); // Add the suffix to the last part
         parts.push(&new_last_part); // Add the updated last part back to the parts vector
         parts.join(".") // Join the parts back into a filename string with dots
     } else {
         // If the filename does not have any dots, simply append the suffix to the end
-        format!("{}.{}", filename, suffix)
+        format!("{filename}.{suffix}")
     }
 }
 
@@ -183,5 +183,38 @@ mod tests {
         let parser = BgpkitParser::new_cached(url, "/tmp/bgpkit-parser-tests").unwrap();
         let count = parser.into_elem_iter().count();
         assert_eq!(8160, count);
+    }
+
+    #[test]
+    fn test_add_suffix_to_filename() {
+        // Test with a filename that has dots
+        let filename = "example.txt";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.suffix.txt");
+
+        // Test with a filename that has multiple dots
+        let filename = "example.tar.gz";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.tar.suffix.gz");
+
+        // Test with a filename that has no dots
+        let filename = "example";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example.suffix");
+
+        // Test with an empty filename
+        let filename = "";
+        let suffix = "suffix";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, ".suffix");
+
+        // Test with an empty suffix
+        let filename = "example.txt";
+        let suffix = "";
+        let result = add_suffix_to_filename(filename, suffix);
+        assert_eq!(result, "example..txt");
     }
 }

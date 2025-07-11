@@ -52,10 +52,10 @@ mod tests {
     #[test]
     fn test_display() {
         let origin = Origin::IGP;
-        assert_eq!(format!("{}", origin), "IGP");
+        assert_eq!(format!("{origin}"), "IGP");
         let origin = Origin::EGP;
-        assert_eq!(format!("{}", origin), "EGP");
+        assert_eq!(format!("{origin}"), "EGP");
         let origin = Origin::INCOMPLETE;
-        assert_eq!(format!("{}", origin), "INCOMPLETE");
+        assert_eq!(format!("{origin}"), "INCOMPLETE");
     }
 }

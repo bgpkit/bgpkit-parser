@@ -25,8 +25,7 @@ pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, Par
         )),
         v => {
             return Err(ParserError::ParseError(format!(
-                "Invalid next hop length found: {}",
-                v
+                "Invalid next hop length found: {v}"
             )));
         }
     };

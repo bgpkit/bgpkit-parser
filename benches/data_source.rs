@@ -62,7 +62,7 @@ pub fn download_test_data() {
                 ),
             };
 
-            if format!("{:x}", computed_checksum).as_str() == checksum {
+            if format!("{computed_checksum:x}").as_str() == checksum {
                 continue;
             }
         }
@@ -75,8 +75,8 @@ pub fn download_test_data() {
 
         match download_file(url, &data_file_path) {
             Ok(download_checksum) => {
-                if format!("{:x}", download_checksum).as_str() != checksum {
-                    println!("MD5 checksum for downloaded file ({:x}) does not match expected checksum ({:?}).", download_checksum, checksum);
+                if format!("{download_checksum:x}").as_str() != checksum {
+                    println!("MD5 checksum for downloaded file ({download_checksum:x}) does not match expected checksum ({checksum:?}).");
                     println!("Perhaps a different file is being used?");
 
                     panic!("Unable to find expected test data file")
@@ -96,7 +96,7 @@ fn md5_checksum_for_file<P: AsRef<Path>>(path: P) -> io::Result<Digest> {
     let mut file = File::open(path)?;
 
     io::copy(&mut file, &mut context)?;
-    Ok(context.compute())
+    Ok(context.finalize())
 }
 
 struct HashingWriter<W> {
@@ -130,7 +130,7 @@ fn download_file<P: AsRef<Path>>(url: &str, target: P) -> io::Result<Digest> {
     io::copy(&mut reader, &mut writer)?;
     writer.flush()?;
 
-    Ok(writer.hasher.compute())
+    Ok(writer.hasher.finalize())
 }
 
 pub fn test_data_dir() -> PathBuf {

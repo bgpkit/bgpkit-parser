@@ -147,7 +147,7 @@ fn main() {
 
     // subscribe to messages from one collector
     let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
-    socket.send(Message::Text(msg)).unwrap();
+    socket.send(Message::Text(msg.into())).unwrap();
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
@@ -406,8 +406,6 @@ We support normal communities, extended communities, and large communities.
     html_logo_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/icon-transparent.png",
     html_favicon_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/favicon.ico"
 )]
-#![allow(clippy::new_without_default)]
-#![allow(clippy::needless_range_loop)]
 
 #[cfg(feature = "parser")]
 pub mod encoder;

@@ -192,7 +192,7 @@ struct ToHexString<'a>(&'a [u8]);
 impl Display for ToHexString<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for byte in self.0 {
-            write!(f, "{:02X}", byte)?;
+            write!(f, "{byte:02X}")?;
         }
         Ok(())
     }
@@ -204,7 +204,7 @@ impl Display for Community {
             Community::NoExport => write!(f, "no-export"),
             Community::NoAdvertise => write!(f, "no-advertise"),
             Community::NoExportSubConfed => write!(f, "no-export-sub-confed"),
-            Community::Custom(asn, value) => write!(f, "{}:{}", asn, value),
+            Community::Custom(asn, value) => write!(f, "{asn}:{value}"),
         }
     }
 }
@@ -283,10 +283,10 @@ impl Display for Ipv6AddrExtCommunity {
 impl Display for MetaCommunity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            MetaCommunity::Plain(c) => write!(f, "{}", c),
-            MetaCommunity::Extended(c) => write!(f, "{}", c),
-            MetaCommunity::Large(c) => write!(f, "{}", c),
-            MetaCommunity::Ipv6Extended(c) => write!(f, "{}", c),
+            MetaCommunity::Plain(c) => write!(f, "{c}"),
+            MetaCommunity::Extended(c) => write!(f, "{c}"),
+            MetaCommunity::Large(c) => write!(f, "{c}"),
+            MetaCommunity::Ipv6Extended(c) => write!(f, "{c}"),
         }
     }
 }
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn test_display_large_community() {
         let large_community = LargeCommunity::new(1, [2, 3]);
-        assert_eq!(format!("{}", large_community), "1:2:3");
+        assert_eq!(format!("{large_community}"), "1:2:3");
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
             local_admin: [0; 4],
         };
         let extended_community = ExtendedCommunity::TransitiveTwoOctetAs(two_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "0:0:0:00000000");
+        assert_eq!(format!("{extended_community}"), "0:0:0:00000000");
 
         let two_octet_as_ext_comm = TwoOctetAsExtCommunity {
             subtype: 0,
@@ -354,7 +354,7 @@ mod tests {
             local_admin: [0; 4],
         };
         let extended_community = ExtendedCommunity::NonTransitiveTwoOctetAs(two_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "64:0:0:00000000");
+        assert_eq!(format!("{extended_community}"), "64:0:0:00000000");
 
         let ipv4_ext_comm = Ipv4AddrExtCommunity {
             subtype: 1,
@@ -362,7 +362,7 @@ mod tests {
             local_admin: [5, 6],
         };
         let extended_community = ExtendedCommunity::TransitiveIpv4Addr(ipv4_ext_comm);
-        assert_eq!(format!("{}", extended_community), "1:1:192.168.1.1:0506");
+        assert_eq!(format!("{extended_community}"), "1:1:192.168.1.1:0506");
 
         let ipv4_ext_comm = Ipv4AddrExtCommunity {
             subtype: 1,
@@ -370,7 +370,7 @@ mod tests {
             local_admin: [5, 6],
         };
         let extended_community = ExtendedCommunity::NonTransitiveIpv4Addr(ipv4_ext_comm);
-        assert_eq!(format!("{}", extended_community), "65:1:192.168.1.1:0506");
+        assert_eq!(format!("{extended_community}"), "65:1:192.168.1.1:0506");
 
         let four_octet_as_ext_comm = FourOctetAsExtCommunity {
             subtype: 2,
@@ -378,7 +378,7 @@ mod tests {
             local_admin: [7, 8],
         };
         let extended_community = ExtendedCommunity::TransitiveFourOctetAs(four_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "2:2:64512:0708");
+        assert_eq!(format!("{extended_community}"), "2:2:64512:0708");
 
         let four_octet_as_ext_comm = FourOctetAsExtCommunity {
             subtype: 2,
@@ -387,25 +387,25 @@ mod tests {
         };
         let extended_community =
             ExtendedCommunity::NonTransitiveFourOctetAs(four_octet_as_ext_comm);
-        assert_eq!(format!("{}", extended_community), "66:2:64512:0708");
+        assert_eq!(format!("{extended_community}"), "66:2:64512:0708");
 
         let opaque_ext_comm = OpaqueExtCommunity {
             subtype: 3,
             value: [9, 10, 11, 12, 13, 14],
         };
         let extended_community = ExtendedCommunity::TransitiveOpaque(opaque_ext_comm);
-        assert_eq!(format!("{}", extended_community), "3:3:090A0B0C0D0E");
+        assert_eq!(format!("{extended_community}"), "3:3:090A0B0C0D0E");
 
         let opaque_ext_comm = OpaqueExtCommunity {
             subtype: 3,
             value: [9, 10, 11, 12, 13, 14],
         };
         let extended_community = ExtendedCommunity::NonTransitiveOpaque(opaque_ext_comm);
-        assert_eq!(format!("{}", extended_community), "67:3:090A0B0C0D0E");
+        assert_eq!(format!("{extended_community}"), "67:3:090A0B0C0D0E");
 
         let raw_ext_comm = [0, 1, 2, 3, 4, 5, 6, 7];
         let extended_community = ExtendedCommunity::Raw(raw_ext_comm);
-        assert_eq!(format!("{}", extended_community), "0001020304050607");
+        assert_eq!(format!("{extended_community}"), "0001020304050607");
     }
 
     #[test]
@@ -417,7 +417,7 @@ mod tests {
             local_admin: [0, 1],
         };
         assert_eq!(
-            format!("{}", ipv6_addr_ext_comm),
+            format!("{ipv6_addr_ext_comm}"),
             "0:0:2001:db8::8a2e:370:7334:0001"
         );
     }
@@ -426,7 +426,31 @@ mod tests {
     fn test_display_meta_community() {
         let large_community = LargeCommunity::new(1, [2, 3]);
         let meta_community = MetaCommunity::Large(large_community);
-        assert_eq!(format!("{}", meta_community), "1:2:3");
+        assert_eq!(format!("{meta_community}"), "1:2:3");
+    }
+
+    #[test]
+    fn test_to_hex_string() {
+        // Test empty array
+        assert_eq!(format!("{}", ToHexString(&[])), "");
+
+        // Test single byte
+        assert_eq!(format!("{}", ToHexString(&[0x0A])), "0A");
+
+        // Test multiple bytes
+        assert_eq!(format!("{}", ToHexString(&[0x0A, 0x0B, 0x0C])), "0A0B0C");
+
+        // Test zero byte
+        assert_eq!(format!("{}", ToHexString(&[0x00])), "00");
+
+        // Test byte with value > 0x0F (needs two hex digits)
+        assert_eq!(format!("{}", ToHexString(&[0x10])), "10");
+
+        // Test mixed bytes
+        assert_eq!(
+            format!("{}", ToHexString(&[0x00, 0x0F, 0x10, 0xFF])),
+            "000F10FF"
+        );
     }
 
     #[test]
