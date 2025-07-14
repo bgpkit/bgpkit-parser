@@ -210,7 +210,7 @@ mod tests {
                 peer_asn: crate::models::Asn::new_32bit(0),
                 local_asn: crate::models::Asn::new_32bit(0),
                 interface_index: 1,
-                peer_addr: IpAddr::from_str("10.0.0.0").unwrap(),
+                peer_ip: IpAddr::from_str("10.0.0.0").unwrap(),
                 local_addr: IpAddr::from_str("10.0.0.0").unwrap(),
                 old_state: BgpState::Idle,
                 new_state: BgpState::Connect,

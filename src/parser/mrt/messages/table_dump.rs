@@ -78,7 +78,7 @@ pub fn parse_table_dump_message(
     let status = data.read_u8()?;
     let time = data.read_u32()? as u64;
 
-    let peer_address: IpAddr = data.read_address(&afi)?;
+    let peer_ip: IpAddr = data.read_address(&afi)?;
     let peer_asn = Asn::new_16bit(data.read_u16()?);
 
     let attribute_length = data.read_u16()? as usize;
@@ -101,7 +101,7 @@ pub fn parse_table_dump_message(
         prefix: NetworkPrefix::new(prefix, 0),
         status,
         originated_time: time,
-        peer_address,
+        peer_ip,
         peer_asn,
         attributes,
     })
@@ -126,7 +126,7 @@ impl TableDumpMessage {
         bytes.put_u32(self.originated_time as u32);
 
         // peer address and peer asn
-        match self.peer_address {
+        match self.peer_ip {
             IpAddr::V4(a) => {
                 bytes.put_u32(a.into());
             }

@@ -11,7 +11,7 @@ pub struct TableDumpMessage {
     pub prefix: NetworkPrefix,
     pub status: u8,
     pub originated_time: u64,
-    pub peer_address: IpAddr,
+    pub peer_ip: IpAddr,
     pub peer_asn: Asn,
     pub attributes: Attributes,
 }
@@ -29,7 +29,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("192.0.2.0/24").unwrap(),
             status: 1,
             originated_time: 1,
-            peer_address: IpAddr::from_str("192.0.2.1").unwrap(),
+            peer_ip: IpAddr::from_str("192.0.2.1").unwrap(),
             peer_asn: Asn::new_32bit(1),
             attributes: Attributes::default(),
         };
@@ -52,7 +52,7 @@ mod tests {
             prefix: NetworkPrefix::from_str("10.0.2.0/24").unwrap(),
             status: 1,
             originated_time: 1,
-            peer_address: IpAddr::from_str("10.0.2.1").unwrap(),
+            peer_ip: IpAddr::from_str("10.0.2.1").unwrap(),
             peer_asn: Asn::new_32bit(1),
             attributes: Attributes::default(),
         };

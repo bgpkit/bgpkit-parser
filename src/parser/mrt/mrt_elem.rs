@@ -343,7 +343,7 @@ impl Elementor {
                 elems.push(BgpElem {
                     timestamp,
                     elem_type: ElemType::ANNOUNCE,
-                    peer_ip: msg.peer_address,
+                    peer_ip: msg.peer_ip,
                     peer_asn: msg.peer_asn,
                     prefix: msg.prefix,
                     next_hop,
@@ -438,7 +438,7 @@ impl Elementor {
                             elems.push(BgpElem {
                                 timestamp,
                                 elem_type: ElemType::ANNOUNCE,
-                                peer_ip: peer.peer_address,
+                                peer_ip: peer.peer_ip,
                                 peer_asn: peer.peer_asn,
                                 prefix,
                                 next_hop: next,
