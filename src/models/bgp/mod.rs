@@ -115,23 +115,38 @@ pub struct Capability {
 ///
 /// Corresponding RFC section: <https://datatracker.ietf.org/doc/html/rfc4271#section-4.3>
 pub struct BgpUpdateMessage {
-    /// Withdrawn prefixes.
+    /// Withdrawn prefixes in this update message.
     ///
-    /// WARN: directly accessing this field is not recommended because other withdrawn prefixes
-    /// may be present in the attribute [AttributeValue::MpUnreachNlri].
+    /// **IMPORTANT:** Do **not** access this field directly in order to get all withdrawn prefixes.
+    /// Some withdrawn prefixes may be present in the [`AttributeValue::MpUnreachNlri`] attribute,
+    /// and will **not** be included here. Accessing this field directly may cause you to miss
+    /// IPv6 or multi-protocol prefixes.
     ///
-    /// See [Elementor::bgp_update_to_elems] for the implementation of getting all prefixes.
+    /// Instead, use [`Elementor::bgp_update_to_elems`] to reliably extract all withdrawn prefixes from the update,
+    /// or combine this field with prefixes found in the `MpUnreachNlri` attribute manually.
+    ///
+    /// See
+    /// * RFC4271 Section 4.3: <https://datatracker.ietf.org/doc/html/rfc4271#section-4.3>
+    /// * RFC4760 Section 4: <https://datatracker.ietf.org/doc/html/rfc4760#section-4>
     pub withdrawn_prefixes: Vec<NetworkPrefix>,
 
     /// BGP path attributes.
     pub attributes: Attributes,
 
-    /// Network prefixes that are being advertised.
+    /// Network prefixes that are being advertised in this update message.
     ///
-    /// WARN: directly accessing this field is not recommended because other advertised prefixes
-    /// may be present in the attribute [AttributeValue::MpReachNlri].
+    /// **IMPORTANT:** Do **not** access this field directly in order to get all announced prefixes.
+    /// Some advertised prefixes may be present in the [`AttributeValue::MpReachNlri`] attribute,
+    /// and will **not** be included here. Accessing this field directly may cause you to miss
+    /// IPv6 or multi-protocol prefixes.
     ///
-    /// See [Elementor::bgp_update_to_elems] for the implementation of getting all prefixes.
+    /// Instead, use [`Elementor::bgp_update_to_elems`] to reliably extract all announced prefixes from the update,
+    /// or combine this field with prefixes found in the `MpReachNlri` attribute manually.
+    ///
+    /// See
+    ///
+    /// * RFC4271 Section 4.3: <https://datatracker.ietf.org/doc/html/rfc4271#section-4.3>
+    /// * RFC4760 Section 3: <https://datatracker.ietf.org/doc/html/rfc4760#section-3>
     pub announced_prefixes: Vec<NetworkPrefix>,
 }
 
