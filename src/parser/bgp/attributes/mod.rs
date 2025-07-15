@@ -210,7 +210,7 @@ pub fn parse_attributes(
 }
 
 impl Attribute {
-    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
 
         let flag = self.flag.bits();
@@ -247,8 +247,8 @@ impl Attribute {
             }
             AttributeValue::OriginatorId(v) => encode_originator_id(&IpAddr::from(*v)),
             AttributeValue::Clusters(v) => encode_clusters(v),
-            AttributeValue::MpReachNlri(v) => encode_nlri(v, true, add_path),
-            AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false, add_path),
+            AttributeValue::MpReachNlri(v) => encode_nlri(v, true),
+            AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
             AttributeValue::Deprecated(v) => Bytes::from(v.bytes.to_owned()),
             AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),
@@ -268,10 +268,10 @@ impl Attribute {
 }
 
 impl Attributes {
-    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
         for attr in &self.inner {
-            bytes.extend(attr.encode(add_path, asn_len));
+            bytes.extend(attr.encode(asn_len));
         }
         bytes.freeze()
     }

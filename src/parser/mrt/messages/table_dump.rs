@@ -98,7 +98,7 @@ pub fn parse_table_dump_message(
     Ok(TableDumpMessage {
         view_number,
         sequence_number,
-        prefix: NetworkPrefix::new(prefix, 0),
+        prefix: NetworkPrefix::new(prefix, None),
         status,
         originated_time: time,
         peer_ip,
@@ -139,9 +139,8 @@ impl TableDumpMessage {
         // encode attributes
         let mut attr_bytes = BytesMut::new();
         for attr in &self.attributes.inner {
-            // add_path always false for v1 table dump
             // asn_len always 16 bites
-            attr_bytes.extend(attr.encode(false, AsnLength::Bits16));
+            attr_bytes.extend(attr.encode(AsnLength::Bits16));
         }
 
         bytes.put_u16(attr_bytes.len() as u16);

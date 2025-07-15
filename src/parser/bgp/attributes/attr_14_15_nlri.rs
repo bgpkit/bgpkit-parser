@@ -106,7 +106,7 @@ pub fn parse_nlri(
 }
 
 /// Encode a NLRI attribute.
-pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Bytes {
+pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
     let mut bytes = BytesMut::new();
 
     // encode address family
@@ -138,7 +138,7 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Bytes {
 
     // NLRI
     for prefix in &nlri.prefixes {
-        bytes.extend(prefix.encode(add_path));
+        bytes.extend(prefix.encode());
     }
 
     bytes.freeze()
@@ -266,7 +266,7 @@ mod tests {
                     Ipv4Addr::from_str("192.0.2.1").unwrap()
                 ))
             );
-            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), 123);
+            let prefix = NetworkPrefix::new(IpNet::from_str("192.0.2.0/24").unwrap(), Some(123));
             assert_eq!(nlri.prefixes[0], prefix);
             assert_eq!(nlri.prefixes[0].path_id, prefix.path_id);
         } else {
@@ -284,10 +284,10 @@ mod tests {
             )),
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
-                path_id: 0,
+                path_id: None,
             }],
         };
-        let bytes = encode_nlri(&nlri, true, false);
+        let bytes = encode_nlri(&nlri, true);
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -312,10 +312,10 @@ mod tests {
             )),
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
-                path_id: 123,
+                path_id: Some(123),
             }],
         };
-        let bytes = encode_nlri(&nlri, true, true);
+        let bytes = encode_nlri(&nlri, true);
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -368,10 +368,10 @@ mod tests {
             next_hop: None,
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
-                path_id: 0,
+                path_id: None,
             }],
         };
-        let bytes = encode_nlri(&nlri, false, false);
+        let bytes = encode_nlri(&nlri, false);
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -398,10 +398,10 @@ mod tests {
             )),
             prefixes: vec![NetworkPrefix {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
-                path_id: 0,
+                path_id: None,
             }],
         };
-        let bytes = encode_nlri(&nlri_with_next_hop, false, false);
+        let bytes = encode_nlri(&nlri_with_next_hop, false);
         // The encoded bytes should include the next_hop
         assert_eq!(
             bytes,

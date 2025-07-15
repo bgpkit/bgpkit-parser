@@ -46,7 +46,7 @@ pub fn parse_rib_afi_entries(
 ) -> Result<RibAfiEntries, ParserError> {
     let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type)?;
 
-    let add_path = matches!(
+    let is_add_path = matches!(
         rib_type,
         TableDumpV2Type::RibIpv4UnicastAddPath
             | TableDumpV2Type::RibIpv4MulticastAddPath
@@ -67,7 +67,7 @@ pub fn parse_rib_afi_entries(
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];
 
     for _i in 0..entry_count {
-        let entry = match parse_rib_entry(data, add_path, &afi, &safi, prefix) {
+        let entry = match parse_rib_entry(data, is_add_path, &afi, &safi, prefix) {
             Ok(entry) => entry,
             Err(e) => {
                 warn!("early break due to error {}", e);
@@ -106,7 +106,7 @@ pub fn parse_rib_afi_entries(
 /// ```
 pub fn parse_rib_entry(
     input: &mut Bytes,
-    add_path: bool,
+    is_add_path: bool,
     afi: &Afi,
     safi: &Safi,
     prefix: NetworkPrefix,
@@ -119,9 +119,12 @@ pub fn parse_rib_entry(
 
     let peer_index = input.read_u16()?;
     let originated_time = input.read_u32()?;
-    if add_path {
-        let _path_id = input.read_u32()?;
-    }
+
+    let path_id = match is_add_path {
+        true => Some(input.read_u32()?),
+        false => None,
+    };
+
     let attribute_length = input.read_u16()? as usize;
 
     input.has_n_remaining(attribute_length)?;
@@ -129,7 +132,7 @@ pub fn parse_rib_entry(
     let attributes = parse_attributes(
         attr_data_slice,
         &AsnLength::Bits32,
-        add_path,
+        is_add_path,
         Some(*afi),
         Some(*safi),
         Some(&[prefix]),
@@ -138,6 +141,7 @@ pub fn parse_rib_entry(
     Ok(RibEntry {
         peer_index,
         originated_time,
+        path_id,
         attributes,
     })
 }
@@ -147,7 +151,7 @@ impl RibAfiEntries {
         let mut bytes = BytesMut::new();
 
         bytes.put_u32(self.sequence_number);
-        bytes.extend(self.prefix.encode(false));
+        bytes.extend(self.prefix.encode());
 
         let entry_count = self.rib_entries.len();
         bytes.put_u16(entry_count as u16);
@@ -165,7 +169,7 @@ impl RibEntry {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.peer_index);
         bytes.put_u32(self.originated_time);
-        let attr_bytes = self.attributes.encode(false, AsnLength::Bits32);
+        let attr_bytes = self.attributes.encode(AsnLength::Bits32);
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.extend(attr_bytes);
         bytes.freeze()

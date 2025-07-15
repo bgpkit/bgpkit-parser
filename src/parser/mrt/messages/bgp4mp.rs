@@ -102,7 +102,7 @@ pub fn parse_bgp4mp_message(
 }
 
 impl Bgp4MpMessage {
-    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.extend(self.peer_asn.encode());
         bytes.extend(self.local_asn.encode());
@@ -110,7 +110,7 @@ impl Bgp4MpMessage {
         bytes.put_u16(address_family(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.local_ip));
-        bytes.extend(&self.bgp_message.encode(add_path, asn_len));
+        bytes.extend(&self.bgp_message.encode(asn_len));
         bytes.freeze()
     }
 }

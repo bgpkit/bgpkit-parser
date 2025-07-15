@@ -151,7 +151,11 @@ pub trait ReadUtils: Buf {
         afi: &Afi,
         add_path: bool,
     ) -> Result<NetworkPrefix, ParserError> {
-        let path_id = if add_path { self.read_u32()? } else { 0 };
+        let path_id = if add_path {
+            Some(self.read_u32()?)
+        } else {
+            None
+        };
 
         // Length in bits
         let bit_len = self.read_u8()?;
@@ -278,10 +282,10 @@ pub fn encode_ipaddr(addr: &IpAddr) -> Vec<u8> {
     }
 }
 
-pub fn encode_nlri_prefixes(prefixes: &[NetworkPrefix], add_path: bool) -> Bytes {
+pub fn encode_nlri_prefixes(prefixes: &[NetworkPrefix]) -> Bytes {
     let mut bytes = BytesMut::new();
     for prefix in prefixes {
-        bytes.extend(prefix.encode(add_path));
+        bytes.extend(prefix.encode());
     }
     bytes.freeze()
 }
@@ -563,14 +567,14 @@ mod tests {
         let mut buf = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01]);
         let expected = NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-            0,
+            None,
         );
         assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, false).unwrap(), expected);
 
         let mut buf = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
         let expected = NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-            1,
+            Some(1),
         );
         assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, true).unwrap(), expected);
     }
@@ -609,31 +613,31 @@ mod tests {
         let prefixes = vec![
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-                0,
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
-                0,
+                None,
             ),
         ];
         let expected = Bytes::from_static(&[0x18, 0xC0, 0xA8, 0x01, 0x18, 0xC0, 0xA8, 0x02]);
-        assert_eq!(encode_nlri_prefixes(&prefixes, false), expected);
+        assert_eq!(encode_nlri_prefixes(&prefixes), expected);
 
         let prefixes = vec![
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-                1,
+                Some(1),
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
-                1,
+                Some(1),
             ),
         ];
         let expected = Bytes::from_static(&[
             0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01, 0x00, 0x00, 0x00, 0x01, 0x18, 0xC0,
             0xA8, 0x02,
         ]);
-        assert_eq!(encode_nlri_prefixes(&prefixes, true), expected);
+        assert_eq!(encode_nlri_prefixes(&prefixes), expected);
     }
 
     #[test]
@@ -672,11 +676,11 @@ mod tests {
         let expected = vec![
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-                0,
+                None,
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
-                0,
+                None,
             ),
         ];
         assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
@@ -689,11 +693,11 @@ mod tests {
         let expected = vec![
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-                1,
+                Some(1),
             ),
             NetworkPrefix::new(
                 IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 2, 0), 24).unwrap()),
-                2,
+                Some(2),
             ),
         ];
         assert_eq!(parse_nlri_list(input, true, &Afi::Ipv4).unwrap(), expected);
@@ -702,7 +706,7 @@ mod tests {
         let input = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
         let expected = vec![NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-            1,
+            Some(1),
         )];
         assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
     }

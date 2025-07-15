@@ -131,6 +131,8 @@ pub struct RibGenericEntries {
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///        |                         Originated Time                       |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///        |                         Optional Path ID                      |
+///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///        |      Attribute Length         |
 ///        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ///        |                    BGP Attributes... (variable)
@@ -141,6 +143,7 @@ pub struct RibGenericEntries {
 pub struct RibEntry {
     pub peer_index: u16,
     pub originated_time: u32,
+    pub path_id: Option<u32>,
     pub attributes: Attributes,
 }
 
@@ -310,6 +313,7 @@ mod tests {
         let rib_entry = RibEntry {
             peer_index: 1,
             originated_time: 1,
+            path_id: None,
             attributes: Attributes::default(),
         };
         let rib_afi = TableDumpV2Message::RibAfi(RibAfiEntries {
