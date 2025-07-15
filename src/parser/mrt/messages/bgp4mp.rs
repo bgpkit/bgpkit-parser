@@ -155,7 +155,7 @@ pub fn parse_bgp4mp_state_change(
     let local_asn: Asn = input.read_asn(asn_len)?;
     let interface_index: u16 = input.read_u16()?;
     let address_family: Afi = input.read_afi()?;
-    let peer_addr = input.read_address(&address_family)?;
+    let peer_ip = input.read_address(&address_family)?;
     let local_addr = input.read_address(&address_family)?;
     let old_state = BgpState::try_from(input.read_u16()?)?;
     let new_state = BgpState::try_from(input.read_u16()?)?;
@@ -164,7 +164,7 @@ pub fn parse_bgp4mp_state_change(
         peer_asn,
         local_asn,
         interface_index,
-        peer_addr,
+        peer_ip,
         local_addr,
         old_state,
         new_state,
@@ -177,8 +177,8 @@ impl Bgp4MpStateChange {
         bytes.extend(encode_asn(&self.peer_asn, &asn_len));
         bytes.extend(encode_asn(&self.local_asn, &asn_len));
         bytes.put_u16(self.interface_index);
-        bytes.put_u16(address_family(&self.peer_addr));
-        bytes.extend(encode_ipaddr(&self.peer_addr));
+        bytes.put_u16(address_family(&self.peer_ip));
+        bytes.extend(encode_ipaddr(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.local_addr));
         bytes.put_u16(self.old_state as u16);
         bytes.put_u16(self.new_state as u16);

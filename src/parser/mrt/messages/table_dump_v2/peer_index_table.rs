@@ -38,40 +38,40 @@ pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, Parser
         };
 
         let peer_bgp_id = Ipv4Addr::from(data.read_u32()?);
-        let peer_address: IpAddr = data.read_address(&afi)?;
+        let peer_ip: IpAddr = data.read_address(&afi)?;
         let peer_asn = data.read_asn(asn_len)?;
         peers.push(Peer {
             peer_type,
             peer_bgp_id,
-            peer_address,
+            peer_ip,
             peer_asn,
         })
     }
 
     let mut id_peer_map = HashMap::new();
-    let mut peer_addr_id_map = HashMap::new();
+    let mut peer_ip_id_map = HashMap::new();
 
     for (id, p) in peers.into_iter().enumerate() {
         id_peer_map.insert(id as u16, p);
-        peer_addr_id_map.insert(p.peer_address, id as u16);
+        peer_ip_id_map.insert(p.peer_ip, id as u16);
     }
 
     Ok(PeerIndexTable {
         collector_bgp_id,
         view_name,
         id_peer_map,
-        peer_addr_id_map,
+        peer_ip_id_map,
     })
 }
 
 impl PeerIndexTable {
     /// Add peer to peer index table and return peer id
     pub fn add_peer(&mut self, peer: Peer) -> u16 {
-        match self.peer_addr_id_map.get(&peer.peer_address) {
+        match self.peer_ip_id_map.get(&peer.peer_ip) {
             Some(id) => *id,
             None => {
-                let peer_id = self.peer_addr_id_map.len() as u16;
-                self.peer_addr_id_map.insert(peer.peer_address, peer_id);
+                let peer_id = self.peer_ip_id_map.len() as u16;
+                self.peer_ip_id_map.insert(peer.peer_ip, peer_id);
                 self.id_peer_map.insert(peer_id, peer);
                 peer_id
             }
@@ -95,7 +95,7 @@ impl PeerIndexTable {
     ///
     /// # Arguments
     ///
-    /// * `peer_addr` - The IP address of the peer.
+    /// * `peer_ip` - The IP address of the peer.
     ///
     /// # Returns
     ///
@@ -109,11 +109,11 @@ impl PeerIndexTable {
     /// use bgpkit_parser::models::PeerIndexTable;
     ///
     /// let index_table = PeerIndexTable::default();
-    /// let peer_addr = IpAddr::from_str("127.0.0.1").unwrap();
-    /// let peer_id = index_table.get_peer_id_by_addr(&peer_addr);
+    /// let peer_ip = IpAddr::from_str("127.0.0.1").unwrap();
+    /// let peer_id = index_table.get_peer_id_by_addr(&peer_ip);
     /// ```
-    pub fn get_peer_id_by_addr(&self, peer_addr: &IpAddr) -> Option<u16> {
-        self.peer_addr_id_map.get(peer_addr).copied()
+    pub fn get_peer_id_by_addr(&self, peer_ip: &IpAddr) -> Option<u16> {
+        self.peer_ip_id_map.get(peer_ip).copied()
     }
 
     /// Encode the data in the struct into a byte array.
@@ -133,7 +133,7 @@ impl PeerIndexTable {
     ///     collector_bgp_id: Ipv4Addr::from(1234),
     ///     view_name: String::from("example"),
     ///     id_peer_map: HashMap::new(),
-    ///     peer_addr_id_map: Default::default(),
+    ///     peer_ip_id_map: Default::default(),
     /// };
     ///
     /// let encoded = data.encode();
@@ -166,8 +166,8 @@ impl PeerIndexTable {
             // Encode peer_bgp_id
             buf.put_u32(peer.peer_bgp_id.into());
 
-            // Encode peer_address
-            match peer.peer_address {
+            // Encode peer_ip
+            match peer.peer_ip {
                 IpAddr::V4(ipv4) => {
                     buf.put_slice(&ipv4.octets());
                 }
@@ -200,7 +200,7 @@ mod tests {
             collector_bgp_id: Ipv4Addr::from(1234),
             view_name: String::from("example"),
             id_peer_map: HashMap::new(),
-            peer_addr_id_map: Default::default(),
+            peer_ip_id_map: Default::default(),
         };
 
         index_table.add_peer(Peer::new(
@@ -225,7 +225,7 @@ mod tests {
             collector_bgp_id: Ipv4Addr::from(1234),
             view_name: String::from("example"),
             id_peer_map: HashMap::new(),
-            peer_addr_id_map: Default::default(),
+            peer_ip_id_map: Default::default(),
         };
 
         let peer1 = Peer::new(

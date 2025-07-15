@@ -161,7 +161,7 @@ pub struct PeerIndexTable {
     pub collector_bgp_id: BgpIdentifier,
     pub view_name: String,
     pub id_peer_map: HashMap<u16, Peer>,
-    pub peer_addr_id_map: HashMap<IpAddr, u16>,
+    pub peer_ip_id_map: HashMap<IpAddr, u16>,
 }
 
 impl Default for PeerIndexTable {
@@ -170,7 +170,7 @@ impl Default for PeerIndexTable {
             collector_bgp_id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
             view_name: "".to_string(),
             id_peer_map: HashMap::new(),
-            peer_addr_id_map: HashMap::new(),
+            peer_ip_id_map: HashMap::new(),
         }
     }
 }
@@ -190,26 +190,26 @@ bitflags! {
 pub struct Peer {
     pub peer_type: PeerType,
     pub peer_bgp_id: BgpIdentifier,
-    pub peer_address: IpAddr,
+    pub peer_ip: IpAddr,
     pub peer_asn: Asn,
 }
 
 impl Peer {
-    pub fn new(peer_bgp_id: BgpIdentifier, peer_address: IpAddr, peer_asn: Asn) -> Self {
+    pub fn new(peer_bgp_id: BgpIdentifier, peer_ip: IpAddr, peer_asn: Asn) -> Self {
         let mut peer_type = PeerType::empty();
 
         if peer_asn.is_four_byte() {
             peer_type.insert(PeerType::AS_SIZE_32BIT);
         }
 
-        if peer_address.is_ipv6() {
+        if peer_ip.is_ipv6() {
             peer_type.insert(PeerType::ADDRESS_FAMILY_IPV6);
         }
 
         Peer {
             peer_type,
             peer_bgp_id,
-            peer_address,
+            peer_ip,
             peer_asn,
         }
     }
@@ -222,10 +222,10 @@ mod tests {
     // Create a helper function to initialize Peer structure
     fn create_peer() -> Peer {
         let bgp_id = Ipv4Addr::from_str("1.1.1.1").unwrap();
-        let peer_address: IpAddr = Ipv4Addr::from_str("2.2.2.2").unwrap().into();
+        let peer_ip: IpAddr = Ipv4Addr::from_str("2.2.2.2").unwrap().into();
         // Assuming Asn::new(u32) is defined.
         let asn = Asn::new_32bit(65000);
-        Peer::new(bgp_id, peer_address, asn)
+        Peer::new(bgp_id, peer_ip, asn)
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(peer.peer_type, PeerType::AS_SIZE_32BIT);
         assert_eq!(peer.peer_bgp_id, Ipv4Addr::from_str("1.1.1.1").unwrap());
         assert_eq!(
-            peer.peer_address,
+            peer.peer_ip,
             IpAddr::V4(Ipv4Addr::from_str("2.2.2.2").unwrap())
         );
         assert_eq!(peer.peer_asn, Asn::new_32bit(65000));
@@ -249,7 +249,7 @@ mod tests {
         );
         assert_eq!(peer_index_table.view_name, "".to_string());
         assert_eq!(peer_index_table.id_peer_map, HashMap::new());
-        assert_eq!(peer_index_table.peer_addr_id_map, HashMap::new());
+        assert_eq!(peer_index_table.peer_ip_id_map, HashMap::new());
     }
 
     #[test]
