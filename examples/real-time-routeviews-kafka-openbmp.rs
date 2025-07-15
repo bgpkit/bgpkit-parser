@@ -88,8 +88,8 @@ pub fn main() {
     tracing_subscriber::fmt::init();
 
     let broker = "stream.routeviews.org:9092".to_owned();
-    // "routeviews.amsix.61955.bmp_raw"
-    let pattern = r#"routeviews\.amsix\..*\.bmp_raw"#.to_owned();
+    // "routeviews.amsix.ams.61955.bmp_raw"
+    let pattern = r#"routeviews\.amsix\.ams\..*\.bmp_raw"#.to_owned();
     let group = "bgpkit-parser-example".to_owned();
 
     consume_and_print(group, pattern, vec![broker]).unwrap();
