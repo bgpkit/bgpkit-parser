@@ -28,13 +28,6 @@ impl MrtMessage {
                         msg.encode(asn_len)
                     }
                     Bgp4MpEnum::Message(msg) => {
-                        let add_path = matches!(
-                            msg_type,
-                            Bgp4MpType::MessageAddpath
-                                | Bgp4MpType::MessageAs4Addpath
-                                | Bgp4MpType::MessageLocalAddpath
-                                | Bgp4MpType::MessageLocalAs4Addpath
-                        );
                         let asn_len = match matches!(
                             msg_type,
                             Bgp4MpType::MessageAs4
@@ -45,7 +38,7 @@ impl MrtMessage {
                             true => AsnLength::Bits32,
                             false => AsnLength::Bits16,
                         };
-                        msg.encode(add_path, asn_len)
+                        msg.encode(asn_len)
                     }
                 }
             }

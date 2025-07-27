@@ -307,21 +307,21 @@ pub fn parse_bgp_update_message(
 }
 
 impl BgpUpdateMessage {
-    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
 
         // withdrawn prefixes
-        let withdrawn_bytes = encode_nlri_prefixes(&self.withdrawn_prefixes, add_path);
+        let withdrawn_bytes = encode_nlri_prefixes(&self.withdrawn_prefixes);
         bytes.put_u16(withdrawn_bytes.len() as u16);
         bytes.put_slice(&withdrawn_bytes);
 
         // attributes
-        let attr_bytes = self.attributes.encode(add_path, asn_len);
+        let attr_bytes = self.attributes.encode(asn_len);
 
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.put_slice(&attr_bytes);
 
-        bytes.extend(encode_nlri_prefixes(&self.announced_prefixes, add_path));
+        bytes.extend(encode_nlri_prefixes(&self.announced_prefixes));
         bytes.freeze()
     }
 
@@ -369,7 +369,7 @@ impl BgpUpdateMessage {
 }
 
 impl BgpMessage {
-    pub fn encode(&self, add_path: bool, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.put_u32(0); // marker
         bytes.put_u32(0); // marker
@@ -378,7 +378,7 @@ impl BgpMessage {
 
         let (msg_type, msg_bytes) = match self {
             BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()),
-            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(add_path, asn_len)),
+            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(asn_len)),
             BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
             BgpMessage::KeepAlive => (BgpMessageType::KEEPALIVE, Bytes::new()),
         };
@@ -629,7 +629,7 @@ mod tests {
             error: BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH),
             data: vec![0x00, 0x00],
         });
-        let bytes = bgp_message.encode(false, AsnLength::Bits16);
+        let bytes = bgp_message.encode(AsnLength::Bits16);
         assert_eq!(
             bytes,
             Bytes::from_static(&[

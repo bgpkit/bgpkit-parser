@@ -48,16 +48,18 @@ impl MrtRibEncoder {
             IpAddr::V6(_ip) => Ipv4Addr::from(0),
         };
         let peer = Peer::new(bgp_identifier, elem.peer_ip, elem.peer_asn);
-        let peer_id = self.index_table.add_peer(peer);
+        let peer_index = self.index_table.add_peer(peer);
+        let path_id = elem.prefix.path_id;
         let prefix = elem.prefix.prefix;
 
         let entries_map = self.per_prefix_entries_map.entry(prefix).or_default();
         let entry = RibEntry {
-            peer_index: peer_id,
+            peer_index,
+            path_id,
             originated_time: elem.timestamp as u32,
             attributes: Attributes::from(elem),
         };
-        entries_map.insert(peer_id, entry);
+        entries_map.insert(peer_index, entry);
     }
 
     /// Export the data stored in the struct to a byte array.
@@ -99,7 +101,7 @@ impl MrtRibEncoder {
             let mut prefix_rib_entry = RibAfiEntries {
                 rib_type,
                 sequence_number: entry_count as u32,
-                prefix: NetworkPrefix::new(*prefix, 0),
+                prefix: NetworkPrefix::new(*prefix, None),
                 rib_entries: vec![],
             };
             for entry in entries_map.values() {

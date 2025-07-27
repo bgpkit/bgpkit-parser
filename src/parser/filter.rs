@@ -603,7 +603,7 @@ mod tests {
             timestamp: 1637437798_f64,
             peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
             peer_asn: Asn::new_32bit(12345),
-            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), 0),
+            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
             next_hop: None,
             as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
             origin_asns: Some(vec![Asn::new_16bit(12345)]),

@@ -161,7 +161,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                     peer_asn: ris_msg.peer_asn,
                                     prefix: NetworkPrefix {
                                         prefix: p,
-                                        path_id: 0,
+                                        path_id: None,
                                     },
                                     next_hop: Some(announcement.next_hop),
                                     as_path: path.clone(),
@@ -192,7 +192,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                 peer_asn: ris_msg.peer_asn,
                                 prefix: NetworkPrefix {
                                     prefix: p,
-                                    path_id: 0,
+                                    path_id: None,
                                 },
                                 next_hop: None,
                                 as_path: None,

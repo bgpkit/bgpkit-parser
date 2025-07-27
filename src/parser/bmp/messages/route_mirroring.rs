@@ -81,7 +81,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_message_bytes = bgp_message.encode(false, AsnLength::Bits32);
+        let bgp_message_bytes = bgp_message.encode(AsnLength::Bits32);
         let expected_asn_len = AsnLength::Bits32;
         let actual_info_len = bgp_message_bytes.len() as u16;
 

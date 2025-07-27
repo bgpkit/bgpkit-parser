@@ -9,16 +9,15 @@ use std::str::FromStr;
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
-    pub path_id: u32,
+    pub path_id: Option<u32>,
 }
 
 // Attempt to reduce the size of the debug output
 impl Debug for NetworkPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.path_id == 0 {
-            write!(f, "{}", self.prefix)
-        } else {
-            write!(f, "{}#{}", self.prefix, self.path_id)
+        match self.path_id {
+            Some(path_id) => write!(f, "{}#{}", self.prefix, path_id),
+            None => write!(f, "{}", self.prefix),
         }
     }
 }
@@ -28,12 +27,15 @@ impl FromStr for NetworkPrefix {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let prefix = IpNet::from_str(s)?;
-        Ok(NetworkPrefix { prefix, path_id: 0 })
+        Ok(NetworkPrefix {
+            prefix,
+            path_id: None,
+        })
     }
 }
 
 impl NetworkPrefix {
-    pub fn new(prefix: IpNet, path_id: u32) -> NetworkPrefix {
+    pub fn new(prefix: IpNet, path_id: Option<u32>) -> NetworkPrefix {
         NetworkPrefix { prefix, path_id }
     }
 
@@ -57,16 +59,19 @@ impl NetworkPrefix {
     /// use bgpkit_parser::models::NetworkPrefix;
     ///
     /// let prefix = NetworkPrefix::from_str("192.168.0.0/24").unwrap();
-    /// let encoded_bytes = prefix.encode(false);
+    /// let encoded_bytes = prefix.encode();
     ///
     /// assert_eq!(encoded_bytes.iter().as_slice(), &[24, 192, 168, 0]);
     /// ```
-    pub fn encode(&self, add_path: bool) -> Bytes {
+    pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
-        if add_path {
+
+        // encode path identifier if it exists
+        if let Some(path_id) = self.path_id {
             // encode path identifier
-            bytes.put_u32(self.path_id);
+            bytes.put_u32(path_id);
         }
+
         // encode prefix
 
         let bit_len = self.prefix.prefix_len();
@@ -108,14 +113,13 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            if serializer.is_human_readable() && self.path_id == 0 {
-                self.prefix.serialize(serializer)
-            } else {
-                SerdeNetworkPrefixRepr::WithPathId {
+            match self.path_id {
+                Some(path_id) => SerdeNetworkPrefixRepr::WithPathId {
                     prefix: self.prefix,
-                    path_id: self.path_id,
+                    path_id,
                 }
-                .serialize(serializer)
+                .serialize(serializer),
+                None => self.prefix.serialize(serializer),
             }
         }
     }
@@ -126,12 +130,14 @@ mod serde_impl {
             D: Deserializer<'de>,
         {
             match SerdeNetworkPrefixRepr::deserialize(deserializer)? {
-                SerdeNetworkPrefixRepr::PlainPrefix(prefix) => {
-                    Ok(NetworkPrefix { prefix, path_id: 0 })
-                }
-                SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } => {
-                    Ok(NetworkPrefix { prefix, path_id })
-                }
+                SerdeNetworkPrefixRepr::PlainPrefix(prefix) => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: None,
+                }),
+                SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: Some(path_id),
+                }),
             }
         }
     }
@@ -150,20 +156,20 @@ mod tests {
             network_prefix.prefix,
             IpNet::from_str("192.168.0.0/24").unwrap()
         );
-        assert_eq!(network_prefix.path_id, 0);
+        assert_eq!(network_prefix.path_id, None);
     }
 
     #[test]
     fn test_encode() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, 1);
-        let _encoded = network_prefix.encode(true);
+        let network_prefix = NetworkPrefix::new(prefix, Some(1));
+        let _encoded = network_prefix.encode();
     }
 
     #[test]
     fn test_display() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, 1);
+        let network_prefix = NetworkPrefix::new(prefix, Some(1));
         assert_eq!(network_prefix.to_string(), "192.168.0.0/24");
     }
 
@@ -171,7 +177,7 @@ mod tests {
     #[cfg(feature = "serde")]
     fn test_serialization() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, 1);
+        let network_prefix = NetworkPrefix::new(prefix, Some(1));
         let serialized = serde_json::to_string(&network_prefix).unwrap();
         assert_eq!(serialized, "{\"prefix\":\"192.168.0.0/24\",\"path_id\":1}");
     }
@@ -185,13 +191,25 @@ mod tests {
             deserialized.prefix,
             IpNet::from_str("192.168.0.0/24").unwrap()
         );
-        assert_eq!(deserialized.path_id, 1);
+        assert_eq!(deserialized.path_id, Some(1));
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_binary_serialization_with_path_id() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, Some(42));
+        // Test non-human readable serialization (binary-like)
+        let serialized = serde_json::to_vec(&network_prefix).unwrap();
+        let deserialized: NetworkPrefix = serde_json::from_slice(&serialized).unwrap();
+        assert_eq!(deserialized.prefix, prefix);
+        assert_eq!(deserialized.path_id, Some(42));
     }
 
     #[test]
     fn test_debug() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
-        let network_prefix = NetworkPrefix::new(prefix, 1);
+        let network_prefix = NetworkPrefix::new(prefix, Some(1));
         assert_eq!(format!("{network_prefix:?}"), "192.168.0.0/24#1");
     }
 }

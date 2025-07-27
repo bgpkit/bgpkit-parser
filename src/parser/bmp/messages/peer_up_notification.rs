@@ -106,7 +106,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_open_message_bytes = bgp_open_message.encode(false, AsnLength::Bits32);
+        let bgp_open_message_bytes = bgp_open_message.encode(AsnLength::Bits32);
         data.extend_from_slice(&bgp_open_message_bytes);
         data.extend_from_slice(&bgp_open_message_bytes);
 

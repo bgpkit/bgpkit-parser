@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking changes
+
+* change `path_id` from `u32` to `Option<u32>` for proper null handling
+    * `NetworkPrefix::path_id` field now properly represents absence with `None` instead of using `0`
+    * `NetworkPrefix::new()` and `NetworkPrefix::encode()` signatures updated accordingly
+    * `RibEntry` now stores `path_id` for TABLE_DUMP_V2 messages with AddPath support
+    * fixes issue [#217](https://github.com/bgpkit/bgpkit-parser/issues/217)
+
+### Bug fixes
+
+* fixed TABLE_DUMP_V2 parsing to properly store path_id when AddPath is enabled
+    * previously path_id was read but discarded, now properly stored in `RibEntry`
+
 ## v0.11.1 - 2025-06-06
 
 ### Bug fixes
