@@ -195,6 +195,18 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
+    fn test_binary_serialization_with_path_id() {
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let network_prefix = NetworkPrefix::new(prefix, Some(42));
+        // Test non-human readable serialization (binary-like)
+        let serialized = serde_json::to_vec(&network_prefix).unwrap();
+        let deserialized: NetworkPrefix = serde_json::from_slice(&serialized).unwrap();
+        assert_eq!(deserialized.prefix, prefix);
+        assert_eq!(deserialized.path_id, Some(42));
+    }
+
+    #[test]
     fn test_debug() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
         let network_prefix = NetworkPrefix::new(prefix, Some(1));

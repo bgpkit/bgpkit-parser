@@ -280,4 +280,28 @@ mod tests {
             panic!("Expected ParseError for invalid sub_type");
         }
     }
+
+    #[test]
+    fn test_table_dump_message_encode_with_attributes() {
+        use crate::models::{Asn, AttributeValue, Attributes, Origin};
+        use std::str::FromStr;
+
+        let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+
+        let table_dump = TableDumpMessage {
+            view_number: 1,
+            sequence_number: 2,
+            prefix: NetworkPrefix::new(prefix, None),
+            status: 1,
+            originated_time: 12345,
+            peer_ip: IpAddr::V4("10.0.0.1".parse().unwrap()),
+            peer_asn: Asn::from(65000),
+            attributes,
+        };
+
+        // This should exercise the attr.encode(AsnLength::Bits16) line
+        let _encoded = table_dump.encode();
+    }
 }

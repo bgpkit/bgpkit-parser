@@ -226,4 +226,22 @@ mod tests {
         let res = extract_afi_safi_from_rib_type(&rib_type);
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_rib_entry_encode() {
+        use crate::models::{AttributeValue, Attributes, Origin};
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+
+        let rib_entry = RibEntry {
+            peer_index: 1,
+            originated_time: 12345,
+            path_id: Some(42),
+            attributes,
+        };
+
+        // This should exercise the self.attributes.encode(AsnLength::Bits32) line
+        let _encoded = rib_entry.encode();
+    }
 }
