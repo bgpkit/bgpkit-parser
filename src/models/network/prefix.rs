@@ -113,14 +113,13 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            if serializer.is_human_readable() && self.path_id.is_none() {
-                self.prefix.serialize(serializer)
-            } else {
-                SerdeNetworkPrefixRepr::WithPathId {
+            match self.path_id {
+                Some(path_id) => SerdeNetworkPrefixRepr::WithPathId {
                     prefix: self.prefix,
-                    path_id: self.path_id.unwrap_or_default(),
+                    path_id,
                 }
-                .serialize(serializer)
+                .serialize(serializer),
+                None => self.prefix.serialize(serializer),
             }
         }
     }
