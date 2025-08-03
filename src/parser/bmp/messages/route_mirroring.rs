@@ -1,6 +1,7 @@
 use crate::bgp::parse_bgp_message;
 use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
+use crate::parser::bmp::messages::BmpPeerType;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -37,6 +38,7 @@ pub enum RouteMirroringInfo {
 pub fn parse_route_mirroring(
     data: &mut Bytes,
     asn_len: &AsnLength,
+    _peer_type: Option<&BmpPeerType>,
 ) -> Result<RouteMirroring, ParserBmpError> {
     let mut tlvs = vec![];
     while data.remaining() > 4 {
@@ -90,7 +92,7 @@ mod tests {
         message.put_u16(actual_info_len);
         message.put_slice(&bgp_message_bytes);
         let mut data = message.freeze();
-        let result = parse_route_mirroring(&mut data, &expected_asn_len);
+        let result = parse_route_mirroring(&mut data, &expected_asn_len, None);
 
         match result {
             Ok(route_mirroring) => {
@@ -109,7 +111,7 @@ mod tests {
         message.put_u16(2);
         message.put_u16(0);
         let mut data = message.freeze();
-        let result = parse_route_mirroring(&mut data, &AsnLength::Bits32).unwrap();
+        let result = parse_route_mirroring(&mut data, &AsnLength::Bits32, None).unwrap();
         assert_eq!(result.tlvs.len(), 1);
         let tlv = &result.tlvs[0];
         assert_eq!(tlv.info_len, 2);

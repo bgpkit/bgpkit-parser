@@ -1,8 +1,10 @@
 use crate::bgp::parse_bgp_message;
 use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
+use crate::parser::bmp::messages::BmpPeerType;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
+use log::warn;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::IpAddr;
 
@@ -43,6 +45,7 @@ pub fn parse_peer_up_notification(
     data: &mut Bytes,
     afi: &Afi,
     asn_len: &AsnLength,
+    peer_type: Option<&BmpPeerType>,
 ) -> Result<PeerUpNotification, ParserBmpError> {
     let local_addr: IpAddr = match afi {
         Afi::Ipv4 => {
@@ -58,17 +61,55 @@ pub fn parse_peer_up_notification(
 
     let sent_open = parse_bgp_message(data, false, asn_len)?;
     let received_open = parse_bgp_message(data, false, asn_len)?;
-    // let received_open = parse_bgp_open_message(data)?;
+
+    // RFC 9069: For Local RIB, the BGP OPEN messages MUST be fabricated
+    if let Some(BmpPeerType::LocalRib) = peer_type {
+        // Validate that the OPEN messages contain appropriate capabilities for Local RIB
+        if let BgpMessage::Open(ref open_msg) = &sent_open {
+            let has_multiprotocol_capability = open_msg
+                .opt_params
+                .iter()
+                .any(|param| matches!(param.param_value, ParamValue::Capability(_)));
+            if !has_multiprotocol_capability {
+                warn!("RFC 9069: Local RIB peer up notification should include multiprotocol capabilities in fabricated OPEN messages");
+            }
+        }
+    }
+
     let mut tlvs = vec![];
+    let mut has_vr_table_name = false;
+
     while data.remaining() >= 4 {
         let info_type = PeerUpTlvType::try_from(data.read_u16()?)?;
         let info_len = data.read_u16()?;
         let info_value = data.read_n_bytes_to_string(info_len as usize)?;
+
+        // RFC 9069: VrTableName TLV validation for Local RIB
+        if let Some(BmpPeerType::LocalRib) = peer_type {
+            if info_type == PeerUpTlvType::VrTableName {
+                has_vr_table_name = true;
+                // RFC 9069: VrTableName MUST be UTF-8 string of 1-255 bytes
+                if info_value.is_empty() || info_value.len() > 255 {
+                    warn!(
+                        "RFC 9069: VrTableName TLV length must be 1-255 bytes, found {} bytes",
+                        info_value.len()
+                    );
+                }
+            }
+        }
+
         tlvs.push(PeerUpNotificationTlv {
             info_type,
             info_len,
             info_value,
         })
+    }
+
+    // RFC 9069: Local RIB instances SHOULD include VrTableName TLV
+    if let Some(BmpPeerType::LocalRib) = peer_type {
+        if !has_vr_table_name {
+            warn!("RFC 9069: Local RIB peer up notification should include VrTableName TLV");
+        }
     }
     Ok(PeerUpNotification {
         local_addr,
@@ -118,7 +159,7 @@ mod tests {
         let afi = Afi::Ipv4;
         let asn_len = AsnLength::Bits32;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len);
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
 
         match result {
             Ok(peer_notification) => {

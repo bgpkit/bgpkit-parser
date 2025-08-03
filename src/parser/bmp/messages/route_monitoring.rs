@@ -1,7 +1,9 @@
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
+use crate::parser::bmp::messages::BmpPeerType;
 use bytes::Bytes;
+use log::warn;
 
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -12,7 +14,15 @@ pub struct RouteMonitoring {
 pub fn parse_route_monitoring(
     data: &mut Bytes,
     asn_len: &AsnLength,
+    peer_type: Option<&BmpPeerType>,
 ) -> Result<RouteMonitoring, ParserBmpError> {
+    // RFC 9069: Local RIB MUST use 4-byte ASN encoding
+    if let Some(BmpPeerType::LocalRib) = peer_type {
+        if *asn_len != AsnLength::Bits32 {
+            warn!("RFC 9069 violation: Local RIB route monitoring MUST use 4-byte ASN encoding");
+        }
+    }
+
     let bgp_update = parse_bgp_message(data, false, asn_len)?;
     Ok(RouteMonitoring {
         bgp_message: bgp_update,

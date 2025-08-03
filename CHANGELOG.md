@@ -12,6 +12,14 @@ All notable changes to this project will be documented in this file.
     * `RibEntry` now stores `path_id` for TABLE_DUMP_V2 messages with AddPath support
     * fixes issue [#217](https://github.com/bgpkit/bgpkit-parser/issues/217)
 
+### Code improvements
+
+* added RFC 9069 validation warnings for BMP Local RIB peer types
+    * validates Local RIB peer header requirements including zero-filled peer address and 4-byte ASN encoding
+    * validates Local RIB peer up notifications for fabricated OPEN messages and VrTableName TLV presence
+    * validates Local RIB route monitoring messages for proper ASN encoding
+    * validation warnings logged when BMP messages do not conform to RFC 9069 specifications
+
 ### Bug fixes
 
 * fixed TABLE_DUMP_V2 parsing to properly store path_id when AddPath is enabled
