@@ -3,7 +3,11 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 
 use crate::error::ParserError;
-use crate::models::capabilities::{BgpCapabilityType, ExtendedNextHopCapability};
+use crate::models::capabilities::{
+    AddPathCapability, BgpCapabilityType, BgpRoleCapability, ExtendedNextHopCapability,
+    FourOctetAsCapability, GracefulRestartCapability, MultiprotocolExtensionsCapability,
+    RouteRefreshCapability,
+};
 use crate::models::error::BgpError;
 use crate::parser::bgp::attributes::parse_attributes;
 use crate::parser::{encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, ReadUtils};
@@ -200,17 +204,40 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 let capability_data = input.read_n_bytes(len as usize)?;
                 let capability_type = BgpCapabilityType::from(code);
 
-                // Parse specific capability types - RFC 8950, Section 3
-                let capability_value = match capability_type {
-                    BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING => {
-                        match ExtendedNextHopCapability::parse(Bytes::from(capability_data.clone()))
-                        {
-                            Ok(parsed) => CapabilityValue::ExtendedNextHop(parsed),
-                            Err(_) => {
-                                // Fall back to raw bytes if parsing fails
-                                CapabilityValue::Raw(capability_data)
-                            }
+                // Parse specific capability types with fallback to raw bytes
+                macro_rules! parse_capability {
+                    ($parser:path, $variant:ident) => {
+                        match $parser(Bytes::from(capability_data.clone())) {
+                            Ok(parsed) => CapabilityValue::$variant(parsed),
+                            Err(_) => CapabilityValue::Raw(capability_data),
                         }
+                    };
+                }
+
+                let capability_value = match capability_type {
+                    BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4 => {
+                        parse_capability!(
+                            MultiprotocolExtensionsCapability::parse,
+                            MultiprotocolExtensions
+                        )
+                    }
+                    BgpCapabilityType::ROUTE_REFRESH_CAPABILITY_FOR_BGP_4 => {
+                        parse_capability!(RouteRefreshCapability::parse, RouteRefresh)
+                    }
+                    BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING => {
+                        parse_capability!(ExtendedNextHopCapability::parse, ExtendedNextHop)
+                    }
+                    BgpCapabilityType::GRACEFUL_RESTART_CAPABILITY => {
+                        parse_capability!(GracefulRestartCapability::parse, GracefulRestart)
+                    }
+                    BgpCapabilityType::SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY => {
+                        parse_capability!(FourOctetAsCapability::parse, FourOctetAs)
+                    }
+                    BgpCapabilityType::ADD_PATH_CAPABILITY => {
+                        parse_capability!(AddPathCapability::parse, AddPath)
+                    }
+                    BgpCapabilityType::BGP_ROLE => {
+                        parse_capability!(BgpRoleCapability::parse, BgpRole)
                     }
                     _ => CapabilityValue::Raw(capability_data),
                 };
@@ -258,7 +285,13 @@ impl BgpOpenMessage {
                 ParamValue::Capability(cap) => {
                     buf.put_u8(cap.ty.into());
                     let encoded_value = match &cap.value {
+                        CapabilityValue::MultiprotocolExtensions(mp) => mp.encode(),
+                        CapabilityValue::RouteRefresh(rr) => rr.encode(),
                         CapabilityValue::ExtendedNextHop(enh) => enh.encode(),
+                        CapabilityValue::GracefulRestart(gr) => gr.encode(),
+                        CapabilityValue::FourOctetAs(foa) => foa.encode(),
+                        CapabilityValue::AddPath(ap) => ap.encode(),
+                        CapabilityValue::BgpRole(br) => br.encode(),
                         CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
                     };
                     buf.put_u8(encoded_value.len() as u8);

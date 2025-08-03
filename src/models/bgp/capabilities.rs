@@ -145,6 +145,415 @@ impl ExtendedNextHopCapability {
     }
 }
 
+/// Multiprotocol Extensions capability entry - RFC 2858, Section 7
+/// Represents a single <AFI, SAFI> combination
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MultiprotocolExtensionsCapability {
+    /// Address Family Identifier
+    pub afi: Afi,
+    /// Subsequent Address Family Identifier
+    pub safi: Safi,
+}
+
+impl MultiprotocolExtensionsCapability {
+    /// Create a new Multiprotocol Extensions capability
+    pub fn new(afi: Afi, safi: Safi) -> Self {
+        Self { afi, safi }
+    }
+
+    /// Parse Multiprotocol Extensions capability from raw bytes - RFC 2858, Section 7
+    ///
+    /// Format: 4 bytes total
+    /// - AFI (2 bytes)
+    /// - Reserved (1 byte) - should be 0
+    /// - SAFI (1 byte)
+    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
+        if data.len() != 4 {
+            return Err(ParserError::ParseError(format!(
+                "Multiprotocol Extensions capability length {} is not 4",
+                data.len()
+            )));
+        }
+
+        let afi = data.read_afi()?;
+        let _reserved = data.read_u8()?; // Reserved field, should be 0 but ignored
+        let safi_u8 = data.read_u8()?;
+        let safi = Safi::try_from(safi_u8)
+            .map_err(|_| ParserError::ParseError(format!("Unknown SAFI type: {}", safi_u8)))?;
+
+        Ok(MultiprotocolExtensionsCapability::new(afi, safi))
+    }
+
+    /// Encode Multiprotocol Extensions capability to raw bytes - RFC 2858, Section 7
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(4);
+        bytes.put_u16(self.afi as u16); // AFI (2 bytes)
+        bytes.put_u8(0); // Reserved (1 byte) - set to 0
+        bytes.put_u8(self.safi as u8); // SAFI (1 byte)
+        bytes.freeze()
+    }
+}
+
+/// Graceful Restart capability - RFC 4724
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GracefulRestartCapability {
+    /// Restart state flag - indicates BGP speaker has restarted
+    pub restart_state: bool,
+    /// Restart time in seconds
+    pub restart_time: u16,
+    /// List of address families that support Graceful Restart
+    pub address_families: Vec<GracefulRestartAddressFamily>,
+}
+
+/// Address family entry for Graceful Restart capability - RFC 4724
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GracefulRestartAddressFamily {
+    /// Address Family Identifier
+    pub afi: Afi,
+    /// Subsequent Address Family Identifier
+    pub safi: Safi,
+    /// Forwarding state preserved flag
+    pub forwarding_state: bool,
+}
+
+impl GracefulRestartCapability {
+    /// Create a new Graceful Restart capability
+    pub fn new(
+        restart_state: bool,
+        restart_time: u16,
+        address_families: Vec<GracefulRestartAddressFamily>,
+    ) -> Self {
+        Self {
+            restart_state,
+            restart_time,
+            address_families,
+        }
+    }
+
+    /// Parse Graceful Restart capability from raw bytes - RFC 4724
+    ///
+    /// Format:
+    /// - Restart Flags (4 bits) + Restart Time (12 bits) = 2 bytes total
+    /// - Followed by 0 or more address family entries (4 bytes each)
+    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
+        if data.len() < 2 {
+            return Err(ParserError::ParseError(format!(
+                "Graceful Restart capability length {} is less than minimum 2 bytes",
+                data.len()
+            )));
+        }
+
+        // Parse restart flags and time (16 bits total)
+        let restart_flags_and_time = data.read_u16()?;
+        let restart_state = (restart_flags_and_time & 0x8000) != 0; // Most significant bit
+        let restart_time = restart_flags_and_time & 0x0FFF; // Lower 12 bits
+
+        let mut address_families = Vec::new();
+
+        // Parse address family entries (4 bytes each)
+        if (data.len() % 4) != 0 {
+            return Err(ParserError::ParseError(format!(
+                "Graceful Restart capability remaining length {} is not divisible by 4",
+                data.len()
+            )));
+        }
+
+        while data.len() >= 4 {
+            let afi = data.read_afi()?;
+            let safi_u8 = data.read_u8()?;
+            let safi = Safi::try_from(safi_u8)
+                .map_err(|_| ParserError::ParseError(format!("Unknown SAFI type: {}", safi_u8)))?;
+            let flags = data.read_u8()?;
+            let forwarding_state = (flags & 0x80) != 0; // Most significant bit
+
+            address_families.push(GracefulRestartAddressFamily {
+                afi,
+                safi,
+                forwarding_state,
+            });
+        }
+
+        Ok(GracefulRestartCapability::new(
+            restart_state,
+            restart_time,
+            address_families,
+        ))
+    }
+
+    /// Encode Graceful Restart capability to raw bytes - RFC 4724
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(2 + self.address_families.len() * 4);
+
+        // Encode restart flags and time
+        let restart_flags_and_time = if self.restart_state {
+            0x8000 | (self.restart_time & 0x0FFF)
+        } else {
+            self.restart_time & 0x0FFF
+        };
+        bytes.put_u16(restart_flags_and_time);
+
+        // Encode address family entries
+        for af in &self.address_families {
+            bytes.put_u16(af.afi as u16); // AFI (2 bytes)
+            bytes.put_u8(af.safi as u8); // SAFI (1 byte)
+            let flags = if af.forwarding_state { 0x80 } else { 0x00 };
+            bytes.put_u8(flags); // Flags (1 byte)
+        }
+
+        bytes.freeze()
+    }
+}
+
+/// ADD-PATH capability - RFC 7911
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AddPathCapability {
+    /// List of address families and their send/receive modes
+    pub address_families: Vec<AddPathAddressFamily>,
+}
+
+/// Address family entry for ADD-PATH capability - RFC 7911
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AddPathAddressFamily {
+    /// Address Family Identifier
+    pub afi: Afi,
+    /// Subsequent Address Family Identifier
+    pub safi: Safi,
+    /// Send/Receive mode
+    pub send_receive: AddPathSendReceive,
+}
+
+/// Send/Receive mode for ADD-PATH capability - RFC 7911
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AddPathSendReceive {
+    /// Can receive multiple paths (value 1)
+    Receive = 1,
+    /// Can send multiple paths (value 2)
+    Send = 2,
+    /// Can both send and receive multiple paths (value 3)
+    SendReceive = 3,
+}
+
+impl TryFrom<u8> for AddPathSendReceive {
+    type Error = ParserError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(AddPathSendReceive::Receive),
+            2 => Ok(AddPathSendReceive::Send),
+            3 => Ok(AddPathSendReceive::SendReceive),
+            _ => Err(ParserError::ParseError(format!(
+                "Invalid ADD-PATH Send/Receive value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+impl AddPathCapability {
+    /// Create a new ADD-PATH capability
+    pub fn new(address_families: Vec<AddPathAddressFamily>) -> Self {
+        Self { address_families }
+    }
+
+    /// Parse ADD-PATH capability from raw bytes - RFC 7911
+    ///
+    /// Format: Series of 4-byte entries, each containing:
+    /// - AFI (2 bytes)
+    /// - SAFI (1 byte)
+    /// - Send/Receive (1 byte)
+    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
+        let mut address_families = Vec::new();
+
+        // Each entry is 4 bytes (2 + 1 + 1)
+        if data.len() % 4 != 0 {
+            return Err(ParserError::ParseError(format!(
+                "ADD-PATH capability length {} is not divisible by 4",
+                data.len()
+            )));
+        }
+
+        while data.len() >= 4 {
+            let afi = data.read_afi()?;
+            let safi_u8 = data.read_u8()?;
+            let safi = Safi::try_from(safi_u8)
+                .map_err(|_| ParserError::ParseError(format!("Unknown SAFI type: {}", safi_u8)))?;
+            let send_receive_u8 = data.read_u8()?;
+            let send_receive = AddPathSendReceive::try_from(send_receive_u8)?;
+
+            address_families.push(AddPathAddressFamily {
+                afi,
+                safi,
+                send_receive,
+            });
+        }
+
+        Ok(AddPathCapability::new(address_families))
+    }
+
+    /// Encode ADD-PATH capability to raw bytes - RFC 7911
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(self.address_families.len() * 4);
+
+        for af in &self.address_families {
+            bytes.put_u16(af.afi as u16); // AFI (2 bytes)
+            bytes.put_u8(af.safi as u8); // SAFI (1 byte)
+            bytes.put_u8(af.send_receive as u8); // Send/Receive (1 byte)
+        }
+
+        bytes.freeze()
+    }
+}
+
+/// Route Refresh capability - RFC 2918
+/// This capability has no parameters, it's just a flag indicating support
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RouteRefreshCapability;
+
+impl RouteRefreshCapability {
+    /// Create a new Route Refresh capability
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Parse Route Refresh capability from raw bytes - RFC 2918
+    /// This capability has length 0, so data should be empty
+    pub fn parse(data: Bytes) -> Result<Self, ParserError> {
+        if !data.is_empty() {
+            return Err(ParserError::ParseError(format!(
+                "Route Refresh capability should have length 0, got {}",
+                data.len()
+            )));
+        }
+        Ok(RouteRefreshCapability::new())
+    }
+
+    /// Encode Route Refresh capability to raw bytes - RFC 2918
+    /// Always returns empty bytes since this capability has no parameters
+    pub fn encode(&self) -> Bytes {
+        Bytes::new()
+    }
+}
+
+impl Default for RouteRefreshCapability {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 4-octet AS number capability - RFC 6793
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FourOctetAsCapability {
+    /// The 4-octet AS number of the BGP speaker
+    pub asn: u32,
+}
+
+impl FourOctetAsCapability {
+    /// Create a new 4-octet AS capability
+    pub fn new(asn: u32) -> Self {
+        Self { asn }
+    }
+
+    /// Parse 4-octet AS capability from raw bytes - RFC 6793
+    /// Format: 4 bytes containing the AS number
+    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
+        if data.len() != 4 {
+            return Err(ParserError::ParseError(format!(
+                "4-octet AS capability length {} is not 4",
+                data.len()
+            )));
+        }
+
+        let asn = data.read_u32()?;
+        Ok(FourOctetAsCapability::new(asn))
+    }
+
+    /// Encode 4-octet AS capability to raw bytes - RFC 6793
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(4);
+        bytes.put_u32(self.asn);
+        bytes.freeze()
+    }
+}
+
+/// BGP Role capability - RFC 9234
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpRoleCapability {
+    /// The BGP Role of this speaker
+    pub role: BgpRole,
+}
+
+/// BGP Role values - RFC 9234, Section 4.1
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BgpRole {
+    /// Provider (value 0)
+    Provider = 0,
+    /// Route Server (value 1)
+    RouteServer = 1,
+    /// Route Server Client (value 2)
+    RouteServerClient = 2,
+    /// Customer (value 3)
+    Customer = 3,
+    /// Peer (Lateral Peer) (value 4)
+    Peer = 4,
+}
+
+impl TryFrom<u8> for BgpRole {
+    type Error = ParserError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(BgpRole::Provider),
+            1 => Ok(BgpRole::RouteServer),
+            2 => Ok(BgpRole::RouteServerClient),
+            3 => Ok(BgpRole::Customer),
+            4 => Ok(BgpRole::Peer),
+            _ => Err(ParserError::ParseError(format!(
+                "Unknown BGP Role value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+impl BgpRoleCapability {
+    /// Create a new BGP Role capability
+    pub fn new(role: BgpRole) -> Self {
+        Self { role }
+    }
+
+    /// Parse BGP Role capability from raw bytes - RFC 9234
+    /// Format: 1 byte containing the role value
+    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
+        if data.len() != 1 {
+            return Err(ParserError::ParseError(format!(
+                "BGP Role capability length {} is not 1",
+                data.len()
+            )));
+        }
+
+        let role_u8 = data.read_u8()?;
+        let role = BgpRole::try_from(role_u8)?;
+        Ok(BgpRoleCapability::new(role))
+    }
+
+    /// Encode BGP Role capability to raw bytes - RFC 9234
+    pub fn encode(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(1);
+        bytes.put_u8(self.role as u8);
+        bytes.freeze()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +818,312 @@ mod tests {
         let empty_capability = ExtendedNextHopCapability::new(vec![]);
         let encoded = empty_capability.encode();
         assert_eq!(encoded.len(), 0);
+    }
+
+    #[test]
+    fn test_multiprotocol_extensions_capability() {
+        use crate::models::network::{Afi, Safi};
+
+        // Test IPv4 Unicast capability
+        let capability = MultiprotocolExtensionsCapability::new(Afi::Ipv4, Safi::Unicast);
+
+        // Test encoding
+        let encoded = capability.encode();
+        assert_eq!(encoded.len(), 4);
+        assert_eq!(encoded[0], 0x00); // AFI high byte
+        assert_eq!(encoded[1], 0x01); // AFI low byte (IPv4)
+        assert_eq!(encoded[2], 0x00); // Reserved
+        assert_eq!(encoded[3], 0x01); // SAFI (Unicast)
+
+        // Test parsing
+        let parsed = MultiprotocolExtensionsCapability::parse(encoded).unwrap();
+        assert_eq!(parsed.afi, Afi::Ipv4);
+        assert_eq!(parsed.safi, Safi::Unicast);
+        assert_eq!(parsed, capability);
+    }
+
+    #[test]
+    fn test_multiprotocol_extensions_capability_ipv6() {
+        use crate::models::network::{Afi, Safi};
+
+        // Test IPv6 Multicast capability
+        let capability = MultiprotocolExtensionsCapability::new(Afi::Ipv6, Safi::Multicast);
+
+        let encoded = capability.encode();
+        let parsed = MultiprotocolExtensionsCapability::parse(encoded).unwrap();
+        assert_eq!(parsed.afi, Afi::Ipv6);
+        assert_eq!(parsed.safi, Safi::Multicast);
+    }
+
+    #[test]
+    fn test_multiprotocol_extensions_capability_invalid_length() {
+        // Test with invalid length
+        let invalid_bytes = Bytes::from(vec![0x00, 0x01, 0x00]); // 3 bytes instead of 4
+        let result = MultiprotocolExtensionsCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_graceful_restart_capability() {
+        use crate::models::network::{Afi, Safi};
+
+        // Create capability with restart state and multiple address families
+        let address_families = vec![
+            GracefulRestartAddressFamily {
+                afi: Afi::Ipv4,
+                safi: Safi::Unicast,
+                forwarding_state: true,
+            },
+            GracefulRestartAddressFamily {
+                afi: Afi::Ipv6,
+                safi: Safi::Unicast,
+                forwarding_state: false,
+            },
+        ];
+
+        let capability = GracefulRestartCapability::new(true, 180, address_families);
+
+        // Test encoding
+        let encoded = capability.encode();
+        assert_eq!(encoded.len(), 2 + 2 * 4); // 2 header bytes + 2 AF entries * 4 bytes each
+
+        // Test parsing
+        let parsed = GracefulRestartCapability::parse(encoded).unwrap();
+        assert_eq!(parsed.restart_state, true);
+        assert_eq!(parsed.restart_time, 180);
+        assert_eq!(parsed.address_families.len(), 2);
+
+        // Check first AF
+        assert_eq!(parsed.address_families[0].afi, Afi::Ipv4);
+        assert_eq!(parsed.address_families[0].safi, Safi::Unicast);
+        assert_eq!(parsed.address_families[0].forwarding_state, true);
+
+        // Check second AF
+        assert_eq!(parsed.address_families[1].afi, Afi::Ipv6);
+        assert_eq!(parsed.address_families[1].safi, Safi::Unicast);
+        assert_eq!(parsed.address_families[1].forwarding_state, false);
+    }
+
+    #[test]
+    fn test_graceful_restart_capability_no_restart_state() {
+        // Test without restart state flag
+        let capability = GracefulRestartCapability::new(false, 300, vec![]);
+
+        let encoded = capability.encode();
+        let parsed = GracefulRestartCapability::parse(encoded).unwrap();
+        assert_eq!(parsed.restart_state, false);
+        assert_eq!(parsed.restart_time, 300);
+        assert_eq!(parsed.address_families.len(), 0);
+    }
+
+    #[test]
+    fn test_graceful_restart_capability_invalid_length() {
+        // Test with length that's not divisible by 4 after header
+        let invalid_bytes = Bytes::from(vec![0x80, 0xB4, 0x00, 0x01, 0x01]); // 5 bytes total, 3 after header
+        let result = GracefulRestartCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_path_capability() {
+        use crate::models::network::{Afi, Safi};
+
+        // Create capability with multiple address families
+        let address_families = vec![
+            AddPathAddressFamily {
+                afi: Afi::Ipv4,
+                safi: Safi::Unicast,
+                send_receive: AddPathSendReceive::SendReceive,
+            },
+            AddPathAddressFamily {
+                afi: Afi::Ipv6,
+                safi: Safi::Unicast,
+                send_receive: AddPathSendReceive::Receive,
+            },
+        ];
+
+        let capability = AddPathCapability::new(address_families);
+
+        // Test encoding
+        let encoded = capability.encode();
+        assert_eq!(encoded.len(), 2 * 4); // 2 AF entries * 4 bytes each
+
+        // Test parsing
+        let parsed = AddPathCapability::parse(encoded).unwrap();
+        assert_eq!(parsed.address_families.len(), 2);
+
+        // Check first AF
+        assert_eq!(parsed.address_families[0].afi, Afi::Ipv4);
+        assert_eq!(parsed.address_families[0].safi, Safi::Unicast);
+        assert_eq!(
+            parsed.address_families[0].send_receive,
+            AddPathSendReceive::SendReceive
+        );
+
+        // Check second AF
+        assert_eq!(parsed.address_families[1].afi, Afi::Ipv6);
+        assert_eq!(parsed.address_families[1].safi, Safi::Unicast);
+        assert_eq!(
+            parsed.address_families[1].send_receive,
+            AddPathSendReceive::Receive
+        );
+    }
+
+    #[test]
+    fn test_add_path_send_receive_values() {
+        use AddPathSendReceive::*;
+
+        assert_eq!(Receive as u8, 1);
+        assert_eq!(Send as u8, 2);
+        assert_eq!(SendReceive as u8, 3);
+
+        assert_eq!(AddPathSendReceive::try_from(1).unwrap(), Receive);
+        assert_eq!(AddPathSendReceive::try_from(2).unwrap(), Send);
+        assert_eq!(AddPathSendReceive::try_from(3).unwrap(), SendReceive);
+
+        // Invalid value
+        assert!(AddPathSendReceive::try_from(4).is_err());
+    }
+
+    #[test]
+    fn test_add_path_capability_invalid_length() {
+        // Test with length that's not divisible by 4
+        let invalid_bytes = Bytes::from(vec![0x00, 0x01, 0x01]); // 3 bytes
+        let result = AddPathCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_path_capability_empty() {
+        // Test with empty capability (valid - no entries)
+        let empty_bytes = Bytes::from(vec![]);
+        let parsed = AddPathCapability::parse(empty_bytes).unwrap();
+        assert_eq!(parsed.address_families.len(), 0);
+
+        // Test encoding empty capability
+        let empty_capability = AddPathCapability::new(vec![]);
+        let encoded = empty_capability.encode();
+        assert_eq!(encoded.len(), 0);
+    }
+
+    #[test]
+    fn test_route_refresh_capability() {
+        // Test creation
+        let capability = RouteRefreshCapability::new();
+
+        // Test encoding (should be empty)
+        let encoded = capability.encode();
+        assert_eq!(encoded.len(), 0);
+
+        // Test parsing (should accept empty data)
+        let parsed = RouteRefreshCapability::parse(encoded).unwrap();
+        assert_eq!(parsed, capability);
+    }
+
+    #[test]
+    fn test_route_refresh_capability_invalid_length() {
+        // Test with non-empty data (should fail)
+        let invalid_bytes = Bytes::from(vec![0x01]);
+        let result = RouteRefreshCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_four_octet_as_capability() {
+        // Test various AS numbers
+        let test_cases = [0, 65535, 65536, 4294967295];
+
+        for asn in test_cases {
+            let capability = FourOctetAsCapability::new(asn);
+
+            // Test encoding
+            let encoded = capability.encode();
+            assert_eq!(encoded.len(), 4);
+
+            // Test parsing
+            let parsed = FourOctetAsCapability::parse(encoded).unwrap();
+            assert_eq!(parsed.asn, asn);
+            assert_eq!(parsed, capability);
+        }
+    }
+
+    #[test]
+    fn test_four_octet_as_capability_invalid_length() {
+        // Test with wrong length
+        let invalid_bytes = Bytes::from(vec![0x00, 0x01, 0x00]); // 3 bytes instead of 4
+        let result = FourOctetAsCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bgp_role_capability() {
+        use BgpRole::*;
+
+        // Test all valid role values
+        let test_cases = [
+            (Provider, 0),
+            (RouteServer, 1),
+            (RouteServerClient, 2),
+            (Customer, 3),
+            (Peer, 4),
+        ];
+
+        for (role, expected_value) in test_cases {
+            let capability = BgpRoleCapability::new(role);
+
+            // Test encoding
+            let encoded = capability.encode();
+            assert_eq!(encoded.len(), 1);
+            assert_eq!(encoded[0], expected_value);
+
+            // Test parsing
+            let parsed = BgpRoleCapability::parse(encoded).unwrap();
+            assert_eq!(parsed.role, role);
+            assert_eq!(parsed, capability);
+        }
+    }
+
+    #[test]
+    fn test_bgp_role_values() {
+        use BgpRole::*;
+
+        // Test enum values
+        assert_eq!(Provider as u8, 0);
+        assert_eq!(RouteServer as u8, 1);
+        assert_eq!(RouteServerClient as u8, 2);
+        assert_eq!(Customer as u8, 3);
+        assert_eq!(Peer as u8, 4);
+
+        // Test TryFrom conversion
+        assert_eq!(BgpRole::try_from(0).unwrap(), Provider);
+        assert_eq!(BgpRole::try_from(1).unwrap(), RouteServer);
+        assert_eq!(BgpRole::try_from(2).unwrap(), RouteServerClient);
+        assert_eq!(BgpRole::try_from(3).unwrap(), Customer);
+        assert_eq!(BgpRole::try_from(4).unwrap(), Peer);
+
+        // Test invalid value
+        assert!(BgpRole::try_from(5).is_err());
+        assert!(BgpRole::try_from(255).is_err());
+    }
+
+    #[test]
+    fn test_bgp_role_capability_invalid_length() {
+        // Test with wrong length
+        let invalid_bytes = Bytes::from(vec![0x00, 0x01]); // 2 bytes instead of 1
+        let result = BgpRoleCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+
+        // Test with empty data
+        let empty_bytes = Bytes::from(vec![]);
+        let result = BgpRoleCapability::parse(empty_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bgp_role_capability_invalid_value() {
+        // Test with invalid role value
+        let invalid_bytes = Bytes::from(vec![5]); // 5 is not a valid role
+        let result = BgpRoleCapability::parse(invalid_bytes);
+        assert!(result.is_err());
     }
 }

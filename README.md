@@ -364,6 +364,8 @@ If you would like to see any specific RFC's support, please submit an issue on G
 ### BGP
 
 - [X] [RFC 2042](https://datatracker.ietf.org/doc/html/rfc2042): Registering New BGP Attribute Types
+- [X] [RFC 2858](https://datatracker.ietf.org/doc/html/rfc2858): Multiprotocol Extensions for BGP-4
+- [X] [RFC 2918](https://datatracker.ietf.org/doc/html/rfc2918): Route Refresh Capability for BGP-4
 - [X] [RFC 3392](https://datatracker.ietf.org/doc/html/rfc3392): Capabilities Advertisement with BGP-4
 - [X] [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271): A Border Gateway Protocol 4 (BGP-4)
 - [X] [RFC 4724](https://datatracker.ietf.org/doc/html/rfc4724): Graceful Restart Mechanism for BGP
