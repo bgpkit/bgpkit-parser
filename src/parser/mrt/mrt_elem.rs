@@ -125,6 +125,9 @@ fn get_relevant_attributes(
                 NextHopAddress::Ipv4(v) => IpAddr::from(*v),
                 NextHopAddress::Ipv6(v) => IpAddr::from(*v),
                 NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(*v),
+                // RFC 8950: VPN next hops - return the IPv6 address part
+                NextHopAddress::VpnIpv6(_, v) => IpAddr::from(*v),
+                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => IpAddr::from(*v),
             })
         })
     });
@@ -418,6 +421,13 @@ impl Elementor {
                                                 NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
                                                 NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
                                                 NextHopAddress::Ipv6LinkLocal(v, _) => {
+                                                    Some(IpAddr::from(v))
+                                                }
+                                                // RFC 8950: VPN next hops - return the IPv6 address part
+                                                NextHopAddress::VpnIpv6(_, v) => {
+                                                    Some(IpAddr::from(v))
+                                                }
+                                                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => {
                                                     Some(IpAddr::from(v))
                                                 }
                                             }

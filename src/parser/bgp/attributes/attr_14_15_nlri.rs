@@ -126,6 +126,20 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
                 ip_bytes.extend_from_slice(&ip2.octets());
                 ip_bytes
             }
+            // RFC 8950: VPN-IPv6 next hop (24 bytes)
+            NextHopAddress::VpnIpv6(rd, ip) => {
+                let mut ip_bytes = rd.0.to_vec(); // 8 bytes RD
+                ip_bytes.extend_from_slice(&ip.octets()); // 16 bytes IPv6
+                ip_bytes
+            }
+            // RFC 8950: VPN-IPv6 next hop with link-local (48 bytes)
+            NextHopAddress::VpnIpv6LinkLocal(rd1, ip1, rd2, ip2) => {
+                let mut ip_bytes = rd1.0.to_vec(); // 8 bytes RD1
+                ip_bytes.extend_from_slice(&ip1.octets()); // 16 bytes IPv6
+                ip_bytes.extend_from_slice(&rd2.0); // 8 bytes RD2
+                ip_bytes.extend_from_slice(&ip2.octets()); // 16 bytes IPv6 link-local
+                ip_bytes
+            }
         };
         bytes.put_u8(next_hop_bytes.len() as u8);
         bytes.put_slice(&next_hop_bytes);

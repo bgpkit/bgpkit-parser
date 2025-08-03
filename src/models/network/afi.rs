@@ -24,7 +24,14 @@ impl From<IpAddr> for Afi {
 
 /// SAFI -- Subsequent Address Family Identifier
 ///
-/// SAFI can be: Unicast, Multicast, or both.
+/// SAFI can be: Unicast, Multicast, or both, as well as MPLS VPN variants.
+/// The AFI determines the IP version (IPv4/IPv6), while SAFI determines the application.
+///
+/// References:
+/// - RFC 4760: Multiprotocol Extensions for BGP-4
+/// - RFC 4364: BGP/MPLS IP Virtual Private Networks (VPNs) - defines SAFI 128
+/// - RFC 6514: BGP Signaling of Multicast VPNs - defines SAFI 129
+/// - RFC 8950: Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 #[derive(Debug, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
@@ -32,6 +39,12 @@ pub enum Safi {
     Unicast = 1,
     Multicast = 2,
     UnicastMulticast = 3,
+    /// MPLS-labeled VPN address - RFC 4364, used in RFC 8950 Section 4
+    /// Works with both AFI 1 (VPN-IPv4) and AFI 2 (VPN-IPv6)
+    MplsVpn = 128,
+    /// Multicast for BGP/MPLS IP VPNs - RFC 6514
+    /// Works with both AFI 1 (Multicast VPN-IPv4) and AFI 2 (Multicast VPN-IPv6)
+    MulticastVpn = 129,
 }
 
 #[cfg(test)]
@@ -58,6 +71,9 @@ mod tests {
         assert_eq!(Safi::Unicast as u8, 1);
         assert_eq!(Safi::Multicast as u8, 2);
         assert_eq!(Safi::UnicastMulticast as u8, 3);
+        // RFC 8950 VPN SAFI values
+        assert_eq!(Safi::MplsVpn as u8, 128);
+        assert_eq!(Safi::MulticastVpn as u8, 129);
     }
 
     #[test]
@@ -90,6 +106,19 @@ mod tests {
         let safi = Safi::UnicastMulticast;
         let serialized = serde_json::to_string(&safi).unwrap();
         assert_eq!(serialized, "\"UnicastMulticast\"");
+        let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, safi);
+
+        // RFC 8950 VPN SAFI variants
+        let safi = Safi::MplsVpn;
+        let serialized = serde_json::to_string(&safi).unwrap();
+        assert_eq!(serialized, "\"MplsVpn\"");
+        let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, safi);
+
+        let safi = Safi::MulticastVpn;
+        let serialized = serde_json::to_string(&safi).unwrap();
+        assert_eq!(serialized, "\"MulticastVpn\"");
         let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, safi);
     }

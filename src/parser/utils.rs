@@ -496,6 +496,13 @@ mod tests {
 
         let mut buf = Bytes::from_static(&[0x02]);
         assert_eq!(buf.read_safi().unwrap(), Safi::Multicast);
+
+        // RFC 8950 VPN SAFI values
+        let mut buf = Bytes::from_static(&[0x80]); // 128 in hex
+        assert_eq!(buf.read_safi().unwrap(), Safi::MplsVpn);
+
+        let mut buf = Bytes::from_static(&[0x81]); // 129 in hex
+        assert_eq!(buf.read_safi().unwrap(), Safi::MulticastVpn);
     }
 
     #[test]
