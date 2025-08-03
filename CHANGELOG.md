@@ -20,6 +20,12 @@ All notable changes to this project will be documented in this file.
     * extended `NextHopAddress` enum with `VpnIpv6` and `VpnIpv6LinkLocal` variants
     * updated `parse_mp_next_hop` to handle 24-byte and 48-byte VPN next-hops
     * enables parsing of VPN-IPv4 routes with VPN-IPv6 next-hops per RFC 8950 Section 4
+* added RFC 8950 Extended Next Hop capability parsing and encoding
+    * implemented `ExtendedNextHopCapability` for BGP OPEN message capability negotiation
+    * supports arbitrary AFI/SAFI combinations per RFC 8950 Section 3
+    * added structured capability parsing with fallback to raw bytes for compatibility
+    * enables BGP speakers to advertise ability to receive cross-protocol next-hops
+    * includes comprehensive validation and helper methods for capability querying
 * added RFC 9069 validation warnings for BMP Local RIB peer types
     * validates Local RIB peer header requirements including zero-filled peer address and 4-byte ASN encoding
     * validates Local RIB peer up notifications for fabricated OPEN messages and VrTableName TLV presence
