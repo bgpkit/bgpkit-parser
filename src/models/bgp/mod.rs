@@ -14,7 +14,7 @@ pub use error::*;
 pub use role::*;
 
 use crate::models::network::*;
-use capabilities::BgpCapabilityType;
+use capabilities::{BgpCapabilityType, ExtendedNextHopCapability};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
 
@@ -106,7 +106,17 @@ pub enum ParamValue {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capability {
     pub ty: BgpCapabilityType,
-    pub value: Vec<u8>,
+    pub value: CapabilityValue,
+}
+
+/// Parsed BGP capability values - RFC 8950, Section 3
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CapabilityValue {
+    /// Raw unparsed capability data
+    Raw(Vec<u8>),
+    /// Extended Next Hop capability - RFC 8950, Section 3
+    ExtendedNextHop(ExtendedNextHopCapability),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
