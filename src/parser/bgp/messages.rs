@@ -3,7 +3,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 
 use crate::error::ParserError;
-use crate::models::capabilities::BgpCapabilityType;
+use crate::models::capabilities::{BgpCapabilityType, ExtendedNextHopCapability};
 use crate::models::error::BgpError;
 use crate::parser::bgp::attributes::parse_attributes;
 use crate::parser::{encode_ipaddr, encode_nlri_prefixes, parse_nlri_list, ReadUtils};
@@ -197,9 +197,27 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                     false => input.read_u8()? as u16,
                 };
 
+                let capability_data = input.read_n_bytes(len as usize)?;
+                let capability_type = BgpCapabilityType::from(code);
+
+                // Parse specific capability types - RFC 8950, Section 3
+                let capability_value = match capability_type {
+                    BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING => {
+                        match ExtendedNextHopCapability::parse(Bytes::from(capability_data.clone()))
+                        {
+                            Ok(parsed) => CapabilityValue::ExtendedNextHop(parsed),
+                            Err(_) => {
+                                // Fall back to raw bytes if parsing fails
+                                CapabilityValue::Raw(capability_data)
+                            }
+                        }
+                    }
+                    _ => CapabilityValue::Raw(capability_data),
+                };
+
                 ParamValue::Capability(Capability {
-                    ty: BgpCapabilityType::from(code),
-                    value: input.read_n_bytes(len as usize)?,
+                    ty: capability_type,
+                    value: capability_value,
                 })
             }
             _ => {
@@ -239,8 +257,12 @@ impl BgpOpenMessage {
             match &param.param_value {
                 ParamValue::Capability(cap) => {
                     buf.put_u8(cap.ty.into());
-                    buf.put_u8(cap.value.len() as u8);
-                    buf.extend(&cap.value);
+                    let encoded_value = match &cap.value {
+                        CapabilityValue::ExtendedNextHop(enh) => enh.encode(),
+                        CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
+                    };
+                    buf.put_u8(encoded_value.len() as u8);
+                    buf.extend(&encoded_value);
                 }
                 ParamValue::Raw(bytes) => {
                     buf.extend(bytes);
@@ -643,5 +665,133 @@ mod tests {
     fn test_bgp_message_from_bgp_update_message() {
         let msg = BgpMessage::from(BgpUpdateMessage::default());
         assert!(matches!(msg, BgpMessage::Update(_)));
+    }
+
+    #[test]
+    fn test_parse_bgp_open_message_with_extended_next_hop_capability() {
+        use crate::models::{Afi, Safi};
+
+        // BGP OPEN message with Extended Next Hop capability - RFC 8950, Section 3
+        // Version=4, ASN=65001, HoldTime=180, BGP-ID=192.0.2.1
+        // One capability: Extended Next Hop (type=5) with two entries:
+        // 1) IPv4 Unicast (AFI=1, SAFI=1) can use IPv6 NextHop (AFI=2)
+        // 2) IPv4 MPLS VPN (AFI=1, SAFI=128) can use IPv6 NextHop (AFI=2)
+        let bytes = Bytes::from(vec![
+            0x04, // version
+            0xfd, 0xe9, // asn = 65001
+            0x00, 0xb4, // hold time = 180
+            0xc0, 0x00, 0x02, 0x01, // sender ip = 192.0.2.1
+            0x10, // opt params length = 16
+            0x02, // param type = 2 (capability)
+            0x0e, // param length = 14
+            0x05, // capability type = 5 (Extended Next Hop)
+            0x0c, // capability length = 12 (2 entries * 6 bytes each)
+            0x00, 0x01, // NLRI AFI = 1 (IPv4)
+            0x00, 0x01, // NLRI SAFI = 1 (Unicast)
+            0x00, 0x02, // NextHop AFI = 2 (IPv6)
+            0x00, 0x01, // NLRI AFI = 1 (IPv4) - second entry
+            0x00, 0x80, // NLRI SAFI = 128 (MPLS VPN)
+            0x00, 0x02, // NextHop AFI = 2 (IPv6)
+        ]);
+
+        let msg = parse_bgp_open_message(&mut bytes.clone()).unwrap();
+        assert_eq!(msg.version, 4);
+        assert_eq!(msg.asn, Asn::new_16bit(65001));
+        assert_eq!(msg.hold_time, 180);
+        assert_eq!(msg.sender_ip, Ipv4Addr::new(192, 0, 2, 1));
+        assert!(!msg.extended_length);
+        assert_eq!(msg.opt_params.len(), 1);
+
+        // Check the capability
+        if let ParamValue::Capability(cap) = &msg.opt_params[0].param_value {
+            assert_eq!(cap.ty, BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING);
+
+            if let CapabilityValue::ExtendedNextHop(enh_cap) = &cap.value {
+                assert_eq!(enh_cap.entries.len(), 2);
+
+                // Check first entry: IPv4 Unicast can use IPv6 NextHop
+                let entry1 = &enh_cap.entries[0];
+                assert_eq!(entry1.nlri_afi, Afi::Ipv4);
+                assert_eq!(entry1.nlri_safi, Safi::Unicast);
+                assert_eq!(entry1.nexthop_afi, Afi::Ipv6);
+
+                // Check second entry: IPv4 MPLS VPN can use IPv6 NextHop
+                let entry2 = &enh_cap.entries[1];
+                assert_eq!(entry2.nlri_afi, Afi::Ipv4);
+                assert_eq!(entry2.nlri_safi, Safi::MplsVpn);
+                assert_eq!(entry2.nexthop_afi, Afi::Ipv6);
+
+                // Test functionality
+                assert!(enh_cap.supports(Afi::Ipv4, Safi::Unicast, Afi::Ipv6));
+                assert!(enh_cap.supports(Afi::Ipv4, Safi::MplsVpn, Afi::Ipv6));
+                assert!(!enh_cap.supports(Afi::Ipv4, Safi::Multicast, Afi::Ipv6));
+            } else {
+                panic!("Expected ExtendedNextHop capability value");
+            }
+        } else {
+            panic!("Expected capability parameter");
+        }
+    }
+
+    #[test]
+    fn test_encode_bgp_open_message_with_extended_next_hop_capability() {
+        use crate::models::capabilities::{ExtendedNextHopCapability, ExtendedNextHopEntry};
+        use crate::models::{Afi, Safi};
+
+        // Create Extended Next Hop capability
+        let entries = vec![
+            ExtendedNextHopEntry {
+                nlri_afi: Afi::Ipv4,
+                nlri_safi: Safi::Unicast,
+                nexthop_afi: Afi::Ipv6,
+            },
+            ExtendedNextHopEntry {
+                nlri_afi: Afi::Ipv4,
+                nlri_safi: Safi::MplsVpn,
+                nexthop_afi: Afi::Ipv6,
+            },
+        ];
+        let enh_capability = ExtendedNextHopCapability::new(entries);
+
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 14, // 1 (type) + 1 (len) + 12 (2 entries * 6 bytes)
+                param_value: ParamValue::Capability(Capability {
+                    ty: BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING,
+                    value: CapabilityValue::ExtendedNextHop(enh_capability),
+                }),
+            }],
+        };
+
+        let encoded = msg.encode();
+
+        // Parse the encoded message back and verify it matches
+        let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
+        assert_eq!(parsed.version, msg.version);
+        assert_eq!(parsed.asn, msg.asn);
+        assert_eq!(parsed.hold_time, msg.hold_time);
+        assert_eq!(parsed.sender_ip, msg.sender_ip);
+        assert_eq!(parsed.extended_length, msg.extended_length);
+        assert_eq!(parsed.opt_params.len(), 1);
+
+        // Verify the capability was encoded and parsed correctly
+        if let ParamValue::Capability(cap) = &parsed.opt_params[0].param_value {
+            assert_eq!(cap.ty, BgpCapabilityType::EXTENDED_NEXT_HOP_ENCODING);
+            if let CapabilityValue::ExtendedNextHop(enh_cap) = &cap.value {
+                assert_eq!(enh_cap.entries.len(), 2);
+                assert!(enh_cap.supports(Afi::Ipv4, Safi::Unicast, Afi::Ipv6));
+                assert!(enh_cap.supports(Afi::Ipv4, Safi::MplsVpn, Afi::Ipv6));
+            } else {
+                panic!("Expected ExtendedNextHop capability value after round trip");
+            }
+        } else {
+            panic!("Expected capability parameter after round trip");
+        }
     }
 }

@@ -19,10 +19,40 @@ pub fn parse_mp_next_hop(mut input: Bytes) -> Result<Option<NextHopAddress>, Par
         0 => None,
         4 => Some(input.read_ipv4_address().map(NextHopAddress::Ipv4)?),
         16 => Some(input.read_ipv6_address().map(NextHopAddress::Ipv6)?),
+        // RFC 8950: VPN-IPv6 next hop (8-byte RD + 16-byte IPv6)
+        24 => {
+            let rd_bytes = input.read_n_bytes(8)?;
+            let mut rd_array = [0u8; 8];
+            rd_array.copy_from_slice(&rd_bytes);
+            let rd = RouteDistinguisher(rd_array);
+            let ipv6 = input.read_ipv6_address()?;
+            Some(NextHopAddress::VpnIpv6(rd, ipv6))
+        }
         32 => Some(NextHopAddress::Ipv6LinkLocal(
             input.read_ipv6_address()?,
             input.read_ipv6_address()?,
         )),
+        // RFC 8950: VPN-IPv6 next hop with link-local (8-byte RD + 16-byte IPv6 + 8-byte RD + 16-byte IPv6 link-local)
+        48 => {
+            let rd1_bytes = input.read_n_bytes(8)?;
+            let mut rd1_array = [0u8; 8];
+            rd1_array.copy_from_slice(&rd1_bytes);
+            let rd1 = RouteDistinguisher(rd1_array);
+            let ipv6 = input.read_ipv6_address()?;
+
+            let rd2_bytes = input.read_n_bytes(8)?;
+            let mut rd2_array = [0u8; 8];
+            rd2_array.copy_from_slice(&rd2_bytes);
+            let rd2 = RouteDistinguisher(rd2_array);
+            let ipv6_link_local = input.read_ipv6_address()?;
+
+            Some(NextHopAddress::VpnIpv6LinkLocal(
+                rd1,
+                ipv6,
+                rd2,
+                ipv6_link_local,
+            ))
+        }
         v => {
             return Err(ParserError::ParseError(format!(
                 "Invalid next hop length found: {v}"
@@ -48,6 +78,22 @@ pub fn encode_mp_next_hop(n: &NextHopAddress) -> Bytes {
             let mut output = BytesMut::with_capacity(32);
             output.extend(n1.octets().to_vec());
             output.extend(n2.octets().to_vec());
+            output.freeze()
+        }
+        // RFC 8950: VPN-IPv6 next hop (24 bytes)
+        NextHopAddress::VpnIpv6(rd, ipv6) => {
+            let mut output = BytesMut::with_capacity(24);
+            output.extend(rd.0.to_vec()); // 8 bytes RD
+            output.extend(ipv6.octets().to_vec()); // 16 bytes IPv6
+            output.freeze()
+        }
+        // RFC 8950: VPN-IPv6 next hop with link-local (48 bytes)
+        NextHopAddress::VpnIpv6LinkLocal(rd1, ipv6, rd2, ipv6_link_local) => {
+            let mut output = BytesMut::with_capacity(48);
+            output.extend(rd1.0.to_vec()); // 8 bytes RD1
+            output.extend(ipv6.octets().to_vec()); // 16 bytes IPv6
+            output.extend(rd2.0.to_vec()); // 8 bytes RD2
+            output.extend(ipv6_link_local.octets().to_vec()); // 16 bytes IPv6 link-local
             output.freeze()
         }
     }
@@ -146,5 +192,56 @@ mod tests {
         // parse invalid bytes
         let next_hop = parse_mp_next_hop(Bytes::from(vec![1]));
         assert!(next_hop.is_err());
+    }
+
+    #[test]
+    fn test_parse_vpn_next_hop() {
+        // Test 24-byte VPN-IPv6 next hop (RFC 8950)
+        let vpn_ipv6_bytes = vec![
+            // 8-byte Route Distinguisher
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            // 16-byte IPv6 address (2001:db8::1)
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01,
+        ];
+
+        let next_hop = parse_mp_next_hop(Bytes::from(vpn_ipv6_bytes.clone())).unwrap();
+        if let Some(NextHopAddress::VpnIpv6(rd, ipv6)) = next_hop {
+            assert_eq!(rd.0, [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+            assert_eq!(ipv6.to_string(), "2001:db8::1");
+        } else {
+            panic!("Expected VpnIpv6 next hop");
+        }
+
+        // Test encoding round-trip
+        let encoded = encode_mp_next_hop(&next_hop.unwrap());
+        assert_eq!(encoded.to_vec(), vpn_ipv6_bytes);
+
+        // Test 48-byte VPN-IPv6 next hop with link-local (RFC 8950)
+        let vpn_ipv6_link_local_bytes = vec![
+            // 8-byte Route Distinguisher 1
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            // 16-byte IPv6 address (2001:db8::1)
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, // 8-byte Route Distinguisher 2
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            // 16-byte IPv6 link-local address (fe80::1)
+            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01,
+        ];
+
+        let next_hop = parse_mp_next_hop(Bytes::from(vpn_ipv6_link_local_bytes.clone())).unwrap();
+        if let Some(NextHopAddress::VpnIpv6LinkLocal(rd1, ipv6, rd2, ipv6_ll)) = next_hop {
+            assert_eq!(rd1.0, [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+            assert_eq!(ipv6.to_string(), "2001:db8::1");
+            assert_eq!(rd2.0, [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]);
+            assert_eq!(ipv6_ll.to_string(), "fe80::1");
+        } else {
+            panic!("Expected VpnIpv6LinkLocal next hop");
+        }
+
+        // Test encoding round-trip
+        let encoded = encode_mp_next_hop(&next_hop.unwrap());
+        assert_eq!(encoded.to_vec(), vpn_ipv6_link_local_bytes);
     }
 }

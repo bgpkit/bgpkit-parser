@@ -363,7 +363,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 5065](https://datatracker.ietf.org/doc/html/rfc5065): Autonomous System Confederations for BGP
 - [X] [RFC 6793](https://datatracker.ietf.org/doc/html/rfc6793): BGP Support for Four-Octet Autonomous System (AS) Number Space
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)
-- [ ] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
+- [X] [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
 - [X] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
