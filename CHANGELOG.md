@@ -14,6 +14,18 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* implemented comprehensive BGP capabilities support for all IANA-defined capability codes with RFC support
+    * added structured parsing and encoding for 7 major BGP capabilities (RFC2858, RFC2918, RFC4724, RFC6793, RFC7911, RFC8950, RFC9234)
+    * implemented `MultiprotocolExtensionsCapability` for AFI/SAFI advertisement per RFC2858
+    * implemented `RouteRefreshCapability` for dynamic route refresh support per RFC2918
+    * implemented `GracefulRestartCapability` with restart flags and per-AF forwarding state per RFC4724
+    * implemented `FourOctetAsCapability` for 4-byte AS number support per RFC6793
+    * implemented `AddPathCapability` with send/receive modes for multiple path advertisement per RFC7911
+    * implemented `BgpRoleCapability` with Provider/Customer/Peer/RouteServer roles per RFC9234
+    * added graceful fallback to raw bytes for unrecognized or parsing-failed capabilities
+    * added comprehensive test coverage with 26 test cases covering all implemented capabilities
+    * updated `CapabilityValue` enum with 7 new structured capability variants
+    * maintains backward compatibility while providing structured access to capability data
 * added RFC 8950 support for IPv4 NLRI with IPv6 next-hops
     * extended `Safi` enum with `MplsVpn` (128) and `MulticastVpn` (129) for VPN address families
     * added `RouteDistinguisher` type for VPN next-hop parsing
