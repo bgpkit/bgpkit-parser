@@ -3,6 +3,7 @@ use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bitflags::bitflags;
 use bytes::{Buf, Bytes};
+use log::warn;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
@@ -351,13 +352,31 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
             let local_rib_peer_flags = LocalRibPeerFlags::from_bits_retain(data.read_u8()?);
 
             let peer_distinguisher = data.read_u64()?;
-            // zero-filled peer_ip address field
-            let peer_ip = IpAddr::V4(Ipv4Addr::from(0));
-            data.advance(16);
 
+            // RFC 9069: Peer Address MUST be zero-filled for Local RIB
+            let peer_addr_bytes: [u8; 16] = {
+                let mut bytes = [0u8; 16];
+                data.copy_to_slice(&mut bytes);
+                bytes
+            };
+
+            // Validate that peer address is zero-filled as required by RFC 9069
+            if peer_addr_bytes != [0u8; 16] {
+                warn!("RFC 9069 violation: Local RIB peer address MUST be zero-filled, but found non-zero bytes");
+            }
+
+            // Local RIB peer address is always zero-filled per RFC 9069
+            let peer_ip = IpAddr::V4(Ipv4Addr::from(0));
+
+            // RFC 9069: MUST use 4-byte ASN encoding for Local RIB
             let peer_asn = Asn::new_32bit(data.read_u32()?);
 
             let peer_bgp_id = data.read_ipv4_address()?;
+
+            // RFC 9069: Validate that peer BGP ID is non-zero for meaningful instances
+            if peer_bgp_id == Ipv4Addr::from(0) && peer_distinguisher != 0 {
+                warn!("RFC 9069: Local RIB peer BGP ID should be set to VRF instance router-id for non-global instances");
+            }
 
             let t_sec = data.read_u32()?;
             let t_usec = data.read_u32()?;
