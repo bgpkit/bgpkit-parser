@@ -1,7 +1,9 @@
+mod geo_peer_table;
 mod peer_index_table;
 mod rib_afi_entries;
 
 use crate::error::ParserError;
+use crate::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table;
 use crate::messages::table_dump_v2::peer_index_table::parse_peer_index_table;
 use crate::messages::table_dump_v2::rib_afi_entries::parse_rib_afi_entries;
 use crate::models::*;
@@ -19,6 +21,7 @@ use std::convert::TryFrom;
 /// 4. RIB_IPV6_UNICAST
 /// 5. RIB_IPV6_MULTICAST
 /// 6. RIB_GENERIC
+/// 7. GEO_PEER_TABLE
 ///
 pub fn parse_table_dump_v2_message(
     sub_type: u16,
@@ -41,12 +44,13 @@ pub fn parse_table_dump_v2_message(
         | TableDumpV2Type::RibIpv6MulticastAddPath => {
             TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
         }
-        TableDumpV2Type::RibGeneric
-        | TableDumpV2Type::RibGenericAddPath
-        | TableDumpV2Type::GeoPeerTable => {
+        TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => {
             return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
+                "TableDumpV2 RibGeneric is not currently supported".to_string(),
             ))
+        }
+        TableDumpV2Type::GeoPeerTable => {
+            TableDumpV2Message::GeoPeerTable(parse_geo_peer_table(&mut input)?)
         }
     };
 

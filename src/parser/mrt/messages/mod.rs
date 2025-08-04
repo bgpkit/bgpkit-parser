@@ -15,6 +15,7 @@ impl MrtMessage {
                 TableDumpV2Message::RibGeneric(_) => {
                     todo!("RibGeneric message is not supported yet");
                 }
+                TableDumpV2Message::GeoPeerTable(g) => g.encode(),
             },
             MrtMessage::Bgp4Mp(m) => {
                 let msg_type = Bgp4MpType::try_from(sub_type).unwrap();
