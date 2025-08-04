@@ -12,6 +12,7 @@ use std::net::IpAddr;
 use std::slice::Iter;
 use std::vec::IntoIter;
 
+use crate::error::BgpValidationWarning;
 use crate::models::*;
 
 pub use aspath::*;
@@ -138,6 +139,8 @@ pub struct Attributes {
     // Black box type to allow for later changes/optimizations. The most common attributes could be
     // added as fields to allow for easier lookup.
     pub(crate) inner: Vec<Attribute>,
+    /// RFC 7606 validation warnings collected during parsing
+    pub(crate) validation_warnings: Vec<BgpValidationWarning>,
 }
 
 impl Attributes {
@@ -154,6 +157,21 @@ impl Attributes {
 
     pub fn add_attr(&mut self, attr: Attribute) {
         self.inner.push(attr);
+    }
+
+    /// Add a validation warning to the attributes
+    pub fn add_validation_warning(&mut self, warning: BgpValidationWarning) {
+        self.validation_warnings.push(warning);
+    }
+
+    /// Get all validation warnings for these attributes
+    pub fn validation_warnings(&self) -> &[BgpValidationWarning] {
+        &self.validation_warnings
+    }
+
+    /// Check if there are any validation warnings
+    pub fn has_validation_warnings(&self) -> bool {
+        !self.validation_warnings.is_empty()
     }
 
     /// Get the `ORIGIN` attribute. In the event that this attribute is not present,
@@ -310,13 +328,17 @@ impl FromIterator<Attribute> for Attributes {
     fn from_iter<T: IntoIterator<Item = Attribute>>(iter: T) -> Self {
         Attributes {
             inner: iter.into_iter().collect(),
+            validation_warnings: Vec::new(),
         }
     }
 }
 
 impl From<Vec<Attribute>> for Attributes {
     fn from(value: Vec<Attribute>) -> Self {
-        Attributes { inner: value }
+        Attributes {
+            inner: value,
+            validation_warnings: Vec::new(),
+        }
     }
 }
 
@@ -342,6 +364,7 @@ impl FromIterator<AttributeValue> for Attributes {
                     flag: AttrFlags::empty(),
                 })
                 .collect(),
+            validation_warnings: Vec::new(),
         }
     }
 }
@@ -385,6 +408,7 @@ mod serde_impl {
         {
             Ok(Attributes {
                 inner: <Vec<Attribute>>::deserialize(deserializer)?,
+                validation_warnings: Vec::new(),
             })
         }
     }

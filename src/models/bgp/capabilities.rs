@@ -1,6 +1,8 @@
+use crate::error::ParserError;
 use crate::models::network::{Afi, Safi};
+#[cfg(feature = "parser")]
 use crate::parser::ReadUtils;
-use crate::ParserError;
+#[cfg(feature = "parser")]
 use bytes::{BufMut, Bytes, BytesMut};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
@@ -101,6 +103,7 @@ impl ExtendedNextHopCapability {
     /// - NLRI AFI (2 bytes)
     /// - NLRI SAFI (2 bytes)
     /// - NextHop AFI (2 bytes)
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         let mut entries = Vec::new();
 
@@ -132,6 +135,7 @@ impl ExtendedNextHopCapability {
     }
 
     /// Encode Extended Next Hop capability to raw bytes - RFC 8950, Section 3
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(self.entries.len() * 6);
 
@@ -168,6 +172,7 @@ impl MultiprotocolExtensionsCapability {
     /// - AFI (2 bytes)
     /// - Reserved (1 byte) - should be 0
     /// - SAFI (1 byte)
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         if data.len() != 4 {
             return Err(ParserError::ParseError(format!(
@@ -186,6 +191,7 @@ impl MultiprotocolExtensionsCapability {
     }
 
     /// Encode Multiprotocol Extensions capability to raw bytes - RFC 2858, Section 7
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(4);
         bytes.put_u16(self.afi as u16); // AFI (2 bytes)
@@ -238,6 +244,7 @@ impl GracefulRestartCapability {
     /// Format:
     /// - Restart Flags (4 bits) + Restart Time (12 bits) = 2 bytes total
     /// - Followed by 0 or more address family entries (4 bytes each)
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         if data.len() < 2 {
             return Err(ParserError::ParseError(format!(
@@ -284,6 +291,7 @@ impl GracefulRestartCapability {
     }
 
     /// Encode Graceful Restart capability to raw bytes - RFC 4724
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(2 + self.address_families.len() * 4);
 
@@ -367,6 +375,7 @@ impl AddPathCapability {
     /// - AFI (2 bytes)
     /// - SAFI (1 byte)
     /// - Send/Receive (1 byte)
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         let mut address_families = Vec::new();
 
@@ -397,6 +406,7 @@ impl AddPathCapability {
     }
 
     /// Encode ADD-PATH capability to raw bytes - RFC 7911
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(self.address_families.len() * 4);
 
@@ -424,6 +434,7 @@ impl RouteRefreshCapability {
 
     /// Parse Route Refresh capability from raw bytes - RFC 2918
     /// This capability has length 0, so data should be empty
+    #[cfg(feature = "parser")]
     pub fn parse(data: Bytes) -> Result<Self, ParserError> {
         if !data.is_empty() {
             return Err(ParserError::ParseError(format!(
@@ -436,6 +447,7 @@ impl RouteRefreshCapability {
 
     /// Encode Route Refresh capability to raw bytes - RFC 2918
     /// Always returns empty bytes since this capability has no parameters
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         Bytes::new()
     }
@@ -463,6 +475,7 @@ impl FourOctetAsCapability {
 
     /// Parse 4-octet AS capability from raw bytes - RFC 6793
     /// Format: 4 bytes containing the AS number
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         if data.len() != 4 {
             return Err(ParserError::ParseError(format!(
@@ -476,6 +489,7 @@ impl FourOctetAsCapability {
     }
 
     /// Encode 4-octet AS capability to raw bytes - RFC 6793
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(4);
         bytes.put_u32(self.asn);
@@ -533,6 +547,7 @@ impl BgpRoleCapability {
 
     /// Parse BGP Role capability from raw bytes - RFC 9234
     /// Format: 1 byte containing the role value
+    #[cfg(feature = "parser")]
     pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
         if data.len() != 1 {
             return Err(ParserError::ParseError(format!(
@@ -547,6 +562,7 @@ impl BgpRoleCapability {
     }
 
     /// Encode BGP Role capability to raw bytes - RFC 9234
+    #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::with_capacity(1);
         bytes.put_u8(self.role as u8);
@@ -554,7 +570,7 @@ impl BgpRoleCapability {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "parser"))]
 mod tests {
     use super::*;
 
