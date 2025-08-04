@@ -370,6 +370,12 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
 - [X] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
+## Tunnel Encapsulation
+
+- [X] [RFC 5640](https://datatracker.ietf.org/doc/html/rfc5640): Load-Balancing for Mesh Softwires
+- [X] [RFC 8365](https://datatracker.ietf.org/doc/html/rfc8365): A Network Virtualization Overlay Solution Using Ethernet VPN (EVPN)
+- [X] [RFC 9012](https://datatracker.ietf.org/doc/html/rfc9012): The BGP Tunnel Encapsulation Attribute
+
 ## MRT
 
 - [X] [RFC 6396](https://datatracker.ietf.org/doc/html/rfc6396): Multi-Threaded Routing Toolkit (MRT) Routing Information Export Format
@@ -399,6 +405,12 @@ We support normal communities, extended communities, and large communities.
 - [ ] [RFC 8955](https://datatracker.ietf.org/doc/html/rfc8955) Dissemination of Flow Specification Rules
 - [ ] [RFC 8956](https://datatracker.ietf.org/doc/html/rfc8956) Dissemination of Flow Specification Rules for IPv6
 - [ ] [RFC 9117](https://datatracker.ietf.org/doc/html/rfc9117) Revised Validation Procedure for BGP Flow Specifications Updates 8955
+
+## Link-State
+- [X] [RFC 7752](https://datatracker.ietf.org/doc/html/rfc7752): North-Bound Distribution of Link-State and Traffic Engineering (TE) Information Using BGP
+- [X] [RFC 8571](https://datatracker.ietf.org/doc/html/rfc8571): BGP - Link State (BGP-LS) Advertisement of IGP Traffic Engineering Performance Metric Extensions
+- [X] [RFC 9085](https://datatracker.ietf.org/doc/html/rfc9085): Border Gateway Protocol - Link State (BGP-LS) Extensions for Segment Routing
+- [X] [RFC 9294](https://datatracker.ietf.org/doc/html/rfc9294): BGP-LS Advertisement of Application-Specific Link Attributes
 
 # Built with ❤️ by BGPKIT Team
 

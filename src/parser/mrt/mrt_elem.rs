@@ -109,7 +109,9 @@ fn get_relevant_attributes(
 
             AttributeValue::OriginatorId(_)
             | AttributeValue::Clusters(_)
-            | AttributeValue::Development(_) => {}
+            | AttributeValue::Development(_)
+            | AttributeValue::LinkState(_)
+            | AttributeValue::TunnelEncapsulation(_) => {}
         };
     }
 

@@ -290,6 +290,7 @@ impl Asn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "parser")]
     use crate::parser::ReadUtils;
     use std::str::FromStr;
 

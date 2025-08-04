@@ -54,6 +54,12 @@ pub fn parse_peer_up_notification(
             ip.into()
         }
         Afi::Ipv6 => data.read_ipv6_address()?.into(),
+        Afi::LinkState => {
+            // Link-State doesn't use traditional IP addresses for local address
+            // Use IPv4 zero address as placeholder
+            data.advance(12);
+            std::net::Ipv4Addr::new(0, 0, 0, 0).into()
+        }
     };
 
     let local_port = data.read_u16()?;

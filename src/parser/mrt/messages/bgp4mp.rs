@@ -43,6 +43,7 @@ fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize
     let ip_size = match afi {
         Afi::Ipv4 => 4 * 2,
         Afi::Ipv6 => 16 * 2,
+        Afi::LinkState => 4 * 2, // Link-State uses IPv4 format for compatibility
     };
     let asn_size = match asn_len {
         AsnLength::Bits16 => 2 * 2,

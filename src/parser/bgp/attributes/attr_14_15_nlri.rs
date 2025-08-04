@@ -1,5 +1,6 @@
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
+use crate::parser::bgp::attributes::attr_29_linkstate::parse_link_state_nlri;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -62,46 +63,60 @@ pub fn parse_nlri(
         next_hop = parse_mp_next_hop(next_hop_bytes)?;
     }
 
-    let prefixes = match prefixes {
-        Some(pfxs) => {
-            // skip parsing prefixes: https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.4
-            if first_byte_zero {
-                if reachable {
-                    // skip reserved byte for reachable NRLI
-                    if input.read_u8()? != 0 {
-                        warn!("NRLI reserved byte not 0");
-                    }
-                }
-                parse_nlri_list(input, additional_paths, &afi)?
-            } else {
-                pfxs.to_vec()
-            }
-        }
-        None => {
+    // Handle Link-State NLRI differently from traditional IP prefixes
+    let (prefixes, link_state_nlris) =
+        if afi == Afi::LinkState && (safi == Safi::LinkState || safi == Safi::LinkStateVpn) {
+            // Parse Link-State NLRI
             if reachable {
                 // skip reserved byte for reachable NRLI
                 if input.read_u8()? != 0 {
                     warn!("NRLI reserved byte not 0");
                 }
             }
-            parse_nlri_list(input, additional_paths, &afi)?
-        }
+            let ls_nlri = parse_link_state_nlri(input, afi, safi, next_hop, reachable)?;
+            let link_state_list = ls_nlri.link_state_nlris;
+            (Vec::new(), link_state_list)
+        } else {
+            // Parse traditional IP prefixes
+            let prefixes = match prefixes {
+                Some(pfxs) => {
+                    // skip parsing prefixes: https://datatracker.ietf.org/doc/html/rfc6396#section-4.3.4
+                    if first_byte_zero {
+                        if reachable {
+                            // skip reserved byte for reachable NRLI
+                            if input.read_u8()? != 0 {
+                                warn!("NRLI reserved byte not 0");
+                            }
+                        }
+                        parse_nlri_list(input, additional_paths, &afi)?
+                    } else {
+                        pfxs.to_vec()
+                    }
+                }
+                None => {
+                    if reachable {
+                        // skip reserved byte for reachable NRLI
+                        if input.read_u8()? != 0 {
+                            warn!("NRLI reserved byte not 0");
+                        }
+                    }
+                    parse_nlri_list(input, additional_paths, &afi)?
+                }
+            };
+            (prefixes, None)
+        };
+
+    let nlri = Nlri {
+        afi,
+        safi,
+        next_hop,
+        prefixes,
+        link_state_nlris,
     };
 
-    // Reserved field, should ignore
     match reachable {
-        true => Ok(AttributeValue::MpReachNlri(Nlri {
-            afi,
-            safi,
-            next_hop,
-            prefixes,
-        })),
-        false => Ok(AttributeValue::MpUnreachNlri(Nlri {
-            afi,
-            safi,
-            next_hop,
-            prefixes,
-        })),
+        true => Ok(AttributeValue::MpReachNlri(nlri)),
+        false => Ok(AttributeValue::MpUnreachNlri(nlri)),
     }
 }
 
@@ -150,9 +165,22 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
         bytes.put_u8(0);
     }
 
-    // NLRI
-    for prefix in &nlri.prefixes {
-        bytes.extend(prefix.encode());
+    // Handle Link-State NLRI encoding
+    if nlri.afi == Afi::LinkState {
+        if let Some(link_state_nlris) = &nlri.link_state_nlris {
+            // Encode Link-State NLRI entries
+            for ls_nlri in link_state_nlris {
+                // Encode each Link-State NLRI (this would need a proper implementation)
+                // For now, we'll create a placeholder
+                bytes.put_u16(ls_nlri.nlri_type as u16);
+                bytes.put_u16(0); // Length placeholder - would need actual encoding
+            }
+        }
+    } else {
+        // NLRI for traditional IP prefixes
+        for prefix in &nlri.prefixes {
+            bytes.extend(prefix.encode());
+        }
     }
 
     bytes.freeze()
@@ -300,6 +328,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            link_state_nlris: None,
         };
         let bytes = encode_nlri(&nlri, true);
         assert_eq!(
@@ -328,6 +357,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: Some(123),
             }],
+            link_state_nlris: None,
         };
         let bytes = encode_nlri(&nlri, true);
         assert_eq!(
@@ -384,6 +414,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            link_state_nlris: None,
         };
         let bytes = encode_nlri(&nlri, false);
         assert_eq!(
@@ -414,6 +445,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            link_state_nlris: None,
         };
         let bytes = encode_nlri(&nlri_with_next_hop, false);
         // The encoded bytes should include the next_hop

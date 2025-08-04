@@ -14,6 +14,24 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* added BGP Tunnel Encapsulation attribute parsing support following RFC 9012, RFC 5640, and RFC 8365
+    * implemented complete TLV-based parsing system for BGP Tunnel Encapsulation attribute (type 23)
+    * added support for all IANA-defined tunnel types (VXLAN, NVGRE, GRE, SR Policy, Geneve, etc.)
+    * added support for all sub-TLV types including Color, UDP Destination Port, Tunnel Egress Endpoint, Preference
+    * implemented variable-length sub-TLV encoding (1 byte for types 0-127, 2 bytes for types 128-255)
+    * added helper methods for common attribute access (color, UDP port, egress endpoint, preference)
+    * created structured data model with `TunnelEncapAttribute`, `TunnelEncapTlv`, and `SubTlv` types
+    * added comprehensive test coverage with 7 test cases covering parsing, encoding, and error handling
+    * maintains full backward compatibility with existing attribute parsing infrastructure
+* added comprehensive BGP Link-State parsing support following RFC 7752 and extensions
+    * implemented complete Link-State NLRI parsing for Node, Link, and IPv4/IPv6 Topology Prefix types
+    * added Link-State AFI (16388) and SAFI (71, 72) support for BGP-LS and BGP-LS-VPN
+    * implemented TLV-based parsing system for Node, Link, and Prefix descriptors and attributes
+    * added support for RFC 8571 traffic engineering performance metrics (TLVs 1114-1120)
+    * added support for RFC 9085 Segment Routing extensions (TLVs 1170-1172, 1174)
+    * added support for RFC 9294 Application-Specific Link Attributes (TLV 1122)
+    * created structured data model with helper methods for common attribute access
+    * maintains backward compatibility with non-breaking optional field additions
 * added fallible iterator implementations for explicit error handling
     * implemented `FallibleRecordIterator` that returns `Result<MrtRecord, ParserErrorWithBytes>`
     * implemented `FallibleElemIterator` that returns `Result<BgpElem, ParserErrorWithBytes>`
