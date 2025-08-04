@@ -1,5 +1,5 @@
 /*!
-Provides parser iterator implementation.
+Default iterator implementations that skip errors and return successfully parsed items.
 */
 use crate::error::ParserError;
 use crate::models::*;
@@ -7,25 +7,6 @@ use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use log::{error, warn};
 use std::io::Read;
-
-/// Use [ElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
-impl<R: Read> IntoIterator for BgpkitParser<R> {
-    type Item = BgpElem;
-    type IntoIter = ElemIterator<R>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        ElemIterator::new(self)
-    }
-}
-
-impl<R> BgpkitParser<R> {
-    pub fn into_record_iter(self) -> RecordIterator<R> {
-        RecordIterator::new(self)
-    }
-    pub fn into_elem_iter(self) -> ElemIterator<R> {
-        ElemIterator::new(self)
-    }
-}
 
 /*********
 MrtRecord Iterator
@@ -38,7 +19,7 @@ pub struct RecordIterator<R> {
 }
 
 impl<R> RecordIterator<R> {
-    fn new(parser: BgpkitParser<R>) -> Self {
+    pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         RecordIterator {
             parser,
             count: 0,
@@ -139,7 +120,7 @@ pub struct ElemIterator<R> {
 }
 
 impl<R> ElemIterator<R> {
-    fn new(parser: BgpkitParser<R>) -> Self {
+    pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         ElemIterator {
             record_iter: RecordIterator::new(parser),
             count: 0,

@@ -14,6 +14,13 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* added fallible iterator implementations for explicit error handling
+    * implemented `FallibleRecordIterator` that returns `Result<MrtRecord, ParserErrorWithBytes>`
+    * implemented `FallibleElemIterator` that returns `Result<BgpElem, ParserErrorWithBytes>`
+    * added `into_fallible_record_iter()` and `into_fallible_elem_iter()` methods on `BgpkitParser`
+    * allows users to handle parsing errors explicitly instead of having them silently skipped
+    * maintains full backward compatibility with existing error-skipping iterators
+    * reorganized iterator implementations into structured `iters` module with `default` and `fallible` submodules
 * implemented comprehensive BGP capabilities support for all IANA-defined capability codes with RFC support
     * added structured parsing and encoding for 7 major BGP capabilities (RFC2858, RFC2918, RFC4724, RFC6793, RFC7911, RFC8950, RFC9234)
     * implemented `MultiprotocolExtensionsCapability` for AFI/SAFI advertisement per RFC2858
