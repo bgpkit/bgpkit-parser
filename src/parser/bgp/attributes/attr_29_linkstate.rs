@@ -29,8 +29,7 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
         match tlv_type {
             // Node Attribute TLVs (1024-1039)
             1024..=1039 => {
-                let node_attr_type =
-                    NodeAttributeType::try_from(tlv_type).unwrap_or(NodeAttributeType::Reserved);
+                let node_attr_type = NodeAttributeType::from(tlv_type);
                 if node_attr_type == NodeAttributeType::Reserved {
                     attr.add_unknown_attribute(Tlv::new(tlv_type, tlv_data.to_vec()));
                 } else {
@@ -39,8 +38,7 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
             }
             // Link Attribute TLVs (1088-1103)
             1088..=1103 => {
-                let link_attr_type =
-                    LinkAttributeType::try_from(tlv_type).unwrap_or(LinkAttributeType::Reserved);
+                let link_attr_type = LinkAttributeType::from(tlv_type);
                 if link_attr_type == LinkAttributeType::Reserved {
                     attr.add_unknown_attribute(Tlv::new(tlv_type, tlv_data.to_vec()));
                 } else {
@@ -49,8 +47,7 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
             }
             // Link Attribute TLVs (1114-1120, 1122) - RFC 8571, RFC 9294
             1114..=1120 | 1122 => {
-                let link_attr_type =
-                    LinkAttributeType::try_from(tlv_type).unwrap_or(LinkAttributeType::Reserved);
+                let link_attr_type = LinkAttributeType::from(tlv_type);
                 if link_attr_type == LinkAttributeType::Reserved {
                     attr.add_unknown_attribute(Tlv::new(tlv_type, tlv_data.to_vec()));
                 } else {
@@ -59,8 +56,7 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
             }
             // Link Attribute TLVs (1172) - RFC 9085
             1172 => {
-                let link_attr_type =
-                    LinkAttributeType::try_from(tlv_type).unwrap_or(LinkAttributeType::Reserved);
+                let link_attr_type = LinkAttributeType::from(tlv_type);
                 if link_attr_type == LinkAttributeType::Reserved {
                     attr.add_unknown_attribute(Tlv::new(tlv_type, tlv_data.to_vec()));
                 } else {
@@ -69,8 +65,7 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
             }
             // Prefix Attribute TLVs (1152-1163, 1170-1171, 1174)
             1152..=1163 | 1170..=1171 | 1174 => {
-                let prefix_attr_type = PrefixAttributeType::try_from(tlv_type)
-                    .unwrap_or(PrefixAttributeType::Reserved);
+                let prefix_attr_type = PrefixAttributeType::from(tlv_type);
                 if prefix_attr_type == PrefixAttributeType::Reserved {
                     attr.add_unknown_attribute(Tlv::new(tlv_type, tlv_data.to_vec()));
                 } else {
@@ -399,7 +394,7 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
 
     if prefix_len <= 32 {
         // IPv4 prefix
-        let needed_bytes = ((prefix_len + 7) / 8) as usize;
+        let needed_bytes = prefix_len.div_ceil(8) as usize;
         if addr_bytes.len() < needed_bytes {
             return Err(ParserError::TruncatedMsg(format!(
                 "Expected {} bytes for IPv4 prefix, but only {} available",
@@ -417,7 +412,7 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
         Ok(NetworkPrefix::new(ipnet::IpNet::V4(ipnet), None))
     } else {
         // IPv6 prefix
-        let needed_bytes = ((prefix_len + 7) / 8) as usize;
+        let needed_bytes = prefix_len.div_ceil(8) as usize;
         if addr_bytes.len() < needed_bytes {
             return Err(ParserError::TruncatedMsg(format!(
                 "Expected {} bytes for IPv6 prefix, but only {} available",

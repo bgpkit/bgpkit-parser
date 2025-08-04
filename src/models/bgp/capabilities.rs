@@ -905,19 +905,19 @@ mod tests {
 
         // Test parsing
         let parsed = GracefulRestartCapability::parse(encoded).unwrap();
-        assert_eq!(parsed.restart_state, true);
+        assert!(parsed.restart_state);
         assert_eq!(parsed.restart_time, 180);
         assert_eq!(parsed.address_families.len(), 2);
 
         // Check first AF
         assert_eq!(parsed.address_families[0].afi, Afi::Ipv4);
         assert_eq!(parsed.address_families[0].safi, Safi::Unicast);
-        assert_eq!(parsed.address_families[0].forwarding_state, true);
+        assert!(parsed.address_families[0].forwarding_state);
 
         // Check second AF
         assert_eq!(parsed.address_families[1].afi, Afi::Ipv6);
         assert_eq!(parsed.address_families[1].safi, Safi::Unicast);
-        assert_eq!(parsed.address_families[1].forwarding_state, false);
+        assert!(!parsed.address_families[1].forwarding_state);
     }
 
     #[test]
@@ -927,7 +927,7 @@ mod tests {
 
         let encoded = capability.encode();
         let parsed = GracefulRestartCapability::parse(encoded).unwrap();
-        assert_eq!(parsed.restart_state, false);
+        assert!(!parsed.restart_state);
         assert_eq!(parsed.restart_time, 300);
         assert_eq!(parsed.address_families.len(), 0);
     }

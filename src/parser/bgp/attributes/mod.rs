@@ -497,7 +497,7 @@ mod tests {
         assert!(attributes.has_validation_warnings());
         let warnings = attributes.validation_warnings();
         // Will have attribute flags error + missing mandatory attributes
-        assert!(warnings.len() >= 1);
+        assert!(!warnings.is_empty());
 
         match &warnings[0] {
             BgpValidationWarning::AttributeFlagsError { attr_type, .. } => {

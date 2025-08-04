@@ -192,6 +192,7 @@ impl Tlv {
 /// Node Descriptor TLVs
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub struct NodeDescriptor {
     pub autonomous_system: Option<u32>,
     pub bgp_ls_identifier: Option<u32>,
@@ -200,21 +201,11 @@ pub struct NodeDescriptor {
     pub unknown_tlvs: Vec<Tlv>,
 }
 
-impl Default for NodeDescriptor {
-    fn default() -> Self {
-        Self {
-            autonomous_system: None,
-            bgp_ls_identifier: None,
-            ospf_area_id: None,
-            igp_router_id: None,
-            unknown_tlvs: Vec::new(),
-        }
-    }
-}
 
 /// Link Descriptor TLVs
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub struct LinkDescriptor {
     pub link_local_remote_identifiers: Option<(u32, u32)>,
     pub ipv4_interface_address: Option<Ipv4Addr>,
@@ -225,23 +216,11 @@ pub struct LinkDescriptor {
     pub unknown_tlvs: Vec<Tlv>,
 }
 
-impl Default for LinkDescriptor {
-    fn default() -> Self {
-        Self {
-            link_local_remote_identifiers: None,
-            ipv4_interface_address: None,
-            ipv4_neighbor_address: None,
-            ipv6_interface_address: None,
-            ipv6_neighbor_address: None,
-            multi_topology_id: None,
-            unknown_tlvs: Vec::new(),
-        }
-    }
-}
 
 /// Prefix Descriptor TLVs
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub struct PrefixDescriptor {
     pub multi_topology_id: Option<u16>,
     pub ospf_route_type: Option<u8>,
@@ -249,16 +228,6 @@ pub struct PrefixDescriptor {
     pub unknown_tlvs: Vec<Tlv>,
 }
 
-impl Default for PrefixDescriptor {
-    fn default() -> Self {
-        Self {
-            multi_topology_id: None,
-            ospf_route_type: None,
-            ip_reachability_information: None,
-            unknown_tlvs: Vec::new(),
-        }
-    }
-}
 
 /// BGP Link-State NLRI structure
 #[derive(Debug, PartialEq, Clone, Eq)]
@@ -330,6 +299,7 @@ impl LinkStateNlri {
 /// BGP Link-State Attributes
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub struct LinkStateAttribute {
     pub node_attributes: HashMap<NodeAttributeType, Vec<u8>>,
     pub link_attributes: HashMap<LinkAttributeType, Vec<u8>>,
@@ -337,16 +307,6 @@ pub struct LinkStateAttribute {
     pub unknown_attributes: Vec<Tlv>,
 }
 
-impl Default for LinkStateAttribute {
-    fn default() -> Self {
-        Self {
-            node_attributes: HashMap::new(),
-            link_attributes: HashMap::new(),
-            prefix_attributes: HashMap::new(),
-            unknown_attributes: Vec::new(),
-        }
-    }
-}
 
 impl LinkStateAttribute {
     pub fn new() -> Self {
@@ -558,9 +518,11 @@ mod tests {
 
     #[test]
     fn test_node_nlri_creation() {
-        let mut node_desc = NodeDescriptor::default();
-        node_desc.autonomous_system = Some(65001);
-        node_desc.igp_router_id = Some(vec![192, 168, 1, 1]);
+        let node_desc = NodeDescriptor {
+            autonomous_system: Some(65001),
+            igp_router_id: Some(vec![192, 168, 1, 1]),
+            ..Default::default()
+        };
 
         let nlri = LinkStateNlri::new_node_nlri(ProtocolId::Ospfv2, 123456, node_desc);
 
@@ -598,9 +560,10 @@ mod tests {
     #[test]
     fn test_prefix_nlri_creation() {
         let local_desc = NodeDescriptor::default();
-        let mut prefix_desc = PrefixDescriptor::default();
-        prefix_desc.ip_reachability_information =
-            Some(NetworkPrefix::from_str("192.168.1.0/24").unwrap());
+        let prefix_desc = PrefixDescriptor {
+            ip_reachability_information: Some(NetworkPrefix::from_str("192.168.1.0/24").unwrap()),
+            ..Default::default()
+        };
 
         let nlri = LinkStateNlri::new_prefix_nlri(
             NlriType::Ipv4TopologyPrefix,

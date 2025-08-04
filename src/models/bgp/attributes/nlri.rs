@@ -249,8 +249,10 @@ mod tests {
     fn nlri_link_state_creation() {
         use crate::models::bgp::linkstate::{LinkStateNlri, NodeDescriptor, ProtocolId};
 
-        let mut node_desc = NodeDescriptor::default();
-        node_desc.autonomous_system = Some(65001);
+        let node_desc = NodeDescriptor {
+            autonomous_system: Some(65001),
+            ..Default::default()
+        };
 
         let ls_nlri = LinkStateNlri::new_node_nlri(ProtocolId::Ospfv2, 123456, node_desc);
         let nlri = Nlri::new_link_state_reachable(

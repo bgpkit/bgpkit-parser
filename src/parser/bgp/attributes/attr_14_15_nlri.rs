@@ -74,10 +74,7 @@ pub fn parse_nlri(
                 }
             }
             let ls_nlri = parse_link_state_nlri(input, afi, safi, next_hop, reachable)?;
-            let link_state_list = match ls_nlri.link_state_nlris {
-                Some(list) => Some(list),
-                None => None,
-            };
+            let link_state_list = ls_nlri.link_state_nlris;
             (Vec::new(), link_state_list)
         } else {
             // Parse traditional IP prefixes
