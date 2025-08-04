@@ -160,6 +160,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "parser")]
     fn test_encode() {
         let prefix = IpNet::from_str("192.168.0.0/24").unwrap();
         let network_prefix = NetworkPrefix::new(prefix, Some(1));

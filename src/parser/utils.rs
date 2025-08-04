@@ -72,6 +72,11 @@ pub trait ReadUtils: Buf {
                 Ok(ip) => Ok(IpAddr::V6(ip)),
                 _ => Err(io::Error::other("Cannot parse IPv6 address")),
             },
+            Afi::LinkState => {
+                // Link-State doesn't use traditional IP addresses
+                // Use IPv4 zero address as placeholder
+                Ok(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))
+            }
         }
     }
 
@@ -186,6 +191,11 @@ pub trait ReadUtils: Buf {
                 let mut buff = [0; 16];
                 self.copy_to_slice(&mut buff[..byte_len]);
                 IpAddr::V6(Ipv6Addr::from(buff))
+            }
+            Afi::LinkState => {
+                // Link-State doesn't use traditional IP prefixes
+                // Use IPv4 zero address as placeholder
+                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
             }
         };
         let prefix = match IpNet::new(addr, bit_len) {

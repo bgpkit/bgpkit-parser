@@ -5,12 +5,14 @@ pub mod capabilities;
 pub mod community;
 pub mod elem;
 pub mod error;
+pub mod linkstate;
 pub mod role;
 
 pub use attributes::*;
 pub use community::*;
 pub use elem::*;
 pub use error::*;
+pub use linkstate::*;
 pub use role::*;
 
 use crate::models::network::*;

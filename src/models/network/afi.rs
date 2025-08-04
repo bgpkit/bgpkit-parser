@@ -10,6 +10,8 @@ use std::net::IpAddr;
 pub enum Afi {
     Ipv4 = 1,
     Ipv6 = 2,
+    /// BGP Link-State - RFC 7752
+    LinkState = 16388,
 }
 
 impl From<IpAddr> for Afi {
@@ -31,6 +33,7 @@ impl From<IpAddr> for Afi {
 /// - RFC 4760: Multiprotocol Extensions for BGP-4
 /// - RFC 4364: BGP/MPLS IP Virtual Private Networks (VPNs) - defines SAFI 128
 /// - RFC 6514: BGP Signaling of Multicast VPNs - defines SAFI 129
+/// - RFC 7752: BGP Link-State - defines SAFI 71, 72
 /// - RFC 8950: Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 #[derive(Debug, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -39,6 +42,10 @@ pub enum Safi {
     Unicast = 1,
     Multicast = 2,
     UnicastMulticast = 3,
+    /// BGP Link-State - RFC 7752
+    LinkState = 71,
+    /// BGP Link-State VPN - RFC 7752
+    LinkStateVpn = 72,
     /// MPLS-labeled VPN address - RFC 4364, used in RFC 8950 Section 4
     /// Works with both AFI 1 (VPN-IPv4) and AFI 2 (VPN-IPv6)
     MplsVpn = 128,
@@ -67,10 +74,14 @@ mod tests {
     fn test_afi_safi_repr() {
         assert_eq!(Afi::Ipv4 as u16, 1);
         assert_eq!(Afi::Ipv6 as u16, 2);
+        assert_eq!(Afi::LinkState as u16, 16388);
 
         assert_eq!(Safi::Unicast as u8, 1);
         assert_eq!(Safi::Multicast as u8, 2);
         assert_eq!(Safi::UnicastMulticast as u8, 3);
+        // RFC 7752 Link-State SAFI values
+        assert_eq!(Safi::LinkState as u8, 71);
+        assert_eq!(Safi::LinkStateVpn as u8, 72);
         // RFC 8950 VPN SAFI values
         assert_eq!(Safi::MplsVpn as u8, 128);
         assert_eq!(Safi::MulticastVpn as u8, 129);

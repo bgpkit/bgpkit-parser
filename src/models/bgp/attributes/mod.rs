@@ -476,6 +476,8 @@ pub enum AttributeValue {
     Clusters(Vec<u32>),
     MpReachNlri(Nlri),
     MpUnreachNlri(Nlri),
+    /// BGP Link-State attribute - RFC 7752
+    LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
     Development(Vec<u8>),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
@@ -532,6 +534,7 @@ impl AttributeValue {
             AttributeValue::Clusters(_) => AttrType::CLUSTER_LIST,
             AttributeValue::MpReachNlri(_) => AttrType::MP_REACHABLE_NLRI,
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
+            AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
         }
@@ -558,6 +561,7 @@ impl AttributeValue {
             AttributeValue::Clusters(_) => Some(OptionalNonTransitive),
             AttributeValue::MpReachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
+            AttributeValue::LinkState(_) => Some(OptionalNonTransitive),
             _ => None,
         }
     }

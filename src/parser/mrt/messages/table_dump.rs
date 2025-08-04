@@ -73,6 +73,13 @@ pub fn parse_table_dump_message(
     let prefix = match &afi {
         Afi::Ipv4 => data.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => data.read_ipv6_prefix().map(ipnet::IpNet::V6),
+        Afi::LinkState => {
+            // Link-State doesn't use traditional prefixes, but we need a placeholder
+            // Use 0.0.0.0/0 as a placeholder for now
+            Ok(ipnet::IpNet::V4(
+                ipnet::Ipv4Net::new(std::net::Ipv4Addr::new(0, 0, 0, 0), 0).unwrap(),
+            ))
+        }
     }?;
 
     let status = data.read_u8()?;
