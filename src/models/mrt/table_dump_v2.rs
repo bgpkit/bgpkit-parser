@@ -302,6 +302,36 @@ mod tests {
     }
 
     #[test]
+    fn test_peer_new_variations() {
+        // Test IPv4 peer with 16-bit AS (neither flag set)
+        let peer_ipv4_16bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V4(Ipv4Addr::from_str("10.0.0.2").unwrap()),
+            Asn::new_16bit(65001),
+        );
+        assert_eq!(peer_ipv4_16bit.peer_type, PeerType::empty());
+
+        // Test IPv6 peer with 16-bit AS (only IPv6 flag set)
+        let peer_ipv6_16bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V6(std::net::Ipv6Addr::from_str("2001:db8::1").unwrap()),
+            Asn::new_16bit(65002),
+        );
+        assert_eq!(peer_ipv6_16bit.peer_type, PeerType::ADDRESS_FAMILY_IPV6);
+
+        // Test IPv6 peer with 32-bit AS (both flags set)
+        let peer_ipv6_32bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V6(std::net::Ipv6Addr::from_str("2001:db8::2").unwrap()),
+            Asn::new_32bit(65003),
+        );
+        assert_eq!(
+            peer_ipv6_32bit.peer_type,
+            PeerType::AS_SIZE_32BIT | PeerType::ADDRESS_FAMILY_IPV6
+        );
+    }
+
+    #[test]
     fn test_default_peer_index_table() {
         let peer_index_table = PeerIndexTable::default();
         assert_eq!(
