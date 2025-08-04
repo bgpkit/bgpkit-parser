@@ -378,6 +378,12 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message Updates
 - [X] [RFC 9234](https://datatracker.ietf.org/doc/html/rfc9234):  Route Leak Prevention and Detection Using Roles in UPDATE and OPEN Messages
 
+### Tunnel Encapsulation
+
+- [X] [RFC 5640](https://datatracker.ietf.org/doc/html/rfc5640): Load-Balancing for Mesh Softwires
+- [X] [RFC 8365](https://datatracker.ietf.org/doc/html/rfc8365): A Network Virtualization Overlay Solution Using Ethernet VPN (EVPN)
+- [X] [RFC 9012](https://datatracker.ietf.org/doc/html/rfc9012): The BGP Tunnel Encapsulation Attribute
+
 ### MRT
 
 - [X] [RFC 6396](https://datatracker.ietf.org/doc/html/rfc6396): Multi-Threaded Routing Toolkit (MRT) Routing Information Export Format
