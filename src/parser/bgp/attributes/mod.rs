@@ -18,7 +18,7 @@ use std::net::IpAddr;
 
 use crate::models::*;
 
-use crate::error::ParserError;
+use crate::error::{BgpValidationWarning, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
 use crate::parser::bgp::attributes::attr_02_17_as_path::{encode_as_path, parse_as_path};
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
@@ -45,6 +45,121 @@ use crate::parser::bgp::attributes::attr_35_otc::{
 };
 use crate::parser::ReadUtils;
 
+/// Validate attribute flags according to RFC 4271 and RFC 7606
+fn validate_attribute_flags(
+    attr_type: AttrType,
+    flags: AttrFlags,
+    warnings: &mut Vec<BgpValidationWarning>,
+) {
+    let expected_flags = match attr_type {
+        // Well-known mandatory attributes
+        AttrType::ORIGIN | AttrType::AS_PATH | AttrType::NEXT_HOP => AttrFlags::TRANSITIVE,
+        // Well-known discretionary attributes
+        AttrType::ATOMIC_AGGREGATE => AttrFlags::TRANSITIVE,
+        // Optional non-transitive attributes
+        AttrType::MULTI_EXIT_DISCRIMINATOR
+        | AttrType::ORIGINATOR_ID
+        | AttrType::CLUSTER_LIST
+        | AttrType::MP_REACHABLE_NLRI
+        | AttrType::MP_UNREACHABLE_NLRI => AttrFlags::OPTIONAL,
+        // Optional transitive attributes
+        AttrType::AGGREGATOR
+        | AttrType::AS4_AGGREGATOR
+        | AttrType::AS4_PATH
+        | AttrType::COMMUNITIES
+        | AttrType::EXTENDED_COMMUNITIES
+        | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+        | AttrType::LARGE_COMMUNITIES
+        | AttrType::ONLY_TO_CUSTOMER => AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE,
+        // LOCAL_PREFERENCE is well-known mandatory for IBGP
+        AttrType::LOCAL_PREFERENCE => AttrFlags::TRANSITIVE,
+        // Unknown or development attributes
+        _ => return, // Don't validate unknown attributes
+    };
+
+    // Check if flags match expected (ignoring EXTENDED and PARTIAL flags for this check)
+    let relevant_flags = flags & (AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE);
+    if relevant_flags != expected_flags {
+        warnings.push(BgpValidationWarning::AttributeFlagsError {
+            attr_type,
+            expected_flags: expected_flags.bits(),
+            actual_flags: relevant_flags.bits(),
+        });
+    }
+
+    // Check partial flag constraint
+    if flags.contains(AttrFlags::PARTIAL) {
+        match attr_type {
+            // Partial bit MUST be 0 for well-known attributes and optional non-transitive
+            AttrType::ORIGIN
+            | AttrType::AS_PATH
+            | AttrType::NEXT_HOP
+            | AttrType::LOCAL_PREFERENCE
+            | AttrType::ATOMIC_AGGREGATE
+            | AttrType::MULTI_EXIT_DISCRIMINATOR
+            | AttrType::ORIGINATOR_ID
+            | AttrType::CLUSTER_LIST
+            | AttrType::MP_REACHABLE_NLRI
+            | AttrType::MP_UNREACHABLE_NLRI => {
+                warnings.push(BgpValidationWarning::AttributeFlagsError {
+                    attr_type,
+                    expected_flags: expected_flags.bits(),
+                    actual_flags: flags.bits(),
+                });
+            }
+            _ => {} // Partial is OK for optional transitive attributes
+        }
+    }
+}
+
+/// Check if an attribute type is well-known mandatory
+fn is_well_known_mandatory(attr_type: AttrType) -> bool {
+    matches!(
+        attr_type,
+        AttrType::ORIGIN | AttrType::AS_PATH | AttrType::NEXT_HOP | AttrType::LOCAL_PREFERENCE
+    )
+}
+
+/// Validate attribute length constraints
+fn validate_attribute_length(
+    attr_type: AttrType,
+    length: usize,
+    warnings: &mut Vec<BgpValidationWarning>,
+) {
+    let expected_length = match attr_type {
+        AttrType::ORIGIN => Some(1),
+        AttrType::NEXT_HOP => Some(4), // IPv4 next hop
+        AttrType::MULTI_EXIT_DISCRIMINATOR => Some(4),
+        AttrType::LOCAL_PREFERENCE => Some(4),
+        AttrType::ATOMIC_AGGREGATE => Some(0),
+        AttrType::ORIGINATOR_ID => Some(4),
+        AttrType::ONLY_TO_CUSTOMER => Some(4),
+        // Variable length attributes - no fixed constraint
+        AttrType::AS_PATH
+        | AttrType::AS4_PATH
+        | AttrType::AGGREGATOR
+        | AttrType::AS4_AGGREGATOR
+        | AttrType::COMMUNITIES
+        | AttrType::EXTENDED_COMMUNITIES
+        | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+        | AttrType::LARGE_COMMUNITIES
+        | AttrType::CLUSTER_LIST
+        | AttrType::MP_REACHABLE_NLRI
+        | AttrType::MP_UNREACHABLE_NLRI => None,
+        _ => None, // Unknown attributes
+    };
+
+    if let Some(expected) = expected_length {
+        if length != expected {
+            warnings.push(BgpValidationWarning::AttributeLengthError {
+                attr_type,
+                expected_length: Some(expected),
+                actual_length: length,
+            });
+        }
+    }
+}
+
 /// Parse BGP attributes given a slice of u8 and some options.
 ///
 /// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
@@ -58,6 +173,8 @@ pub fn parse_attributes(
     prefixes: Option<&[NetworkPrefix]>,
 ) -> Result<Attributes, ParserError> {
     let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
+    let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
+    let mut seen_attributes: std::collections::HashSet<AttrType> = std::collections::HashSet::new();
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -90,7 +207,23 @@ pub fn parse_attributes(
             "reading attribute: type -- {:?}, length -- {}",
             &attr_type, attr_length
         );
-        let attr_type = match AttrType::from(attr_type) {
+
+        let parsed_attr_type = AttrType::from(attr_type);
+
+        // RFC 7606: Check for duplicate attributes
+        if seen_attributes.contains(&parsed_attr_type) {
+            validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
+                attr_type: parsed_attr_type,
+            });
+            // Continue processing - don't skip duplicate for now
+        }
+        seen_attributes.insert(parsed_attr_type);
+
+        // Validate attribute flags and length
+        validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
+        validate_attribute_length(parsed_attr_type, attr_length, &mut validation_warnings);
+
+        let attr_type = match parsed_attr_type {
             attr_type @ AttrType::Unknown(unknown_type) => {
                 // skip pass the remaining bytes of this attribute
                 let bytes = data.read_n_bytes(attr_length)?;
@@ -195,18 +328,61 @@ pub fn parse_attributes(
                 attributes.push(Attribute { value, flag });
             }
             Err(e) => {
+                // RFC 7606 error handling
                 if partial {
-                    // it's ok to have errors when reading partial bytes
-                    debug!("PARTIAL: {}", e);
+                    // Partial attribute with errors - log warning but continue
+                    validation_warnings.push(BgpValidationWarning::PartialAttributeError {
+                        attr_type,
+                        reason: e.to_string(),
+                    });
+                    debug!("PARTIAL attribute error: {}", e);
+                } else if is_well_known_mandatory(attr_type) {
+                    // For well-known mandatory attributes, use "treat-as-withdraw" approach
+                    // Don't break parsing, but log warning
+                    validation_warnings.push(BgpValidationWarning::MalformedAttributeList {
+                        reason: format!(
+                            "Well-known mandatory attribute {} parsing failed: {}",
+                            u8::from(attr_type),
+                            e
+                        ),
+                    });
+                    debug!(
+                        "Well-known mandatory attribute parsing failed, treating as withdraw: {}",
+                        e
+                    );
                 } else {
-                    debug!("{}", e);
+                    // For optional attributes, use "attribute discard" approach
+                    validation_warnings.push(BgpValidationWarning::OptionalAttributeError {
+                        attr_type,
+                        reason: e.to_string(),
+                    });
+                    debug!("Optional attribute error, discarding: {}", e);
                 }
+                // Continue parsing in all cases - never break the session
                 continue;
             }
         };
     }
 
-    Ok(Attributes::from(attributes))
+    // Check for missing well-known mandatory attributes
+    let mandatory_attributes = [
+        AttrType::ORIGIN,
+        AttrType::AS_PATH,
+        AttrType::NEXT_HOP,
+        // LOCAL_PREFERENCE is only mandatory for IBGP, so we don't check it here
+    ];
+
+    for &mandatory_attr in &mandatory_attributes {
+        if !seen_attributes.contains(&mandatory_attr) {
+            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: mandatory_attr,
+            });
+        }
+    }
+
+    let mut result = Attributes::from(attributes);
+    result.validation_warnings = validation_warnings;
+    Ok(result)
 }
 
 impl Attribute {
@@ -297,5 +473,135 @@ mod tests {
             attributes.inner[0].value.attr_type(),
             AttrType::Unknown(254)
         );
+    }
+
+    #[test]
+    fn test_rfc7606_attribute_flags_error() {
+        // Create an ORIGIN attribute with wrong flags (should be transitive, not optional)
+        let data = Bytes::from(vec![0x80, 0x01, 0x01, 0x00]); // Optional flag set incorrectly
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // Should have validation warning for incorrect flags
+        assert!(attributes.has_validation_warnings());
+        let warnings = attributes.validation_warnings();
+        // Will have attribute flags error + missing mandatory attributes
+        assert!(warnings.len() >= 1);
+
+        match &warnings[0] {
+            BgpValidationWarning::AttributeFlagsError { attr_type, .. } => {
+                assert_eq!(*attr_type, AttrType::ORIGIN);
+            }
+            _ => panic!("Expected AttributeFlagsError warning"),
+        }
+    }
+
+    #[test]
+    fn test_rfc7606_missing_mandatory_attribute() {
+        // Empty attributes - should have warnings for missing mandatory attributes
+        let data = Bytes::from(vec![]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // Should have warnings for missing mandatory attributes
+        assert!(attributes.has_validation_warnings());
+        let warnings = attributes.validation_warnings();
+        assert_eq!(warnings.len(), 3); // ORIGIN, AS_PATH, NEXT_HOP
+
+        for warning in warnings {
+            match warning {
+                BgpValidationWarning::MissingWellKnownAttribute { attr_type } => {
+                    assert!(matches!(
+                        attr_type,
+                        AttrType::ORIGIN | AttrType::AS_PATH | AttrType::NEXT_HOP
+                    ));
+                }
+                _ => panic!("Expected MissingWellKnownAttribute warning"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_rfc7606_duplicate_attribute() {
+        // Create two ORIGIN attributes
+        let data = Bytes::from(vec![
+            0x40, 0x01, 0x01, 0x00, // First ORIGIN attribute
+            0x40, 0x01, 0x01, 0x01, // Second ORIGIN attribute (duplicate)
+        ]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // Should have warning for duplicate attribute
+        assert!(attributes.has_validation_warnings());
+        let warnings = attributes.validation_warnings();
+
+        // Should have at least one duplicate attribute warning
+        let has_duplicate_warning = warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::DuplicateAttribute { .. }));
+        assert!(has_duplicate_warning);
+    }
+
+    #[test]
+    fn test_rfc7606_attribute_length_error() {
+        // Create an ORIGIN attribute with wrong length (should be 1 byte, not 2)
+        let data = Bytes::from(vec![0x40, 0x01, 0x02, 0x00, 0x01]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // Should have warning for incorrect attribute length
+        assert!(attributes.has_validation_warnings());
+        let warnings = attributes.validation_warnings();
+
+        let has_length_warning = warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::AttributeLengthError { .. }));
+        assert!(has_length_warning);
+    }
+
+    #[test]
+    fn test_rfc7606_no_session_reset() {
+        // Test that parsing continues even with multiple errors
+        let data = Bytes::from(vec![
+            0x80, 0x01, 0x02, 0x00, 0x01, // Wrong flags and length for ORIGIN
+            0x40, 0x01, 0x01, 0x00, // Duplicate ORIGIN
+            0x40, 0xFF, 0x01, 0x00, // Unknown attribute
+        ]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        // Should not panic or return error - RFC 7606 requires continued parsing
+        let result = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
+        assert!(result.is_ok());
+
+        let attributes = result.unwrap();
+        assert!(attributes.has_validation_warnings());
+
+        // Should have multiple warnings but parsing should continue
+        let warnings = attributes.validation_warnings();
+        assert!(!warnings.is_empty());
     }
 }

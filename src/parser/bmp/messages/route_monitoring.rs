@@ -74,9 +74,11 @@ mod tests {
         let mon_msg = RouteMonitoring {
             bgp_message: BgpMessage::Update(msg),
         };
-        assert_eq!(
-            format!("{mon_msg:?}"),
-            "RouteMonitoring { bgp_message: Update(BgpUpdateMessage { withdrawn_prefixes: [], attributes: Attributes { inner: [] }, announced_prefixes: [] }) }"
-        );
+        #[cfg(feature = "parser")]
+        let expected = "RouteMonitoring { bgp_message: Update(BgpUpdateMessage { withdrawn_prefixes: [], attributes: Attributes { inner: [], validation_warnings: [] }, announced_prefixes: [] }) }";
+        #[cfg(not(feature = "parser"))]
+        let expected = "RouteMonitoring { bgp_message: Update(BgpUpdateMessage { withdrawn_prefixes: [], attributes: Attributes { inner: [] }, announced_prefixes: [] }) }";
+
+        assert_eq!(format!("{mon_msg:?}"), expected);
     }
 }
