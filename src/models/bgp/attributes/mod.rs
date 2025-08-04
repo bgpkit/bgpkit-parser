@@ -478,6 +478,8 @@ pub enum AttributeValue {
     MpUnreachNlri(Nlri),
     /// BGP Link-State attribute - RFC 7752
     LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
+    /// BGP Tunnel Encapsulation attribute - RFC 9012
+    TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
     Development(Vec<u8>),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
@@ -535,6 +537,7 @@ impl AttributeValue {
             AttributeValue::MpReachNlri(_) => AttrType::MP_REACHABLE_NLRI,
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
             AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
+            AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
         }

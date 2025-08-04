@@ -201,7 +201,6 @@ pub struct NodeDescriptor {
     pub unknown_tlvs: Vec<Tlv>,
 }
 
-
 /// Link Descriptor TLVs
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -216,7 +215,6 @@ pub struct LinkDescriptor {
     pub unknown_tlvs: Vec<Tlv>,
 }
 
-
 /// Prefix Descriptor TLVs
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -227,7 +225,6 @@ pub struct PrefixDescriptor {
     pub ip_reachability_information: Option<NetworkPrefix>,
     pub unknown_tlvs: Vec<Tlv>,
 }
-
 
 /// BGP Link-State NLRI structure
 #[derive(Debug, PartialEq, Clone, Eq)]
@@ -306,7 +303,6 @@ pub struct LinkStateAttribute {
     pub prefix_attributes: HashMap<PrefixAttributeType, Vec<u8>>,
     pub unknown_attributes: Vec<Tlv>,
 }
-
 
 impl LinkStateAttribute {
     pub fn new() -> Self {

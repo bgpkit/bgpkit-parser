@@ -7,6 +7,7 @@ pub mod elem;
 pub mod error;
 pub mod linkstate;
 pub mod role;
+pub mod tunnel_encap;
 
 pub use attributes::*;
 pub use community::*;
@@ -14,6 +15,7 @@ pub use elem::*;
 pub use error::*;
 pub use linkstate::*;
 pub use role::*;
+pub use tunnel_encap::*;
 
 use crate::models::network::*;
 use capabilities::{

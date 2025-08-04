@@ -9,6 +9,7 @@ mod attr_09_originator;
 mod attr_10_13_cluster;
 mod attr_14_15_nlri;
 mod attr_16_25_extended_communities;
+mod attr_23_tunnel_encap;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
 mod attr_35_otc;
@@ -37,6 +38,9 @@ use crate::parser::bgp::attributes::attr_14_15_nlri::{encode_nlri, parse_nlri};
 use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
     encode_extended_communities, encode_ipv6_extended_communities, parse_extended_community,
     parse_ipv6_extended_community,
+};
+use crate::parser::bgp::attributes::attr_23_tunnel_encap::{
+    encode_tunnel_encapsulation_attribute, parse_tunnel_encapsulation_attribute,
 };
 use crate::parser::bgp::attributes::attr_29_linkstate::{
     encode_link_state_attribute, parse_link_state_attribute,
@@ -321,6 +325,7 @@ pub fn parse_attributes(
                 Ok(AttributeValue::Development(value))
             }
             AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
+            AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
             _ => Err(ParserError::Unsupported(format!(
                 "unsupported attribute type: {attr_type:?}"
@@ -431,6 +436,7 @@ impl Attribute {
             AttributeValue::MpReachNlri(v) => encode_nlri(v, true),
             AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false),
             AttributeValue::LinkState(v) => encode_link_state_attribute(v),
+            AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
             AttributeValue::Deprecated(v) => Bytes::from(v.bytes.to_owned()),
             AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),

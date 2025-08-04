@@ -14,6 +14,15 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* added BGP Tunnel Encapsulation attribute parsing support following RFC 9012, RFC 5640, and RFC 8365
+    * implemented complete TLV-based parsing system for BGP Tunnel Encapsulation attribute (type 23)
+    * added support for all IANA-defined tunnel types (VXLAN, NVGRE, GRE, SR Policy, Geneve, etc.)
+    * added support for all sub-TLV types including Color, UDP Destination Port, Tunnel Egress Endpoint, Preference
+    * implemented variable-length sub-TLV encoding (1 byte for types 0-127, 2 bytes for types 128-255)
+    * added helper methods for common attribute access (color, UDP port, egress endpoint, preference)
+    * created structured data model with `TunnelEncapAttribute`, `TunnelEncapTlv`, and `SubTlv` types
+    * added comprehensive test coverage with 7 test cases covering parsing, encoding, and error handling
+    * maintains full backward compatibility with existing attribute parsing infrastructure
 * added comprehensive BGP Link-State parsing support following RFC 7752 and extensions
     * implemented complete Link-State NLRI parsing for Node, Link, and IPv4/IPv6 Topology Prefix types
     * added Link-State AFI (16388) and SAFI (71, 72) support for BGP-LS and BGP-LS-VPN
