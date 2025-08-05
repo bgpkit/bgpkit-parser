@@ -451,15 +451,14 @@ mod component_tests {
 
         // Components that don't use numeric operators
         let prefix = NetworkPrefix::from_str("192.0.2.0/24").unwrap();
-        assert!(!FlowSpecComponent::DestinationPrefix(prefix.clone()).uses_numeric_operators());
-        assert!(!FlowSpecComponent::SourcePrefix(prefix.clone()).uses_numeric_operators());
+        assert!(!FlowSpecComponent::DestinationPrefix(prefix).uses_numeric_operators());
+        assert!(!FlowSpecComponent::SourcePrefix(prefix).uses_numeric_operators());
         assert!(!FlowSpecComponent::TcpFlags(vec![]).uses_numeric_operators());
         assert!(!FlowSpecComponent::Fragment(vec![]).uses_numeric_operators());
-        assert!(!FlowSpecComponent::DestinationIpv6Prefix {
-            offset: 0,
-            prefix: prefix.clone()
-        }
-        .uses_numeric_operators());
+        assert!(
+            !FlowSpecComponent::DestinationIpv6Prefix { offset: 0, prefix }
+                .uses_numeric_operators()
+        );
         assert!(!FlowSpecComponent::SourceIpv6Prefix { offset: 0, prefix }.uses_numeric_operators());
     }
 
@@ -471,8 +470,8 @@ mod component_tests {
 
         // Components that don't use bitmask operators
         let prefix = NetworkPrefix::from_str("192.0.2.0/24").unwrap();
-        assert!(!FlowSpecComponent::DestinationPrefix(prefix.clone()).uses_bitmask_operators());
-        assert!(!FlowSpecComponent::SourcePrefix(prefix.clone()).uses_bitmask_operators());
+        assert!(!FlowSpecComponent::DestinationPrefix(prefix).uses_bitmask_operators());
+        assert!(!FlowSpecComponent::SourcePrefix(prefix).uses_bitmask_operators());
         assert!(!FlowSpecComponent::IpProtocol(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::Port(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::DestinationPort(vec![]).uses_bitmask_operators());
@@ -482,11 +481,10 @@ mod component_tests {
         assert!(!FlowSpecComponent::PacketLength(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::Dscp(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::FlowLabel(vec![]).uses_bitmask_operators());
-        assert!(!FlowSpecComponent::DestinationIpv6Prefix {
-            offset: 0,
-            prefix: prefix.clone()
-        }
-        .uses_bitmask_operators());
+        assert!(
+            !FlowSpecComponent::DestinationIpv6Prefix { offset: 0, prefix }
+                .uses_bitmask_operators()
+        );
         assert!(!FlowSpecComponent::SourceIpv6Prefix { offset: 0, prefix }.uses_bitmask_operators());
     }
 
@@ -725,7 +723,7 @@ mod nlri_parsing_tests {
         let prefix = NetworkPrefix::from_str("2001:db8::/64").unwrap();
         let nlri = FlowSpecNlri::new(vec![FlowSpecComponent::DestinationIpv6Prefix {
             offset: 32,
-            prefix: prefix.clone(),
+            prefix,
         }]);
 
         let encoded = encode_flowspec_nlri(&nlri);
