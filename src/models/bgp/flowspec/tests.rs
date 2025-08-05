@@ -381,14 +381,12 @@ mod component_tests {
     #[test]
     fn test_component_type_ids() {
         // Test all component type IDs
-        let dest_prefix = FlowSpecComponent::DestinationPrefix(
-            NetworkPrefix::from_str("192.0.2.0/24").unwrap()
-        );
+        let dest_prefix =
+            FlowSpecComponent::DestinationPrefix(NetworkPrefix::from_str("192.0.2.0/24").unwrap());
         assert_eq!(dest_prefix.component_type(), 1);
 
-        let src_prefix = FlowSpecComponent::SourcePrefix(
-            NetworkPrefix::from_str("192.0.2.0/24").unwrap()
-        );
+        let src_prefix =
+            FlowSpecComponent::SourcePrefix(NetworkPrefix::from_str("192.0.2.0/24").unwrap());
         assert_eq!(src_prefix.component_type(), 2);
 
         let ip_protocol = FlowSpecComponent::IpProtocol(vec![NumericOperator::equal_to(6)]);
@@ -457,7 +455,11 @@ mod component_tests {
         assert!(!FlowSpecComponent::SourcePrefix(prefix.clone()).uses_numeric_operators());
         assert!(!FlowSpecComponent::TcpFlags(vec![]).uses_numeric_operators());
         assert!(!FlowSpecComponent::Fragment(vec![]).uses_numeric_operators());
-        assert!(!FlowSpecComponent::DestinationIpv6Prefix { offset: 0, prefix: prefix.clone() }.uses_numeric_operators());
+        assert!(!FlowSpecComponent::DestinationIpv6Prefix {
+            offset: 0,
+            prefix: prefix.clone()
+        }
+        .uses_numeric_operators());
         assert!(!FlowSpecComponent::SourceIpv6Prefix { offset: 0, prefix }.uses_numeric_operators());
     }
 
@@ -480,7 +482,11 @@ mod component_tests {
         assert!(!FlowSpecComponent::PacketLength(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::Dscp(vec![]).uses_bitmask_operators());
         assert!(!FlowSpecComponent::FlowLabel(vec![]).uses_bitmask_operators());
-        assert!(!FlowSpecComponent::DestinationIpv6Prefix { offset: 0, prefix: prefix.clone() }.uses_bitmask_operators());
+        assert!(!FlowSpecComponent::DestinationIpv6Prefix {
+            offset: 0,
+            prefix: prefix.clone()
+        }
+        .uses_bitmask_operators());
         assert!(!FlowSpecComponent::SourceIpv6Prefix { offset: 0, prefix }.uses_bitmask_operators());
     }
 
@@ -624,7 +630,6 @@ mod nlri_parsing_tests {
         assert_eq!(offset, 1);
     }
 
-
     #[test]
     fn test_invalid_prefix_length() {
         // Test prefix with invalid length causing insufficient data
@@ -673,7 +678,7 @@ mod nlri_parsing_tests {
         let data = vec![
             0x02, // Length: 2 bytes
             0x03, // Type 3: IP Protocol
-            // No operator data follows
+                  // No operator data follows
         ];
 
         let result = parse_flowspec_nlri(&data);
@@ -724,7 +729,7 @@ mod nlri_parsing_tests {
         }]);
 
         let encoded = encode_flowspec_nlri(&nlri);
-        
+
         // Should start with length, then type 1, then prefix len, then offset
         assert!(encoded.len() > 4);
         assert_eq!(encoded[1], 1); // Type 1
@@ -788,10 +793,10 @@ mod nlri_parsing_tests {
 
         let encoded = encode_flowspec_nlri(&nlri);
         let parsed = parse_flowspec_nlri(&encoded).unwrap();
-        
+
         // Verify round-trip encoding worked
         assert_eq!(parsed.components.len(), 2);
-        
+
         match &parsed.components[0] {
             FlowSpecComponent::IpProtocol(ops) => {
                 assert_eq!(ops.len(), 3);
@@ -801,7 +806,7 @@ mod nlri_parsing_tests {
             }
             _ => panic!("Expected IP protocol component"),
         }
-        
+
         match &parsed.components[1] {
             FlowSpecComponent::TcpFlags(ops) => {
                 assert_eq!(ops.len(), 2);
@@ -829,37 +834,44 @@ mod nlri_parsing_tests {
 
         for (component_type, description) in test_cases {
             let data = vec![
-                0x03, // Length: 3 bytes
+                0x03,           // Length: 3 bytes
                 component_type, // Component type
-                0x81, // end=1, and=0, len=00, eq=1
-                0x06, // Value
+                0x81,           // end=1, and=0, len=00, eq=1
+                0x06,           // Value
             ];
 
             let result = parse_flowspec_nlri(&data);
-            assert!(result.is_ok(), "Failed to parse {}: {:?}", description, result);
-            
+            assert!(
+                result.is_ok(),
+                "Failed to parse {}: {:?}",
+                description,
+                result
+            );
+
             let nlri = result.unwrap();
             assert_eq!(nlri.components.len(), 1);
             assert_eq!(nlri.components[0].component_type(), component_type);
         }
 
         // Test bitmask component types
-        let bitmask_cases = vec![
-            (9, "TCP Flags"),
-            (12, "Fragment"),
-        ];
+        let bitmask_cases = vec![(9, "TCP Flags"), (12, "Fragment")];
 
         for (component_type, description) in bitmask_cases {
             let data = vec![
-                0x03, // Length: 3 bytes
+                0x03,           // Length: 3 bytes
                 component_type, // Component type
-                0x81, // end=1, and=0, len=00, not=0, match=1
-                0x06, // Value
+                0x81,           // end=1, and=0, len=00, not=0, match=1
+                0x06,           // Value
             ];
 
             let result = parse_flowspec_nlri(&data);
-            assert!(result.is_ok(), "Failed to parse {}: {:?}", description, result);
-            
+            assert!(
+                result.is_ok(),
+                "Failed to parse {}: {:?}",
+                description,
+                result
+            );
+
             let nlri = result.unwrap();
             assert_eq!(nlri.components.len(), 1);
             assert_eq!(nlri.components[0].component_type(), component_type);

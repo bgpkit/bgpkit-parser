@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(op4.value_length, 4);
         assert_eq!(op4.value, 0x10000);
 
-        // Test 8-byte value  
+        // Test 8-byte value
         let op8 = NumericOperator::equal_to(0x100000000);
         assert_eq!(op8.value_length, 8);
         assert_eq!(op8.value, 0x100000000);
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(op1.value_length, 1);
         assert_eq!(op1.bitmask, 255);
 
-        // Test 2-byte value  
+        // Test 2-byte value
         let op2 = BitmaskOperator::exact_match(256);
         assert_eq!(op2.value_length, 2);
         assert_eq!(op2.bitmask, 256);
