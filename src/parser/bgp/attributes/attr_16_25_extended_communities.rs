@@ -29,14 +29,59 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
             }
             ExtendedCommunityType::NonTransitiveTwoOctetAs => {
                 let sub_type = input.read_u8()?;
-                let global = input.read_u16()?;
-                let mut local: [u8; 4] = [0; 4];
-                input.read_exact(&mut local)?;
-                ExtendedCommunity::NonTransitiveTwoOctetAs(TwoOctetAsExtCommunity {
-                    subtype: sub_type,
-                    global_admin: Asn::new_16bit(global),
-                    local_admin: local,
-                })
+                match sub_type {
+                    0x06 => {
+                        // Flow-Spec Traffic Rate
+                        let as_number = input.read_u16()?;
+                        let rate_bytes = input.read_u32()?;
+                        let rate = f32::from_bits(rate_bytes);
+                        ExtendedCommunity::FlowSpecTrafficRate(FlowSpecTrafficRate::new(
+                            as_number, rate,
+                        ))
+                    }
+                    0x07 => {
+                        // Flow-Spec Traffic Action
+                        let as_number = input.read_u16()?;
+                        let flags = input.read_u32()?;
+                        let terminal = (flags & 0x01) != 0;
+                        let sample = (flags & 0x02) != 0;
+                        ExtendedCommunity::FlowSpecTrafficAction(FlowSpecTrafficAction::new(
+                            as_number, terminal, sample,
+                        ))
+                    }
+                    0x08 => {
+                        // Flow-Spec Redirect (same as TwoOctetAsExtCommunity but different variant)
+                        let global = input.read_u16()?;
+                        let mut local: [u8; 4] = [0; 4];
+                        input.read_exact(&mut local)?;
+                        ExtendedCommunity::FlowSpecRedirect(TwoOctetAsExtCommunity {
+                            subtype: sub_type,
+                            global_admin: Asn::new_16bit(global),
+                            local_admin: local,
+                        })
+                    }
+                    0x09 => {
+                        // Flow-Spec Traffic Marking
+                        let as_number = input.read_u16()?;
+                        let dscp = input.read_u8()?;
+                        let _reserved1 = input.read_u8()?; // reserved
+                        let _reserved2 = input.read_u16()?; // reserved
+                        ExtendedCommunity::FlowSpecTrafficMarking(FlowSpecTrafficMarking::new(
+                            as_number, dscp,
+                        ))
+                    }
+                    _ => {
+                        // Standard NonTransitiveTwoOctetAs
+                        let global = input.read_u16()?;
+                        let mut local: [u8; 4] = [0; 4];
+                        input.read_exact(&mut local)?;
+                        ExtendedCommunity::NonTransitiveTwoOctetAs(TwoOctetAsExtCommunity {
+                            subtype: sub_type,
+                            global_admin: Asn::new_16bit(global),
+                            local_admin: local,
+                        })
+                    }
+                }
             }
 
             ExtendedCommunityType::TransitiveIpv4Addr => {
@@ -173,6 +218,39 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
                 bytes.put_slice(&opaque.value);
             }
 
+            ExtendedCommunity::FlowSpecTrafficRate(rate) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x06); // subtype
+                bytes.put_u16(rate.as_number);
+                bytes.put_f32(rate.rate_bytes_per_sec);
+            }
+            ExtendedCommunity::FlowSpecTrafficAction(action) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x07); // subtype
+                bytes.put_u16(action.as_number);
+                let mut flags = 0u32;
+                if action.terminal {
+                    flags |= 0x01;
+                }
+                if action.sample {
+                    flags |= 0x02;
+                }
+                bytes.put_u32(flags);
+            }
+            ExtendedCommunity::FlowSpecRedirect(redirect) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x08); // subtype
+                bytes.put_u16(redirect.global_admin.into());
+                bytes.put_slice(redirect.local_admin.as_slice());
+            }
+            ExtendedCommunity::FlowSpecTrafficMarking(marking) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x09); // subtype
+                bytes.put_u16(marking.as_number);
+                bytes.put_u8(marking.dscp);
+                bytes.put_u8(0); // reserved
+                bytes.put_u16(0); // reserved
+            }
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
@@ -366,5 +444,123 @@ mod tests {
             local_admin: [0x00, 0x01],
         };
         let _bytes = encode_ipv6_extended_communities(&vec![community]);
+    }
+
+    #[test]
+    fn test_flowspec_extended_communities() {
+        // Test Flow-Spec Traffic Rate community
+        let rate_data = vec![
+            0x40, // NonTransitiveTwoOctetAs
+            0x06, // Traffic Rate subtype
+            0xFC, 0x00, // AS 64512
+            0x44, 0x7A, 0x00, 0x00, // 1000.0 as IEEE 754 float32
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(rate_data)).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::FlowSpecTrafficRate(rate) = &communities[0] {
+                assert_eq!(rate.as_number, 64512);
+                assert_eq!(rate.rate_bytes_per_sec, 1000.0);
+            } else {
+                panic!("Expected FlowSpecTrafficRate community");
+            }
+        } else {
+            panic!("Expected ExtendedCommunities attribute");
+        }
+
+        // Test Flow-Spec Traffic Action community
+        let action_data = vec![
+            0x40, // NonTransitiveTwoOctetAs
+            0x07, // Traffic Action subtype
+            0xFC, 0x00, // AS 64512
+            0x00, 0x00, 0x00, 0x03, // terminal=1, sample=1
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(action_data)).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::FlowSpecTrafficAction(action) = &communities[0] {
+                assert_eq!(action.as_number, 64512);
+                assert!(action.terminal);
+                assert!(action.sample);
+            } else {
+                panic!("Expected FlowSpecTrafficAction community");
+            }
+        } else {
+            panic!("Expected ExtendedCommunities attribute");
+        }
+
+        // Test Flow-Spec Traffic Marking community
+        let marking_data = vec![
+            0x40, // NonTransitiveTwoOctetAs
+            0x09, // Traffic Marking subtype
+            0xFC, 0x00, // AS 64512
+            0x2E, // DSCP 46 (EF)
+            0x00, // reserved
+            0x00, 0x00, // reserved
+        ];
+
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(marking_data)).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            if let ExtendedCommunity::FlowSpecTrafficMarking(marking) = &communities[0] {
+                assert_eq!(marking.as_number, 64512);
+                assert_eq!(marking.dscp, 46);
+            } else {
+                panic!("Expected FlowSpecTrafficMarking community");
+            }
+        } else {
+            panic!("Expected ExtendedCommunities attribute");
+        }
+    }
+
+    #[test]
+    fn test_flowspec_extended_communities_encoding() {
+        // Test encoding of Flow-Spec communities
+        let communities = vec![
+            ExtendedCommunity::FlowSpecTrafficRate(FlowSpecTrafficRate::new(64512, 1000.0)),
+            ExtendedCommunity::FlowSpecTrafficAction(FlowSpecTrafficAction::new(64512, true, true)),
+            ExtendedCommunity::FlowSpecTrafficMarking(FlowSpecTrafficMarking::new(64512, 46)),
+        ];
+
+        let encoded = encode_extended_communities(&communities);
+
+        // Parse it back to verify round-trip
+        if let AttributeValue::ExtendedCommunities(parsed_communities) =
+            parse_extended_community(encoded).unwrap()
+        {
+            assert_eq!(parsed_communities.len(), 3);
+
+            // Verify traffic rate
+            if let ExtendedCommunity::FlowSpecTrafficRate(rate) = &parsed_communities[0] {
+                assert_eq!(rate.as_number, 64512);
+                assert_eq!(rate.rate_bytes_per_sec, 1000.0);
+            } else {
+                panic!("Expected FlowSpecTrafficRate community");
+            }
+
+            // Verify traffic action
+            if let ExtendedCommunity::FlowSpecTrafficAction(action) = &parsed_communities[1] {
+                assert_eq!(action.as_number, 64512);
+                assert!(action.terminal);
+                assert!(action.sample);
+            } else {
+                panic!("Expected FlowSpecTrafficAction community");
+            }
+
+            // Verify traffic marking
+            if let ExtendedCommunity::FlowSpecTrafficMarking(marking) = &parsed_communities[2] {
+                assert_eq!(marking.as_number, 64512);
+                assert_eq!(marking.dscp, 46);
+            } else {
+                panic!("Expected FlowSpecTrafficMarking community");
+            }
+        } else {
+            panic!("Expected ExtendedCommunities attribute");
+        }
     }
 }

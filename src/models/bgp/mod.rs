@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod community;
 pub mod elem;
 pub mod error;
+pub mod flowspec;
 pub mod linkstate;
 pub mod role;
 pub mod tunnel_encap;
@@ -13,6 +14,7 @@ pub use attributes::*;
 pub use community::*;
 pub use elem::*;
 pub use error::*;
+pub use flowspec::*;
 pub use linkstate::*;
 pub use role::*;
 pub use tunnel_encap::*;
@@ -139,7 +141,7 @@ pub enum CapabilityValue {
     BgpRole(BgpRoleCapability),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// BGP Update Message.
 ///

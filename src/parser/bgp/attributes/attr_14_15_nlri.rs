@@ -112,6 +112,7 @@ pub fn parse_nlri(
         next_hop,
         prefixes,
         link_state_nlris,
+        flowspec_nlris: None,
     };
 
     match reachable {
@@ -329,6 +330,7 @@ mod tests {
                 path_id: None,
             }],
             link_state_nlris: None,
+            flowspec_nlris: None,
         };
         let bytes = encode_nlri(&nlri, true);
         assert_eq!(
@@ -358,6 +360,7 @@ mod tests {
                 path_id: Some(123),
             }],
             link_state_nlris: None,
+            flowspec_nlris: None,
         };
         let bytes = encode_nlri(&nlri, true);
         assert_eq!(
@@ -415,6 +418,7 @@ mod tests {
                 path_id: None,
             }],
             link_state_nlris: None,
+            flowspec_nlris: None,
         };
         let bytes = encode_nlri(&nlri, false);
         assert_eq!(
@@ -446,6 +450,7 @@ mod tests {
                 path_id: None,
             }],
             link_state_nlris: None,
+            flowspec_nlris: None,
         };
         let bytes = encode_nlri(&nlri_with_next_hop, false);
         // The encoded bytes should include the next_hop

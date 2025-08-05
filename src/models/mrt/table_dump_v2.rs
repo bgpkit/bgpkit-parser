@@ -191,13 +191,23 @@ bitflags! {
 }
 
 /// Geo-location peer entry - RFC 6397
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GeoPeer {
     pub peer: Peer,
     pub peer_latitude: f32,
     pub peer_longitude: f32,
 }
+
+impl PartialEq for GeoPeer {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer == other.peer
+            && self.peer_latitude.to_bits() == other.peer_latitude.to_bits()
+            && self.peer_longitude.to_bits() == other.peer_longitude.to_bits()
+    }
+}
+
+impl Eq for GeoPeer {}
 
 impl GeoPeer {
     pub fn new(peer: Peer, latitude: f32, longitude: f32) -> Self {
@@ -209,10 +219,8 @@ impl GeoPeer {
     }
 }
 
-impl Eq for GeoPeer {}
-
 /// RFC 6397: Geo-location peer table
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GeoPeerTable {
     pub collector_bgp_id: BgpIdentifier,
@@ -221,6 +229,18 @@ pub struct GeoPeerTable {
     pub collector_longitude: f32,
     pub geo_peers: Vec<GeoPeer>,
 }
+
+impl PartialEq for GeoPeerTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.collector_bgp_id == other.collector_bgp_id
+            && self.view_name == other.view_name
+            && self.collector_latitude.to_bits() == other.collector_latitude.to_bits()
+            && self.collector_longitude.to_bits() == other.collector_longitude.to_bits()
+            && self.geo_peers == other.geo_peers
+    }
+}
+
+impl Eq for GeoPeerTable {}
 
 impl GeoPeerTable {
     pub fn new(
@@ -242,8 +262,6 @@ impl GeoPeerTable {
         self.geo_peers.push(geo_peer);
     }
 }
-
-impl Eq for GeoPeerTable {}
 
 /// Peer struct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

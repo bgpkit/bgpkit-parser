@@ -134,7 +134,7 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 }
 
 /// Convenience wrapper for a list of attributes
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone, Default, Eq)]
 pub struct Attributes {
     // Black box type to allow for later changes/optimizations. The most common attributes could be
     // added as fields to allow for easier lookup.

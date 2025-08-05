@@ -14,6 +14,8 @@ pub struct Nlri {
     pub prefixes: Vec<NetworkPrefix>,
     /// Link-State NLRI data - RFC 7752
     pub link_state_nlris: Option<Vec<crate::models::bgp::linkstate::LinkStateNlri>>,
+    /// Flow-Spec NLRI data - RFC 8955/8956
+    pub flowspec_nlris: Option<Vec<crate::models::bgp::flowspec::FlowSpecNlri>>,
 }
 
 impl Nlri {
@@ -30,6 +32,11 @@ impl Nlri {
     /// Returns true if this NLRI refers to Link-State information.
     pub const fn is_link_state(&self) -> bool {
         matches!(self.afi, Afi::LinkState)
+    }
+
+    /// Returns true if this NLRI refers to Flow-Spec information.
+    pub const fn is_flowspec(&self) -> bool {
+        matches!(self.safi, Safi::FlowSpec | Safi::FlowSpecL3Vpn)
     }
 
     /// Returns true if this NLRI refers to reachable prefixes
@@ -60,6 +67,7 @@ impl Nlri {
             next_hop,
             prefixes: vec![prefix],
             link_state_nlris: None,
+            flowspec_nlris: None,
         }
     }
 
@@ -75,6 +83,7 @@ impl Nlri {
             next_hop: None,
             prefixes: vec![prefix],
             link_state_nlris: None,
+            flowspec_nlris: None,
         }
     }
 
@@ -90,6 +99,7 @@ impl Nlri {
             next_hop,
             prefixes: Vec::new(),
             link_state_nlris: Some(nlri_list),
+            flowspec_nlris: None,
         }
     }
 
@@ -103,6 +113,41 @@ impl Nlri {
             next_hop: None,
             prefixes: Vec::new(),
             link_state_nlris: Some(nlri_list),
+            flowspec_nlris: None,
+        }
+    }
+
+    /// Create a new Flow-Spec reachable NLRI
+    pub fn new_flowspec_reachable(
+        afi: Afi,
+        safi: Safi,
+        next_hop: Option<IpAddr>,
+        flowspec_nlris: Vec<crate::models::bgp::flowspec::FlowSpecNlri>,
+    ) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        Nlri {
+            afi,
+            safi,
+            next_hop,
+            prefixes: Vec::new(),
+            link_state_nlris: None,
+            flowspec_nlris: Some(flowspec_nlris),
+        }
+    }
+
+    /// Create a new Flow-Spec unreachable NLRI
+    pub fn new_flowspec_unreachable(
+        afi: Afi,
+        safi: Safi,
+        flowspec_nlris: Vec<crate::models::bgp::flowspec::FlowSpecNlri>,
+    ) -> Nlri {
+        Nlri {
+            afi,
+            safi,
+            next_hop: None,
+            prefixes: Vec::new(),
+            link_state_nlris: None,
+            flowspec_nlris: Some(flowspec_nlris),
         }
     }
 }
@@ -133,7 +178,7 @@ impl<'a> IntoIterator for &'a Nlri {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpReachableNlri {
     afi: Afi,
@@ -158,7 +203,7 @@ impl MpReachableNlri {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MpUnreachableNlri {
     afi: Afi,
@@ -289,6 +334,91 @@ mod tests {
         let node_desc = NodeDescriptor::default();
         let ls_nlri = LinkStateNlri::new_node_nlri(ProtocolId::Ospfv2, 123456, node_desc);
         let nlri = Nlri::new_link_state_unreachable(Safi::LinkState, vec![ls_nlri]);
+
+        let _ = nlri.next_hop_addr();
+    }
+
+    #[test]
+    fn nlri_flowspec_creation() {
+        use crate::models::bgp::flowspec::{FlowSpecComponent, FlowSpecNlri};
+        use std::str::FromStr;
+
+        let component =
+            FlowSpecComponent::DestinationPrefix(NetworkPrefix::from_str("192.0.2.0/24").unwrap());
+        let flowspec_nlri = FlowSpecNlri::new(vec![component]);
+
+        let nlri = Nlri::new_flowspec_reachable(
+            Afi::Ipv4,
+            Safi::FlowSpec,
+            Some("192.0.2.1".parse().unwrap()),
+            vec![flowspec_nlri],
+        );
+
+        assert!(nlri.is_flowspec());
+        assert!(nlri.is_reachable());
+        assert!(nlri.is_ipv4());
+        assert_eq!(nlri.afi, Afi::Ipv4);
+        assert_eq!(nlri.safi, Safi::FlowSpec);
+        assert_eq!(nlri.prefixes.len(), 0); // Flow-Spec doesn't use traditional prefixes
+        assert!(nlri.flowspec_nlris.is_some());
+        assert_eq!(nlri.flowspec_nlris.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn nlri_flowspec_unreachable() {
+        use crate::models::bgp::flowspec::{FlowSpecComponent, FlowSpecNlri};
+        use std::str::FromStr;
+
+        let component =
+            FlowSpecComponent::DestinationPrefix(NetworkPrefix::from_str("2001:db8::/32").unwrap());
+        let flowspec_nlri = FlowSpecNlri::new(vec![component]);
+
+        let nlri = Nlri::new_flowspec_unreachable(Afi::Ipv6, Safi::FlowSpec, vec![flowspec_nlri]);
+
+        assert!(nlri.is_flowspec());
+        assert!(!nlri.is_reachable());
+        assert!(nlri.is_ipv6());
+        assert_eq!(nlri.afi, Afi::Ipv6);
+        assert_eq!(nlri.safi, Safi::FlowSpec);
+        assert!(nlri.flowspec_nlris.is_some());
+        assert_eq!(nlri.flowspec_nlris.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn nlri_flowspec_l3vpn() {
+        use crate::models::bgp::flowspec::{FlowSpecComponent, FlowSpecNlri, NumericOperator};
+        use std::str::FromStr;
+
+        let components = vec![
+            FlowSpecComponent::DestinationPrefix(NetworkPrefix::from_str("10.0.0.0/8").unwrap()),
+            FlowSpecComponent::IpProtocol(vec![NumericOperator::equal_to(6)]), // TCP
+        ];
+        let flowspec_nlri = FlowSpecNlri::new(components);
+
+        let nlri = Nlri::new_flowspec_reachable(
+            Afi::Ipv4,
+            Safi::FlowSpecL3Vpn,
+            None, // Flow-Spec often doesn't have next hop
+            vec![flowspec_nlri],
+        );
+
+        assert!(nlri.is_flowspec());
+        assert!(!nlri.is_reachable());
+        assert!(nlri.is_ipv4());
+        assert_eq!(nlri.safi, Safi::FlowSpecL3Vpn);
+    }
+
+    #[test]
+    #[should_panic]
+    fn nlri_flowspec_next_hop_addr_unreachable() {
+        use crate::models::bgp::flowspec::{FlowSpecComponent, FlowSpecNlri};
+        use std::str::FromStr;
+
+        let component =
+            FlowSpecComponent::DestinationPrefix(NetworkPrefix::from_str("192.0.2.0/24").unwrap());
+        let flowspec_nlri = FlowSpecNlri::new(vec![component]);
+
+        let nlri = Nlri::new_flowspec_unreachable(Afi::Ipv4, Safi::FlowSpec, vec![flowspec_nlri]);
 
         let _ = nlri.next_hop_addr();
     }
