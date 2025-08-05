@@ -14,6 +14,8 @@ pub enum TableDumpV2Message {
     RibAfi(RibAfiEntries),
     /// Currently unsupported
     RibGeneric(RibGenericEntries),
+    /// RFC 6397: Geo-location peer table
+    GeoPeerTable(GeoPeerTable),
 }
 
 impl TableDumpV2Message {
@@ -22,6 +24,7 @@ impl TableDumpV2Message {
             TableDumpV2Message::PeerIndexTable(_) => TableDumpV2Type::PeerIndexTable,
             TableDumpV2Message::RibAfi(x) => x.rib_type,
             TableDumpV2Message::RibGeneric(_) => TableDumpV2Type::RibGeneric,
+            TableDumpV2Message::GeoPeerTable(_) => TableDumpV2Type::GeoPeerTable,
         }
     }
 }
@@ -187,6 +190,61 @@ bitflags! {
     }
 }
 
+/// Geo-location peer entry - RFC 6397
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GeoPeer {
+    pub peer: Peer,
+    pub peer_latitude: f32,
+    pub peer_longitude: f32,
+}
+
+impl GeoPeer {
+    pub fn new(peer: Peer, latitude: f32, longitude: f32) -> Self {
+        Self {
+            peer,
+            peer_latitude: latitude,
+            peer_longitude: longitude,
+        }
+    }
+}
+
+impl Eq for GeoPeer {}
+
+/// RFC 6397: Geo-location peer table
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GeoPeerTable {
+    pub collector_bgp_id: BgpIdentifier,
+    pub view_name: String,
+    pub collector_latitude: f32,
+    pub collector_longitude: f32,
+    pub geo_peers: Vec<GeoPeer>,
+}
+
+impl GeoPeerTable {
+    pub fn new(
+        collector_bgp_id: BgpIdentifier,
+        view_name: String,
+        collector_latitude: f32,
+        collector_longitude: f32,
+    ) -> Self {
+        Self {
+            collector_bgp_id,
+            view_name,
+            collector_latitude,
+            collector_longitude,
+            geo_peers: Vec::new(),
+        }
+    }
+
+    pub fn add_geo_peer(&mut self, geo_peer: GeoPeer) {
+        self.geo_peers.push(geo_peer);
+    }
+}
+
+impl Eq for GeoPeerTable {}
+
 /// Peer struct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -241,6 +299,36 @@ mod tests {
             IpAddr::V4(Ipv4Addr::from_str("2.2.2.2").unwrap())
         );
         assert_eq!(peer.peer_asn, Asn::new_32bit(65000));
+    }
+
+    #[test]
+    fn test_peer_new_variations() {
+        // Test IPv4 peer with 16-bit AS (neither flag set)
+        let peer_ipv4_16bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V4(Ipv4Addr::from_str("10.0.0.2").unwrap()),
+            Asn::new_16bit(65001),
+        );
+        assert_eq!(peer_ipv4_16bit.peer_type, PeerType::empty());
+
+        // Test IPv6 peer with 16-bit AS (only IPv6 flag set)
+        let peer_ipv6_16bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V6(std::net::Ipv6Addr::from_str("2001:db8::1").unwrap()),
+            Asn::new_16bit(65002),
+        );
+        assert_eq!(peer_ipv6_16bit.peer_type, PeerType::ADDRESS_FAMILY_IPV6);
+
+        // Test IPv6 peer with 32-bit AS (both flags set)
+        let peer_ipv6_32bit = Peer::new(
+            Ipv4Addr::from_str("10.0.0.1").unwrap(),
+            IpAddr::V6(std::net::Ipv6Addr::from_str("2001:db8::2").unwrap()),
+            Asn::new_32bit(65003),
+        );
+        assert_eq!(
+            peer_ipv6_32bit.peer_type,
+            PeerType::AS_SIZE_32BIT | PeerType::ADDRESS_FAMILY_IPV6
+        );
     }
 
     #[test]
@@ -336,5 +424,68 @@ mod tests {
         let serialized = serde_json::to_string(&rib_generic).unwrap();
         let deserialized: TableDumpV2Message = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, rib_generic);
+    }
+
+    #[test]
+    fn test_geo_peer() {
+        let peer = create_peer();
+        let geo_peer = GeoPeer::new(peer, 40.7128, -74.0060);
+
+        assert_eq!(geo_peer.peer, peer);
+        assert_eq!(geo_peer.peer_latitude, 40.7128);
+        assert_eq!(geo_peer.peer_longitude, -74.0060);
+
+        // Test with NaN coordinates
+        let private_geo_peer = GeoPeer::new(peer, f32::NAN, f32::NAN);
+        assert!(private_geo_peer.peer_latitude.is_nan());
+        assert!(private_geo_peer.peer_longitude.is_nan());
+    }
+
+    #[test]
+    fn test_geo_peer_table() {
+        let collector_bgp_id = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        let mut geo_table = GeoPeerTable::new(
+            collector_bgp_id,
+            "test-view".to_string(),
+            51.5074, // London latitude
+            -0.1278, // London longitude
+        );
+
+        assert!(!geo_table.collector_latitude.is_nan());
+        assert!(!geo_table.collector_longitude.is_nan());
+        assert_eq!(geo_table.collector_latitude, 51.5074);
+        assert_eq!(geo_table.collector_longitude, -0.1278);
+
+        // Add a peer with valid location
+        let peer1 = create_peer();
+        let geo_peer1 = GeoPeer::new(peer1, 40.7128, -74.0060); // New York
+        geo_table.add_geo_peer(geo_peer1);
+
+        // Add a peer with private location (NaN)
+        let peer2 = Peer::new(
+            Ipv4Addr::from_str("2.2.2.2").unwrap(),
+            Ipv4Addr::from_str("3.3.3.3").unwrap().into(),
+            Asn::new_32bit(65001),
+        );
+        let geo_peer2 = GeoPeer::new(peer2, f32::NAN, f32::NAN);
+        geo_table.add_geo_peer(geo_peer2);
+
+        assert_eq!(geo_table.geo_peers.len(), 2);
+
+        // Check that first peer has valid location, second doesn't
+        assert!(!geo_table.geo_peers[0].peer_latitude.is_nan());
+        assert!(!geo_table.geo_peers[0].peer_longitude.is_nan());
+        assert!(geo_table.geo_peers[1].peer_latitude.is_nan());
+        assert!(geo_table.geo_peers[1].peer_longitude.is_nan());
+
+        // Test with private collector location
+        let private_geo_table = GeoPeerTable::new(
+            collector_bgp_id,
+            "private-view".to_string(),
+            f32::NAN,
+            f32::NAN,
+        );
+        assert!(private_geo_table.collector_latitude.is_nan());
+        assert!(private_geo_table.collector_longitude.is_nan());
     }
 }

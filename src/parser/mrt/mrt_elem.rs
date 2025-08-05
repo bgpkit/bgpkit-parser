@@ -474,6 +474,10 @@ impl Elementor {
                             "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
                         );
                     }
+                    TableDumpV2Message::GeoPeerTable(_t) => {
+                        // GeoPeerTable doesn't generate BGP elements, it provides geo-location context
+                        // for other peer entries. No BGP elements are generated from this message type.
+                    }
                 }
             }
             MrtMessage::Bgp4Mp(msg) => match msg {

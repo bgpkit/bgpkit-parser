@@ -15,6 +15,7 @@ impl MrtMessage {
                 TableDumpV2Message::RibGeneric(_) => {
                     todo!("RibGeneric message is not supported yet");
                 }
+                TableDumpV2Message::GeoPeerTable(g) => g.encode(),
             },
             MrtMessage::Bgp4Mp(m) => {
                 let msg_type = Bgp4MpType::try_from(sub_type).unwrap();
@@ -45,5 +46,33 @@ impl MrtMessage {
         };
 
         msg_bytes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{GeoPeerTable, TableDumpV2Type};
+    use std::net::Ipv4Addr;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_mrt_message_encode_geo_peer_table() {
+        // Test MrtMessage::encode path for GeoPeerTable
+        let geo_table = GeoPeerTable::new(
+            Ipv4Addr::from_str("192.0.2.1").unwrap(),
+            "test-view".to_string(),
+            0.0,
+            0.0,
+        );
+
+        let mrt_message =
+            MrtMessage::TableDumpV2Message(TableDumpV2Message::GeoPeerTable(geo_table));
+
+        let subtype = TableDumpV2Type::GeoPeerTable as u16;
+        let encoded = mrt_message.encode(subtype);
+
+        // Should produce some encoded bytes
+        assert!(!encoded.is_empty());
     }
 }

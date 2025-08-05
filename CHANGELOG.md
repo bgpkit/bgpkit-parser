@@ -23,6 +23,14 @@ All notable changes to this project will be documented in this file.
     * created structured data model with `TunnelEncapAttribute`, `TunnelEncapTlv`, and `SubTlv` types
     * added comprehensive test coverage with 7 test cases covering parsing, encoding, and error handling
     * maintains full backward compatibility with existing attribute parsing infrastructure
+* added MRT geo-location extensions support following RFC 6397
+    * implemented GEO_PEER_TABLE subtype (7) parsing and encoding for TABLE_DUMP_V2 format
+    * added data structures for collector and peer geo-location information with WGS84 coordinates
+    * implemented NaN coordinate support for privacy-protected geo-location data
+    * added `GeoPeerTable` and `GeoPeer` data structures with direct float coordinate storage
+    * encoding functionality follows consistent parser module pattern with other TABLE_DUMP_V2 types
+    * includes test coverage with 8 test cases covering parsing, encoding, round-trip operations, and edge cases
+    * maintains backward compatibility with existing TABLE_DUMP_V2 parsing and encoding infrastructure
 * added comprehensive BGP Link-State parsing support following RFC 7752 and extensions
     * implemented complete Link-State NLRI parsing for Node, Link, and IPv4/IPv6 Topology Prefix types
     * added Link-State AFI (16388) and SAFI (71, 72) support for BGP-LS and BGP-LS-VPN

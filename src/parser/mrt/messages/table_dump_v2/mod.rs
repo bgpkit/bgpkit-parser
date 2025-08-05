@@ -1,10 +1,14 @@
+mod geo_peer_table;
 mod peer_index_table;
 mod rib_afi_entries;
 
 use crate::error::ParserError;
+use crate::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table;
 use crate::messages::table_dump_v2::peer_index_table::parse_peer_index_table;
 use crate::messages::table_dump_v2::rib_afi_entries::parse_rib_afi_entries;
 use crate::models::*;
+#[cfg(test)]
+use bytes::BufMut;
 use bytes::Bytes;
 use std::convert::TryFrom;
 
@@ -19,6 +23,7 @@ use std::convert::TryFrom;
 /// 4. RIB_IPV6_UNICAST
 /// 5. RIB_IPV6_MULTICAST
 /// 6. RIB_GENERIC
+/// 7. GEO_PEER_TABLE
 ///
 pub fn parse_table_dump_v2_message(
     sub_type: u16,
@@ -41,12 +46,13 @@ pub fn parse_table_dump_v2_message(
         | TableDumpV2Type::RibIpv6MulticastAddPath => {
             TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
         }
-        TableDumpV2Type::RibGeneric
-        | TableDumpV2Type::RibGenericAddPath
-        | TableDumpV2Type::GeoPeerTable => {
+        TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => {
             return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric and GeoPeerTable is not currently supported".to_string(),
+                "TableDumpV2 RibGeneric is not currently supported".to_string(),
             ))
+        }
+        TableDumpV2Type::GeoPeerTable => {
+            TableDumpV2Message::GeoPeerTable(parse_geo_peer_table(&mut input)?)
         }
     };
 
@@ -59,7 +65,43 @@ mod tests {
 
     #[test]
     fn test_unsupported_type() {
-        let msg = parse_table_dump_v2_message(7, Bytes::new());
+        // Test RibGeneric (subtype 6) - should be unsupported
+        let msg = parse_table_dump_v2_message(6, Bytes::new());
         assert!(msg.is_err());
+
+        // Test RibGenericAddPath (subtype 13) - should be unsupported
+        let msg = parse_table_dump_v2_message(13, Bytes::new());
+        assert!(msg.is_err());
+    }
+
+    #[test]
+    fn test_geo_peer_table_parsing() {
+        // Test GeoPeerTable (subtype 7) parsing path
+        // Create minimal valid GeoPeerTable bytes
+        let mut bytes = bytes::BytesMut::new();
+
+        // Collector BGP ID (4 bytes)
+        bytes.put_u32(0x01020304);
+
+        // View name length (2 bytes) and name (0 bytes for empty string)
+        bytes.put_u16(0);
+
+        // Collector coordinates (8 bytes)
+        bytes.put_f32(0.0); // latitude
+        bytes.put_f32(0.0); // longitude
+
+        // Peer count (2 bytes) - 0 peers
+        bytes.put_u16(0);
+
+        let bytes = bytes.freeze();
+        let result = parse_table_dump_v2_message(7, bytes);
+        assert!(result.is_ok());
+
+        if let Ok(TableDumpV2Message::GeoPeerTable(geo_table)) = result {
+            assert_eq!(geo_table.view_name, "");
+            assert_eq!(geo_table.geo_peers.len(), 0);
+        } else {
+            panic!("Expected GeoPeerTable message");
+        }
     }
 }
