@@ -14,6 +14,15 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* added BGP Flow-Spec parsing support following RFC 8955 and RFC 8956
+    * implemented complete Flow-Spec NLRI parsing for IPv4 and IPv6 Flow Specification rules
+    * added support for all Flow-Spec component types (destination/source prefix, protocol, ports, ICMP, TCP flags, packet length, DSCP, fragment, flow label)
+    * implemented Flow-Spec operator parsing for numeric and bitmask operations with proper semantics
+    * added Flow-Spec Extended Communities for Traffic Rate, Traffic Action, Redirect, and Traffic Marking (RFC 8955)
+    * created structured data model with `FlowSpecNlri`, `FlowSpecComponent`, and operator types
+    * added support for IPv6-specific components including Flow Label and prefix offset encoding
+    * includes test coverage with RFC example validation and round-trip encoding/decoding
+    * maintains backward compatibility with existing NLRI and Extended Community parsing infrastructure
 * added BGP Tunnel Encapsulation attribute parsing support following RFC 9012, RFC 5640, and RFC 8365
     * implemented complete TLV-based parsing system for BGP Tunnel Encapsulation attribute (type 23)
     * added support for all IANA-defined tunnel types (VXLAN, NVGRE, GRE, SR Policy, Geneve, etc.)

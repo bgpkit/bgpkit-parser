@@ -24,7 +24,7 @@ pub use table_dump_v2::*;
 ///
 /// See [CommonHeader] for the content in header, and [MrtMessage] for the
 /// message format.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MrtRecord {
     pub common_header: CommonHeader,
@@ -92,7 +92,7 @@ impl PartialEq for CommonHeader {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),

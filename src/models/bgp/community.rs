@@ -102,6 +102,14 @@ pub enum ExtendedCommunity {
     NonTransitiveIpv4Addr(Ipv4AddrExtCommunity),
     NonTransitiveFourOctetAs(FourOctetAsExtCommunity),
     NonTransitiveOpaque(OpaqueExtCommunity),
+    /// Flow-Spec Traffic Rate - RFC 8955
+    FlowSpecTrafficRate(FlowSpecTrafficRate),
+    /// Flow-Spec Traffic Action - RFC 8955  
+    FlowSpecTrafficAction(FlowSpecTrafficAction),
+    /// Flow-Spec Redirect - RFC 8955
+    FlowSpecRedirect(TwoOctetAsExtCommunity),
+    /// Flow-Spec Traffic Marking - RFC 8955
+    FlowSpecTrafficMarking(FlowSpecTrafficMarking),
     Raw([u8; 8]),
 }
 
@@ -117,6 +125,10 @@ impl ExtendedCommunity {
             ExtendedCommunity::NonTransitiveIpv4Addr(_) => NonTransitiveIpv4Addr,
             ExtendedCommunity::NonTransitiveFourOctetAs(_) => NonTransitiveFourOctetAs,
             ExtendedCommunity::NonTransitiveOpaque(_) => NonTransitiveOpaque,
+            ExtendedCommunity::FlowSpecTrafficRate(_) => NonTransitiveTwoOctetAs,
+            ExtendedCommunity::FlowSpecTrafficAction(_) => NonTransitiveTwoOctetAs,
+            ExtendedCommunity::FlowSpecRedirect(_) => NonTransitiveTwoOctetAs,
+            ExtendedCommunity::FlowSpecTrafficMarking(_) => NonTransitiveTwoOctetAs,
             ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
         }
     }
@@ -181,6 +193,92 @@ pub struct OpaqueExtCommunity {
     pub subtype: u8,
     // 6 octet
     pub value: [u8; 6],
+}
+
+/// Flow-Spec Traffic Rate Extended Community
+///
+/// RFC 8955 - subtype 0x06
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FlowSpecTrafficRate {
+    /// AS Number (2 octets)
+    pub as_number: u16,
+    /// Rate in bytes per second (IEEE 754 single precision float)
+    pub rate_bytes_per_sec: f32,
+}
+
+impl PartialEq for FlowSpecTrafficRate {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_number == other.as_number
+            && self.rate_bytes_per_sec.to_bits() == other.rate_bytes_per_sec.to_bits()
+    }
+}
+
+impl Eq for FlowSpecTrafficRate {}
+
+/// Flow-Spec Traffic Action Extended Community
+///
+/// RFC 8955 - subtype 0x07  
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FlowSpecTrafficAction {
+    /// AS Number (2 octets)
+    pub as_number: u16,
+    /// Terminal action - stop processing additional flow-specs
+    pub terminal: bool,
+    /// Sample action - enable traffic sampling
+    pub sample: bool,
+}
+
+/// Flow-Spec Traffic Marking Extended Community
+///
+/// RFC 8955 - subtype 0x09
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FlowSpecTrafficMarking {
+    /// AS Number (2 octets)
+    pub as_number: u16,
+    /// DSCP value (6 bits)
+    pub dscp: u8,
+}
+
+impl FlowSpecTrafficRate {
+    /// Create a new traffic rate community
+    pub fn new(as_number: u16, rate_bytes_per_sec: f32) -> Self {
+        Self {
+            as_number,
+            rate_bytes_per_sec,
+        }
+    }
+
+    /// Create a "discard all traffic" rate (rate = 0.0)
+    pub fn discard(as_number: u16) -> Self {
+        Self {
+            as_number,
+            rate_bytes_per_sec: 0.0,
+        }
+    }
+}
+
+impl FlowSpecTrafficAction {
+    /// Create a new traffic action community
+    pub fn new(as_number: u16, terminal: bool, sample: bool) -> Self {
+        Self {
+            as_number,
+            terminal,
+            sample,
+        }
+    }
+}
+
+impl FlowSpecTrafficMarking {
+    /// Create a new traffic marking community
+    pub fn new(as_number: u16, dscp: u8) -> Self {
+        Self {
+            as_number,
+            dscp: dscp & 0x3F,
+        } // Mask to 6 bits
+    }
 }
 
 /////////////
@@ -259,6 +357,34 @@ impl Display for ExtendedCommunity {
             ExtendedCommunity::TransitiveOpaque(ec)
             | ExtendedCommunity::NonTransitiveOpaque(ec) => {
                 write!(f, "{}:{}:{}", ec_type, ec.subtype, ToHexString(&ec.value))
+            }
+            ExtendedCommunity::FlowSpecTrafficRate(rate) => {
+                write!(
+                    f,
+                    "rate:{} bytes/sec (AS {})",
+                    rate.rate_bytes_per_sec, rate.as_number
+                )
+            }
+            ExtendedCommunity::FlowSpecTrafficAction(action) => {
+                let mut flags = Vec::new();
+                if action.terminal {
+                    flags.push("terminal");
+                }
+                if action.sample {
+                    flags.push("sample");
+                }
+                write!(f, "action:{} (AS {})", flags.join(","), action.as_number)
+            }
+            ExtendedCommunity::FlowSpecRedirect(redirect) => {
+                write!(
+                    f,
+                    "redirect:AS{}:{}",
+                    redirect.global_admin,
+                    ToHexString(&redirect.local_admin)
+                )
+            }
+            ExtendedCommunity::FlowSpecTrafficMarking(marking) => {
+                write!(f, "mark:DSCP{} (AS {})", marking.dscp, marking.as_number)
             }
             ExtendedCommunity::Raw(ec) => {
                 write!(f, "{}", ToHexString(ec))
@@ -486,5 +612,48 @@ mod tests {
         let serialized = serde_json::to_string(&meta_community).unwrap();
         let deserialized: MetaCommunity = serde_json::from_str(&serialized).unwrap();
         assert_eq!(meta_community, deserialized);
+    }
+
+    #[test]
+    fn test_flowspec_traffic_rate() {
+        let rate = FlowSpecTrafficRate::new(64512, 1000.0);
+        assert_eq!(rate.as_number, 64512);
+        assert_eq!(rate.rate_bytes_per_sec, 1000.0);
+
+        let discard = FlowSpecTrafficRate::discard(64512);
+        assert_eq!(discard.rate_bytes_per_sec, 0.0);
+    }
+
+    #[test]
+    fn test_flowspec_traffic_action() {
+        let action = FlowSpecTrafficAction::new(64512, true, false);
+        assert_eq!(action.as_number, 64512);
+        assert!(action.terminal);
+        assert!(!action.sample);
+    }
+
+    #[test]
+    fn test_flowspec_traffic_marking() {
+        let marking = FlowSpecTrafficMarking::new(64512, 46); // EF DSCP
+        assert_eq!(marking.as_number, 64512);
+        assert_eq!(marking.dscp, 46);
+
+        // Test DSCP masking
+        let masked = FlowSpecTrafficMarking::new(64512, 255);
+        assert_eq!(masked.dscp, 63); // Should be masked to 6 bits
+    }
+
+    #[test]
+    fn test_flowspec_community_display() {
+        let rate = ExtendedCommunity::FlowSpecTrafficRate(FlowSpecTrafficRate::new(64512, 1000.0));
+        assert_eq!(format!("{}", rate), "rate:1000 bytes/sec (AS 64512)");
+
+        let action =
+            ExtendedCommunity::FlowSpecTrafficAction(FlowSpecTrafficAction::new(64512, true, true));
+        assert_eq!(format!("{}", action), "action:terminal,sample (AS 64512)");
+
+        let marking =
+            ExtendedCommunity::FlowSpecTrafficMarking(FlowSpecTrafficMarking::new(64512, 46));
+        assert_eq!(format!("{}", marking), "mark:DSCP46 (AS 64512)");
     }
 }

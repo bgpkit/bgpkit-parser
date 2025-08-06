@@ -486,6 +486,7 @@ mod tests {
             next_hop: None,
             prefixes: vec![],
             link_state_nlris: None,
+            flowspec_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -521,6 +522,7 @@ mod tests {
             next_hop: None,
             prefixes: vec![],
             link_state_nlris: None,
+            flowspec_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -536,6 +538,7 @@ mod tests {
             next_hop: None,
             prefixes: vec![prefix],
             link_state_nlris: None,
+            flowspec_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -551,6 +554,7 @@ mod tests {
             next_hop: None,
             prefixes: vec![prefix],
             link_state_nlris: None,
+            flowspec_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -567,6 +571,7 @@ mod tests {
                 next_hop: None,
                 prefixes: vec![],
                 link_state_nlris: None,
+                flowspec_nlris: None,
             }),
             AttributeValue::AtomicAggregate,
         ]);

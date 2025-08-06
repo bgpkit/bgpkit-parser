@@ -52,6 +52,12 @@ pub enum Safi {
     /// Multicast for BGP/MPLS IP VPNs - RFC 6514
     /// Works with both AFI 1 (Multicast VPN-IPv4) and AFI 2 (Multicast VPN-IPv6)
     MulticastVpn = 129,
+    /// Flow Specification - RFC 8955/8956
+    /// Works with both AFI 1 (IPv4 Flow-Spec) and AFI 2 (IPv6 Flow-Spec)
+    FlowSpec = 133,
+    /// L3VPN Flow Specification - RFC 8955/8956
+    /// Works with both AFI 1 (VPN-IPv4 Flow-Spec) and AFI 2 (VPN-IPv6 Flow-Spec)
+    FlowSpecL3Vpn = 134,
 }
 
 #[cfg(test)]
@@ -85,6 +91,9 @@ mod tests {
         // RFC 8950 VPN SAFI values
         assert_eq!(Safi::MplsVpn as u8, 128);
         assert_eq!(Safi::MulticastVpn as u8, 129);
+        // RFC 8955/8956 Flow-Spec SAFI values
+        assert_eq!(Safi::FlowSpec as u8, 133);
+        assert_eq!(Safi::FlowSpecL3Vpn as u8, 134);
     }
 
     #[test]
@@ -130,6 +139,19 @@ mod tests {
         let safi = Safi::MulticastVpn;
         let serialized = serde_json::to_string(&safi).unwrap();
         assert_eq!(serialized, "\"MulticastVpn\"");
+        let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, safi);
+
+        // RFC 8955/8956 Flow-Spec SAFI variants
+        let safi = Safi::FlowSpec;
+        let serialized = serde_json::to_string(&safi).unwrap();
+        assert_eq!(serialized, "\"FlowSpec\"");
+        let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, safi);
+
+        let safi = Safi::FlowSpecL3Vpn;
+        let serialized = serde_json::to_string(&safi).unwrap();
+        assert_eq!(serialized, "\"FlowSpecL3Vpn\"");
         let deserialized: Safi = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, safi);
     }
