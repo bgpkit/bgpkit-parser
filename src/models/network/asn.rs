@@ -52,7 +52,7 @@ impl PartialEq for Asn {
 
 impl PartialOrd for Asn {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.asn.cmp(&other.asn))
+        Some(self.cmp(&other))
     }
 }
 
