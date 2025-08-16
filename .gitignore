@@ -12,3 +12,4 @@ Cargo.lock
 examples/debug-file.rs
 
 .env
+.claude
