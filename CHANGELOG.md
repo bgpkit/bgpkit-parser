@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* optimized BytesMut buffer allocation patterns for better memory efficiency
+    * replaced `BytesMut::with_capacity() + resize()` with `BytesMut::zeroed()` for cleaner initialization
+    * added capacity pre-allocation in ASN encoding to avoid reallocations
+    * replaced unnecessary BytesMut allocations with direct slice references in MRT header parsing
+    * added capacity pre-allocation in MRT record encoding for optimal buffer sizing
+    * fixed non-canonical PartialOrd implementation for ASN type to follow Rust idioms
 * added BGP Flow-Spec parsing support following RFC 8955 and RFC 8956
     * implemented complete Flow-Spec NLRI parsing for IPv4 and IPv6 Flow Specification rules
     * added support for all Flow-Spec component types (destination/source prefix, protocol, ports, ICMP, TCP flags, packet length, DSCP, fragment, flow label)
