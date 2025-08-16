@@ -42,7 +42,7 @@ use std::io::Read;
 pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, ParserError> {
     let mut raw_bytes = [0u8; 12];
     input.read_exact(&mut raw_bytes)?;
-    let mut data = BytesMut::from(&raw_bytes[..]);
+    let mut data = &raw_bytes[..];
 
     let timestamp = data.get_u32();
     let entry_type_raw = data.get_u16();
@@ -56,7 +56,7 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
             length -= 4;
             let mut raw_bytes: [u8; 4] = [0; 4];
             input.read_exact(&mut raw_bytes)?;
-            Some(BytesMut::from(&raw_bytes[..]).get_u32())
+            Some((&raw_bytes[..]).get_u32())
         }
         _ => None,
     };

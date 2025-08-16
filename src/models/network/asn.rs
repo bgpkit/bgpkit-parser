@@ -278,7 +278,7 @@ impl FromStr for Asn {
 #[cfg(feature = "parser")]
 impl Asn {
     pub fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
+        let mut bytes = BytesMut::with_capacity(if self.four_byte { 4 } else { 2 });
         match self.four_byte {
             true => bytes.put_u32(self.asn),
             false => bytes.put_u16(self.asn as u16),

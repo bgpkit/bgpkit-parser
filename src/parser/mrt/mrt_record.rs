@@ -31,8 +31,7 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
     };
 
     // read the whole message bytes to buffer
-    let mut buffer = BytesMut::with_capacity(common_header.length as usize);
-    buffer.resize(common_header.length as usize, 0);
+    let mut buffer = BytesMut::zeroed(common_header.length as usize);
     match input
         .take(common_header.length as u64)
         .read_exact(&mut buffer)
@@ -127,7 +126,6 @@ pub fn parse_mrt_body(
 
 impl MrtRecord {
     pub fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
         let message_bytes = self.message.encode(self.common_header.entry_subtype);
         let mut new_header = self.common_header;
         if message_bytes.len() < new_header.length as usize {
@@ -146,6 +144,7 @@ impl MrtRecord {
         // assert!(self.message == parsed_body);
         // // debug ends
 
+        let mut bytes = BytesMut::with_capacity(header_bytes.len() + message_bytes.len());
         bytes.put_slice(&header_bytes);
         bytes.put_slice(&message_bytes);
         bytes.freeze()
