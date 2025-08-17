@@ -459,7 +459,7 @@ impl Attribute {
 impl Attributes {
     pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
-        for attr in &self.inner {
+        for attr in &self.iter() {
             bytes.extend(attr.encode(asn_len));
         }
         bytes.freeze()

@@ -5,6 +5,7 @@ mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
+use itertools::chain;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
@@ -138,25 +139,83 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 pub struct Attributes {
     // Black box type to allow for later changes/optimizations. The most common attributes could be
     // added as fields to allow for easier lookup.
-    pub(crate) inner: Vec<Attribute>,
+    inner: Vec<Attribute>,
+
+    // Direct fields for well-known mandatory path attributes.
+    // ORIGIN is a well-known mandatory attribute
+    origin: Option<Attribute>,
+    // AS_PATH is a well-known mandatory attribute
+    as_path: Option<Attribute>,
+    // NEXT_HOP is a well-known mandatory attribute
+    next_hop: Option<Attribute>,
+
     /// RFC 7606 validation warnings collected during parsing
     pub(crate) validation_warnings: Vec<BgpValidationWarning>,
 }
 
+struct WellKnownMandatoryAndOtherAttributes {
+    origin: Option<Attribute>,
+    as_path: Option<Attribute>,
+    next_hop: Option<Attribute>,
+    inner: Vec<Attribute>,
+}
+
+impl FromIterator<Attribute> for WellKnownMandatoryAndOtherAttributes {
+    fn from_iter<T: IntoIterator<Item = Attribute>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+
+        let mut origin = None;
+        let mut as_path = None;
+        let mut next_hop = None;
+        let mut inner = Vec::with_capacity(iter.size_hint().0.max(253));
+
+        for attr in iter {
+            match attr.value.attr_type() {
+                AttrType::ORIGIN => origin = Some(attr),
+                AttrType::AS_PATH => as_path = Some(attr),
+                AttrType::NEXT_HOP => next_hop = Some(attr),
+                _ => inner.push(attr),
+            }
+        }
+
+        WellKnownMandatoryAndOtherAttributes {
+            origin,
+            as_path,
+            next_hop,
+            inner,
+        }
+    }
+}
+
 impl Attributes {
     pub fn has_attr(&self, ty: AttrType) -> bool {
-        self.inner.iter().any(|x| x.value.attr_type() == ty)
+        match ty {
+            AttrType::ORIGIN => self.origin.is_some(),
+            AttrType::AS_PATH => self.as_path.is_some(),
+            AttrType::NEXT_HOP => self.next_hop.is_some(),
+            _ => self.inner.iter().any(|x| x.value.attr_type() == ty)
+        }
     }
 
     pub fn get_attr(&self, ty: AttrType) -> Option<Attribute> {
-        self.inner
-            .iter()
-            .find(|x| x.value.attr_type() == ty)
-            .cloned()
+        match ty {
+            AttrType::ORIGIN => self.origin.clone(),
+            AttrType::AS_PATH => self.as_path.clone(),
+            AttrType::NEXT_HOP => self.next_hop.clone(),
+            _ => self.inner
+                    .iter()
+                    .find(|x| x.value.attr_type() == ty)
+                    .cloned()
+        }
     }
 
     pub fn add_attr(&mut self, attr: Attribute) {
-        self.inner.push(attr);
+        match attr.value.attr_type() {
+            AttrType::ORIGIN => self.origin = Some(attr),
+            AttrType::AS_PATH => self.as_path = Some(attr),
+            AttrType::NEXT_HOP => self.next_hop = Some(attr),
+            _ => self.inner.push(attr),
+        }
     }
 
     /// Add a validation warning to the attributes
@@ -177,9 +236,8 @@ impl Attributes {
     /// Get the `ORIGIN` attribute. In the event that this attribute is not present,
     /// [Origin::INCOMPLETE] will be returned instead.
     pub fn origin(&self) -> Origin {
-        self.inner
-            .iter()
-            .find_map(|x| match &x.value {
+        self.origin.as_ref()
+            .and_then(|x| match &x.value {
                 AttributeValue::Origin(x) => Some(*x),
                 _ => None,
             })
@@ -199,10 +257,12 @@ impl Attributes {
     /// **Note**: Even when this attribute is not present, the next hop address may still be
     /// attainable from the `MP_REACH_NLRI` attribute.
     pub fn next_hop(&self) -> Option<IpAddr> {
-        self.inner.iter().find_map(|x| match &x.value {
-            AttributeValue::NextHop(x) => Some(*x),
-            _ => None,
-        })
+        self.next_hop
+            .as_ref()
+            .and_then(|x| match &x.value {
+                AttributeValue::NextHop(x) => Some(*x),
+                _ => None,
+            })
     }
 
     pub fn multi_exit_discriminator(&self) -> Option<u32> {
@@ -250,12 +310,12 @@ impl Attributes {
 
     // These implementations are horribly inefficient, but they were super easy to write and use
     pub fn as_path(&self) -> Option<&AsPath> {
-        // Begin searching at the end of the attributes to increase the odds of finding an AS4
-        // attribute first.
-        self.inner.iter().rev().find_map(|x| match &x.value {
-            AttributeValue::AsPath { path, .. } => Some(path),
-            _ => None,
-        })
+        self.as_path
+            .as_ref()
+            .and_then(|x| match &x.value {
+                AttributeValue::AsPath { path, .. } => Some(path),
+                _ => None,
+            })
     }
 
     pub fn get_reachable_nlri(&self) -> Option<&Nlri> {
@@ -288,7 +348,12 @@ impl Attributes {
     /// Get an iterator over the held [Attribute]s. If you do no not need attribute flags, consider
     /// using [Attributes::iter] instead.
     pub fn into_attributes_iter(self) -> impl Iterator<Item = Attribute> {
-        self.inner.into_iter()
+        chain!(
+            self.as_path.into_iter(),
+            self.origin.into_iter(),
+            self.next_hop.into_iter(),
+            self.inner.into_iter(),
+        )
     }
 }
 
@@ -326,8 +391,13 @@ impl Iterator for MetaCommunitiesIter<'_> {
 
 impl FromIterator<Attribute> for Attributes {
     fn from_iter<T: IntoIterator<Item = Attribute>>(iter: T) -> Self {
+        let attrs = WellKnownMandatoryAndOtherAttributes::from_iter(iter);
+
         Attributes {
-            inner: iter.into_iter().collect(),
+            origin: attrs.origin,
+            as_path: attrs.as_path,
+            next_hop: attrs.next_hop,
+            inner: attrs.inner,
             validation_warnings: Vec::new(),
         }
     }
@@ -335,8 +405,13 @@ impl FromIterator<Attribute> for Attributes {
 
 impl From<Vec<Attribute>> for Attributes {
     fn from(value: Vec<Attribute>) -> Self {
+        let attrs = WellKnownMandatoryAndOtherAttributes::from_iter(value.into_iter());
+
         Attributes {
-            inner: value,
+            origin: attrs.origin,
+            as_path: attrs.as_path,
+            next_hop: attrs.next_hop,
+            inner: attrs.inner,
             validation_warnings: Vec::new(),
         }
     }
@@ -356,14 +431,20 @@ impl Extend<AttributeValue> for Attributes {
 
 impl FromIterator<AttributeValue> for Attributes {
     fn from_iter<T: IntoIterator<Item = AttributeValue>>(iter: T) -> Self {
-        Attributes {
-            inner: iter
+        let attrs = WellKnownMandatoryAndOtherAttributes::from_iter(
+            iter
                 .into_iter()
                 .map(|value| Attribute {
                     value,
                     flag: AttrFlags::empty(),
                 })
-                .collect(),
+        );
+
+        Attributes {
+            origin: attrs.origin,
+            as_path: attrs.as_path,
+            next_hop: attrs.next_hop,
+            inner: attrs.inner,
             validation_warnings: Vec::new(),
         }
     }
@@ -383,7 +464,14 @@ impl<'a> IntoIterator for &'a Attributes {
     type IntoIter = Map<Iter<'a, Attribute>, fn(&Attribute) -> &AttributeValue>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.iter().map(|x| &x.value)
+        let tmp: Vec<_> = chain!(
+            self.as_path.iter(),
+            self.origin.iter(),
+            self.next_hop.iter(),
+            self.inner.iter()
+        ).collect();
+        
+        tmp.as_slice().into_iter().map(|x| &x.value)
     }
 }
 
