@@ -142,6 +142,10 @@ required-features = ["serde"]
 name = "deprecated_attributes"
 required-features = ["serde"]
 
+[[example]]
+name = "scan_mrt"
+required-features = ["cli"]
+
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
 pkg-fmt = "tgz"
