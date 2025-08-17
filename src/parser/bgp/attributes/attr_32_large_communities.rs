@@ -4,7 +4,8 @@ use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    // RFC 8092, section 3: Each BGP Large Community value is encoded as a 12-octet quantity [..]
+    let mut communities = Vec::with_capacity(input.remaining() / 12);
     while input.remaining() > 0 {
         input.has_n_remaining(12)?; // 12 bytes for large community (3x 32 bits integers)
         let global_administrator = input.get_u32();

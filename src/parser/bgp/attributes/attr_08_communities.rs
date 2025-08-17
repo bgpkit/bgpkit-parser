@@ -8,7 +8,8 @@ const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
 const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
 
 pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    let mut communities = vec![];
+    // RFC 1997: [..] Communities are treated as 32 bit values [..]
+    let mut communities = Vec::with_capacity(input.remaining() / 4);
 
     while input.remaining() > 0 {
         let community_val = input.read_u32()?;

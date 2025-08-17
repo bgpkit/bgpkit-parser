@@ -11,7 +11,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    // RFC 4360, section 2: Each Extended Community is encoded as an 8-octet quantity [..]
+    let mut communities = Vec::with_capacity(input.remaining() / 8);
 
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
@@ -162,7 +163,8 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
 }
 
 pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
-    let mut communities = Vec::new();
+    // RFC 5701, section 2: Each IPv6 Address Specific extended community is encoded as a 20-octet quantity [..]
+    let mut communities = Vec::with_capacity(input.remaining() / 20);
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
         let sub_type = input.read_u8()?;
