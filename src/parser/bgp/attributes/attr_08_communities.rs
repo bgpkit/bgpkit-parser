@@ -29,7 +29,7 @@ pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, Par
 }
 
 pub fn encode_regular_communities(communities: &Vec<Community>) -> Bytes {
-    let mut bytes = BytesMut::new();
+    let mut bytes = BytesMut::with_capacity(4 * communities.len());
 
     for community in communities {
         match community {
@@ -43,6 +43,7 @@ pub fn encode_regular_communities(communities: &Vec<Community>) -> Bytes {
         }
     }
 
+    debug_assert!(bytes.len() == bytes.capacity());
     bytes.freeze()
 }
 

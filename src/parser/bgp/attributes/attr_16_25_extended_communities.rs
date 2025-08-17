@@ -12,7 +12,9 @@ use std::net::Ipv4Addr;
 
 pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     // RFC 4360, section 2: Each Extended Community is encoded as an 8-octet quantity [..]
-    let mut communities = Vec::with_capacity(input.remaining() / 8);
+    let num_communities = input.remaining() / 8;
+
+    let mut communities = Vec::with_capacity(num_communities);
 
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
@@ -159,12 +161,16 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
 
         communities.push(ec);
     }
+
+    debug_assert!(communities.len() == num_communities);
     Ok(AttributeValue::ExtendedCommunities(communities))
 }
 
 pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     // RFC 5701, section 2: Each IPv6 Address Specific extended community is encoded as a 20-octet quantity [..]
-    let mut communities = Vec::with_capacity(input.remaining() / 20);
+    let num_communities = input.remaining() / 20;
+
+    let mut communities = Vec::with_capacity(num_communities);
     while input.remaining() > 0 {
         let ec_type_u8 = input.read_u8()?;
         let sub_type = input.read_u8()?;
@@ -180,13 +186,16 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
         };
         communities.push(ec);
     }
+
+    debug_assert!(communities.len() == num_communities);
     Ok(AttributeValue::Ipv6AddressSpecificExtendedCommunities(
         communities,
     ))
 }
 
 pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
-    let mut bytes = BytesMut::new();
+    let mut bytes = BytesMut::with_capacity(8 * communities.len());
+
     for community in communities {
         let ec_type = u8::from(community.community_type());
         match community {
@@ -258,6 +267,8 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
             }
         }
     }
+
+    debug_assert!(bytes.len() == bytes.capacity());
     bytes.freeze()
 }
 
