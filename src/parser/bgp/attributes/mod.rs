@@ -182,7 +182,8 @@ pub fn parse_attributes(
 ) -> Result<Attributes, ParserError> {
     let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
     let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
-    let mut seen_attributes: std::collections::HashSet<AttrType> = std::collections::HashSet::new();
+    // boolean flags for seen attributes - small dataset in hot loop.
+    let mut seen_attributes: [bool; 256] = [false; 256];
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -219,13 +220,14 @@ pub fn parse_attributes(
         let parsed_attr_type = AttrType::from(attr_type);
 
         // RFC 7606: Check for duplicate attributes
-        if seen_attributes.contains(&parsed_attr_type) {
+        let idx = u8::from(parsed_attr_type) as usize;
+        if seen_attributes[idx] {
             validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
                 attr_type: parsed_attr_type,
             });
             // Continue processing - don't skip duplicate for now
         }
-        seen_attributes.insert(parsed_attr_type);
+        seen_attributes[idx] = true;
 
         // Validate attribute flags and length
         validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
@@ -383,7 +385,7 @@ pub fn parse_attributes(
     ];
 
     for &mandatory_attr in &mandatory_attributes {
-        if !seen_attributes.contains(&mandatory_attr) {
+        if !seen_attributes[u8::from(mandatory_attr) as usize] {
             validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
                 attr_type: mandatory_attr,
             });
