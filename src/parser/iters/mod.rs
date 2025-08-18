@@ -13,7 +13,7 @@ pub mod default;
 pub mod fallible;
 
 // Re-export all iterator types for convenience
-pub use default::{ElemIterator, RecordIterator};
+pub use default::{ElemIterator, RawRecordIterator, RecordIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 
 use crate::models::BgpElem;
@@ -37,6 +37,10 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_elem_iter(self) -> ElemIterator<R> {
         ElemIterator::new(self)
+    }
+
+    pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
+        RawRecordIterator::new(self)
     }
 
     /// Creates a fallible iterator over MRT records that returns parsing errors.
