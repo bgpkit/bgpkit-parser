@@ -105,7 +105,7 @@ harness = false
 [dev-dependencies]
 regex = "1"
 anyhow = "1"
-bgpkit-broker = "0.7.0-beta.5"
+bgpkit-broker = "0.8.0"
 env_logger = "0.11"
 kafka = "0.10.0"
 tungstenite = "0.27.0"
