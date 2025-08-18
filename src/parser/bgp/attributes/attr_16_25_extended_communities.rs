@@ -194,7 +194,8 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
 }
 
 pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Bytes {
-    let mut bytes = BytesMut::with_capacity(8 * communities.len());
+    let expected_len = 8 * communities.len();
+    let mut bytes = BytesMut::with_capacity(expected_len);
 
     for community in communities {
         let ec_type = u8::from(community.community_type());
@@ -268,7 +269,7 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
         }
     }
 
-    debug_assert!(bytes.len() == bytes.capacity());
+    debug_assert!(bytes.len() == expected_len);
     bytes.freeze()
 }
 

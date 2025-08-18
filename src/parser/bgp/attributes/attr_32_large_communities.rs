@@ -20,14 +20,15 @@ pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, Parse
 }
 
 pub fn encode_large_communities(communities: &[LargeCommunity]) -> Bytes {
-    let mut data = BytesMut::with_capacity(12 * communities.len());
+    let expected_len = 12 * communities.len();
+    let mut data = BytesMut::with_capacity(expected_len);
     for community in communities {
         data.put_u32(community.global_admin);
         data.put_u32(community.local_data[0]);
         data.put_u32(community.local_data[1]);
     }
 
-    debug_assert!(data.len() == data.capacity());
+    debug_assert!(data.len() == expected_len);
     data.freeze()
 }
 
