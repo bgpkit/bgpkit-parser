@@ -220,14 +220,13 @@ pub fn parse_attributes(
         let parsed_attr_type = AttrType::from(attr_type);
 
         // RFC 7606: Check for duplicate attributes
-        let idx = u8::from(parsed_attr_type) as usize;
-        if seen_attributes[idx] {
+        if seen_attributes[attr_type as usize] {
             validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
                 attr_type: parsed_attr_type,
             });
             // Continue processing - don't skip duplicate for now
         }
-        seen_attributes[idx] = true;
+        seen_attributes[attr_type as usize] = true;
 
         // Validate attribute flags and length
         validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
