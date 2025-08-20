@@ -571,6 +571,44 @@ mod tests {
     }
 
     #[test]
+    fn test_attribute_type_boundaries() {
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        // Required attributes for valid BGP message
+        const REQUIRED_ATTRS: &[u8] = &[
+            0x40, 0x01, 0x01, 0x00, // origin
+            0x40, 0x02, 0x00, // as_path
+            0x40, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, // next_hop
+        ];
+
+        // Test highest (development) attribute type
+        let mut data = REQUIRED_ATTRS.to_vec();
+        data.extend_from_slice(&[0x40, 0xFF, 0x01, 0x00]); // development
+        let data = Bytes::from(data);
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        assert!(attributes.has_attr(AttrType::DEVELOPMENT));
+        assert!(!attributes.has_validation_warnings());
+
+        // Test lowest (reserved) attribute type
+        let mut data = REQUIRED_ATTRS.to_vec();
+        data.extend_from_slice(&[0x40, 0x00, 0x01, 0x01]); // reserved
+        let data = Bytes::from(data);
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // There is a validation warning about the reserved attribute
+        assert!(attributes.validation_warnings.iter().any(|vw| {
+            matches!(vw, BgpValidationWarning::OptionalAttributeError { attr_type, reason:_ } if *attr_type == AttrType::RESERVED)
+        }));
+    }
+
+    #[test]
     fn test_rfc7606_attribute_length_error() {
         // Create an ORIGIN attribute with wrong length (should be 1 byte, not 2)
         let data = Bytes::from(vec![0x40, 0x01, 0x02, 0x00, 0x01]);
