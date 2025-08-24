@@ -182,7 +182,8 @@ pub fn parse_attributes(
 ) -> Result<Attributes, ParserError> {
     let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
     let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
-    let mut seen_attributes: std::collections::HashSet<AttrType> = std::collections::HashSet::new();
+    // boolean flags for seen attributes - small dataset in hot loop.
+    let mut seen_attributes: [bool; 256] = [false; 256];
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -219,13 +220,13 @@ pub fn parse_attributes(
         let parsed_attr_type = AttrType::from(attr_type);
 
         // RFC 7606: Check for duplicate attributes
-        if seen_attributes.contains(&parsed_attr_type) {
+        if seen_attributes[attr_type as usize] {
             validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
                 attr_type: parsed_attr_type,
             });
             // Continue processing - don't skip duplicate for now
         }
-        seen_attributes.insert(parsed_attr_type);
+        seen_attributes[attr_type as usize] = true;
 
         // Validate attribute flags and length
         validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
@@ -383,7 +384,7 @@ pub fn parse_attributes(
     ];
 
     for &mandatory_attr in &mandatory_attributes {
-        if !seen_attributes.contains(&mandatory_attr) {
+        if !seen_attributes[u8::from(mandatory_attr) as usize] {
             validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
                 attr_type: mandatory_attr,
             });
@@ -567,6 +568,44 @@ mod tests {
             .iter()
             .any(|w| matches!(w, BgpValidationWarning::DuplicateAttribute { .. }));
         assert!(has_duplicate_warning);
+    }
+
+    #[test]
+    fn test_attribute_type_boundaries() {
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        // Required attributes for valid BGP message
+        const REQUIRED_ATTRS: &[u8] = &[
+            0x40, 0x01, 0x01, 0x00, // origin
+            0x40, 0x02, 0x00, // as_path
+            0x40, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, // next_hop
+        ];
+
+        // Test highest (development) attribute type
+        let mut data = REQUIRED_ATTRS.to_vec();
+        data.extend_from_slice(&[0x40, 0xFF, 0x01, 0x00]); // development
+        let data = Bytes::from(data);
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        assert!(attributes.has_attr(AttrType::DEVELOPMENT));
+        assert!(!attributes.has_validation_warnings());
+
+        // Test lowest (reserved) attribute type
+        let mut data = REQUIRED_ATTRS.to_vec();
+        data.extend_from_slice(&[0x40, 0x00, 0x01, 0x01]); // reserved
+        let data = Bytes::from(data);
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // There is a validation warning about the reserved attribute
+        assert!(attributes.validation_warnings.iter().any(|vw| {
+            matches!(vw, BgpValidationWarning::OptionalAttributeError { attr_type, reason:_ } if *attr_type == AttrType::RESERVED)
+        }));
     }
 
     #[test]
