@@ -21,9 +21,9 @@ pub use tunnel_encap::*;
 
 use crate::models::network::*;
 use capabilities::{
-    AddPathCapability, BgpCapabilityType, BgpRoleCapability, ExtendedNextHopCapability,
-    FourOctetAsCapability, GracefulRestartCapability, MultiprotocolExtensionsCapability,
-    RouteRefreshCapability,
+    AddPathCapability, BgpCapabilityType, BgpExtendedMessageCapability, BgpRoleCapability,
+    ExtendedNextHopCapability, FourOctetAsCapability, GracefulRestartCapability,
+    MultiprotocolExtensionsCapability, RouteRefreshCapability,
 };
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::Ipv4Addr;
@@ -139,6 +139,8 @@ pub enum CapabilityValue {
     AddPath(AddPathCapability),
     /// BGP Role capability - RFC 9234
     BgpRole(BgpRoleCapability),
+    /// BGP Extended Message capability - RFC 8654
+    BgpExtendedMessage(BgpExtendedMessageCapability),
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Eq)]
