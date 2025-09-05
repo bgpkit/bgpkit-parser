@@ -4,9 +4,9 @@ use std::convert::TryFrom;
 
 use crate::error::ParserError;
 use crate::models::capabilities::{
-    AddPathCapability, BgpCapabilityType, BgpRoleCapability, ExtendedNextHopCapability,
-    FourOctetAsCapability, GracefulRestartCapability, MultiprotocolExtensionsCapability,
-    RouteRefreshCapability,
+    AddPathCapability, BgpCapabilityType, BgpExtendedMessageCapability, BgpRoleCapability,
+    ExtendedNextHopCapability, FourOctetAsCapability, GracefulRestartCapability,
+    MultiprotocolExtensionsCapability, RouteRefreshCapability,
 };
 use crate::models::error::BgpError;
 use crate::parser::bgp::attributes::parse_attributes;
@@ -51,7 +51,15 @@ pub fn parse_bgp_message(
     message.
     */
     let length = data.get_u16();
-    if !(19..=4096).contains(&length) {
+
+    // Validate message length according to RFC 8654
+    // For now, we allow extended messages for all message types except when we know
+    // for certain that extended messages are not supported.
+    // RFC 8654: Extended messages up to 65535 bytes are allowed for all message types
+    // except OPEN and KEEPALIVE (which remain limited to 4096 bytes).
+    // However, since we're parsing MRT data without session context, we'll be permissive.
+    let max_length = 65535; // RFC 8654 maximum
+    if !(19..=max_length).contains(&length) {
         return Err(ParserError::ParseError(format!(
             "invalid BGP message length {length}"
         )));
@@ -71,6 +79,28 @@ pub fn parse_bgp_message(
             ))
         }
     };
+
+    // Additional validation for OPEN and KEEPALIVE messages per RFC 8654
+    // These message types cannot exceed 4096 bytes even with extended message capability
+    match msg_type {
+        BgpMessageType::OPEN | BgpMessageType::KEEPALIVE => {
+            if length > 4096 {
+                return Err(ParserError::ParseError(format!(
+                    "BGP {} message length {} exceeds maximum allowed 4096 bytes (RFC 8654)",
+                    match msg_type {
+                        BgpMessageType::OPEN => "OPEN",
+                        BgpMessageType::KEEPALIVE => "KEEPALIVE",
+                        _ => unreachable!(),
+                    },
+                    length
+                )));
+            }
+        }
+        BgpMessageType::UPDATE | BgpMessageType::NOTIFICATION => {
+            // These can be extended messages up to 65535 bytes when capability is negotiated
+            // Since we're parsing MRT data, we allow extended lengths
+        }
+    }
 
     if data.remaining() != bgp_msg_length {
         warn!(
@@ -239,6 +269,9 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                     BgpCapabilityType::BGP_ROLE => {
                         parse_capability!(BgpRoleCapability::parse, BgpRole)
                     }
+                    BgpCapabilityType::BGP_EXTENDED_MESSAGE => {
+                        parse_capability!(BgpExtendedMessageCapability::parse, BgpExtendedMessage)
+                    }
                     _ => CapabilityValue::Raw(capability_data),
                 };
 
@@ -292,6 +325,7 @@ impl BgpOpenMessage {
                         CapabilityValue::FourOctetAs(foa) => foa.encode(),
                         CapabilityValue::AddPath(ap) => ap.encode(),
                         CapabilityValue::BgpRole(br) => br.encode(),
+                        CapabilityValue::BgpExtendedMessage(bem) => bem.encode(),
                         CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
                     };
                     buf.put_u8(encoded_value.len() as u8);
@@ -773,6 +807,295 @@ mod tests {
             }
         } else {
             panic!("Expected capability parameter");
+        }
+    }
+
+    #[test]
+    fn test_rfc8654_extended_message_length_validation() {
+        // Test valid extended UPDATE message (within 65535 limit)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x13, 0x00, // length = 4864 (0x1300) (extended message)
+            0x02, // type = UPDATE
+            0x00, 0x00, // withdrawn length = 0
+            0x00,
+            0x00, // path attribute length = 0
+                  // No NLRI data needed for this test
+        ]);
+        let mut data = bytes.clone();
+        // This should succeed because UPDATE messages can be extended
+        assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_ok());
+
+        // Test OPEN message exceeding 4096 bytes (should fail)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x13, 0x00, // length = 4864 (0x1300) (exceeds 4096 for OPEN)
+            0x01, // type = OPEN
+        ]);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(result.is_err());
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(msg.contains("BGP OPEN message length"));
+            assert!(msg.contains("4096 bytes"));
+        }
+
+        // Test KEEPALIVE message exceeding 4096 bytes (should fail)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x13, 0x00, // length = 4864 (0x1300) (exceeds 4096 for KEEPALIVE)
+            0x04, // type = KEEPALIVE
+        ]);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(result.is_err());
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(msg.contains("BGP KEEPALIVE message length"));
+            assert!(msg.contains("4096 bytes"));
+        }
+
+        // Test message exceeding 65535 bytes (maximum allowed)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0xFF, 0xFF, // length = 65535 (0xFFFF) (maximum allowed)
+            0x02, // type = UPDATE
+        ]);
+        let mut data = bytes.clone();
+        // This might fail due to insufficient data, but should not fail on length validation
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        if let Err(ParserError::ParseError(msg)) = result {
+            // Should not be a length validation error
+            assert!(!msg.contains("invalid BGP message length"));
+        }
+    }
+
+    #[test]
+    fn test_bgp_extended_message_capability_parsing() {
+        use crate::models::CapabilityValue;
+
+        // Test BGP OPEN message with Extended Message capability (capability code 6)
+        let bytes = Bytes::from(vec![
+            0x04, // version
+            0x00, 0x01, // asn
+            0x00, 0xb4, // hold time
+            0xc0, 0x00, 0x02, 0x01, // sender ip
+            0x04, // opt params length = 4
+            0x02, // param type = 2 (capability)
+            0x02, // param length = 2
+            0x06, // capability type = 6 (Extended Message)
+            0x00, // capability length = 0 (no parameters)
+        ]);
+
+        let msg = parse_bgp_open_message(&mut bytes.clone()).unwrap();
+        assert_eq!(msg.version, 4);
+        assert_eq!(msg.asn, Asn::new_16bit(1));
+        assert_eq!(msg.opt_params.len(), 1);
+
+        // Check that we have the extended message capability
+        if let ParamValue::Capability(cap) = &msg.opt_params[0].param_value {
+            assert_eq!(cap.ty, BgpCapabilityType::BGP_EXTENDED_MESSAGE);
+            if let CapabilityValue::BgpExtendedMessage(_) = &cap.value {
+                // Extended Message capability should have no parameters
+            } else {
+                panic!("Expected BgpExtendedMessage capability value");
+            }
+        } else {
+            panic!("Expected capability parameter");
+        }
+    }
+
+    #[test]
+    fn test_rfc8654_edge_cases() {
+        // Test NOTIFICATION message with extended length (should be allowed)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x20, 0x00, // length = 8192 (extended NOTIFICATION message)
+            0x03, // type = NOTIFICATION
+            0x06, // error code (Cease)
+            0x00, // error subcode
+                  // Additional data would go here
+        ]);
+        let mut data = bytes.clone();
+        // This should succeed because NOTIFICATION messages can be extended
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        // May fail due to insufficient data, but not due to length validation
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(!msg.contains("invalid BGP message length"));
+            assert!(!msg.contains("exceeds maximum allowed 4096 bytes"));
+        }
+
+        // Test message exactly at 4096 bytes for OPEN (should be allowed)
+        let open_data = vec![
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x10, 0x00, // length = 4096 (exactly at limit for OPEN)
+            0x01, // type = OPEN
+        ];
+        let bytes = Bytes::from(open_data);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        // Should not fail on length validation (may fail on parsing due to insufficient data)
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(!msg.contains("exceeds maximum allowed 4096 bytes"));
+        }
+
+        // Test message exactly at 65535 bytes for UPDATE (should be allowed)
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0xFF, 0xFF, // length = 65535 (0xFFFF) (maximum allowed)
+            0x02, // type = UPDATE
+        ]);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        // Should not fail on length validation
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(!msg.contains("invalid BGP message length"));
+        }
+    }
+
+    #[test]
+    fn test_rfc8654_capability_encoding_path() {
+        use crate::models::capabilities::BgpExtendedMessageCapability;
+
+        // Test that the encoding path for BgpExtendedMessage capability is covered
+        // This specifically tests the line: CapabilityValue::BgpExtendedMessage(bem) => bem.encode()
+        let capability_value =
+            CapabilityValue::BgpExtendedMessage(BgpExtendedMessageCapability::new());
+        let capability = Capability {
+            ty: BgpCapabilityType::BGP_EXTENDED_MESSAGE,
+            value: capability_value,
+        };
+
+        let opt_param = OptParam {
+            param_type: 2, // capability
+            param_len: 2,
+            param_value: ParamValue::Capability(capability),
+        };
+
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![opt_param],
+        };
+
+        // This will exercise the encoding path we need to test
+        let encoded = msg.encode();
+        assert!(!encoded.is_empty());
+
+        // Verify we can parse it back (exercises the parsing path too)
+        let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
+        assert_eq!(parsed.opt_params.len(), 1);
+        if let ParamValue::Capability(cap) = &parsed.opt_params[0].param_value {
+            assert_eq!(cap.ty, BgpCapabilityType::BGP_EXTENDED_MESSAGE);
+        }
+    }
+
+    #[test]
+    fn test_rfc8654_error_message_formatting() {
+        // Test the error message formatting paths that include message type names
+        // This tests the match arms for OPEN and KEEPALIVE in error messages
+
+        // Test OPEN message error path
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x20, 0x01, // length = 8193 (exceeds 4096 for OPEN)
+            0x01, // type = OPEN
+        ]);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(result.is_err());
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(msg.contains("BGP OPEN message length"));
+            assert!(msg.contains("exceeds maximum allowed 4096 bytes"));
+        }
+
+        // Test KEEPALIVE message error path
+        let bytes = Bytes::from_static(&[
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x20, 0x01, // length = 8193 (exceeds 4096 for KEEPALIVE)
+            0x04, // type = KEEPALIVE
+        ]);
+        let mut data = bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(result.is_err());
+        if let Err(ParserError::ParseError(msg)) = result {
+            assert!(msg.contains("BGP KEEPALIVE message length"));
+            assert!(msg.contains("exceeds maximum allowed 4096 bytes"));
+        }
+    }
+
+    #[test]
+    fn test_encode_bgp_open_message_with_extended_message_capability() {
+        use crate::models::capabilities::BgpExtendedMessageCapability;
+
+        // Create Extended Message capability
+        let extended_msg_capability = BgpExtendedMessageCapability::new();
+
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 2,  // 1 (type) + 1 (len) + 0 (no parameters)
+                param_value: ParamValue::Capability(Capability {
+                    ty: BgpCapabilityType::BGP_EXTENDED_MESSAGE,
+                    value: CapabilityValue::BgpExtendedMessage(extended_msg_capability),
+                }),
+            }],
+        };
+
+        let encoded = msg.encode();
+
+        // Parse the encoded message back and verify it matches
+        let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
+        assert_eq!(parsed.version, msg.version);
+        assert_eq!(parsed.asn, msg.asn);
+        assert_eq!(parsed.hold_time, msg.hold_time);
+        assert_eq!(parsed.sender_ip, msg.sender_ip);
+        assert_eq!(parsed.opt_params.len(), 1);
+
+        // Verify the capability was encoded and parsed correctly
+        if let ParamValue::Capability(cap) = &parsed.opt_params[0].param_value {
+            assert_eq!(cap.ty, BgpCapabilityType::BGP_EXTENDED_MESSAGE);
+            if let CapabilityValue::BgpExtendedMessage(_) = &cap.value {
+                // Extended Message capability should have no parameters
+            } else {
+                panic!("Expected BgpExtendedMessage capability value after round trip");
+            }
+        } else {
+            panic!("Expected capability parameter after round trip");
         }
     }
 

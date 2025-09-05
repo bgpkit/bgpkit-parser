@@ -459,6 +459,45 @@ impl Default for RouteRefreshCapability {
     }
 }
 
+/// BGP Extended Message capability - RFC 8654
+/// This capability has no parameters, it's just a flag indicating support for extended messages
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpExtendedMessageCapability;
+
+impl BgpExtendedMessageCapability {
+    /// Create a new BGP Extended Message capability
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Parse BGP Extended Message capability from raw bytes - RFC 8654
+    /// This capability has length 0, so data should be empty
+    #[cfg(feature = "parser")]
+    pub fn parse(data: Bytes) -> Result<Self, ParserError> {
+        if !data.is_empty() {
+            return Err(ParserError::ParseError(format!(
+                "BGP Extended Message capability should have length 0, got {}",
+                data.len()
+            )));
+        }
+        Ok(BgpExtendedMessageCapability::new())
+    }
+
+    /// Encode BGP Extended Message capability to raw bytes - RFC 8654
+    /// Always returns empty bytes since this capability has no parameters
+    #[cfg(feature = "parser")]
+    pub fn encode(&self) -> Bytes {
+        Bytes::new()
+    }
+}
+
+impl Default for BgpExtendedMessageCapability {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// 4-octet AS number capability - RFC 6793
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1140,6 +1179,28 @@ mod tests {
         // Test with invalid role value
         let invalid_bytes = Bytes::from(vec![5]); // 5 is not a valid role
         let result = BgpRoleCapability::parse(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bgp_extended_message_capability() {
+        // Test creation
+        let capability = BgpExtendedMessageCapability::new();
+
+        // Test encoding (should be empty)
+        let encoded = capability.encode();
+        assert_eq!(encoded.len(), 0);
+
+        // Test parsing (should accept empty data)
+        let parsed = BgpExtendedMessageCapability::parse(encoded).unwrap();
+        assert_eq!(parsed, capability);
+    }
+
+    #[test]
+    fn test_bgp_extended_message_capability_invalid_length() {
+        // Test with non-empty data (should fail)
+        let invalid_bytes = Bytes::from(vec![0x01]);
+        let result = BgpExtendedMessageCapability::parse(invalid_bytes);
         assert!(result.is_err());
     }
 }

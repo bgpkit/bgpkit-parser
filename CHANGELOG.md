@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file.
 
 ### Code improvements
 
+* add support for RFC 8654 Extended Messages
+  * updated message length validation to support extended messages up to 65535 bytes
+  * resolves parsing errors for large BGP messages (e.g., "invalid BGP message length 4834")
+  * implemented BGP Extended Message capability (capability code 6) for parsing and encoding
+  * added proper RFC 8654 validation constraints (OPEN and KEEPALIVE messages remain limited to 4096 bytes)
+  * added test cases for extended message length validation and capability parsing
 * optimized BytesMut buffer allocation patterns for better memory efficiency
     * replaced `BytesMut::with_capacity() + resize()` with `BytesMut::zeroed()` for cleaner initialization
     * added capacity pre-allocation in ASN encoding to avoid reallocations
