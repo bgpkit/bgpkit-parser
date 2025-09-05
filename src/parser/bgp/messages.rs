@@ -818,11 +818,11 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
-            0x13, 0x00, // length = 4864 (extended message)
+            0x13, 0x00, // length = 4864 (0x1300) (extended message)
             0x02, // type = UPDATE
-            0x00, 0x00, // withdrawn length
+            0x00, 0x00, // withdrawn length = 0
             0x00,
-            0x00, // path attribute length
+            0x00, // path attribute length = 0
                   // No NLRI data needed for this test
         ]);
         let mut data = bytes.clone();
@@ -835,7 +835,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
-            0x13, 0x00, // length = 4864 (exceeds 4096 for OPEN)
+            0x13, 0x00, // length = 4864 (0x1300) (exceeds 4096 for OPEN)
             0x01, // type = OPEN
         ]);
         let mut data = bytes.clone();
@@ -852,7 +852,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
-            0x13, 0x00, // length = 4864 (exceeds 4096 for KEEPALIVE)
+            0x13, 0x00, // length = 4864 (0x1300) (exceeds 4096 for KEEPALIVE)
             0x04, // type = KEEPALIVE
         ]);
         let mut data = bytes.clone();
@@ -869,7 +869,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
-            0xFF, 0xFF, // length = 65535 (maximum allowed)
+            0xFF, 0xFF, // length = 65535 (0xFFFF) (maximum allowed)
             0x02, // type = UPDATE
         ]);
         let mut data = bytes.clone();
