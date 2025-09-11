@@ -65,8 +65,19 @@ pub fn parse_peer_up_notification(
     let local_port = data.read_u16()?;
     let remote_port = data.read_u16()?;
 
-    let sent_open = parse_bgp_message(data, false, asn_len)?;
-    let received_open = parse_bgp_message(data, false, asn_len)?;
+    // Extract first BGP message with proper boundary
+    data.has_n_remaining(19)?; // BGP header
+    let bgp1_length = u16::from_be_bytes([data[16], data[17]]) as usize;
+    data.has_n_remaining(bgp1_length)?;
+    let mut bgp1_data = data.split_to(bgp1_length);
+    let sent_open = parse_bgp_message(&mut bgp1_data, false, asn_len)?;
+
+    // Extract second BGP message with proper boundary
+    data.has_n_remaining(19)?; // BGP header
+    let bgp2_length = u16::from_be_bytes([data[16], data[17]]) as usize;
+    data.has_n_remaining(bgp2_length)?;
+    let mut bgp2_data = data.split_to(bgp2_length);
+    let received_open = parse_bgp_message(&mut bgp2_data, false, asn_len)?;
 
     // RFC 9069: For Local RIB, the BGP OPEN messages MUST be fabricated
     if let Some(BmpPeerType::LocalRib) = peer_type {
@@ -186,5 +197,255 @@ mod tests {
                 panic!("parse_peer_up_notification should return Ok");
             }
         }
+    }
+
+    // Helper function to set up warning capture for tests
+    fn setup_warning_logger() -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        use log::{Level, Record};
+        use std::sync::{Arc, Mutex};
+
+        struct TestLogger(Arc<Mutex<Vec<String>>>);
+
+        impl log::Log for TestLogger {
+            fn enabled(&self, metadata: &log::Metadata) -> bool {
+                metadata.level() <= Level::Warn
+            }
+
+            fn log(&self, record: &Record) {
+                if record.level() <= Level::Warn {
+                    self.0.lock().unwrap().push(record.args().to_string());
+                }
+            }
+
+            fn flush(&self) {}
+        }
+
+        let warnings = Arc::new(Mutex::new(Vec::new()));
+        let logger = TestLogger(warnings.clone());
+        let _ = log::set_boxed_logger(Box::new(logger));
+        log::set_max_level(log::LevelFilter::Warn);
+        warnings
+    }
+
+    #[test]
+    fn test_parse_peer_up_notification_no_warnings() {
+        let warnings = setup_warning_logger();
+
+        // Regression test: This test creates a scenario with two consecutive BGP OPEN messages
+        // that would have triggered BGP length warnings in the old implementation.
+        // The new implementation should parse cleanly without warnings.
+
+        let mut data = BytesMut::new();
+
+        // Local address (IPv4): 192.168.1.1 + ports
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create two different BGP OPEN messages that will be concatenated
+        // This test verifies that the boundary extraction fix prevents BGP length warnings
+
+        // First BGP OPEN message
+        let bgp1 = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_16bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp1_bytes = bgp1.encode(AsnLength::Bits32);
+
+        // Second BGP OPEN message
+        let bgp2 = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_16bit(65002),
+            hold_time: 90,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 2),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp2_bytes = bgp2.encode(AsnLength::Bits32);
+
+        // Add both BGP messages consecutively
+        data.extend_from_slice(&bgp1_bytes);
+        data.extend_from_slice(&bgp2_bytes);
+
+        // Add a TLV (String type, length 8, "TestNode")
+        data.extend_from_slice(&[
+            0x00, 0x00, // String TLV type
+            0x00, 0x08, // length 8
+        ]);
+        data.extend_from_slice(b"TestNode");
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
+
+        // Test should succeed without any BGP length warnings
+        assert!(result.is_ok(), "Parsing should succeed without warnings");
+
+        let peer_notification = result.unwrap();
+        assert_eq!(
+            peer_notification.local_addr,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+        );
+        assert_eq!(peer_notification.local_port, 179);
+        assert_eq!(peer_notification.remote_port, 179);
+
+        // Ensure both BGP messages were parsed correctly with different ASNs
+        if let crate::models::BgpMessage::Open(ref open1) = &peer_notification.sent_open {
+            assert_eq!(open1.asn, crate::models::Asn::new_16bit(65001));
+        } else {
+            panic!("sent_open should be an OPEN message");
+        }
+
+        if let crate::models::BgpMessage::Open(ref open2) = &peer_notification.received_open {
+            assert_eq!(open2.asn, crate::models::Asn::new_16bit(65002));
+        } else {
+            panic!("received_open should be an OPEN message");
+        }
+
+        // Verify TLV was parsed correctly
+        assert_eq!(peer_notification.tlvs.len(), 1);
+        assert_eq!(peer_notification.tlvs[0].info_type, PeerUpTlvType::String);
+        assert_eq!(peer_notification.tlvs[0].info_value, "TestNode");
+
+        // The main assertion: verify no warnings were logged
+        let captured_warnings = warnings.lock().unwrap();
+        assert!(
+            captured_warnings.is_empty(),
+            "Test should not produce warnings, but got: {:?}",
+            *captured_warnings
+        );
+    }
+
+    #[test]
+    fn test_parse_peer_up_insufficient_data_first_bgp() {
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x01,
+            0x01, 0x01,
+        ]);
+        data.extend_from_slice(&[0x1F, 0x40]); // local port
+        data.extend_from_slice(&[0x23, 0x28]); // remote port
+
+        // Add incomplete first BGP message (only header, no body)
+        data.extend_from_slice(&[
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // BGP marker
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+            0x40, // Length = 64 bytes (but we won't provide 64 bytes)
+            0x01, // OPEN message type
+        ]);
+        // Missing the remaining 45 bytes of the BGP OPEN message
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
+
+        assert!(
+            result.is_err(),
+            "Should fail with insufficient data for first BGP message"
+        );
+    }
+
+    #[test]
+    fn test_parse_peer_up_insufficient_data_second_bgp() {
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x01,
+            0x01, 0x01,
+        ]);
+        data.extend_from_slice(&[0x1F, 0x40]); // local port
+        data.extend_from_slice(&[0x23, 0x28]); // remote port
+
+        // Add complete first BGP message
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Default::default(),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(0, 0, 0, 0),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add incomplete second BGP message (only partial header)
+        data.extend_from_slice(&[
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // BGP marker
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+            0x30, // Length = 48 bytes
+                  // Missing message type and body
+        ]);
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
+
+        assert!(
+            result.is_err(),
+            "Should fail with insufficient data for second BGP message"
+        );
+    }
+
+    #[test]
+    fn test_parse_peer_up_excess_data_in_tlvs() {
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x01,
+            0x01, 0x01,
+        ]);
+        data.extend_from_slice(&[0x1F, 0x40]); // local port
+        data.extend_from_slice(&[0x23, 0x28]); // remote port
+
+        // Add two complete BGP messages
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Default::default(),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(0, 0, 0, 0),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add valid TLVs
+        data.extend_from_slice(&[0x00, 0x00]); // String TLV
+        data.extend_from_slice(&[0x00, 0x04]); // length 4
+        data.extend_from_slice(b"Test"); // value
+
+        data.extend_from_slice(&[0x00, 0x00]); // String TLV
+        data.extend_from_slice(&[0x00, 0x06]); // length 6
+        data.extend_from_slice(b"Router"); // value
+
+        // Add some random extra bytes (should be safely ignored due to TLV parsing logic)
+        data.extend_from_slice(&[0x00, 0x01, 0x02]); // Less than 4 bytes, should exit TLV parsing loop
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
+
+        // Should succeed - TLV parsing handles excess data gracefully
+        assert!(result.is_ok(), "Should handle excess data gracefully");
+
+        let peer_notification = result.unwrap();
+        assert_eq!(peer_notification.tlvs.len(), 2); // Should have parsed 2 TLVs
+        assert_eq!(peer_notification.tlvs[0].info_type, PeerUpTlvType::String);
+        assert_eq!(peer_notification.tlvs[0].info_value, "Test");
+        assert_eq!(peer_notification.tlvs[1].info_type, PeerUpTlvType::String);
+        assert_eq!(peer_notification.tlvs[1].info_value, "Router");
     }
 }
