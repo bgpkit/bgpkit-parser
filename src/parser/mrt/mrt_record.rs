@@ -13,7 +13,32 @@ use std::io::Read;
 use std::net::IpAddr;
 use std::str::FromStr;
 
-pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
+/// Raw MRT record containing the common header and unparsed message bytes.
+/// This allows for lazy parsing of the MRT message body.
+#[derive(Debug, Clone)]
+pub struct RawMrtRecord {
+    pub common_header: CommonHeader,
+    pub raw_bytes: Bytes,
+}
+
+impl RawMrtRecord {
+    /// Parse the raw MRT record into a fully parsed MrtRecord.
+    /// This consumes the RawMrtRecord and returns a MrtRecord.
+    pub fn parse(self) -> Result<MrtRecord, ParserError> {
+        let message = parse_mrt_body(
+            self.common_header.entry_type as u16,
+            self.common_header.entry_subtype,
+            self.raw_bytes,
+        )?;
+
+        Ok(MrtRecord {
+            common_header: self.common_header,
+            message,
+        })
+    }
+}
+
+pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErrorWithBytes> {
     // parse common header
     let common_header = match parse_common_header(input) {
         Ok(v) => v,
@@ -45,32 +70,20 @@ pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorW
         }
     }
 
-    match parse_mrt_body(
-        common_header.entry_type as u16,
-        common_header.entry_subtype,
-        buffer.freeze(), // freeze the BytesMute to Bytes
-    ) {
-        Ok(message) => Ok(MrtRecord {
-            common_header,
-            message,
-        }),
-        Err(e) => {
-            // TODO: find more efficient way to preserve the bytes during error
-            // let mut total_bytes = vec![];
-            // if common_header.write_header(&mut total_bytes).is_err() {
-            //     unreachable!("Vec<u8> will never produce errors when used as a std::io::Write")
-            // }
+    Ok(RawMrtRecord {
+        common_header,
+        raw_bytes: buffer.freeze(),
+    })
+}
 
-            // total_bytes.extend(buffer);
-            // Err(ParserErrorWithBytes {
-            //     error: e,
-            //     bytes: Some(total_bytes),
-            // })
-            Err(ParserErrorWithBytes {
-                error: e,
-                bytes: None,
-            })
-        }
+pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
+    let raw_record = chunk_mrt_record(input)?;
+    match raw_record.parse() {
+        Ok(record) => Ok(record),
+        Err(e) => Err(ParserErrorWithBytes {
+            error: e,
+            bytes: None,
+        }),
     }
 }
 
