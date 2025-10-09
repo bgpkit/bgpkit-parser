@@ -11,10 +11,12 @@ Rust's iterator syntax.
 
 pub mod default;
 pub mod fallible;
+mod raw;
 
 // Re-export all iterator types for convenience
 pub use default::{ElemIterator, RecordIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
+pub use raw::RawRecordIterator;
 
 use crate::models::BgpElem;
 use crate::parser::BgpkitParser;
@@ -37,6 +39,10 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_elem_iter(self) -> ElemIterator<R> {
         ElemIterator::new(self)
+    }
+
+    pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
+        RawRecordIterator::new(self)
     }
 
     /// Creates a fallible iterator over MRT records that returns parsing errors.

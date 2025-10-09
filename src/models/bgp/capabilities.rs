@@ -108,7 +108,7 @@ impl ExtendedNextHopCapability {
         let mut entries = Vec::new();
 
         // Each entry is 6 bytes (2 + 2 + 2)
-        if data.len() % 6 != 0 {
+        if !data.len().is_multiple_of(6) {
             return Err(ParserError::ParseError(format!(
                 "Extended Next Hop capability length {} is not divisible by 6",
                 data.len()
@@ -261,7 +261,7 @@ impl GracefulRestartCapability {
         let mut address_families = Vec::new();
 
         // Parse address family entries (4 bytes each)
-        if (data.len() % 4) != 0 {
+        if !data.len().is_multiple_of(4) {
             return Err(ParserError::ParseError(format!(
                 "Graceful Restart capability remaining length {} is not divisible by 4",
                 data.len()
@@ -380,7 +380,7 @@ impl AddPathCapability {
         let mut address_families = Vec::new();
 
         // Each entry is 4 bytes (2 + 1 + 1)
-        if data.len() % 4 != 0 {
+        if !data.len().is_multiple_of(4) {
             return Err(ParserError::ParseError(format!(
                 "ADD-PATH capability length {} is not divisible by 4",
                 data.len()
