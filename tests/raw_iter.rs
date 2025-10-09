@@ -76,7 +76,9 @@ fn test_raw_record_iterator_parse_error_skips_when_no_core_dump() {
     let mut iter = parser.into_raw_record_iter();
 
     // Iterator should skip the invalid header and yield the valid record
-    let rec = iter.next().expect("should yield valid record after skipping parse error");
+    let rec = iter
+        .next()
+        .expect("should yield valid record after skipping parse error");
     assert_eq!(rec.common_header.entry_type, EntryType::BGP4MP);
     assert_eq!(rec.raw_bytes.len(), 0);
     assert!(iter.next().is_none());
