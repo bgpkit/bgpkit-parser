@@ -52,7 +52,10 @@ mod tests {
         let mut record_types = HashMap::new();
         let mut raw_record_types = HashMap::new();
 
-        for record in BgpkitParser::new_cached(url, temp_path.to_str().unwrap()).unwrap().into_record_iter() {
+        for record in BgpkitParser::new_cached(url, temp_path.to_str().unwrap())
+            .unwrap()
+            .into_record_iter()
+        {
             let entry = record_types
                 .entry((
                     record.common_header.entry_type,
