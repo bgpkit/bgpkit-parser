@@ -36,3 +36,6 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Check MSRV
+        run: cargo install cargo-msrv --locked && cargo msrv verify

@@ -11,6 +11,7 @@ keywords = ["bgp", "bgpkit", "mrt"]
 categories = ["network-programming"]
 default-run = "bgpkit-parser"
 readme = "README.md"
+rust-version = "1.87.0"
 
 [[bin]]
 name = "bgpkit-parser"
