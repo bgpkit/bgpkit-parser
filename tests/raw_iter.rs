@@ -23,7 +23,7 @@ fn build_bgp4mp_with_len(len: u32) -> Vec<u8> {
         length: len,
     };
     let mut bytes = hdr.encode().to_vec();
-    bytes.extend(std::iter::repeat(0u8).take(len as usize));
+    bytes.extend(std::iter::repeat_n(0u8, len as usize));
     bytes
 }
 
