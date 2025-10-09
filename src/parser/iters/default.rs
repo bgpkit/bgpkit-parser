@@ -3,8 +3,6 @@ Default iterator implementations that skip errors and return successfully parsed
 */
 use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::chunk_mrt_record;
-use crate::parser::mrt::RawMrtRecord;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use log::{error, warn};
@@ -172,81 +170,6 @@ impl<R: Read> Iterator for ElemIterator<R> {
                     true => return Some(e),
                     false => continue,
                 },
-            }
-        }
-    }
-}
-
-/*********
-RawMrtRecord Iterator
-**********/
-
-pub struct RawRecordIterator<R> {
-    parser: BgpkitParser<R>,
-    count: u64,
-}
-
-impl<R> RawRecordIterator<R> {
-    pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
-        RawRecordIterator { parser, count: 0 }
-    }
-}
-
-impl<R: Read> Iterator for RawRecordIterator<R> {
-    type Item = RawMrtRecord;
-
-    fn next(&mut self) -> Option<RawMrtRecord> {
-        self.count += 1;
-        match chunk_mrt_record(&mut self.parser.reader) {
-            Ok(raw_record) => Some(raw_record),
-            Err(e) => {
-                match e.error {
-                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: {}", err_str);
-                        }
-                        if let Some(bytes) = e.bytes {
-                            std::fs::write("mrt_core_dump", bytes)
-                                .expect("Unable to write to mrt_core_dump");
-                        }
-                        // skip this record and try next
-                        self.next()
-                    }
-                    ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                            None
-                        } else {
-                            // skip this record and try next
-                            self.next()
-                        }
-                    }
-                    ParserError::EofExpected => {
-                        // normal end of file
-                        None
-                    }
-                    ParserError::IoError(err) | ParserError::EofError(err) => {
-                        // when reaching IO error, stop iterating
-                        error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
-                        None
-                    }
-                    #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => None,
-                    ParserError::FilterError(_) => {
-                        // this should not happen at this stage
-                        None
-                    }
-                }
             }
         }
     }
