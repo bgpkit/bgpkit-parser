@@ -12,55 +12,96 @@ All notable changes to this project will be documented in this file.
     * `RibEntry` now stores `path_id` for TABLE_DUMP_V2 messages with AddPath support
     * fixes issue [#217](https://github.com/bgpkit/bgpkit-parser/issues/217)
 
+### Minumum Supported Rust Version (MSRV)
+
+We now set a minimum supported Rust version (MSRV) of 1.87.0.
+
 ### Code improvements
 
+#### New RFCs Supported
+
+* added BGP Flow-Spec parsing support following RFC 8955 and RFC 8956
+  * implemented complete Flow-Spec NLRI parsing for IPv4 and IPv6 Flow Specification rules
+  * added support for all Flow-Spec component types (destination/source prefix, protocol, ports, ICMP, TCP flags, packet length, DSCP, fragment, flow label)
+  * implemented Flow-Spec operator parsing for numeric and bitmask operations with proper semantics
+  * added Flow-Spec Extended Communities for Traffic Rate, Traffic Action, Redirect, and Traffic Marking (RFC 8955)
+  * created structured data model with `FlowSpecNlri`, `FlowSpecComponent`, and operator types
+  * added support for IPv6-specific components including Flow Label and prefix offset encoding
+  * includes test coverage with RFC example validation and round-trip encoding/decoding
+  * maintains backward compatibility with existing NLRI and Extended Community parsing infrastructure
+* added BGP Tunnel Encapsulation attribute parsing support following RFC 9012, RFC 5640, and RFC 8365
+  * implemented complete TLV-based parsing system for BGP Tunnel Encapsulation attribute (type 23)
+  * added support for all IANA-defined tunnel types (VXLAN, NVGRE, GRE, SR Policy, Geneve, etc.)
+  * added support for all sub-TLV types including Color, UDP Destination Port, Tunnel Egress Endpoint, Preference
+  * implemented variable-length sub-TLV encoding (1 byte for types 0-127, 2 bytes for types 128-255)
+  * added helper methods for common attribute access (color, UDP port, egress endpoint, preference)
+  * created structured data model with `TunnelEncapAttribute`, `TunnelEncapTlv`, and `SubTlv` types
+  * added comprehensive test coverage with 7 test cases covering parsing, encoding, and error handling
+  * maintains full backward compatibility with existing attribute parsing infrastructure
+* added MRT geo-location extensions support following RFC 6397
+  * implemented GEO_PEER_TABLE subtype (7) parsing and encoding for TABLE_DUMP_V2 format
+  * added data structures for collector and peer geo-location information with WGS84 coordinates
+  * implemented NaN coordinate support for privacy-protected geo-location data
+  * added `GeoPeerTable` and `GeoPeer` data structures with direct float coordinate storage
+  * encoding functionality follows consistent parser module pattern with other TABLE_DUMP_V2 types
+  * includes test coverage with 8 test cases covering parsing, encoding, round-trip operations, and edge cases
+  * maintains backward compatibility with existing TABLE_DUMP_V2 parsing and encoding infrastructure
+* added comprehensive BGP Link-State parsing support following RFC 7752 and extensions
+  * implemented complete Link-State NLRI parsing for Node, Link, and IPv4/IPv6 Topology Prefix types
+  * added Link-State AFI (16388) and SAFI (71, 72) support for BGP-LS and BGP-LS-VPN
+  * implemented TLV-based parsing system for Node, Link, and Prefix descriptors and attributes
+  * added support for RFC 8571 traffic engineering performance metrics (TLVs 1114-1120)
+  * added support for RFC 9085 Segment Routing extensions (TLVs 1170-1172, 1174)
+  * added support for RFC 9294 Application-Specific Link Attributes (TLV 1122)
+  * created structured data model with helper methods for common attribute access
+  * maintains backward compatibility with non-breaking optional field additions
 * add support for RFC 8654 Extended Messages
   * updated message length validation to support extended messages up to 65535 bytes
   * resolves parsing errors for large BGP messages (e.g., "invalid BGP message length 4834")
   * implemented BGP Extended Message capability (capability code 6) for parsing and encoding
   * added proper RFC 8654 validation constraints (OPEN and KEEPALIVE messages remain limited to 4096 bytes)
   * added test cases for extended message length validation and capability parsing
+* implemented comprehensive BGP capabilities support for all IANA-defined capability codes with RFC support
+  * added structured parsing and encoding for 7 major BGP capabilities (RFC2858, RFC2918, RFC4724, RFC6793, RFC7911, RFC8950, RFC9234)
+  * implemented `MultiprotocolExtensionsCapability` for AFI/SAFI advertisement per RFC2858
+  * implemented `RouteRefreshCapability` for dynamic route refresh support per RFC2918
+  * implemented `GracefulRestartCapability` with restart flags and per-AF forwarding state per RFC4724
+  * implemented `FourOctetAsCapability` for 4-byte AS number support per RFC6793
+  * implemented `AddPathCapability` with send/receive modes for multiple path advertisement per RFC7911
+  * implemented `BgpRoleCapability` with Provider/Customer/Peer/RouteServer roles per RFC9234
+  * added graceful fallback to raw bytes for unrecognized or parsing-failed capabilities
+  * added comprehensive test coverage with 26 test cases covering all implemented capabilities
+  * updated `CapabilityValue` enum with 7 new structured capability variants
+  * maintains backward compatibility while providing structured access to capability data
+* added RFC 8950 support for IPv4 NLRI with IPv6 next-hops
+  * extended `Safi` enum with `MplsVpn` (128) and `MulticastVpn` (129) for VPN address families
+  * added `RouteDistinguisher` type for VPN next-hop parsing
+  * extended `NextHopAddress` enum with `VpnIpv6` and `VpnIpv6LinkLocal` variants
+  * updated `parse_mp_next_hop` to handle 24-byte and 48-byte VPN next-hops
+  * enables parsing of VPN-IPv4 routes with VPN-IPv6 next-hops per RFC 8950 Section 4
+* added RFC 8950 Extended Next Hop capability parsing and encoding
+  * implemented `ExtendedNextHopCapability` for BGP OPEN message capability negotiation
+  * supports arbitrary AFI/SAFI combinations per RFC 8950 Section 3
+  * added structured capability parsing with fallback to raw bytes for compatibility
+  * enables BGP speakers to advertise ability to receive cross-protocol next-hops
+  * includes comprehensive validation and helper methods for capability querying
+* added RFC 9069 validation warnings for BMP Local RIB peer types
+  * validates Local RIB peer header requirements including zero-filled peer address and 4-byte ASN encoding
+  * validates Local RIB peer up notifications for fabricated OPEN messages and VrTableName TLV presence
+  * validates Local RIB route monitoring messages for proper ASN encoding
+  * validation warnings logged when BMP messages do not conform to RFC 9069 specifications
+
+#### Performance improvements
+
 * optimized BytesMut buffer allocation patterns for better memory efficiency
     * replaced `BytesMut::with_capacity() + resize()` with `BytesMut::zeroed()` for cleaner initialization
     * added capacity pre-allocation in ASN encoding to avoid reallocations
     * replaced unnecessary BytesMut allocations with direct slice references in MRT header parsing
     * added capacity pre-allocation in MRT record encoding for optimal buffer sizing
     * fixed non-canonical PartialOrd implementation for ASN type to follow Rust idioms
-* added BGP Flow-Spec parsing support following RFC 8955 and RFC 8956
-    * implemented complete Flow-Spec NLRI parsing for IPv4 and IPv6 Flow Specification rules
-    * added support for all Flow-Spec component types (destination/source prefix, protocol, ports, ICMP, TCP flags, packet length, DSCP, fragment, flow label)
-    * implemented Flow-Spec operator parsing for numeric and bitmask operations with proper semantics
-    * added Flow-Spec Extended Communities for Traffic Rate, Traffic Action, Redirect, and Traffic Marking (RFC 8955)
-    * created structured data model with `FlowSpecNlri`, `FlowSpecComponent`, and operator types
-    * added support for IPv6-specific components including Flow Label and prefix offset encoding
-    * includes test coverage with RFC example validation and round-trip encoding/decoding
-    * maintains backward compatibility with existing NLRI and Extended Community parsing infrastructure
-* added BGP Tunnel Encapsulation attribute parsing support following RFC 9012, RFC 5640, and RFC 8365
-    * implemented complete TLV-based parsing system for BGP Tunnel Encapsulation attribute (type 23)
-    * added support for all IANA-defined tunnel types (VXLAN, NVGRE, GRE, SR Policy, Geneve, etc.)
-    * added support for all sub-TLV types including Color, UDP Destination Port, Tunnel Egress Endpoint, Preference
-    * implemented variable-length sub-TLV encoding (1 byte for types 0-127, 2 bytes for types 128-255)
-    * added helper methods for common attribute access (color, UDP port, egress endpoint, preference)
-    * created structured data model with `TunnelEncapAttribute`, `TunnelEncapTlv`, and `SubTlv` types
-    * added comprehensive test coverage with 7 test cases covering parsing, encoding, and error handling
-    * maintains full backward compatibility with existing attribute parsing infrastructure
-* added MRT geo-location extensions support following RFC 6397
-    * implemented GEO_PEER_TABLE subtype (7) parsing and encoding for TABLE_DUMP_V2 format
-    * added data structures for collector and peer geo-location information with WGS84 coordinates
-    * implemented NaN coordinate support for privacy-protected geo-location data
-    * added `GeoPeerTable` and `GeoPeer` data structures with direct float coordinate storage
-    * encoding functionality follows consistent parser module pattern with other TABLE_DUMP_V2 types
-    * includes test coverage with 8 test cases covering parsing, encoding, round-trip operations, and edge cases
-    * maintains backward compatibility with existing TABLE_DUMP_V2 parsing and encoding infrastructure
-* added comprehensive BGP Link-State parsing support following RFC 7752 and extensions
-    * implemented complete Link-State NLRI parsing for Node, Link, and IPv4/IPv6 Topology Prefix types
-    * added Link-State AFI (16388) and SAFI (71, 72) support for BGP-LS and BGP-LS-VPN
-    * implemented TLV-based parsing system for Node, Link, and Prefix descriptors and attributes
-    * added support for RFC 8571 traffic engineering performance metrics (TLVs 1114-1120)
-    * added support for RFC 9085 Segment Routing extensions (TLVs 1170-1172, 1174)
-    * added support for RFC 9294 Application-Specific Link Attributes (TLV 1122)
-    * created structured data model with helper methods for common attribute access
-    * maintains backward compatibility with non-breaking optional field additions
+
+#### Iterator improvements
+
 * added fallible iterator implementations for explicit error handling
     * implemented `FallibleRecordIterator` that returns `Result<MrtRecord, ParserErrorWithBytes>`
     * implemented `FallibleElemIterator` that returns `Result<BgpElem, ParserErrorWithBytes>`
@@ -68,40 +109,21 @@ All notable changes to this project will be documented in this file.
     * allows users to handle parsing errors explicitly instead of having them silently skipped
     * maintains full backward compatibility with existing error-skipping iterators
     * reorganized iterator implementations into structured `iters` module with `default` and `fallible` submodules
-* implemented comprehensive BGP capabilities support for all IANA-defined capability codes with RFC support
-    * added structured parsing and encoding for 7 major BGP capabilities (RFC2858, RFC2918, RFC4724, RFC6793, RFC7911, RFC8950, RFC9234)
-    * implemented `MultiprotocolExtensionsCapability` for AFI/SAFI advertisement per RFC2858
-    * implemented `RouteRefreshCapability` for dynamic route refresh support per RFC2918
-    * implemented `GracefulRestartCapability` with restart flags and per-AF forwarding state per RFC4724
-    * implemented `FourOctetAsCapability` for 4-byte AS number support per RFC6793
-    * implemented `AddPathCapability` with send/receive modes for multiple path advertisement per RFC7911
-    * implemented `BgpRoleCapability` with Provider/Customer/Peer/RouteServer roles per RFC9234
-    * added graceful fallback to raw bytes for unrecognized or parsing-failed capabilities
-    * added comprehensive test coverage with 26 test cases covering all implemented capabilities
-    * updated `CapabilityValue` enum with 7 new structured capability variants
-    * maintains backward compatibility while providing structured access to capability data
-* added RFC 8950 support for IPv4 NLRI with IPv6 next-hops
-    * extended `Safi` enum with `MplsVpn` (128) and `MulticastVpn` (129) for VPN address families
-    * added `RouteDistinguisher` type for VPN next-hop parsing
-    * extended `NextHopAddress` enum with `VpnIpv6` and `VpnIpv6LinkLocal` variants
-    * updated `parse_mp_next_hop` to handle 24-byte and 48-byte VPN next-hops
-    * enables parsing of VPN-IPv4 routes with VPN-IPv6 next-hops per RFC 8950 Section 4
-* added RFC 8950 Extended Next Hop capability parsing and encoding
-    * implemented `ExtendedNextHopCapability` for BGP OPEN message capability negotiation
-    * supports arbitrary AFI/SAFI combinations per RFC 8950 Section 3
-    * added structured capability parsing with fallback to raw bytes for compatibility
-    * enables BGP speakers to advertise ability to receive cross-protocol next-hops
-    * includes comprehensive validation and helper methods for capability querying
-* added RFC 9069 validation warnings for BMP Local RIB peer types
-    * validates Local RIB peer header requirements including zero-filled peer address and 4-byte ASN encoding
-    * validates Local RIB peer up notifications for fabricated OPEN messages and VrTableName TLV presence
-    * validates Local RIB route monitoring messages for proper ASN encoding
-    * validation warnings logged when BMP messages do not conform to RFC 9069 specifications
+* added raw MRT record iteration support for record-by-record processing (PR #239)
+    * added `RawRecordIterator` accessible via `into_raw_record_iter()` on `BgpkitParser`
+    * separated MRT record reading from parsing for clearer error handling and improved throughput
+    * moved `RawRecordIterator` into dedicated `iters::raw` module for better organization
+    * added raw record parsing to `scan_mrt` example
+    * added tests comparing `into_raw_record_iter()` with `record_iter()` behavior
+* optimized duplicate BGP attribute detection using a fixed-size boolean array to track seen attributes (PR #239)
+    * added boundary test cases for BGP attribute types
 
 ### Bug fixes
 
 * fixed TABLE_DUMP_V2 parsing to properly store path_id when AddPath is enabled
     * previously path_id was read but discarded, now properly stored in `RibEntry`
+* clarified in-bounds indexing for BGP attribute types when tracking seen attributes (PR #239)
+    * index attribute type as `u8` when indexing the seen-attributes array to ensure bounds correctness
 
 ## v0.11.1 - 2025-06-06
 
