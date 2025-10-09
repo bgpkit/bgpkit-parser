@@ -197,57 +197,57 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
 
     fn next(&mut self) -> Option<RawMrtRecord> {
         self.count += 1;
-        loop {
-            return match chunk_mrt_record(&mut self.parser.reader) {
-                Ok(raw_record) => Some(raw_record),
-                Err(e) => {
-                    match e.error {
-                        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                            if self.parser.options.show_warnings {
-                                warn!("parser warn: {}", err_str);
-                            }
+        match chunk_mrt_record(&mut self.parser.reader) {
+            Ok(raw_record) => Some(raw_record),
+            Err(e) => {
+                match e.error {
+                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
+                        if self.parser.options.show_warnings {
+                            warn!("parser warn: {}", err_str);
+                        }
+                        if let Some(bytes) = e.bytes {
+                            std::fs::write("mrt_core_dump", bytes)
+                                .expect("Unable to write to mrt_core_dump");
+                        }
+                        // skip this record and try next
+                        self.next()
+                    }
+                    ParserError::ParseError(err_str) => {
+                        error!("parser error: {}", err_str);
+                        if self.parser.core_dump {
                             if let Some(bytes) = e.bytes {
                                 std::fs::write("mrt_core_dump", bytes)
                                     .expect("Unable to write to mrt_core_dump");
                             }
-                            continue;
-                        }
-                        ParserError::ParseError(err_str) => {
-                            error!("parser error: {}", err_str);
-                            if self.parser.core_dump {
-                                if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_core_dump", bytes)
-                                        .expect("Unable to write to mrt_core_dump");
-                                }
-                                None
-                            } else {
-                                continue;
-                            }
-                        }
-                        ParserError::EofExpected => {
-                            // normal end of file
                             None
-                        }
-                        ParserError::IoError(err) | ParserError::EofError(err) => {
-                            // when reaching IO error, stop iterating
-                            error!("{:?}", err);
-                            if self.parser.core_dump {
-                                if let Some(bytes) = e.bytes {
-                                    std::fs::write("mrt_core_dump", bytes)
-                                        .expect("Unable to write to mrt_core_dump");
-                                }
-                            }
-                            None
-                        }
-                        #[cfg(feature = "oneio")]
-                        ParserError::OneIoError(_) => None,
-                        ParserError::FilterError(_) => {
-                            // this should not happen at this stage
-                            None
+                        } else {
+                            // skip this record and try next
+                            self.next()
                         }
                     }
+                    ParserError::EofExpected => {
+                        // normal end of file
+                        None
+                    }
+                    ParserError::IoError(err) | ParserError::EofError(err) => {
+                        // when reaching IO error, stop iterating
+                        error!("{:?}", err);
+                        if self.parser.core_dump {
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_core_dump", bytes)
+                                    .expect("Unable to write to mrt_core_dump");
+                            }
+                        }
+                        None
+                    }
+                    #[cfg(feature = "oneio")]
+                    ParserError::OneIoError(_) => None,
+                    ParserError::FilterError(_) => {
+                        // this should not happen at this stage
+                        None
+                    }
                 }
-            };
+            }
         }
     }
 }
