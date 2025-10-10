@@ -2,8 +2,6 @@
 
 This directory contains runnable examples for bgpkit-parser. They demonstrate basic usage, filtering, batch processing with BGPKIT Broker, real-time streaming, attribute and metadata inspection, error handling, and more. Each entry below links directly to the source so you can browse it on GitHub.
 
-Note: debug-file.rs is a local, debug-only example and is intentionally omitted from this list.
-
 ## Quickstart and Iteration
 - [parse-single-file.rs](parse-single-file.rs) — Download and iterate over a single RouteViews updates file, logging each BGP element (BgpElem).
 - [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe-delimited format.
