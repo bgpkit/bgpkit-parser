@@ -126,11 +126,11 @@ tracing-subscriber = "0.3"
 
 # This list only includes examples which require additional features to run. These are more in the examples directory.
 [[example]]
-name = "real-time-ris-live-websocket"
+name = "real_time_ris_live_websocket"
 required-features = ["rislive"]
 
 [[example]]
-name = "real-time-ris-live-websocket-async"
+name = "real_time_ris_live_websocket_async"
 required-features = ["rislive"]
 
 [[example]]
