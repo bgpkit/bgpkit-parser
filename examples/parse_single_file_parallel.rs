@@ -93,8 +93,7 @@ fn main() {
     let parser = BgpkitParser::new(local_path.to_str().unwrap()).expect("failed to create parser");
     let mut raw_iter = parser.into_raw_record_iter();
 
-    // Track whether we've consumed the first record (PeerIndexTable) so metrics include it.
-    let mut consumed_first_record = false;
+    // Consume first record (PeerIndexTable) for Elementor; metrics will include it.
 
     // Elementor requires the peer index table for TableDumpV2
     let mut elementor = Elementor::new();
@@ -105,7 +104,6 @@ fn main() {
         elementor
             .set_peer_table(record)
             .expect("first record is not a PeerIndexTable; this example expects a RIB file");
-        consumed_first_record = true;
     } else {
         eprintln!("empty input: no records found");
         return;
@@ -123,9 +121,7 @@ fn main() {
     let records_parsed = Arc::new(AtomicU64::new(0));
 
     // Include the initial PeerIndexTable record in the records count for consistency with parse-only runs.
-    if consumed_first_record {
-        records_parsed.fetch_add(1, Ordering::Relaxed);
-    }
+    records_parsed.fetch_add(1, Ordering::Relaxed);
 
     // Channels: batches of RawMrtRecord
     let (batch_tx, batch_rx) = channel::bounded::<Vec<RawMrtRecord>>(chan_cap);
