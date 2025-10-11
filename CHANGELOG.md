@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Examples and benchmarking
+
+* Added a new runnable example: `examples/parse_single_file_parallel.rs`.
+  * Parses RIB file using thread pool with batching and collecting. Two modes: worker-only parsing (default) or worker
+    parsing + element conversion.
+  * Includes bottleneck diagnostics, tunable parameters (batch size, workers, etc), benchmarking, and remote file
+    downloading.
+
 ### Breaking changes
 
 * change `path_id` from `u32` to `Option<u32>` for proper null handling
