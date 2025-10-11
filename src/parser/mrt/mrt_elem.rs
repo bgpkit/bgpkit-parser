@@ -6,6 +6,8 @@
 //! process BGP information on a per-prefix basis.
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
+use crate::ParserError;
+use crate::ParserError::ParseError;
 use itertools::Itertools;
 use log::{error, warn};
 use std::collections::HashMap;
@@ -14,7 +16,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 #[derive(Default, Debug, Clone)]
 pub struct Elementor {
-    peer_table: Option<PeerIndexTable>,
+    pub peer_table: Option<PeerIndexTable>,
 }
 
 // use macro_rules! <name of macro>{<Body>}
@@ -163,6 +165,45 @@ fn get_relevant_attributes(
 impl Elementor {
     pub fn new() -> Elementor {
         Self::default()
+    }
+
+    /// Sets the peer index table for the elementor.
+    ///
+    /// This method takes an MRT record and extracts the peer index table from it if the record contains one.
+    /// The peer index table is required for processing TableDumpV2 records, as it contains the mapping between
+    /// peer indices and their corresponding IP addresses and ASNs.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - An MRT record that should contain a peer index table
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the peer table was successfully extracted and set
+    /// * `Err(ParserError)` - If the record does not contain a peer index table
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::{BgpkitParser, Elementor};
+    ///
+    /// let mut parser = BgpkitParser::new("rib.dump.bz2").unwrap();
+    /// let mut elementor = Elementor::new();
+    ///
+    /// // Get the first record which should be the peer index table
+    /// if let Ok(record) = parser.next_record() {
+    ///     elementor.set_peer_table(record).unwrap();
+    /// }
+    /// ```
+    pub fn set_peer_table(&mut self, record: MrtRecord) -> Result<(), ParserError> {
+        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(p)) =
+            record.message
+        {
+            self.peer_table = Some(p);
+            Ok(())
+        } else {
+            Err(ParseError("peer_table is not a PeerIndexTable".to_string()))
+        }
     }
 
     /// Convert a [BgpMessage] to a vector of [BgpElem]s.
