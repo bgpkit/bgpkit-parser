@@ -29,17 +29,6 @@ pub fn parse_bmp_msg(data: &mut Bytes) -> Result<BmpMessage, ParserBmpError> {
     data.has_n_remaining(content_length)?;
     let mut content = data.split_to(content_length);
 
-    // if total_len>common_header.msg_len {
-    //     // truncated message
-    //     let diff = total_len - common_header.msg_len;
-    //     let bytes_left = reader.get_ref().len() as u32 - reader.position() as u32;
-    //     buffer = Vec::with_capacity((bytes_left - diff) as usize);
-    // } else if total_len == common_header.msg_len {
-    // } else {
-    //     return Err(ParserBmpError::CorruptedBmpMessage)
-    // };
-    // reader.read_exact(&mut buffer)?;
-
     match &common_header.msg_type {
         BmpMsgType::RouteMonitoring => {
             let per_peer_header = parse_per_peer_header(&mut content)?;

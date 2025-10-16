@@ -152,7 +152,7 @@ mod tests {
         );
         assert_eq!(
             ParserBmpError::from(ParserError::ParseError("test".to_string())),
-            ParserBmpError::CorruptedBmpMessage
+            ParserBmpError::CorruptedBgpMessage("Error: test".to_string())
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<BmpMsgType>::new(0)),

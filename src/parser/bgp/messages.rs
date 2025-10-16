@@ -225,16 +225,19 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
             2 => {
                 let mut capacities = vec![];
 
-                while input.remaining() >= 2 {
+                // Split off only the bytes for this parameter to avoid consuming other parameters
+                let mut param_data = input.split_to(param_len as usize);
+
+                while param_data.remaining() >= 2 {
                     // capability codes:
                     // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
-                    let code = input.read_u8()?;
+                    let code = param_data.read_u8()?;
                     let len = match extended_length {
-                        true => input.read_u16()?,
-                        false => input.read_u8()? as u16,
+                        true => param_data.read_u16()?,
+                        false => param_data.read_u8()? as u16,
                     };
 
-                    let capability_data = input.read_n_bytes(len as usize)?;
+                    let capability_data = param_data.read_n_bytes(len as usize)?;
                     let capability_type = BgpCapabilityType::from(code);
 
                     // Parse specific capability types with fallback to raw bytes
@@ -1169,6 +1172,159 @@ mod tests {
             }
         } else {
             panic!("Expected capability parameter after round trip");
+        }
+    }
+
+    #[test]
+    fn test_parse_bgp_open_message_with_multiple_capabilities() {
+        // Create a BGP OPEN message with multiple capabilities in a single optional parameter
+        // This tests RFC 5492 support for multiple capabilities per parameter
+
+        // Build capabilities: Extended Message, Route Refresh, and 4-octet AS
+        let extended_msg_cap = Capability {
+            ty: BgpCapabilityType::BGP_EXTENDED_MESSAGE,
+            value: CapabilityValue::BgpExtendedMessage(BgpExtendedMessageCapability {}),
+        };
+
+        let route_refresh_cap = Capability {
+            ty: BgpCapabilityType::ROUTE_REFRESH_CAPABILITY_FOR_BGP_4,
+            value: CapabilityValue::RouteRefresh(RouteRefreshCapability {}),
+        };
+
+        let four_octet_as_cap = Capability {
+            ty: BgpCapabilityType::SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY,
+            value: CapabilityValue::FourOctetAs(FourOctetAsCapability { asn: 65536 }),
+        };
+
+        // Create OPEN message with all three capabilities in one parameter
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(65000),
+            hold_time: 180,
+            sender_ip: "10.0.0.1".parse().unwrap(),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 10, // 3 capabilities: (1+1+0) + (1+1+0) + (1+1+4) = 2+2+6 = 10
+                param_value: ParamValue::Capacities(vec![
+                    extended_msg_cap,
+                    route_refresh_cap,
+                    four_octet_as_cap,
+                ]),
+            }],
+        };
+
+        // Encode the message
+        let encoded = msg.encode();
+
+        // Parse it back
+        let mut encoded_bytes = encoded.clone();
+        let parsed = parse_bgp_open_message(&mut encoded_bytes).unwrap();
+
+        // Verify basic fields
+        assert_eq!(parsed.version, 4);
+        assert_eq!(parsed.asn, Asn::new_32bit(65000));
+        assert_eq!(parsed.hold_time, 180);
+        assert_eq!(
+            parsed.sender_ip,
+            "10.0.0.1".parse::<std::net::Ipv4Addr>().unwrap()
+        );
+        assert_eq!(parsed.opt_params.len(), 1);
+
+        // Verify we have all three capabilities
+        if let ParamValue::Capacities(caps) = &parsed.opt_params[0].param_value {
+            assert_eq!(caps.len(), 3, "Should have 3 capabilities");
+
+            // Check first capability: Extended Message
+            assert_eq!(caps[0].ty, BgpCapabilityType::BGP_EXTENDED_MESSAGE);
+            assert!(matches!(
+                caps[0].value,
+                CapabilityValue::BgpExtendedMessage(_)
+            ));
+
+            // Check second capability: Route Refresh
+            assert_eq!(
+                caps[1].ty,
+                BgpCapabilityType::ROUTE_REFRESH_CAPABILITY_FOR_BGP_4
+            );
+            assert!(matches!(caps[1].value, CapabilityValue::RouteRefresh(_)));
+
+            // Check third capability: 4-octet AS
+            assert_eq!(
+                caps[2].ty,
+                BgpCapabilityType::SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY
+            );
+            if let CapabilityValue::FourOctetAs(foa) = &caps[2].value {
+                assert_eq!(foa.asn, 65536);
+            } else {
+                panic!("Expected FourOctetAs capability value");
+            }
+        } else {
+            panic!("Expected Capacities parameter");
+        }
+    }
+
+    #[test]
+    fn test_parse_bgp_open_message_with_multiple_capability_parameters() {
+        // Test parsing OPEN message with multiple optional parameters, each containing capabilities
+        // This is less common but still valid per RFC 5492
+
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(65001),
+            hold_time: 90,
+            sender_ip: "192.168.1.1".parse().unwrap(),
+            extended_length: false,
+            opt_params: vec![
+                OptParam {
+                    param_type: 2, // capability
+                    param_len: 2,
+                    param_value: ParamValue::Capacities(vec![Capability {
+                        ty: BgpCapabilityType::BGP_EXTENDED_MESSAGE,
+                        value: CapabilityValue::BgpExtendedMessage(BgpExtendedMessageCapability {}),
+                    }]),
+                },
+                OptParam {
+                    param_type: 2, // capability
+                    param_len: 6,
+                    param_value: ParamValue::Capacities(vec![Capability {
+                        ty: BgpCapabilityType::SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY,
+                        value: CapabilityValue::FourOctetAs(FourOctetAsCapability {
+                            asn: 4200000000,
+                        }),
+                    }]),
+                },
+            ],
+        };
+
+        // Encode and parse back
+        let encoded = msg.encode();
+        let mut encoded_bytes = encoded.clone();
+        let parsed = parse_bgp_open_message(&mut encoded_bytes).unwrap();
+
+        // Verify we have 2 optional parameters
+        assert_eq!(parsed.opt_params.len(), 2);
+
+        // Check first parameter
+        if let ParamValue::Capacities(caps) = &parsed.opt_params[0].param_value {
+            assert_eq!(caps.len(), 1);
+            assert_eq!(caps[0].ty, BgpCapabilityType::BGP_EXTENDED_MESSAGE);
+        } else {
+            panic!("Expected Capacities in first parameter");
+        }
+
+        // Check second parameter
+        if let ParamValue::Capacities(caps) = &parsed.opt_params[1].param_value {
+            assert_eq!(caps.len(), 1);
+            assert_eq!(
+                caps[0].ty,
+                BgpCapabilityType::SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY
+            );
+            if let CapabilityValue::FourOctetAs(foa) = &caps[0].value {
+                assert_eq!(foa.asn, 4200000000);
+            }
+        } else {
+            panic!("Expected Capacities in second parameter");
         }
     }
 }
