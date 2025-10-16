@@ -13,3 +13,5 @@ examples/debug-file.rs
 
 .env
 .claude
+*.pcap
+*.bin
