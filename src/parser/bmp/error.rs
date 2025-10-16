@@ -10,13 +10,14 @@ use num_enum::TryFromPrimitiveError;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 pub enum ParserBmpError {
     InvalidOpenBmpHeader,
     UnsupportedOpenBmpMessage,
     UnknownTlvType,
     UnknownTlvValue,
     CorruptedBmpMessage,
+    CorruptedBgpMessage(String),
     TruncatedBmpMessage,
 }
 
@@ -41,6 +42,9 @@ impl Display for ParserBmpError {
             ParserBmpError::UnknownTlvValue => {
                 write!(f, "Unknown TLV value")
             }
+            ParserBmpError::CorruptedBgpMessage(s) => {
+                write!(f, "Corrupted BGP message: {}", s)
+            }
         }
     }
 }
@@ -55,8 +59,8 @@ impl From<std::io::Error> for ParserBmpError {
 }
 
 impl From<ParserError> for ParserBmpError {
-    fn from(_: ParserError) -> Self {
-        ParserBmpError::CorruptedBmpMessage
+    fn from(e: ParserError) -> Self {
+        ParserBmpError::CorruptedBgpMessage(e.to_string())
     }
 }
 
