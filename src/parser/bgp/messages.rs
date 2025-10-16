@@ -156,6 +156,33 @@ impl BgpNotificationMessage {
 /// Parse BGP OPEN message.
 ///
 /// The parsing of BGP OPEN message also includes decoding the BGP capabilities.
+///
+/// RFC 4271: https://datatracker.ietf.org/doc/html/rfc4271
+/// ```text
+///       0                   1                   2                   3
+///       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///       +-+-+-+-+-+-+-+-+
+///       |    Version    |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///       |     My Autonomous System      |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///       |           Hold Time           |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///       |                         BGP Identifier                        |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///       | Opt Parm Len  |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///       |                                                               |
+///       |             Optional Parameters (variable)                    |
+///       |                                                               |
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+///       0                   1
+///       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-...
+///       |  Parm. Type   | Parm. Length  |  Parameter Value (variable)
+///       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-...
+/// ```
 pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
     input.has_n_remaining(10)?;
     let version = input.get_u8();
@@ -172,8 +199,14 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     while input.remaining() >= 2 {
         let mut param_type = input.get_u8();
         if first {
+            if opt_params_len == 0 && param_type == 255 {
+                return Err(ParserError::ParseError(
+                    "RFC 9072 violation: Non-Extended Optional Parameters Length must not be 0 when using extended format".to_string()
+                ));
+            }
             // first parameter, check if it is extended length message
-            if opt_params_len == 255 && param_type == 255 {
+            if opt_params_len != 0 && param_type == 255 {
+                // RFC 9072: https://datatracker.ietf.org/doc/rfc9072/
                 //
                 // 0                   1                   2                   3
                 // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -191,7 +224,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 //     |                                                               |
                 //     |             Optional Parameters (variable)                    |
                 //     |                                                               |
-                //         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
                 //
                 //         Figure 1: Extended Encoding OPEN Format
                 extended_length = true;
@@ -218,6 +251,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
             true => input.read_u16()?,
             false => input.read_u8()? as u16,
         };
+
         // https://tools.ietf.org/html/rfc3392
         // https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml#bgp-parameters-11
 
@@ -232,10 +266,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                     // capability codes:
                     // https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
                     let code = param_data.read_u8()?;
-                    let len = match extended_length {
-                        true => param_data.read_u16()?,
-                        false => param_data.read_u8()? as u16,
-                    };
+                    let len = param_data.read_u8()? as u16; // Capability length is ALWAYS 1 byte per RFC 5492
 
                     let capability_data = param_data.read_n_bytes(len as usize)?;
                     let capability_type = BgpCapabilityType::from(code);
