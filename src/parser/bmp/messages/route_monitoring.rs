@@ -100,7 +100,7 @@ mod tests {
         });
         let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
 
-        let mut data = Bytes::from(bgp_bytes);
+        let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits16; // RFC 9069 violation
         let peer_type = crate::parser::bmp::messages::BmpPeerType::LocalRib;
 
@@ -123,7 +123,7 @@ mod tests {
         });
         let bgp_bytes = bgp_update.encode(AsnLength::Bits32);
 
-        let mut data = Bytes::from(bgp_bytes);
+        let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits32; // RFC 9069 compliant
         let peer_type = crate::parser::bmp::messages::BmpPeerType::LocalRib;
 
@@ -146,7 +146,7 @@ mod tests {
         });
         let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
 
-        let mut data = Bytes::from(bgp_bytes);
+        let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits16;
         let peer_type = crate::parser::bmp::messages::BmpPeerType::Global; // Not LocalRib
 
