@@ -132,6 +132,11 @@ We now set a minimum supported Rust version (MSRV) of 1.87.0.
     * previously path_id was read but discarded, now properly stored in `RibEntry`
 * clarified in-bounds indexing for BGP attribute types when tracking seen attributes (PR #239)
     * index attribute type as `u8` when indexing the seen-attributes array to ensure bounds correctness
+* fixed BGP OPEN message optional parameter parsing to support multiple capabilities per parameter
+    * changed `ParamValue::Capability` to `ParamValue::Capacities(Vec<Capability>)` to properly handle RFC 5492 format
+    * previously parser only read the first capability in each optional parameter, ignoring subsequent capabilities
+    * now correctly parses all capabilities within each optional parameter
+    * updated encoding logic to write all capabilities in the vector
 
 ## v0.11.1 - 2025-06-06
 

@@ -61,7 +61,9 @@ pub fn parse_route_mirroring(
                     value: RouteMirroringValue::Information(value),
                 });
             }
-            _ => return Err(ParserBmpError::CorruptedBmpMessage),
+            _ => {
+                return Err(ParserBmpError::CorruptedBmpMessage);
+            }
         }
     }
     Ok(RouteMirroring { tlvs })

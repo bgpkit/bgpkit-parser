@@ -105,7 +105,7 @@ pub struct OptParam {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ParamValue {
     Raw(Vec<u8>),
-    Capability(Capability),
+    Capacities(Vec<Capability>),
 }
 
 /// BGP Capability.

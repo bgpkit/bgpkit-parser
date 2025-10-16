@@ -371,6 +371,7 @@ If you would like to see any specific RFC's support, please submit an issue on G
 - [X] [RFC 4724](https://datatracker.ietf.org/doc/html/rfc4724): Graceful Restart Mechanism for BGP
 - [X] [RFC 4456](https://datatracker.ietf.org/doc/html/rfc4456): BGP Route Reflection: An Alternative to Full Mesh Internal BGP (IBGP)
 - [X] [RFC 5065](https://datatracker.ietf.org/doc/html/rfc5065): Autonomous System Confederations for BGP
+- [X] [RFC 5492](https://datatracker.ietf.org/doc/html/rfc5492): Capabilities Advertisement with BGP-4
 - [X] [RFC 6793](https://datatracker.ietf.org/doc/html/rfc6793): BGP Support for Four-Octet Autonomous System (AS) Number Space
 - [X] [RFC 7606](https://datatracker.ietf.org/doc/html/rfc7606): Revised Error Handling for BGP UPDATE Messages
 - [X] [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths in BGP (ADD-PATH)

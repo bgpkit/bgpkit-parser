@@ -81,4 +81,78 @@ mod tests {
 
         assert_eq!(format!("{mon_msg:?}"), expected);
     }
+
+    // Note: These tests verify that the parser handles LocalRib ASN validation correctly.
+    // The actual warning messages are logged via the `log` crate and would appear
+    // in production use. For testing purposes, we verify that parsing succeeds
+    // and the code paths are exercised.
+
+    #[test]
+    fn test_local_rib_with_16bit_asn() {
+        // This test verifies that LocalRib route monitoring with 16-bit ASN
+        // is parsed successfully. In production, a warning would be logged.
+
+        // Create a simple BGP UPDATE message (End-of-RIB)
+        let bgp_update = BgpMessage::Update(BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::default(),
+            announced_prefixes: vec![],
+        });
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
+
+        let mut data = bgp_bytes;
+        let asn_len = AsnLength::Bits16; // RFC 9069 violation
+        let peer_type = crate::parser::bmp::messages::BmpPeerType::LocalRib;
+
+        let result = parse_route_monitoring(&mut data, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // In production, a warning would be logged about ASN encoding violation
+    }
+
+    #[test]
+    fn test_local_rib_with_32bit_asn() {
+        // This test verifies that LocalRib route monitoring with 32-bit ASN
+        // is parsed successfully without warnings.
+
+        // Create a simple BGP UPDATE message (End-of-RIB)
+        let bgp_update = BgpMessage::Update(BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::default(),
+            announced_prefixes: vec![],
+        });
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits32);
+
+        let mut data = bgp_bytes;
+        let asn_len = AsnLength::Bits32; // RFC 9069 compliant
+        let peer_type = crate::parser::bmp::messages::BmpPeerType::LocalRib;
+
+        let result = parse_route_monitoring(&mut data, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // No warning should be logged when using 32-bit ASN
+    }
+
+    #[test]
+    fn test_non_local_rib_with_16bit_asn() {
+        // This test verifies that non-LocalRib route monitoring doesn't trigger
+        // LocalRib-specific ASN validation.
+
+        // Create a simple BGP UPDATE message (End-of-RIB)
+        let bgp_update = BgpMessage::Update(BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::default(),
+            announced_prefixes: vec![],
+        });
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
+
+        let mut data = bgp_bytes;
+        let asn_len = AsnLength::Bits16;
+        let peer_type = crate::parser::bmp::messages::BmpPeerType::Global; // Not LocalRib
+
+        let result = parse_route_monitoring(&mut data, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // No warnings should be logged for non-LocalRib peer types
+    }
 }
