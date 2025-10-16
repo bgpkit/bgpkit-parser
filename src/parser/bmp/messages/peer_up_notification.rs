@@ -86,7 +86,7 @@ pub fn parse_peer_up_notification(
             let has_multiprotocol_capability = open_msg
                 .opt_params
                 .iter()
-                .any(|param| matches!(param.param_value, ParamValue::Capability(_)));
+                .any(|param| matches!(param.param_value, ParamValue::Capacities(_)));
             if !has_multiprotocol_capability {
                 warn!("RFC 9069: Local RIB peer up notification should include multiprotocol capabilities in fabricated OPEN messages");
             }
