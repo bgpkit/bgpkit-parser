@@ -141,9 +141,9 @@ pub fn parse_peer_up_notification(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::capabilities::{BgpCapabilityType, MultiprotocolExtensionsCapability};
     use bytes::BytesMut;
     use std::net::{IpAddr, Ipv4Addr};
-    use crate::models::capabilities::{BgpCapabilityType, MultiprotocolExtensionsCapability};
 
     #[test]
     fn test_parse_peer_up_notification() {
@@ -486,7 +486,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // In production, a warning would be logged about missing multiprotocol capability
@@ -535,7 +536,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // No warning should be logged when multiprotocol capability is present
@@ -589,7 +591,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // In production, a warning would be logged about missing VrTableName TLV
@@ -643,13 +646,17 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
 
         let peer_notification = result.unwrap();
         assert_eq!(peer_notification.tlvs.len(), 1);
-        assert_eq!(peer_notification.tlvs[0].info_type, PeerUpTlvType::VrTableName);
+        assert_eq!(
+            peer_notification.tlvs[0].info_type,
+            PeerUpTlvType::VrTableName
+        );
         assert_eq!(peer_notification.tlvs[0].info_value, "LocalRIB");
         // No warnings should be logged with valid VrTableName
     }
@@ -701,7 +708,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // In production, a warning would be logged about invalid VrTableName length
@@ -756,7 +764,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::LocalRib;
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // In production, a warning would be logged about oversized VrTableName
@@ -792,7 +801,8 @@ mod tests {
         let asn_len = AsnLength::Bits32;
         let peer_type = BmpPeerType::Global; // Not LocalRib
 
-        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+        let result =
+            parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
 
         assert!(result.is_ok(), "Parsing should succeed");
         // No warnings should be logged for non-LocalRib peer types
