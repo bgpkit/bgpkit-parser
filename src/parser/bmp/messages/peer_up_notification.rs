@@ -1,4 +1,5 @@
 use crate::bgp::parse_bgp_message;
+use crate::models::capabilities::BgpCapabilityType;
 use crate::models::*;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::BmpPeerType;
@@ -83,10 +84,14 @@ pub fn parse_peer_up_notification(
     if let Some(BmpPeerType::LocalRib) = peer_type {
         // Validate that the OPEN messages contain appropriate capabilities for Local RIB
         if let BgpMessage::Open(ref open_msg) = &sent_open {
-            let has_multiprotocol_capability = open_msg
-                .opt_params
-                .iter()
-                .any(|param| matches!(param.param_value, ParamValue::Capacities(_)));
+            let has_multiprotocol_capability = open_msg.opt_params.iter().any(|param| {
+                if let ParamValue::Capacities(caps) = &param.param_value {
+                    caps.iter()
+                        .any(|cap| cap.ty == BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4)
+                } else {
+                    false
+                }
+            });
             if !has_multiprotocol_capability {
                 warn!("RFC 9069: Local RIB peer up notification should include multiprotocol capabilities in fabricated OPEN messages");
             }
