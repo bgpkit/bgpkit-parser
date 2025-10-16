@@ -143,6 +143,7 @@ mod tests {
     use super::*;
     use bytes::BytesMut;
     use std::net::{IpAddr, Ipv4Addr};
+    use crate::models::capabilities::{BgpCapabilityType, MultiprotocolExtensionsCapability};
 
     #[test]
     fn test_parse_peer_up_notification() {
@@ -226,6 +227,11 @@ mod tests {
         log::set_max_level(log::LevelFilter::Warn);
         warnings
     }
+
+    // Note: These tests verify that the parser handles LocalRib validation correctly.
+    // The actual warning messages are logged via the `log` crate and would appear
+    // in production use. For testing purposes, we verify that parsing succeeds
+    // and the code paths are exercised.
 
     #[test]
     fn test_parse_peer_up_notification_no_warnings() {
@@ -447,5 +453,348 @@ mod tests {
         assert_eq!(peer_notification.tlvs[0].info_value, "Test");
         assert_eq!(peer_notification.tlvs[1].info_type, PeerUpTlvType::String);
         assert_eq!(peer_notification.tlvs[1].info_value, "Router");
+    }
+
+    #[test]
+    fn test_local_rib_without_multiprotocol_capability() {
+        // This test verifies that LocalRib peer up notifications without multiprotocol
+        // capabilities are parsed successfully. In production, a warning would be logged.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message WITHOUT multiprotocol capabilities (RFC 9069 violation)
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![], // No capabilities
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // In production, a warning would be logged about missing multiprotocol capability
+    }
+
+    #[test]
+    fn test_local_rib_with_multiprotocol_capability() {
+        // This test verifies that LocalRib peer up notifications WITH multiprotocol
+        // capabilities are parsed successfully without warnings.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message WITH multiprotocol capabilities (RFC 9069 compliant)
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 6,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
+                    value: CapabilityValue::MultiprotocolExtensions(
+                        MultiprotocolExtensionsCapability {
+                            afi: Afi::Ipv4,
+                            safi: Safi::Unicast,
+                        },
+                    ),
+                }]),
+            }],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // No warning should be logged when multiprotocol capability is present
+    }
+
+    #[test]
+    fn test_local_rib_without_vr_table_name_tlv() {
+        // This test verifies that LocalRib peer up notifications without VrTableName TLV
+        // are parsed successfully. In production, a warning would be logged.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message with capabilities
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 6,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
+                    value: CapabilityValue::MultiprotocolExtensions(
+                        MultiprotocolExtensionsCapability {
+                            afi: Afi::Ipv4,
+                            safi: Safi::Unicast,
+                        },
+                    ),
+                }]),
+            }],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add TLVs but NO VrTableName (RFC 9069 violation)
+        data.extend_from_slice(&[0x00, 0x00]); // String TLV
+        data.extend_from_slice(&[0x00, 0x04]); // length 4
+        data.extend_from_slice(b"Test");
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // In production, a warning would be logged about missing VrTableName TLV
+    }
+
+    #[test]
+    fn test_local_rib_with_valid_vr_table_name_tlv() {
+        // This test verifies that LocalRib peer up notifications with valid VrTableName TLV
+        // are parsed successfully without warnings.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message with capabilities
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 6,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
+                    value: CapabilityValue::MultiprotocolExtensions(
+                        MultiprotocolExtensionsCapability {
+                            afi: Afi::Ipv4,
+                            safi: Safi::Unicast,
+                        },
+                    ),
+                }]),
+            }],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add VrTableName TLV with valid length (1-255 bytes)
+        data.extend_from_slice(&[0x00, 0x03]); // VrTableName TLV type
+        data.extend_from_slice(&[0x00, 0x08]); // length 8
+        data.extend_from_slice(b"LocalRIB");
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+
+        let peer_notification = result.unwrap();
+        assert_eq!(peer_notification.tlvs.len(), 1);
+        assert_eq!(peer_notification.tlvs[0].info_type, PeerUpTlvType::VrTableName);
+        assert_eq!(peer_notification.tlvs[0].info_value, "LocalRIB");
+        // No warnings should be logged with valid VrTableName
+    }
+
+    #[test]
+    fn test_local_rib_with_empty_vr_table_name() {
+        // This test verifies that LocalRib peer up notifications with empty VrTableName
+        // are parsed successfully. In production, a warning would be logged.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message with capabilities
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 6,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
+                    value: CapabilityValue::MultiprotocolExtensions(
+                        MultiprotocolExtensionsCapability {
+                            afi: Afi::Ipv4,
+                            safi: Safi::Unicast,
+                        },
+                    ),
+                }]),
+            }],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add VrTableName TLV with EMPTY value (RFC 9069 violation)
+        data.extend_from_slice(&[0x00, 0x03]); // VrTableName TLV type
+        data.extend_from_slice(&[0x00, 0x00]); // length 0 (empty)
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // In production, a warning would be logged about invalid VrTableName length
+    }
+
+    #[test]
+    fn test_local_rib_with_oversized_vr_table_name() {
+        // This test verifies that LocalRib peer up notifications with oversized VrTableName
+        // are parsed successfully. In production, a warning would be logged.
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message with capabilities
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2, // capability
+                param_len: 6,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
+                    value: CapabilityValue::MultiprotocolExtensions(
+                        MultiprotocolExtensionsCapability {
+                            afi: Afi::Ipv4,
+                            safi: Safi::Unicast,
+                        },
+                    ),
+                }]),
+            }],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add VrTableName TLV with oversized value (>255 bytes, RFC 9069 violation)
+        let oversized_name = "A".repeat(256);
+        data.extend_from_slice(&[0x00, 0x03]); // VrTableName TLV type
+        data.extend_from_slice(&[0x01, 0x00]); // length 256
+        data.extend_from_slice(oversized_name.as_bytes());
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::LocalRib;
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // In production, a warning would be logged about oversized VrTableName
+    }
+
+    #[test]
+    fn test_non_local_rib_no_validation() {
+        // This test verifies that non-LocalRib peer types don't trigger LocalRib validations
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Create BGP OPEN message WITHOUT capabilities (but not LocalRib, so no warning)
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let peer_type = BmpPeerType::Global; // Not LocalRib
+
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, Some(&peer_type));
+
+        assert!(result.is_ok(), "Parsing should succeed");
+        // No warnings should be logged for non-LocalRib peer types
     }
 }

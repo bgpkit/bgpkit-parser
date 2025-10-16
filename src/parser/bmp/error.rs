@@ -131,6 +131,10 @@ mod tests {
             "Corrupted BMP message"
         );
         assert_eq!(
+            ParserBmpError::CorruptedBgpMessage("test".to_string()).to_string(),
+            "Corrupted BGP message: test"
+        );
+        assert_eq!(
             ParserBmpError::TruncatedBmpMessage.to_string(),
             "Truncated BMP message"
         );
