@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.12.0 - 2025-10-17
 
 ### Examples and benchmarking
 
@@ -137,6 +137,21 @@ We now set a minimum supported Rust version (MSRV) of 1.87.0.
     * previously parser only read the first capability in each optional parameter, ignoring subsequent capabilities
     * now correctly parses all capabilities within each optional parameter
     * updated encoding logic to write all capabilities in the vector
+* fixed RFC 9072 Extended Optional Parameters Length validation
+    * corrected extended parameter format validation (must have non-zero opt_params_len)
+    * fixed capability length parsing to always use 1-byte length per RFC 5492, not variable length
+    * ensures proper RFC 9072 compliance for extended OPEN message format
+* improved RFC 9069 validation for BMP Local RIB peer types
+    * fixed multi-protocol capability check to specifically validate MULTIPROTOCOL_EXTENSIONS capability presence
+    * previously checked for any capabilities, now correctly validates the required capability type
+* added `CorruptedBgpMessage` error type for better BMP parsing error handling
+    * provides more specific error information when BGP messages within BMP are corrupted
+
+### Maintenance
+
+* updated dependencies
+* updated crate documentation and README
+* removed outdated documentation files
 
 ## v0.11.1 - 2025-06-06
 
