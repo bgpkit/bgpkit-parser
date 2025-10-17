@@ -1,8 +1,9 @@
 use bgpkit_parser::BgpkitParser;
 use bzip2::bufread::BzDecoder;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use flate2::bufread::GzDecoder;
 use std::fs::File;
+use std::hint::black_box;
 use std::io::{BufReader, Read};
 use std::time::Duration;
 
