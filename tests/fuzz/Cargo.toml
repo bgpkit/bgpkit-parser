@@ -9,7 +9,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = { version = "0.4" }
-bgpkit-parser = { path = "../../", features = ["parser"] }
+arbitrary = { version = "1", features = ["derive"] }
+bgpkit-parser = { path = "../../", features = ["parser", "rislive"] }
 bytes = "1.7"
 
 [workspace]
@@ -27,6 +28,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_attributes"
+path = "fuzz_targets/fuzz_attributes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_bgp_message"
 path = "fuzz_targets/fuzz_bgp_message.rs"
 test = false
@@ -34,8 +42,36 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_rislive"
+path = "fuzz_targets/fuzz_rislive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_parser"
 path = "fuzz_targets/fuzz_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bmp"
+path = "fuzz_targets/fuzz_bmp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_nlri"
+path = "fuzz_targets/fuzz_nlri.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mrt_header"
+path = "fuzz_targets/fuzz_mrt_header.rs"
 test = false
 doc = false
 bench = false
