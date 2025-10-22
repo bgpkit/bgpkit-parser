@@ -1,0 +1,41 @@
+[package]
+name = "bgpkit-parser-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4" }
+bgpkit-parser = { path = "../../", features = ["parser"] }
+bytes = "1.7"
+
+[workspace]
+members = ["."]
+
+# Prevent this from interfering with workspaces
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "fuzz_mrt_record"
+path = "fuzz_targets/fuzz_mrt_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bgp_message"
+path = "fuzz_targets/fuzz_bgp_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_parser"
+path = "fuzz_targets/fuzz_parser.rs"
+test = false
+doc = false
+bench = false
