@@ -12,8 +12,8 @@ pub fn parse_link_state_attribute(mut data: Bytes) -> Result<AttributeValue, Par
     let mut attr = LinkStateAttribute::new();
 
     while data.remaining() >= 4 {
-        let tlv_type = data.get_u16();
-        let tlv_length = data.get_u16();
+        let tlv_type = data.read_u16()?;
+        let tlv_length = data.read_u16()?;
 
         if data.remaining() < tlv_length as usize {
             return Err(ParserError::TruncatedMsg(format!(
@@ -93,8 +93,8 @@ pub fn parse_link_state_nlri(
     let mut nlri_list = Vec::new();
 
     while data.remaining() >= 4 {
-        let nlri_type = data.get_u16();
-        let nlri_len = data.get_u16();
+        let nlri_type = data.read_u16()?;
+        let nlri_len = data.read_u16()?;
 
         if data.remaining() < nlri_len as usize {
             return Err(ParserError::TruncatedMsg(format!(
@@ -133,8 +133,8 @@ fn parse_single_link_state_nlri(
         )));
     }
 
-    let protocol_id = ProtocolId::from(data.get_u8());
-    let identifier = data.get_u64();
+    let protocol_id = ProtocolId::from(data.read_u8()?);
+    let identifier = data.read_u64()?;
 
     // Parse descriptors based on NLRI type
     let (local_node_descriptors, remote_node_descriptors, link_descriptors, prefix_descriptors) =
@@ -180,7 +180,7 @@ fn parse_node_descriptors(data: &mut Bytes) -> Result<NodeDescriptor, ParserErro
     if data.remaining() < 2 {
         return Ok(node_desc);
     }
-    let desc_len = data.get_u16();
+    let desc_len = data.read_u16()?;
 
     if data.remaining() < desc_len as usize {
         return Err(ParserError::TruncatedMsg(format!(
@@ -193,8 +193,8 @@ fn parse_node_descriptors(data: &mut Bytes) -> Result<NodeDescriptor, ParserErro
     let mut desc_data: Bytes = data.read_n_bytes(desc_len as usize)?.into();
 
     while desc_data.remaining() >= 4 {
-        let sub_tlv_type = desc_data.get_u16();
-        let sub_tlv_len = desc_data.get_u16();
+        let sub_tlv_type = desc_data.read_u16()?;
+        let sub_tlv_len = desc_data.read_u16()?;
 
         if desc_data.remaining() < sub_tlv_len as usize {
             break;
@@ -245,7 +245,7 @@ fn parse_link_descriptors(data: &mut Bytes) -> Result<LinkDescriptor, ParserErro
     if data.remaining() < 2 {
         return Ok(link_desc);
     }
-    let desc_len = data.get_u16();
+    let desc_len = data.read_u16()?;
 
     if data.remaining() < desc_len as usize {
         return Err(ParserError::TruncatedMsg(format!(
@@ -258,8 +258,8 @@ fn parse_link_descriptors(data: &mut Bytes) -> Result<LinkDescriptor, ParserErro
     let mut desc_data: Bytes = data.read_n_bytes(desc_len as usize)?.into();
 
     while desc_data.remaining() >= 4 {
-        let sub_tlv_type = desc_data.get_u16();
-        let sub_tlv_len = desc_data.get_u16();
+        let sub_tlv_type = desc_data.read_u16()?;
+        let sub_tlv_len = desc_data.read_u16()?;
 
         if desc_data.remaining() < sub_tlv_len as usize {
             break;
@@ -331,7 +331,7 @@ fn parse_prefix_descriptors(data: &mut Bytes) -> Result<PrefixDescriptor, Parser
     if data.remaining() < 2 {
         return Ok(prefix_desc);
     }
-    let desc_len = data.get_u16();
+    let desc_len = data.read_u16()?;
 
     if data.remaining() < desc_len as usize {
         return Err(ParserError::TruncatedMsg(format!(
@@ -344,8 +344,8 @@ fn parse_prefix_descriptors(data: &mut Bytes) -> Result<PrefixDescriptor, Parser
     let mut desc_data: Bytes = data.read_n_bytes(desc_len as usize)?.into();
 
     while desc_data.remaining() >= 4 {
-        let sub_tlv_type = desc_data.get_u16();
-        let sub_tlv_len = desc_data.get_u16();
+        let sub_tlv_type = desc_data.read_u16()?;
+        let sub_tlv_len = desc_data.read_u16()?;
 
         if desc_data.remaining() < sub_tlv_len as usize {
             break;

@@ -9,9 +9,8 @@ pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, Parse
 
     let mut communities = Vec::with_capacity(num_communities);
     while input.remaining() > 0 {
-        input.has_n_remaining(12)?; // 12 bytes for large community (3x 32 bits integers)
-        let global_administrator = input.get_u32();
-        let local_data = [input.get_u32(), input.get_u32()];
+        let global_administrator = input.read_u32()?;
+        let local_data = [input.read_u32()?, input.read_u32()?];
         communities.push(LargeCommunity::new(global_administrator, local_data));
     }
 

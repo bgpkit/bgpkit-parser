@@ -50,7 +50,7 @@ pub fn parse_bgp_message(
     have the smallest value required, given the rest of the
     message.
     */
-    let length = data.get_u16();
+    let length = data.read_u16()?;
 
     // Validate message length according to RFC 8654
     // For now, we allow extended messages for all message types except when we know
@@ -71,7 +71,7 @@ pub fn parse_bgp_message(
         length as usize - 19
     };
 
-    let msg_type: BgpMessageType = match BgpMessageType::try_from(data.get_u8()) {
+    let msg_type: BgpMessageType = match BgpMessageType::try_from(data.read_u8()?) {
         Ok(t) => t,
         Err(_) => {
             return Err(ParserError::ParseError(
@@ -185,19 +185,19 @@ impl BgpNotificationMessage {
 /// ```
 pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, ParserError> {
     input.has_n_remaining(10)?;
-    let version = input.get_u8();
-    let asn = Asn::new_16bit(input.get_u16());
-    let hold_time = input.get_u16();
+    let version = input.read_u8()?;
+    let asn = Asn::new_16bit(input.read_u16()?);
+    let hold_time = input.read_u16()?;
 
     let sender_ip = input.read_ipv4_address()?;
-    let mut opt_params_len: u16 = input.get_u8() as u16;
+    let mut opt_params_len: u16 = input.read_u8()? as u16;
 
     let mut extended_length = false;
     let mut first = true;
 
     let mut params: Vec<OptParam> = vec![];
     while input.remaining() >= 2 {
-        let mut param_type = input.get_u8();
+        let mut param_type = input.read_u8()?;
         if first {
             if opt_params_len == 0 && param_type == 255 {
                 return Err(ParserError::ParseError(
@@ -260,6 +260,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 let mut capacities = vec![];
 
                 // Split off only the bytes for this parameter to avoid consuming other parameters
+                input.has_n_remaining(param_len as usize)?;
                 let mut param_data = input.split_to(param_len as usize);
 
                 while param_data.remaining() >= 2 {

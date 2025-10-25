@@ -318,6 +318,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
             let peer_distinguisher = data.read_u64()?;
             let peer_ip = match peer_flags.address_family() {
                 Afi::Ipv4 => {
+                    data.has_n_remaining(12)?;
                     data.advance(12);
                     IpAddr::V4(data.read_ipv4_address()?)
                 }
@@ -325,6 +326,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
                 Afi::LinkState => {
                     // Link-State doesn't use traditional IP addresses for peer identification
                     // Use IPv4 zero address as placeholder
+                    data.has_n_remaining(12)?;
                     data.advance(12);
                     IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))
                 }
@@ -332,6 +334,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
 
             let peer_asn = match peer_flags.asn_length() {
                 AsnLength::Bits16 => {
+                    data.has_n_remaining(2)?;
                     data.advance(2);
                     Asn::new_16bit(data.read_u16()?)
                 }
@@ -362,6 +365,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
             // RFC 9069: Peer Address MUST be zero-filled for Local RIB
             let peer_addr_bytes: [u8; 16] = {
                 let mut bytes = [0u8; 16];
+                data.has_n_remaining(16)?;
                 data.copy_to_slice(&mut bytes);
                 bytes
             };

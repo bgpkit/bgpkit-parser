@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Testing and fuzzing
+
+* Add cargo-fuzz harness and initial fuzz targets (mrt_record, bgp_message, parser)
+* Add additional fuzz targets (BMP/OpenBMP, RIS Live, attributes, MRT header, NLRI); enable rislive feature for fuzzing
+
+### Bug fixes
+
+* Add bounds checks throughout parsers to avoid overread/advance/split_to panics
+* Handle invalid MRT BGP4MP_ET header length gracefully (reject ET records with on-wire length < 4)
+
+### Tooling and benchmarking
+
+* Add hyperfine benchmarking script for bgpkit-parser
+
 ## v0.12.0 - 2025-10-17
 
 ### Examples and benchmarking

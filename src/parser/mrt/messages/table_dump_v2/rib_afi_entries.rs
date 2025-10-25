@@ -61,7 +61,12 @@ pub fn parse_rib_afi_entries(
     let prefix = data.read_nlri_prefix(&afi, false)?;
 
     let entry_count = data.read_u16()?;
-    let mut rib_entries = Vec::with_capacity((entry_count * 2) as usize);
+    // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs
+    let min_entry_size =
+        2 /*peer_index*/ + 4 /*time*/ + 2 /*attr_len*/ + if is_add_path { 4 } else { 0 };
+    let max_possible = data.remaining() / min_entry_size;
+    let reserve = (entry_count as usize).min(max_possible).saturating_mul(2);
+    let mut rib_entries = Vec::with_capacity(reserve);
 
     // get the u8 slice of the rest of the data
     // let attr_data_slice = &input.into_inner()[(input.position() as usize)..];

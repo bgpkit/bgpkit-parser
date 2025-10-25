@@ -31,7 +31,7 @@ pub fn parse_nlri(
     reachable: bool,        // whether the NLRI is announcements or withdrawals
     additional_paths: bool, // whether the NLRI is part of an additional paths message
 ) -> Result<AttributeValue, ParserError> {
-    let first_byte_zero = input[0] == 0;
+    let first_byte_zero = input.first().map(|b| *b == 0).unwrap_or(false);
 
     // read address family
     let afi = match afi {

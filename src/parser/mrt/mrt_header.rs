@@ -53,6 +53,14 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 
     let microsecond_timestamp = match &entry_type {
         EntryType::BGP4MP_ET => {
+            // For ET records, the on-wire length includes the extra 4-byte microsecond timestamp
+            // that lives in the header. Internally we store `length` as the message length only,
+            // so subtract 4 after validating to avoid underflow.
+            if length < 4 {
+                return Err(ParserError::ParseError(
+                    "invalid MRT header length for ET record: length < 4".into(),
+                ));
+            }
             length -= 4;
             let mut raw_bytes: [u8; 4] = [0; 4];
             input.read_exact(&mut raw_bytes)?;
@@ -147,5 +155,20 @@ mod tests {
         let mut reader = expected.reader();
         let parsed = parse_common_header(&mut reader).unwrap();
         assert_eq!(parsed, header);
+    }
+
+    /// Ensure ET header with invalid on-wire length (< 4) returns error instead of panicking.
+    #[test]
+    fn test_parse_common_header_et_invalid_length() {
+        // Construct a header with length=3 for ET (which is invalid since it must include 4 bytes of microsecond field)
+        let bytes = Bytes::from_static(&[
+            0, 0, 0, 0, // timestamp
+            0, 17, // entry type = BGP4MP_ET
+            0, 0, // subtype
+            0, 0, 0, 3, // length (invalid for ET)
+        ]);
+        let mut reader = bytes.reader();
+        let res = parse_common_header(&mut reader);
+        assert!(res.is_err());
     }
 }

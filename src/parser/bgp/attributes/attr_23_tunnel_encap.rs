@@ -13,8 +13,8 @@ pub fn parse_tunnel_encapsulation_attribute(
     let mut attr = TunnelEncapAttribute::new();
 
     while data.remaining() >= 4 {
-        let tunnel_type = data.get_u16();
-        let tunnel_length = data.get_u16();
+        let tunnel_type = data.read_u16()?;
+        let tunnel_length = data.read_u16()?;
 
         if data.remaining() < tunnel_length as usize {
             return Err(ParserError::TruncatedMsg(format!(
@@ -44,7 +44,7 @@ fn parse_tunnel_tlv(tunnel_type: u16, mut data: Bytes) -> Result<TunnelEncapTlv,
             ));
         }
 
-        let sub_tlv_type = data.get_u8();
+        let sub_tlv_type = data.read_u8()?;
 
         // Sub-TLV length encoding: 1 byte for types 0-127, 2 bytes for types 128-255
         let sub_tlv_length: u16 = if sub_tlv_type < 128 {
@@ -53,14 +53,14 @@ fn parse_tunnel_tlv(tunnel_type: u16, mut data: Bytes) -> Result<TunnelEncapTlv,
                     "Not enough data for Sub-TLV length".to_string(),
                 ));
             }
-            data.get_u8() as u16
+            data.read_u8()? as u16
         } else {
             if data.remaining() < 2 {
                 return Err(ParserError::TruncatedMsg(
                     "Not enough data for extended Sub-TLV length".to_string(),
                 ));
             }
-            data.get_u16()
+            data.read_u16()?
         };
 
         if data.remaining() < sub_tlv_length as usize {

@@ -39,8 +39,8 @@ pub fn parse_initiation_message(data: &mut Bytes) -> Result<InitiationMessage, P
     let mut tlvs = vec![];
 
     while data.remaining() > 4 {
-        let info_type: InitiationTlvType = InitiationTlvType::try_from(data.get_u16())?;
-        let info_len = data.get_u16();
+        let info_type: InitiationTlvType = InitiationTlvType::try_from(data.read_u16()?)?;
+        let info_len = data.read_u16()?;
         if data.remaining() < info_len as usize {
             // not enough bytes to read
             break;

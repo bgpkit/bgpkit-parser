@@ -50,6 +50,7 @@ pub fn parse_peer_up_notification(
 ) -> Result<PeerUpNotification, ParserBmpError> {
     let local_addr: IpAddr = match afi {
         Afi::Ipv4 => {
+            data.has_n_remaining(12)?;
             data.advance(12);
             let ip = data.read_ipv4_address()?;
             ip.into()
@@ -58,6 +59,7 @@ pub fn parse_peer_up_notification(
         Afi::LinkState => {
             // Link-State doesn't use traditional IP addresses for local address
             // Use IPv4 zero address as placeholder
+            data.has_n_remaining(12)?;
             data.advance(12);
             std::net::Ipv4Addr::new(0, 0, 0, 0).into()
         }
