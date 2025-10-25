@@ -1,10 +1,10 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
-use bytes::Bytes;
 use bgpkit_parser::parser::bmp::{parse_bmp_msg, parse_openbmp_header};
+use bytes::Bytes;
+use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let mut bytes = Bytes::copy_from_slice(data);
+    let bytes = Bytes::copy_from_slice(data);
     // Try BMP common message parsing directly
     let _ = parse_bmp_msg(&mut bytes.clone());
 
