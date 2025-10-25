@@ -55,6 +55,14 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
         }
     };
 
+    // Protect against unreasonable allocations from corrupt headers
+    const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
+    if common_header.length > MAX_MRT_MESSAGE_LEN {
+        return Err(ParserErrorWithBytes::from(ParserError::Unsupported(
+            format!("MRT message too large: {} bytes", common_header.length),
+        )));
+    }
+
     // read the whole message bytes to buffer
     let mut buffer = BytesMut::zeroed(common_header.length as usize);
     match input

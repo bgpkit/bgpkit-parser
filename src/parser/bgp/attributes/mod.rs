@@ -190,11 +190,11 @@ pub fn parse_attributes(
         // thus the while loop condition is set to be at least 3 bytes to read.
 
         // has content to read
-        let flag = AttrFlags::from_bits_retain(data.get_u8());
-        let attr_type = data.get_u8();
+        let flag = AttrFlags::from_bits_retain(data.read_u8()?);
+        let attr_type = data.read_u8()?;
         let attr_length = match flag.contains(AttrFlags::EXTENDED) {
-            false => data.get_u8() as usize,
-            true => data.get_u16() as usize,
+            false => data.read_u8()? as usize,
+            true => data.read_u16()? as usize,
         };
 
         let mut partial = false;
@@ -321,7 +321,7 @@ pub fn parse_attributes(
             AttrType::DEVELOPMENT => {
                 let mut value = vec![];
                 for _i in 0..attr_length {
-                    value.push(attr_data.get_u8());
+                    value.push(attr_data.read_u8()?);
                 }
                 Ok(AttributeValue::Development(value))
             }

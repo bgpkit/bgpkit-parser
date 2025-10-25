@@ -50,11 +50,13 @@ pub fn parse_geo_peer_table(data: &mut Bytes) -> Result<GeoPeerTable, ParserErro
     let collector_bgp_id = data.read_ipv4_address()?;
 
     // Read view name length and view name
-    let view_name_len = data.get_u16() as usize;
+    let view_name_len = data.read_u16()? as usize;
     let view_name = data.read_n_bytes_to_string(view_name_len)?;
 
     // Read collector coordinates (4 bytes each, 32-bit float)
+    data.has_n_remaining(4)?;
     let collector_latitude = data.get_f32();
+    data.has_n_remaining(4)?;
     let collector_longitude = data.get_f32();
 
     let mut geo_table = GeoPeerTable::new(
@@ -65,12 +67,12 @@ pub fn parse_geo_peer_table(data: &mut Bytes) -> Result<GeoPeerTable, ParserErro
     );
 
     // Read peer count
-    let peer_count = data.get_u16();
+    let peer_count = data.read_u16()?;
 
     // Parse each peer entry
     for _ in 0..peer_count {
         // Read peer type (1 byte)
-        let peer_type_raw = data.get_u8();
+        let peer_type_raw = data.read_u8()?;
         let peer_type = PeerType::from_bits_retain(peer_type_raw);
 
         // Read peer BGP ID (4 bytes)
@@ -85,9 +87,9 @@ pub fn parse_geo_peer_table(data: &mut Bytes) -> Result<GeoPeerTable, ParserErro
 
         // Read peer AS number (2 or 4 bytes depending on AS size)
         let peer_asn = if peer_type.contains(PeerType::AS_SIZE_32BIT) {
-            Asn::new_32bit(data.get_u32())
+            Asn::new_32bit(data.read_u32()?)
         } else {
-            Asn::new_16bit(data.get_u16())
+            Asn::new_16bit(data.read_u16()?)
         };
 
         // Create the peer structure
@@ -99,7 +101,9 @@ pub fn parse_geo_peer_table(data: &mut Bytes) -> Result<GeoPeerTable, ParserErro
         };
 
         // Read peer coordinates (4 bytes each, 32-bit float)
+        data.has_n_remaining(4)?;
         let peer_latitude = data.get_f32();
+        data.has_n_remaining(4)?;
         let peer_longitude = data.get_f32();
 
         let geo_peer = GeoPeer::new(peer, peer_latitude, peer_longitude);
