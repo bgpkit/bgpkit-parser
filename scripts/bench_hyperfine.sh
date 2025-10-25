@@ -39,7 +39,7 @@ fi
 # Build local release binary to ensure it's up to date
 LOCAL_BIN_DEFAULT="target/release/bgpkit-parser"
 echo "Building release binary..."
-cargo build --release >/dev/null
+cargo build --release --features cli >/dev/null
 
 LOCAL_BIN="${LOCAL_BIN:-$LOCAL_BIN_DEFAULT}"
 if [ ! -x "$LOCAL_BIN" ]; then
