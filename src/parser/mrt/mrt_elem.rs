@@ -387,7 +387,7 @@ impl Elementor {
                     .map(|as_path| as_path.iter_origins().collect());
 
                 elems.push(BgpElem {
-                    timestamp,
+                    timestamp: msg.originated_time as f64,
                     elem_type: ElemType::ANNOUNCE,
                     peer_ip: msg.peer_ip,
                     peer_asn: msg.peer_asn,
@@ -489,7 +489,7 @@ impl Elementor {
                                 .map(|as_path| as_path.iter_origins().collect());
 
                             elems.push(BgpElem {
-                                timestamp,
+                                timestamp: e.originated_time as f64,
                                 elem_type: ElemType::ANNOUNCE,
                                 peer_ip: peer.peer_ip,
                                 peer_asn: peer.peer_asn,
