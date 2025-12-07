@@ -344,7 +344,25 @@ mod tests {
     }
 
     #[test]
+    fn test_table_dump_v2_entry_struct() {
+        let entry = TableDumpV2Entry {
+            timestamp: 1234567890.0,
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 42,
+            prefix: "10.0.0.0/8".parse().unwrap(),
+            rib_entries: vec![],
+        };
+
+        assert_eq!(entry.timestamp, 1234567890.0);
+        assert_eq!(entry.rib_type, TableDumpV2Type::RibIpv4Unicast);
+        assert_eq!(entry.sequence_number, 42);
+        assert_eq!(entry.prefix.to_string(), "10.0.0.0/8");
+        assert!(entry.rib_entries.is_empty());
+    }
+
+    #[test]
     fn test_mrt_update_timestamp() {
+        // Test Bgp4MpUpdate variant
         let bgp4mp = MrtUpdate::Bgp4MpUpdate(Bgp4MpUpdate {
             timestamp: 1234567890.5,
             peer_ip: "192.0.2.1".parse().unwrap(),
@@ -353,6 +371,7 @@ mod tests {
         });
         assert_eq!(bgp4mp.timestamp(), 1234567890.5);
 
+        // Test TableDumpV2Entry variant
         let table_dump_v2 = MrtUpdate::TableDumpV2Entry(TableDumpV2Entry {
             timestamp: 1234567891.5,
             rib_type: TableDumpV2Type::RibIpv4Unicast,
@@ -361,6 +380,19 @@ mod tests {
             rib_entries: vec![],
         });
         assert_eq!(table_dump_v2.timestamp(), 1234567891.5);
+
+        // Test TableDumpMessage variant
+        let table_dump_v1 = MrtUpdate::TableDumpMessage(TableDumpMessage {
+            view_number: 0,
+            sequence_number: 1,
+            prefix: "192.168.0.0/16".parse().unwrap(),
+            status: 1,
+            originated_time: 1234567892,
+            peer_ip: "10.0.0.1".parse().unwrap(),
+            peer_asn: Asn::new_32bit(65001),
+            attributes: Attributes::default(),
+        });
+        assert_eq!(table_dump_v1.timestamp(), 1234567892.0);
     }
 
     #[test]
@@ -379,5 +411,325 @@ mod tests {
         let mut iter = FallibleUpdateIterator::new(parser);
 
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_bgp4mp_update_clone_and_debug() {
+        let update = Bgp4MpUpdate {
+            timestamp: 1234567890.123456,
+            peer_ip: "192.0.2.1".parse().unwrap(),
+            peer_asn: Asn::new_32bit(65000),
+            message: BgpUpdateMessage::default(),
+        };
+
+        // Test Clone
+        let cloned = update.clone();
+        assert_eq!(update, cloned);
+
+        // Test Debug
+        let debug_str = format!("{:?}", update);
+        assert!(debug_str.contains("Bgp4MpUpdate"));
+        assert!(debug_str.contains("192.0.2.1"));
+    }
+
+    #[test]
+    fn test_table_dump_v2_entry_clone_and_debug() {
+        let entry = TableDumpV2Entry {
+            timestamp: 1234567890.0,
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 42,
+            prefix: "10.0.0.0/8".parse().unwrap(),
+            rib_entries: vec![],
+        };
+
+        // Test Clone
+        let cloned = entry.clone();
+        assert_eq!(entry, cloned);
+
+        // Test Debug
+        let debug_str = format!("{:?}", entry);
+        assert!(debug_str.contains("TableDumpV2Entry"));
+        assert!(debug_str.contains("10.0.0.0/8"));
+    }
+
+    #[test]
+    fn test_mrt_update_clone_and_debug() {
+        let update = MrtUpdate::Bgp4MpUpdate(Bgp4MpUpdate {
+            timestamp: 1234567890.5,
+            peer_ip: "192.0.2.1".parse().unwrap(),
+            peer_asn: Asn::new_32bit(65000),
+            message: BgpUpdateMessage::default(),
+        });
+
+        // Test Clone
+        let cloned = update.clone();
+        assert_eq!(update, cloned);
+
+        // Test Debug
+        let debug_str = format!("{:?}", update);
+        assert!(debug_str.contains("Bgp4MpUpdate"));
+    }
+
+    #[test]
+    fn test_fallible_update_iterator_with_invalid_data() {
+        // Create invalid MRT data that will trigger a parsing error
+        let invalid_data = vec![
+            0x00, 0x00, 0x00, 0x00, // timestamp
+            0xFF, 0xFF, // invalid type
+            0x00, 0x00, // subtype
+            0x00, 0x00, 0x00, 0x04, // length
+            0x00, 0x00, 0x00, 0x00, // dummy data
+        ];
+
+        let cursor = Cursor::new(invalid_data);
+        let parser = BgpkitParser::from_reader(cursor);
+        let mut iter = FallibleUpdateIterator::new(parser);
+
+        // First item should be an error
+        let result = iter.next();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_err());
+    }
+
+    #[test]
+    fn test_mrt_update_enum_variants() {
+        // Test that all enum variants can be constructed and matched
+        let updates: Vec<MrtUpdate> = vec![
+            MrtUpdate::Bgp4MpUpdate(Bgp4MpUpdate {
+                timestamp: 1.0,
+                peer_ip: "192.0.2.1".parse().unwrap(),
+                peer_asn: Asn::new_32bit(65000),
+                message: BgpUpdateMessage::default(),
+            }),
+            MrtUpdate::TableDumpV2Entry(TableDumpV2Entry {
+                timestamp: 2.0,
+                rib_type: TableDumpV2Type::RibIpv6Unicast,
+                sequence_number: 1,
+                prefix: "2001:db8::/32".parse().unwrap(),
+                rib_entries: vec![],
+            }),
+            MrtUpdate::TableDumpMessage(TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: "10.0.0.0/8".parse().unwrap(),
+                status: 1,
+                originated_time: 3,
+                peer_ip: "10.0.0.1".parse().unwrap(),
+                peer_asn: Asn::new_32bit(65001),
+                attributes: Attributes::default(),
+            }),
+        ];
+
+        for (i, update) in updates.iter().enumerate() {
+            match update {
+                MrtUpdate::Bgp4MpUpdate(_) => assert_eq!(i, 0),
+                MrtUpdate::TableDumpV2Entry(_) => assert_eq!(i, 1),
+                MrtUpdate::TableDumpMessage(_) => assert_eq!(i, 2),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_bgp4mp_update_serde() {
+        let update = Bgp4MpUpdate {
+            timestamp: 1234567890.123456,
+            peer_ip: "192.0.2.1".parse().unwrap(),
+            peer_asn: Asn::new_32bit(65000),
+            message: BgpUpdateMessage::default(),
+        };
+
+        let serialized = serde_json::to_string(&update).unwrap();
+        let deserialized: Bgp4MpUpdate = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(update, deserialized);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_table_dump_v2_entry_serde() {
+        let entry = TableDumpV2Entry {
+            timestamp: 1234567890.0,
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 42,
+            prefix: "10.0.0.0/8".parse().unwrap(),
+            rib_entries: vec![],
+        };
+
+        let serialized = serde_json::to_string(&entry).unwrap();
+        let deserialized: TableDumpV2Entry = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(entry, deserialized);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_mrt_update_serde() {
+        let update = MrtUpdate::Bgp4MpUpdate(Bgp4MpUpdate {
+            timestamp: 1234567890.5,
+            peer_ip: "192.0.2.1".parse().unwrap(),
+            peer_asn: Asn::new_32bit(65000),
+            message: BgpUpdateMessage::default(),
+        });
+
+        let serialized = serde_json::to_string(&update).unwrap();
+        let deserialized: MrtUpdate = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(update, deserialized);
+    }
+
+    /// Test parsing real UPDATES file data
+    #[test]
+    fn test_update_iterator_with_updates_file() {
+        let url = "https://spaces.bgpkit.org/parser/update-example";
+        let parser = BgpkitParser::new(url).unwrap();
+
+        let mut bgp4mp_count = 0;
+        let mut total_announced = 0;
+        let mut total_withdrawn = 0;
+
+        for update in parser.into_update_iter() {
+            match update {
+                MrtUpdate::Bgp4MpUpdate(u) => {
+                    bgp4mp_count += 1;
+                    total_announced += u.message.announced_prefixes.len();
+                    total_withdrawn += u.message.withdrawn_prefixes.len();
+                    // Also count MP_REACH/MP_UNREACH prefixes
+                    for attr in &u.message.attributes {
+                        match attr {
+                            AttributeValue::MpReachNlri(nlri) => {
+                                total_announced += nlri.prefixes.len();
+                            }
+                            AttributeValue::MpUnreachNlri(nlri) => {
+                                total_withdrawn += nlri.prefixes.len();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                MrtUpdate::TableDumpV2Entry(_) => {
+                    panic!("Should not see TableDumpV2Entry in UPDATES file");
+                }
+                MrtUpdate::TableDumpMessage(_) => {
+                    panic!("Should not see TableDumpMessage in UPDATES file");
+                }
+            }
+        }
+
+        // Verify we got some data
+        assert!(bgp4mp_count > 0, "Should have parsed some BGP4MP updates");
+        assert!(
+            total_announced + total_withdrawn > 0,
+            "Should have some prefixes"
+        );
+    }
+
+    /// Test parsing real RIB dump file data
+    #[test]
+    fn test_update_iterator_with_rib_file() {
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+        let parser = BgpkitParser::new(url).unwrap();
+
+        let mut rib_entry_count = 0;
+        let mut total_rib_entries = 0;
+
+        for update in parser.into_update_iter().take(100) {
+            match update {
+                MrtUpdate::Bgp4MpUpdate(_) => {
+                    panic!("Should not see Bgp4MpUpdate in RIB file");
+                }
+                MrtUpdate::TableDumpV2Entry(e) => {
+                    rib_entry_count += 1;
+                    total_rib_entries += e.rib_entries.len();
+                    // Verify the entry has valid data
+                    assert!(e.sequence_number > 0 || rib_entry_count == 1);
+                }
+                MrtUpdate::TableDumpMessage(_) => {
+                    // Legacy format is also acceptable in RIB files
+                }
+            }
+        }
+
+        // Verify we got some data
+        assert!(rib_entry_count > 0, "Should have parsed some RIB entries");
+        assert!(
+            total_rib_entries > 0,
+            "Should have some RIB entries per prefix"
+        );
+    }
+
+    /// Test fallible iterator with real data
+    #[test]
+    fn test_fallible_update_iterator_with_updates_file() {
+        let url = "https://spaces.bgpkit.org/parser/update-example";
+        let parser = BgpkitParser::new(url).unwrap();
+
+        let mut success_count = 0;
+        let mut error_count = 0;
+
+        for result in parser.into_fallible_update_iter() {
+            match result {
+                Ok(_) => success_count += 1,
+                Err(_) => error_count += 1,
+            }
+        }
+
+        assert!(
+            success_count > 0,
+            "Should have parsed some updates successfully"
+        );
+        // The test file should be valid, so we expect no errors
+        assert_eq!(
+            error_count, 0,
+            "Should have no parsing errors in valid file"
+        );
+    }
+
+    /// Test that UpdateIterator and ElemIterator yield consistent prefix counts
+    #[test]
+    fn test_update_iter_vs_elem_iter_consistency() {
+        let url = "https://spaces.bgpkit.org/parser/update-example";
+
+        // Count prefixes using UpdateIterator
+        let parser1 = BgpkitParser::new(url).unwrap();
+        let mut update_iter_announced = 0;
+        let mut update_iter_withdrawn = 0;
+
+        for update in parser1.into_update_iter() {
+            if let MrtUpdate::Bgp4MpUpdate(u) = update {
+                update_iter_announced += u.message.announced_prefixes.len();
+                update_iter_withdrawn += u.message.withdrawn_prefixes.len();
+                for attr in &u.message.attributes {
+                    match attr {
+                        AttributeValue::MpReachNlri(nlri) => {
+                            update_iter_announced += nlri.prefixes.len();
+                        }
+                        AttributeValue::MpUnreachNlri(nlri) => {
+                            update_iter_withdrawn += nlri.prefixes.len();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Count prefixes using ElemIterator
+        let parser2 = BgpkitParser::new(url).unwrap();
+        let mut elem_iter_announced = 0;
+        let mut elem_iter_withdrawn = 0;
+
+        for elem in parser2.into_elem_iter() {
+            match elem.elem_type {
+                ElemType::ANNOUNCE => elem_iter_announced += 1,
+                ElemType::WITHDRAW => elem_iter_withdrawn += 1,
+            }
+        }
+
+        // Counts should match
+        assert_eq!(
+            update_iter_announced, elem_iter_announced,
+            "Announced prefix counts should match"
+        );
+        assert_eq!(
+            update_iter_withdrawn, elem_iter_withdrawn,
+            "Withdrawn prefix counts should match"
+        );
     }
 }
