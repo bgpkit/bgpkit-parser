@@ -8,6 +8,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe_delimited format.
 - [count_elems.rs](count_elems.rs) — Count the total number of BGP elements in a given file.
 - [records_iter.rs](records_iter.rs) — Iterate over raw MRT records and inspect/update messages; includes an example of detecting the Only_To_Customer (OTC) attribute.
+- [update_messages_iter.rs](update_messages_iter.rs) — Iterate over BGP announcements using the intermediate MrtUpdate representation; compares performance with BgpElem iteration and works with both UPDATES files and RIB dumps.
 - [scan_mrt.rs](scan_mrt.rs) — CLI_style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
 
 ## Filtering and Policy Examples

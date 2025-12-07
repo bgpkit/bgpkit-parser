@@ -402,6 +402,7 @@ files.par_iter().for_each(|file| {
 
 ### Choose the right data structure
 - Use [MrtRecord] iteration for minimal memory overhead
+- Use [MrtUpdate] for efficient batch processing without per-prefix attribute duplication
 - Use [BgpElem] for easier per-prefix analysis
 - See [Data Representation](#data-representation) for detailed comparison
 
@@ -504,7 +505,7 @@ bgpkit-parser -o 13335 -m a -4 updates.bz2
 
 # Data Representation
 
-BGPKIT Parser provides two ways to access parsed BGP data: [MrtRecord] and [BgpElem]. Choose based on your needs:
+BGPKIT Parser provides three ways to access parsed BGP data: [MrtRecord], [MrtUpdate], and [BgpElem]. Choose based on your needs:
 
 ```text
 ┌──────────────────────────────────────────────┐
@@ -514,15 +515,15 @@ BGPKIT Parser provides two ways to access parsed BGP data: [MrtRecord] and [BgpE
                        │
                        ├──> Parser
                        │
-         ┌─────────────┴────────────────┐
-         │                              │
-         ▼                              ▼
-   [MrtRecord]                    [BgpElem]
-   (Low-level)                  (High-level)
-         │                              │
-         └──────────────┬───────────────┘
-                        │
-                        ▼
+         ┌──────────────┼────────────────┐
+         │              │                │
+         ▼              ▼                ▼
+   [MrtRecord]    [MrtUpdate]      [BgpElem]
+   (Low-level)   (Intermediate)   (High-level)
+         │             │                │
+         └─────────────┴────────────────┘
+                       │
+                       ▼
               Your Analysis Code
 ```
 
@@ -541,6 +542,48 @@ See the [MrtRecord] documentation for the complete structure definition.
 - `message`: The actual MRT message (TableDump, TableDumpV2, or Bgp4Mp)
 
 **Iteration**: Use [`BgpkitParser::into_record_iter()`] to iterate over [MrtRecord]s.
+
+## [MrtUpdate]: Intermediate Message-Level Representation
+
+[MrtUpdate] provides access to BGP announcements without expanding them into individual per-prefix elements. This is a middle ground between [MrtRecord] and [BgpElem]. Use this when you need:
+- **Efficient batch processing**: Avoid duplicating attributes across prefixes
+- **Message-level analysis**: Work with UPDATE messages or RIB entries as units
+- **Memory efficiency**: Shared attributes aren't cloned for each prefix
+
+**Supported message types** (via enum variants):
+- `Bgp4MpUpdate`: BGP UPDATE messages from UPDATES files
+- `TableDumpV2Entry`: RIB entries from TableDumpV2 RIB dumps
+- `TableDumpMessage`: Legacy TableDump v1 messages
+
+**Example**:
+```no_run
+use bgpkit_parser::{BgpkitParser, MrtUpdate};
+
+let parser = BgpkitParser::new("updates.mrt.bz2").unwrap();
+for update in parser.into_update_iter() {
+    match update {
+        MrtUpdate::Bgp4MpUpdate(u) => {
+            // One UPDATE message may contain multiple prefixes sharing attributes
+            println!("Peer {} announced {} prefixes",
+                u.peer_ip,
+                u.message.announced_prefixes.len()
+            );
+        }
+        MrtUpdate::TableDumpV2Entry(e) => {
+            // One prefix with multiple RIB entries (one per peer)
+            println!("Prefix {} seen by {} peers",
+                e.prefix,
+                e.rib_entries.len()
+            );
+        }
+        MrtUpdate::TableDumpMessage(m) => {
+            println!("Legacy table dump for {}", m.prefix);
+        }
+    }
+}
+```
+
+**Iteration**: Use [`BgpkitParser::into_update_iter()`] to iterate over [MrtUpdate]s.
 
 ## [BgpElem]: High-level Per-Prefix Representation
 
@@ -585,10 +628,18 @@ See the [BgpElem] documentation for the complete structure definition.
 
 ## Which One Should I Use?
 
-- **Use [BgpElem]** (default): For most BGP analysis tasks, prefix tracking, AS path analysis
-- **Use [MrtRecord]**: When you need MRT format details, re-encoding, or minimal memory overhead
+| Use Case | Recommended | Why |
+|----------|-------------|-----|
+| Simple prefix analysis | [BgpElem] | Easy per-prefix access, format-agnostic |
+| High-performance processing | [MrtUpdate] | Avoids attribute duplication overhead |
+| Counting prefixes per UPDATE | [MrtUpdate] | Direct access to message structure |
+| Re-encoding MRT data | [MrtRecord] | Preserves complete MRT structure |
+| MRT format-specific details | [MrtRecord] | Access to peer index tables, geo-location, etc. |
 
-**Memory trade-off**: [BgpElem] duplicates shared attributes (AS path, communities) for each prefix, consuming more memory but providing simpler analysis.
+**Memory trade-off**:
+- [BgpElem] duplicates shared attributes (AS path, communities) for each prefix
+- [MrtUpdate] keeps attributes shared within each message/entry
+- [MrtRecord] has minimal overhead but requires more code to extract BGP data
 
 # RFCs Support
 
