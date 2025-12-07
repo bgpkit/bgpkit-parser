@@ -149,6 +149,12 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: {}", err_str);
                         }
+                        if self.parser.core_dump {
+                            if let Some(bytes) = e.bytes {
+                                std::fs::write("mrt_core_dump", bytes)
+                                    .expect("Unable to write to mrt_core_dump");
+                            }
+                        }
                         continue;
                     }
                     ParserError::ParseError(err_str) => {

@@ -5,11 +5,11 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 ## Quickstart and Iteration
 - [parse_single_file.rs](parse_single_file.rs) — Download and iterate over a single RouteViews updates file, logging each BGP element (BgpElem).
 - [parse_single_file_parallel.rs](parse_single_file_parallel.rs) — Parse a single compressed RIB in parallel using a raw iterator + worker pool. Downloads to current directory if remote, counts elems, and compares timing with a sequential run. Tunables via env vars: BATCH_SIZE, WORKERS, CHAN_CAP, ELEM_IN_WORKERS, QUIET_ERRORS.
-- [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe_delimited format.
+- [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe-delimited format.
 - [count_elems.rs](count_elems.rs) — Count the total number of BGP elements in a given file.
 - [records_iter.rs](records_iter.rs) — Iterate over raw MRT records and inspect/update messages; includes an example of detecting the Only_To_Customer (OTC) attribute.
 - [update_messages_iter.rs](update_messages_iter.rs) — Iterate over BGP announcements using the intermediate MrtUpdate representation; compares performance with BgpElem iteration and works with both UPDATES files and RIB dumps.
-- [scan_mrt.rs](scan_mrt.rs) — CLI_style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
+- [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
 
 ## Filtering and Policy Examples
 - [filters.rs](filters.rs) — Parse an MRT file and filter by a specific prefix (e.g., 211.98.251.0/24), logging matching announcements.
