@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### New features
+
+* Add `UpdateIterator` and `FallibleUpdateIterator` for iterating over BGP announcements ([#250](https://github.com/bgpkit/bgpkit-parser/issues/250))
+  - New `MrtUpdate` enum supporting both BGP4MP UPDATE messages and TableDumpV2 RIB entries
+  - `Bgp4MpUpdate` struct for BGP4MP UPDATE messages with metadata (timestamp, peer_ip, peer_asn)
+  - `TableDumpV2Entry` struct for RIB dump entries (prefix with multiple RIB entries per peer)
+  - `into_update_iter()` and `into_fallible_update_iter()` methods on `BgpkitParser`
+  - Middle ground between `MrtRecord` and `BgpElem` for more efficient processing
+* Add `update_messages_iter` example demonstrating the new iterator
+
 ### Testing and fuzzing
 
 * Add cargo-fuzz harness and initial fuzz targets (mrt_record, bgp_message, parser)
@@ -13,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 * Add bounds checks throughout parsers to avoid overread/advance/split_to panics
 * Handle invalid MRT BGP4MP_ET header length gracefully (reject ET records with on-wire length < 4)
+* Use originated time instead of MRT header time for TableDumpV2 messages ([#252](https://github.com/bgpkit/bgpkit-parser/pull/252))
 
 ### Tooling and benchmarking
 

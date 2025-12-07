@@ -78,6 +78,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
+    c.bench_function("updates into_update_iter", |b| {
+        b.iter(|| {
+            let mut reader = black_box(&updates[..]);
+
+            BgpkitParser::from_reader(&mut reader)
+                .into_update_iter()
+                .take(RECORD_LIMIT)
+                .for_each(|x| {
+                    black_box(x);
+                });
+        })
+    });
+
     c.bench_function("rib into_record_iter", |b| {
         b.iter(|| {
             let mut reader = black_box(&rib_dump[..]);
@@ -97,6 +110,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
             BgpkitParser::from_reader(&mut reader)
                 .into_elem_iter()
+                .take(RECORD_LIMIT)
+                .for_each(|x| {
+                    black_box(x);
+                });
+        })
+    });
+
+    c.bench_function("rib into_update_iter", |b| {
+        b.iter(|| {
+            let mut reader = black_box(&rib_dump[..]);
+
+            BgpkitParser::from_reader(&mut reader)
+                .into_update_iter()
                 .take(RECORD_LIMIT)
                 .for_each(|x| {
                     black_box(x);
