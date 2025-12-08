@@ -1,0 +1,43 @@
+=== RIB Time Difference Study Summary ===
+Dump timestamp: 2025-01-01T00:00:00Z
+
+## Overall Statistics
+Total entries: 74582838
+
+## route-views2 Statistics
+Entries: 21324697
+Average age: 7.15 days (171.55 hours)
+Median age: 8.42 days (202.01 hours)
+Min age: -0.00 days (-0.00 hours)
+Max age: 8.42 days (202.06 hours)
+
+## rrc00 Statistics
+Entries: 53258141
+Average age: 18.97 days (455.16 hours)
+Median age: 12.87 days (308.96 hours)
+Min age: 0.00 days (0.00 hours)
+Max age: 497.61 days (11942.56 hours)
+
+## Top 20 ASNs with Oldest Entries
+Rank | ASN | Avg Age (days) | Prefix Count
+-----|-----|----------------|-------------
+   1 | AS33438 | 497.61 | 29
+   2 | AS16150 | 497.61 | 22
+   3 | AS147137 | 237.33 | 278
+   4 | AS138377 | 155.97 | 15
+   5 | AS138376 | 139.58 | 17
+   6 | AS131793 | 93.48 | 12
+   7 | AS24356 | 75.43 | 68
+   8 | AS4671 | 70.90 | 18
+   9 | AS24353 | 69.64 | 232
+  10 | AS25485 | 68.48 | 49
+  11 | AS138381 | 65.40 | 53
+  12 | AS64997 | 59.48 | 16
+  13 | AS64995 | 55.38 | 26
+  14 | AS65211 | 48.38 | 17
+  15 | AS47787 | 46.44 | 340
+  16 | AS65302 | 46.21 | 16
+  17 | AS400506 | 45.05 | 78
+  18 | AS397198 | 43.58 | 91
+  19 | AS65534 | 43.26 | 15
+  20 | AS24355 | 41.21 | 298

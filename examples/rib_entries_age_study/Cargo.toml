@@ -1,0 +1,20 @@
+[package]
+name = "rib_time_diff_study"
+version = "0.1.0"
+edition = "2021"
+description = "Study the time difference between RIB dump timestamp and actual entry update times"
+
+[[bin]]
+name = "phase1_collect"
+path = "src/bin/phase1_collect.rs"
+
+[[bin]]
+name = "phase2_visualize"
+path = "src/bin/phase2_visualize.rs"
+
+[dependencies]
+bgpkit-parser = { path = "../..", default-features = true }
+csv = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+plotters = "0.3"
+indicatif = "0.17"

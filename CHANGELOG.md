@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 * Add bounds checks throughout parsers to avoid overread/advance/split_to panics
 * Handle invalid MRT BGP4MP_ET header length gracefully (reject ET records with on-wire length < 4)
 * Use originated time instead of MRT header time for TableDumpV2 messages ([#252](https://github.com/bgpkit/bgpkit-parser/pull/252))
+  * added a new example study `rib_entries_age_study` demonstrating the difference between dump time and entry originated time
 
 ### Tooling and benchmarking
 
