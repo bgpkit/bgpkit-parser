@@ -43,6 +43,7 @@ for announcement in parser.into_update_iter() {
 */
 use crate::error::ParserError;
 use crate::models::*;
+use crate::parser::mrt::mrt_record::parse_mrt_record_with_buffer;
 use crate::parser::BgpkitParser;
 use crate::Elementor;
 use log::{error, warn};
@@ -126,6 +127,8 @@ impl MrtUpdate {
 pub struct UpdateIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    /// Reusable buffer for parsing MRT records, avoiding repeated allocations
+    buffer: Vec<u8>,
 }
 
 impl<R> UpdateIterator<R> {
@@ -133,6 +136,8 @@ impl<R> UpdateIterator<R> {
         UpdateIterator {
             parser,
             elementor: Elementor::new(),
+            // Pre-allocate a reasonable buffer size for typical MRT records
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -142,48 +147,50 @@ impl<R: Read> Iterator for UpdateIterator<R> {
 
     fn next(&mut self) -> Option<MrtUpdate> {
         loop {
-            let record = match self.parser.next_record() {
-                Ok(record) => record,
-                Err(e) => match e.error {
-                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: {}", err_str);
-                        }
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
+            // Use buffer-reusing parse function for better performance
+            let record =
+                match parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
+                    Ok(record) => record,
+                    Err(e) => match e.error {
+                        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
+                            if self.parser.options.show_warnings {
+                                warn!("parser warn: {}", err_str);
                             }
+                            if self.parser.core_dump {
+                                if let Some(bytes) = e.bytes {
+                                    std::fs::write("mrt_core_dump", bytes)
+                                        .expect("Unable to write to mrt_core_dump");
+                                }
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
+                        ParserError::ParseError(err_str) => {
+                            error!("parser error: {}", err_str);
+                            if self.parser.core_dump {
+                                if let Some(bytes) = e.bytes {
+                                    std::fs::write("mrt_core_dump", bytes)
+                                        .expect("Unable to write to mrt_core_dump");
+                                }
+                                return None;
+                            }
+                            continue;
+                        }
+                        ParserError::EofExpected => return None,
+                        ParserError::IoError(err) | ParserError::EofError(err) => {
+                            error!("{:?}", err);
+                            if self.parser.core_dump {
+                                if let Some(bytes) = e.bytes {
+                                    std::fs::write("mrt_core_dump", bytes)
+                                        .expect("Unable to write to mrt_core_dump");
+                                }
                             }
                             return None;
                         }
-                        continue;
-                    }
-                    ParserError::EofExpected => return None,
-                    ParserError::IoError(err) | ParserError::EofError(err) => {
-                        error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
-                        return None;
-                    }
-                    #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => return None,
-                    ParserError::FilterError(_) => return None,
-                },
-            };
+                        #[cfg(feature = "oneio")]
+                        ParserError::OneIoError(_) => return None,
+                        ParserError::FilterError(_) => return None,
+                    },
+                };
 
             let t = record.common_header.timestamp;
             let timestamp: f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
@@ -251,6 +258,8 @@ impl<R: Read> Iterator for UpdateIterator<R> {
 pub struct FallibleUpdateIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    /// Reusable buffer for parsing MRT records, avoiding repeated allocations
+    buffer: Vec<u8>,
 }
 
 impl<R> FallibleUpdateIterator<R> {
@@ -258,6 +267,8 @@ impl<R> FallibleUpdateIterator<R> {
         FallibleUpdateIterator {
             parser,
             elementor: Elementor::new(),
+            // Pre-allocate a reasonable buffer size for typical MRT records
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -267,7 +278,8 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.parser.next_record() {
+            // Use buffer-reusing parse function for better performance
+            match parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
                 Ok(record) => {
                     let t = record.common_header.timestamp;
                     let timestamp: f64 =

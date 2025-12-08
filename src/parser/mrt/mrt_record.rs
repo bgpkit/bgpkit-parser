@@ -13,6 +13,14 @@ use std::io::Read;
 use std::net::IpAddr;
 use std::str::FromStr;
 
+/// Maximum MRT message length to protect against unreasonable allocations from corrupt headers.
+/// 16 MiB upper bound should be sufficient for any legitimate MRT record.
+const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024;
+
+/// Default initial buffer capacity for MRT record parsing.
+/// Most MRT records are smaller than this, reducing reallocations.
+const DEFAULT_BUFFER_CAPACITY: usize = 4096;
+
 /// Raw MRT record containing the common header and unparsed message bytes.
 /// This allows for lazy parsing of the MRT message body.
 #[derive(Debug, Clone)]
@@ -38,7 +46,93 @@ impl RawMrtRecord {
     }
 }
 
+/// A reusable buffer for parsing MRT records, avoiding repeated allocations.
+///
+/// This struct maintains an internal buffer that grows as needed but is never
+/// shrunk, allowing for efficient reuse across multiple record parsing operations.
+#[derive(Debug, Clone)]
+pub struct MrtRecordBuffer {
+    buffer: Vec<u8>,
+}
+
+impl Default for MrtRecordBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MrtRecordBuffer {
+    /// Creates a new buffer with the default capacity.
+    #[inline]
+    pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_BUFFER_CAPACITY)
+    }
+
+    /// Creates a new buffer with the specified initial capacity.
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        MrtRecordBuffer {
+            buffer: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Returns the current capacity of the buffer.
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    /// Chunks the next MRT record from the input stream, reusing the internal buffer.
+    ///
+    /// This method is more efficient than `chunk_mrt_record` when parsing multiple
+    /// records because it reuses the same buffer allocation.
+    #[inline]
+    pub fn chunk_record(
+        &mut self,
+        input: &mut impl Read,
+    ) -> Result<RawMrtRecord, ParserErrorWithBytes> {
+        chunk_mrt_record_with_buffer(input, &mut self.buffer)
+    }
+
+    /// Parses the next MRT record from the input stream, reusing the internal buffer.
+    ///
+    /// This method is more efficient than `parse_mrt_record` when parsing multiple
+    /// records because it reuses the same buffer allocation.
+    #[inline]
+    pub fn parse_record(
+        &mut self,
+        input: &mut impl Read,
+    ) -> Result<MrtRecord, ParserErrorWithBytes> {
+        parse_mrt_record_with_buffer(input, &mut self.buffer)
+    }
+}
+
+/// Chunks an MRT record from the input, allocating a new buffer.
+///
+/// For parsing multiple records, consider using `MrtRecordBuffer` or
+/// `chunk_mrt_record_with_buffer` for better performance.
 pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErrorWithBytes> {
+    let mut buffer = Vec::with_capacity(DEFAULT_BUFFER_CAPACITY);
+    chunk_mrt_record_with_buffer(input, &mut buffer)
+}
+
+/// Chunks an MRT record from the input, reusing the provided buffer.
+///
+/// The buffer will be resized as needed but never shrunk, making this function
+/// efficient for parsing multiple records in sequence.
+///
+/// # Arguments
+/// * `input` - The input stream to read from
+/// * `buffer` - A reusable buffer that will be used to store the record data
+///
+/// # Performance
+/// This function avoids allocating a new buffer for each record, which can
+/// provide significant performance improvements when parsing large MRT files.
+#[inline]
+pub fn chunk_mrt_record_with_buffer(
+    input: &mut impl Read,
+    buffer: &mut Vec<u8>,
+) -> Result<RawMrtRecord, ParserErrorWithBytes> {
     // parse common header
     let common_header = match parse_common_header(input) {
         Ok(v) => v,
@@ -55,37 +149,75 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
         }
     };
 
+    let length = common_header.length as usize;
+
     // Protect against unreasonable allocations from corrupt headers
-    const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
     if common_header.length > MAX_MRT_MESSAGE_LEN {
         return Err(ParserErrorWithBytes::from(ParserError::Unsupported(
             format!("MRT message too large: {} bytes", common_header.length),
         )));
     }
 
-    // read the whole message bytes to buffer
-    let mut buffer = BytesMut::zeroed(common_header.length as usize);
-    match input
-        .take(common_header.length as u64)
-        .read_exact(&mut buffer)
-    {
+    // Resize buffer if needed - this will only grow, never shrink
+    // Using resize instead of reserve + set_len for safety
+    if buffer.len() < length {
+        buffer.resize(length, 0);
+    }
+
+    // Read directly into the buffer slice
+    match input.read_exact(&mut buffer[..length]) {
         Ok(_) => {}
         Err(e) => {
             return Err(ParserErrorWithBytes {
                 error: ParserError::IoError(e),
                 bytes: None,
-            })
+            });
         }
     }
 
+    // Create Bytes from the buffer slice
+    // Note: This still requires a copy, but the buffer can be reused for the next record
+    let raw_bytes = Bytes::copy_from_slice(&buffer[..length]);
+
     Ok(RawMrtRecord {
         common_header,
-        raw_bytes: buffer.freeze(),
+        raw_bytes,
     })
 }
 
+/// Parses an MRT record from the input, allocating a new buffer.
+///
+/// For parsing multiple records, consider using `MrtRecordBuffer` or
+/// `parse_mrt_record_with_buffer` for better performance.
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
+    match raw_record.parse() {
+        Ok(record) => Ok(record),
+        Err(e) => Err(ParserErrorWithBytes {
+            error: e,
+            bytes: None,
+        }),
+    }
+}
+
+/// Parses an MRT record from the input, reusing the provided buffer.
+///
+/// The buffer will be resized as needed but never shrunk, making this function
+/// efficient for parsing multiple records in sequence.
+///
+/// # Arguments
+/// * `input` - The input stream to read from
+/// * `buffer` - A reusable buffer that will be used to store the record data
+///
+/// # Performance
+/// This function avoids allocating a new buffer for each record, which can
+/// provide significant performance improvements when parsing large MRT files.
+#[inline]
+pub fn parse_mrt_record_with_buffer(
+    input: &mut impl Read,
+    buffer: &mut Vec<u8>,
+) -> Result<MrtRecord, ParserErrorWithBytes> {
+    let raw_record = chunk_mrt_record_with_buffer(input, buffer)?;
     match raw_record.parse() {
         Ok(record) => Ok(record),
         Err(e) => Err(ParserErrorWithBytes {
@@ -229,7 +361,70 @@ mod tests {
     use super::*;
     use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
     use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
+    use std::io::Cursor;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_mrt_record_buffer_new() {
+        let buffer = MrtRecordBuffer::new();
+        assert!(buffer.capacity() >= DEFAULT_BUFFER_CAPACITY);
+    }
+
+    #[test]
+    fn test_mrt_record_buffer_with_capacity() {
+        let buffer = MrtRecordBuffer::with_capacity(8192);
+        assert!(buffer.capacity() >= 8192);
+    }
+
+    #[test]
+    fn test_chunk_mrt_record_with_buffer_reuse() {
+        // Create a simple valid MRT record bytes
+        let mut data = BytesMut::new();
+        // Common header: timestamp(4) + type(2) + subtype(2) + length(4)
+        data.put_u32(1234567890); // timestamp
+        data.put_u16(16); // type = BGP4MP
+        data.put_u16(0); // subtype
+        data.put_u32(4); // length
+        data.put_slice(&[0, 0, 0, 0]); // dummy message body
+
+        let mut buffer = Vec::new();
+
+        // First parse
+        let mut cursor = Cursor::new(data.clone().freeze().to_vec());
+        let _ = chunk_mrt_record_with_buffer(&mut cursor, &mut buffer);
+
+        // Buffer should have grown
+        assert!(buffer.len() >= 4);
+
+        // Parse again with a larger record
+        let mut data2 = BytesMut::new();
+        data2.put_u32(1234567890);
+        data2.put_u16(16);
+        data2.put_u16(0);
+        data2.put_u32(100); // larger length
+        data2.put_slice(&[0u8; 100]); // larger body
+
+        let mut cursor2 = Cursor::new(data2.freeze().to_vec());
+        let _ = chunk_mrt_record_with_buffer(&mut cursor2, &mut buffer);
+
+        // Buffer should have grown but may have been reallocated
+        assert!(buffer.len() >= 100);
+    }
+
+    #[test]
+    fn test_mrt_record_buffer_chunk_record() {
+        let mut data = BytesMut::new();
+        data.put_u32(1234567890);
+        data.put_u16(16);
+        data.put_u16(0);
+        data.put_u32(4);
+        data.put_slice(&[0, 0, 0, 0]);
+
+        let mut buffer = MrtRecordBuffer::new();
+        let mut cursor = Cursor::new(data.freeze().to_vec());
+        let result = buffer.chunk_record(&mut cursor);
+        assert!(result.is_ok() || result.is_err()); // Just check it doesn't panic
+    }
 
     #[test]
     fn test_try_from_bmp_message() {

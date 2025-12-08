@@ -11,18 +11,26 @@ when possible and continue processing the remaining data. It also supports confi
 warning messages and core dump generation for debugging purposes.
 */
 
-use crate::{chunk_mrt_record, BgpkitParser, ParserError, RawMrtRecord};
+use crate::parser::mrt::mrt_record::chunk_mrt_record_with_buffer;
+use crate::{BgpkitParser, ParserError, RawMrtRecord};
 use log::{error, warn};
 use std::io::Read;
 
 pub struct RawRecordIterator<R> {
     parser: BgpkitParser<R>,
     count: u64,
+    /// Reusable buffer for chunking MRT records, avoiding repeated allocations
+    buffer: Vec<u8>,
 }
 
 impl<R> RawRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
-        RawRecordIterator { parser, count: 0 }
+        RawRecordIterator {
+            parser,
+            count: 0,
+            // Pre-allocate a reasonable buffer size for typical MRT records
+            buffer: Vec::with_capacity(4096),
+        }
     }
 }
 
@@ -31,7 +39,8 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
 
     fn next(&mut self) -> Option<RawMrtRecord> {
         self.count += 1;
-        match chunk_mrt_record(&mut self.parser.reader) {
+        // Use buffer-reusing chunk function for better performance
+        match chunk_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
             Ok(raw_record) => Some(raw_record),
             Err(e) => {
                 match e.error {

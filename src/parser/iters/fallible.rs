@@ -7,6 +7,7 @@ maintaining backward compatibility with existing code.
 */
 use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
+use crate::parser::mrt::mrt_record::parse_mrt_record_with_buffer;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use std::io::Read;
@@ -18,6 +19,8 @@ use std::io::Read;
 pub struct FallibleRecordIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    /// Reusable buffer for parsing MRT records, avoiding repeated allocations
+    buffer: Vec<u8>,
 }
 
 impl<R> FallibleRecordIterator<R> {
@@ -25,6 +28,8 @@ impl<R> FallibleRecordIterator<R> {
         FallibleRecordIterator {
             parser,
             elementor: Elementor::new(),
+            // Pre-allocate a reasonable buffer size for typical MRT records
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -34,7 +39,8 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.parser.next_record() {
+            // Use buffer-reusing parse function for better performance
+            match parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
                 Ok(record) => {
                     // Apply filters if any are set
                     let filters = &self.parser.filters;
@@ -77,16 +83,20 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
 /// for each successfully parsed element, and surfaces any parsing errors encountered.
 pub struct FallibleElemIterator<R> {
     cache_elems: Vec<BgpElem>,
-    record_iter: FallibleRecordIterator<R>,
+    parser: BgpkitParser<R>,
     elementor: Elementor,
+    /// Reusable buffer for parsing MRT records, avoiding repeated allocations
+    buffer: Vec<u8>,
 }
 
 impl<R> FallibleElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         FallibleElemIterator {
-            record_iter: FallibleRecordIterator::new(parser),
+            parser,
             cache_elems: vec![],
             elementor: Elementor::new(),
+            // Pre-allocate a reasonable buffer size for typical MRT records
+            buffer: Vec::with_capacity(4096),
         }
     }
 }
@@ -99,7 +109,7 @@ impl<R: Read> Iterator for FallibleElemIterator<R> {
             // First check if we have cached elements
             if !self.cache_elems.is_empty() {
                 if let Some(elem) = self.cache_elems.pop() {
-                    if elem.match_filters(&self.record_iter.parser.filters) {
+                    if elem.match_filters(&self.parser.filters) {
                         return Some(Ok(elem));
                     }
                     // Element doesn't match filters, continue to next
@@ -108,10 +118,25 @@ impl<R: Read> Iterator for FallibleElemIterator<R> {
             }
 
             // Need to refill cache from next record
-            match self.record_iter.next() {
-                None => return None,
-                Some(Err(e)) => return Some(Err(e)),
-                Some(Ok(record)) => {
+            // Use buffer-reusing parse function for better performance
+            match parse_mrt_record_with_buffer(&mut self.parser.reader, &mut self.buffer) {
+                Err(e) if matches!(e.error, ParserError::EofExpected) => {
+                    return None;
+                }
+                Err(e) => return Some(Err(e)),
+                Ok(record) => {
+                    // Apply filters if any are set
+                    let filters = &self.parser.filters;
+                    if !filters.is_empty() {
+                        // Special handling for PeerIndexTable - always process
+                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(
+                            _,
+                        )) = &record.message
+                        {
+                            let _ = self.elementor.record_to_elems(record.clone());
+                        }
+                    }
+
                     let mut elems = self.elementor.record_to_elems(record);
                     if elems.is_empty() {
                         // No elements from this record, try next
