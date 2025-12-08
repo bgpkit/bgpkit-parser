@@ -39,7 +39,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
 
 ## Debugging and Analysis
-- [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: BGPDump -m format output, debug display for MRT records, and raw byte export.
+- [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: debug display for MRT records, raw byte export, and the new `Display` implementation.
 - [extract_problematic_records.rs](extract_problematic_records.rs) — Find and export MRT records that fail to parse for further analysis with other tools.
 
 ## Local-only and Misc
