@@ -49,7 +49,7 @@ fn test_raw_record_iterator_yields_valid_record() {
     let rec = iter.next().expect("should yield one record");
     assert_eq!(rec.common_header.entry_type, EntryType::BGP4MP);
     assert_eq!(rec.common_header.length, 0);
-    assert_eq!(rec.raw_bytes.len(), 0);
+    assert_eq!(rec.total_bytes_len(), 12); // 12 bytes header + 0 bytes body
 
     // then end of stream
     assert!(iter.next().is_none());
@@ -80,7 +80,7 @@ fn test_raw_record_iterator_parse_error_skips_when_no_core_dump() {
         .next()
         .expect("should yield valid record after skipping parse error");
     assert_eq!(rec.common_header.entry_type, EntryType::BGP4MP);
-    assert_eq!(rec.raw_bytes.len(), 0);
+    assert_eq!(rec.total_bytes_len(), 12); // 12 bytes header + 0 bytes body
     assert!(iter.next().is_none());
 }
 

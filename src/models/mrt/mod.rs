@@ -6,6 +6,7 @@ pub mod table_dump_v2;
 
 pub use bgp4mp::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::fmt::{Display, Formatter};
 pub use table_dump::*;
 pub use table_dump_v2::*;
 
@@ -92,6 +93,91 @@ impl PartialEq for CommonHeader {
     }
 }
 
+impl Display for CommonHeader {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ts = match self.microsecond_timestamp {
+            Some(us) => format!("{}.{:06}", self.timestamp, us),
+            None => self.timestamp.to_string(),
+        };
+        write!(
+            f,
+            "MRT|{}|{:?}|{}|{}",
+            ts, self.entry_type, self.entry_subtype, self.length
+        )
+    }
+}
+
+impl Display for MrtRecord {
+    /// Formats the MRT record in a debug-friendly format.
+    ///
+    /// The format is: `MRT|<timestamp>|<type>|<subtype>|<message_summary>`
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ts = match self.common_header.microsecond_timestamp {
+            Some(us) => format!("{}.{:06}", self.common_header.timestamp, us),
+            None => self.common_header.timestamp.to_string(),
+        };
+        write!(
+            f,
+            "MRT|{}|{:?}|{}|{}",
+            ts, self.common_header.entry_type, self.common_header.entry_subtype, self.message
+        )
+    }
+}
+
+impl Display for MrtMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MrtMessage::TableDumpMessage(msg) => {
+                write!(f, "TABLE_DUMP|{}|{}", msg.prefix, msg.peer_ip)
+            }
+            MrtMessage::TableDumpV2Message(msg) => match msg {
+                TableDumpV2Message::PeerIndexTable(pit) => {
+                    write!(f, "PEER_INDEX_TABLE|{}", pit.id_peer_map.len())
+                }
+                TableDumpV2Message::RibAfi(rib) => {
+                    write!(
+                        f,
+                        "RIB|{:?}|{}|{} entries",
+                        rib.rib_type,
+                        rib.prefix,
+                        rib.rib_entries.len()
+                    )
+                }
+                TableDumpV2Message::RibGeneric(rib) => {
+                    write!(
+                        f,
+                        "RIB_GENERIC|AFI {:?}|SAFI {:?}|{} entries",
+                        rib.afi,
+                        rib.safi,
+                        rib.rib_entries.len()
+                    )
+                }
+                TableDumpV2Message::GeoPeerTable(gpt) => {
+                    write!(f, "GEO_PEER_TABLE|{} peers", gpt.geo_peers.len())
+                }
+            },
+            MrtMessage::Bgp4Mp(bgp4mp) => match bgp4mp {
+                Bgp4MpEnum::StateChange(sc) => {
+                    write!(
+                        f,
+                        "STATE_CHANGE|{}|{}|{:?}->{:?}",
+                        sc.peer_ip, sc.peer_asn, sc.old_state, sc.new_state
+                    )
+                }
+                Bgp4MpEnum::Message(msg) => {
+                    let msg_type = match &msg.bgp_message {
+                        crate::models::BgpMessage::Open(_) => "OPEN",
+                        crate::models::BgpMessage::Update(_) => "UPDATE",
+                        crate::models::BgpMessage::Notification(_) => "NOTIFICATION",
+                        crate::models::BgpMessage::KeepAlive => "KEEPALIVE",
+                    };
+                    write!(f, "BGP4MP|{}|{}|{}", msg.peer_ip, msg.peer_asn, msg_type)
+                }
+            },
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
@@ -153,6 +239,59 @@ pub enum EntryType {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_mrt_record_display() {
+        use super::*;
+        use crate::models::Asn;
+        use std::net::IpAddr;
+        use std::str::FromStr;
+
+        let mrt_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1609459200,
+                microsecond_timestamp: None,
+                entry_type: EntryType::BGP4MP,
+                entry_subtype: 0,
+                length: 0,
+            },
+            message: MrtMessage::Bgp4Mp(Bgp4MpEnum::StateChange(Bgp4MpStateChange {
+                msg_type: Bgp4MpType::StateChange,
+                peer_asn: Asn::new_32bit(65000),
+                local_asn: Asn::new_32bit(65001),
+                interface_index: 1,
+                peer_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+                local_addr: IpAddr::from_str("10.0.0.2").unwrap(),
+                old_state: BgpState::Idle,
+                new_state: BgpState::Connect,
+            })),
+        };
+
+        let display = format!("{}", mrt_record);
+        assert!(display.contains("1609459200"));
+        assert!(display.contains("BGP4MP"));
+        assert!(display.contains("STATE_CHANGE"));
+        assert!(display.contains("10.0.0.1"));
+        assert!(display.contains("65000"));
+    }
+
+    #[test]
+    fn test_common_header_display() {
+        use super::*;
+
+        let header = CommonHeader {
+            timestamp: 1609459200,
+            microsecond_timestamp: Some(500000),
+            entry_type: EntryType::BGP4MP_ET,
+            entry_subtype: 4,
+            length: 128,
+        };
+
+        let display = format!("{}", header);
+        assert!(display.contains("1609459200.500000"));
+        assert!(display.contains("BGP4MP_ET"));
+        assert!(display.contains("128"));
+    }
 
     #[test]
     #[cfg(feature = "serde")]
