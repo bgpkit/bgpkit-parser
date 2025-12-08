@@ -23,7 +23,7 @@ Add `bgpkit-parser` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bgpkit-parser = "0.12"
+bgpkit-parser = "0.13"
 ```
 
 Parse a BGP MRT file in three lines:
