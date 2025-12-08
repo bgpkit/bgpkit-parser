@@ -1,4 +1,4 @@
-use super::mrt_header::parse_common_header;
+use super::mrt_header::parse_common_header_with_bytes;
 use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::ParserError;
 use crate::models::*;
@@ -9,16 +9,22 @@ use crate::utils::convert_timestamp;
 use bytes::{BufMut, Bytes, BytesMut};
 use log::warn;
 use std::convert::TryFrom;
-use std::io::Read;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::net::IpAddr;
+use std::path::Path;
 use std::str::FromStr;
 
 /// Raw MRT record containing the common header and unparsed message bytes.
-/// This allows for lazy parsing of the MRT message body.
+/// This allows for lazy parsing of the MRT message body, and provides
+/// utilities for debugging and exporting problematic records.
 #[derive(Debug, Clone)]
 pub struct RawMrtRecord {
     pub common_header: CommonHeader,
-    pub raw_bytes: Bytes,
+    /// The raw bytes of the MRT common header (as read from the wire).
+    pub header_bytes: Bytes,
+    /// The raw bytes of the MRT message body (excluding the common header).
+    pub message_bytes: Bytes,
 }
 
 impl RawMrtRecord {
@@ -28,7 +34,7 @@ impl RawMrtRecord {
         let message = parse_mrt_body(
             self.common_header.entry_type as u16,
             self.common_header.entry_subtype,
-            self.raw_bytes,
+            self.message_bytes,
         )?;
 
         Ok(MrtRecord {
@@ -36,11 +42,80 @@ impl RawMrtRecord {
             message,
         })
     }
+
+    /// Returns the complete MRT record as raw bytes (header + message body).
+    ///
+    /// This returns the exact bytes as they were read from the wire,
+    /// without any re-encoding. This is useful for debugging problematic
+    /// MRT records by exporting them as-is to a file for further analysis.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let raw_record = parser.into_raw_record_iter().next().unwrap();
+    /// let bytes = raw_record.raw_bytes();
+    /// std::fs::write("record.mrt", &bytes).unwrap();
+    /// ```
+    pub fn raw_bytes(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(self.header_bytes.len() + self.message_bytes.len());
+        bytes.put_slice(&self.header_bytes);
+        bytes.put_slice(&self.message_bytes);
+        bytes.freeze()
+    }
+
+    /// Writes the raw MRT record (header + message body) to a file.
+    ///
+    /// This is useful for extracting problematic MRT records for debugging
+    /// or further analysis with other tools.
+    ///
+    /// # Arguments
+    /// * `path` - The path to write the raw bytes to.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let raw_record = parser.into_raw_record_iter().next().unwrap();
+    /// raw_record.write_raw_bytes("problematic_record.mrt").unwrap();
+    /// ```
+    pub fn write_raw_bytes<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        file.write_all(&self.header_bytes)?;
+        file.write_all(&self.message_bytes)?;
+        Ok(())
+    }
+
+    /// Appends the raw MRT record (header + message body) to a file.
+    ///
+    /// This is useful for collecting multiple problematic records into a single file.
+    ///
+    /// # Arguments
+    /// * `path` - The path to append the raw bytes to.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for raw_record in parser.into_raw_record_iter() {
+    ///     if is_problematic(&raw_record) {
+    ///         raw_record.append_raw_bytes("problematic_records.mrt").unwrap();
+    ///     }
+    /// }
+    /// ```
+    pub fn append_raw_bytes<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        file.write_all(&self.header_bytes)?;
+        file.write_all(&self.message_bytes)?;
+        Ok(())
+    }
+
+    /// Returns the total length of the complete MRT record in bytes (header + body).
+    pub fn total_bytes_len(&self) -> usize {
+        self.header_bytes.len() + self.message_bytes.len()
+    }
 }
 
 pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErrorWithBytes> {
-    // parse common header
-    let common_header = match parse_common_header(input) {
+    // parse common header and capture raw bytes
+    let parsed_header = match parse_common_header_with_bytes(input) {
         Ok(v) => v,
         Err(e) => {
             if let ParserError::EofError(e) = &e {
@@ -54,6 +129,9 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
             });
         }
     };
+
+    let common_header = parsed_header.header;
+    let header_bytes = parsed_header.raw_bytes;
 
     // Protect against unreasonable allocations from corrupt headers
     const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
@@ -80,7 +158,8 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
 
     Ok(RawMrtRecord {
         common_header,
-        raw_bytes: buffer.freeze(),
+        header_bytes,
+        message_bytes: buffer.freeze(),
     })
 }
 
@@ -230,6 +309,131 @@ mod tests {
     use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
     use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
     use std::net::Ipv4Addr;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_raw_mrt_record_raw_bytes() {
+        let header = CommonHeader {
+            timestamp: 1609459200,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: 4,
+            length: 10,
+        };
+        let header_bytes = Bytes::from_static(&[
+            0x5f, 0xee, 0x6a, 0x80, // timestamp
+            0x00, 0x10, // entry type
+            0x00, 0x04, // entry subtype
+            0x00, 0x00, 0x00, 0x0a, // length
+        ]);
+        let message_bytes = Bytes::from_static(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        let raw_record = RawMrtRecord {
+            common_header: header,
+            header_bytes,
+            message_bytes,
+        };
+
+        let mrt_bytes = raw_record.raw_bytes();
+        // Header is 12 bytes + 10 bytes body = 22 bytes total
+        assert_eq!(mrt_bytes.len(), 22);
+        assert_eq!(raw_record.total_bytes_len(), 22);
+    }
+
+    #[test]
+    fn test_raw_mrt_record_raw_bytes_with_et() {
+        let header = CommonHeader {
+            timestamp: 1609459200,
+            microsecond_timestamp: Some(500000),
+            entry_type: EntryType::BGP4MP_ET,
+            entry_subtype: 4,
+            length: 10,
+        };
+        let header_bytes = Bytes::from_static(&[
+            0x5f, 0xee, 0x6a, 0x80, // timestamp
+            0x00, 0x11, // entry type (BGP4MP_ET = 17)
+            0x00, 0x04, // entry subtype
+            0x00, 0x00, 0x00, 0x0e, // length (10 + 4 for microseconds)
+            0x00, 0x07, 0xa1, 0x20, // microsecond timestamp (500000)
+        ]);
+        let message_bytes = Bytes::from_static(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        let raw_record = RawMrtRecord {
+            common_header: header,
+            header_bytes,
+            message_bytes,
+        };
+
+        let mrt_bytes = raw_record.raw_bytes();
+        // ET Header is 16 bytes + 10 bytes body = 26 bytes total
+        assert_eq!(mrt_bytes.len(), 26);
+        assert_eq!(raw_record.total_bytes_len(), 26);
+    }
+
+    #[test]
+    fn test_raw_mrt_record_write_to_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test_record.mrt");
+
+        let header = CommonHeader {
+            timestamp: 1609459200,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: 4,
+            length: 5,
+        };
+        let header_bytes = Bytes::from_static(&[
+            0x5f, 0xee, 0x6a, 0x80, // timestamp
+            0x00, 0x10, // entry type
+            0x00, 0x04, // entry subtype
+            0x00, 0x00, 0x00, 0x05, // length
+        ]);
+        let message_bytes = Bytes::from_static(&[1, 2, 3, 4, 5]);
+
+        let raw_record = RawMrtRecord {
+            common_header: header,
+            header_bytes,
+            message_bytes,
+        };
+
+        raw_record.write_raw_bytes(&file_path).unwrap();
+
+        let written_bytes = std::fs::read(&file_path).unwrap();
+        assert_eq!(written_bytes.len(), 17); // 12 header + 5 body
+    }
+
+    #[test]
+    fn test_raw_mrt_record_append_to_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test_records.mrt");
+
+        let header = CommonHeader {
+            timestamp: 1609459200,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: 4,
+            length: 3,
+        };
+        let header_bytes = Bytes::from_static(&[
+            0x5f, 0xee, 0x6a, 0x80, // timestamp
+            0x00, 0x10, // entry type
+            0x00, 0x04, // entry subtype
+            0x00, 0x00, 0x00, 0x03, // length
+        ]);
+        let message_bytes = Bytes::from_static(&[1, 2, 3]);
+
+        let raw_record = RawMrtRecord {
+            common_header: header,
+            header_bytes,
+            message_bytes,
+        };
+
+        raw_record.append_raw_bytes(&file_path).unwrap();
+        raw_record.append_raw_bytes(&file_path).unwrap();
+
+        let written_bytes = std::fs::read(&file_path).unwrap();
+        assert_eq!(written_bytes.len(), 30); // (12 header + 3 body) * 2
+    }
 
     #[test]
     fn test_try_from_bmp_message() {

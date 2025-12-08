@@ -5,8 +5,32 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 
 use bgpkit_parser::{BgpElem, BgpkitParser, Elementor};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ipnet::IpNet;
+
+/// Output format for the parser
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum OutputFormat {
+    /// Default pipe-separated format
+    #[default]
+    Default,
+    /// JSON format (one object per line)
+    Json,
+    /// Pretty-printed JSON format
+    JsonPretty,
+    /// PSV format with header
+    Psv,
+}
+
+/// Output level granularity
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum OutputLevel {
+    /// Output BGP elements (per-prefix)
+    #[default]
+    Elems,
+    /// Output MRT records
+    Records,
+}
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
 #[derive(Parser, Debug)]
@@ -20,17 +44,25 @@ struct Opts {
     #[clap(short, long)]
     cache_dir: Option<PathBuf>,
 
-    /// Output as JSON objects
+    /// Output format
+    #[clap(short = 'F', long, value_enum, default_value_t = OutputFormat::Default)]
+    format: OutputFormat,
+
+    /// Output level: elems (per-prefix) or records (MRT records)
+    #[clap(short = 'L', long, value_enum, default_value_t = OutputLevel::Elems)]
+    level: OutputLevel,
+
+    /// Output as JSON objects (shorthand for --format json)
     #[clap(long)]
     json: bool,
 
-    /// Output as full PSV entries with header
-    #[clap(long)]
-    psv: bool,
-
-    /// Pretty-print JSON output
+    /// Pretty-print JSON output (shorthand for --format json-pretty)
     #[clap(long)]
     pretty: bool,
+
+    /// Output as full PSV entries with header (shorthand for --format psv)
+    #[clap(long)]
+    psv: bool,
 
     /// Count BGP elems
     #[clap(short, long)]
@@ -178,6 +210,17 @@ fn main() {
         }
     }
 
+    // Determine final output format (shorthand flags override --format)
+    let output_format = if opts.pretty {
+        OutputFormat::JsonPretty
+    } else if opts.json {
+        OutputFormat::Json
+    } else if opts.psv {
+        OutputFormat::Psv
+    } else {
+        opts.format
+    };
+
     match (opts.elems_count, opts.records_count) {
         (true, true) => {
             let mut elementor = Elementor::new();
@@ -193,34 +236,73 @@ fn main() {
             println!("total records: {}", parser.into_record_iter().count());
         }
         (true, false) => {
-            println!("total records: {}", parser.into_elem_iter().count());
+            println!("total elems: {}", parser.into_elem_iter().count());
         }
         (false, false) => {
             let mut stdout = std::io::stdout();
-            for (index, elem) in parser.into_elem_iter().enumerate() {
-                let output_str = if opts.json {
-                    let val = json!(elem);
-                    if opts.pretty {
-                        serde_json::to_string_pretty(&val).unwrap()
-                    } else {
-                        val.to_string()
+
+            match opts.level {
+                OutputLevel::Elems => {
+                    for (index, elem) in parser.into_elem_iter().enumerate() {
+                        let output_str = format_elem(&elem, output_format, index);
+                        if let Err(e) = writeln!(stdout, "{}", &output_str) {
+                            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                                eprintln!("{e}");
+                            }
+                            std::process::exit(1);
+                        }
                     }
-                } else if opts.psv {
-                    if index == 0 {
-                        format!("{}\n{}", BgpElem::get_psv_header(), elem.to_psv())
-                    } else {
-                        elem.to_psv()
+                }
+                OutputLevel::Records => {
+                    for record in parser.into_record_iter() {
+                        let output_str = format_record(&record, output_format);
+                        if let Err(e) = writeln!(stdout, "{}", &output_str) {
+                            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                                eprintln!("{e}");
+                            }
+                            std::process::exit(1);
+                        }
                     }
-                } else {
-                    elem.to_string()
-                };
-                if let Err(e) = writeln!(stdout, "{}", &output_str) {
-                    if e.kind() != std::io::ErrorKind::BrokenPipe {
-                        eprintln!("{e}");
-                    }
-                    std::process::exit(1);
                 }
             }
+        }
+    }
+}
+
+fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {
+    match format {
+        OutputFormat::Json => {
+            let val = json!(elem);
+            val.to_string()
+        }
+        OutputFormat::JsonPretty => {
+            let val = json!(elem);
+            serde_json::to_string_pretty(&val).unwrap()
+        }
+        OutputFormat::Psv => {
+            if index == 0 {
+                format!("{}\n{}", BgpElem::get_psv_header(), elem.to_psv())
+            } else {
+                elem.to_psv()
+            }
+        }
+        OutputFormat::Default => elem.to_string(),
+    }
+}
+
+fn format_record(record: &bgpkit_parser::MrtRecord, format: OutputFormat) -> String {
+    match format {
+        OutputFormat::Json => {
+            let val = json!(record);
+            val.to_string()
+        }
+        OutputFormat::JsonPretty => {
+            let val = json!(record);
+            serde_json::to_string_pretty(&val).unwrap()
+        }
+        OutputFormat::Psv | OutputFormat::Default => {
+            // Use the Display implementation for MrtRecord
+            format!("{}", record)
         }
     }
 }

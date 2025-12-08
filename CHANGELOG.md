@@ -4,8 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking changes
+
+* **`RawMrtRecord` field renamed**: `raw_bytes` is now `message_bytes` to clarify it contains only the message body
+  - Added new `header_bytes` field containing the raw header bytes as read from the wire
+  - The `raw_bytes()` method now returns complete MRT record bytes (header + body) without re-encoding
+
 ### New features
 
+* Add MRT record debugging and raw bytes export capabilities
+  - `RawMrtRecord` now stores both `header_bytes` and `message_bytes` to enable exact byte-for-byte export without re-encoding
+  - New methods on `RawMrtRecord`: `raw_bytes()`, `write_raw_bytes()`, `append_raw_bytes()`, `total_bytes_len()`
+  - Added `Display` implementations for `MrtRecord`, `CommonHeader`, and `MrtMessage` for human-readable debug output
+  - New examples: `mrt_debug.rs` and `extract_problematic_records.rs` demonstrating debug features
+* CLI now supports record-level output and multiple output formats
+  - New `--level` (`-L`) option: `elems` (default) or `records` to control output granularity
+  - New `--format` (`-F`) option: `default`, `json`, `json-pretty`, or `psv`
+  - Record-level output with `--level records` outputs MRT records instead of per-prefix elements
+  - JSON output for records provides full structured data for debugging
 * Add `UpdateIterator` and `FallibleUpdateIterator` for iterating over BGP announcements ([#250](https://github.com/bgpkit/bgpkit-parser/issues/250))
   - New `MrtUpdate` enum supporting both BGP4MP UPDATE messages and TableDumpV2 RIB entries
   - `Bgp4MpUpdate` struct for BGP4MP UPDATE messages with metadata (timestamp, peer_ip, peer_asn)
