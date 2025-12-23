@@ -960,7 +960,7 @@ mod tests {
             subject_public_key_info: vec![0xAB, 0xCD, 0xEF],
         };
         let bytes = key.encode();
-        assert_eq!(bytes.len(), 37); // 36 min + 3 SPKI
+        assert_eq!(bytes.len(), 37); // 34 min + 3 SPKI
 
         let (pdu, _) = parse_rtr_pdu(&bytes).unwrap();
         match pdu {
