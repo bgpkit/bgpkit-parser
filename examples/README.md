@@ -42,5 +42,8 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: debug display for MRT records, raw byte export, and the new `Display` implementation.
 - [extract_problematic_records.rs](extract_problematic_records.rs) — Find and export MRT records that fail to parse for further analysis with other tools.
 
+## RPKI RTR Protocol
+- [rtr_client.rs](rtr_client.rs) — Connect to an RTR server (RFC 6810/8210), fetch ROAs, and validate a route announcement (1.1.1.0/24 -> AS13335). Demonstrates RTR PDU parsing and encoding.
+
 ## Local-only and Misc
 - [local_only/src/main.rs](local_only/src/main.rs) — Minimal example that reads a local updates.bz2 file; intended for local experimentation (not network fetching).
