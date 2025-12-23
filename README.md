@@ -19,12 +19,7 @@ BGPKIT Parser has the following features:
 
 ## Getting Started
 
-Add `bgpkit-parser` to your `Cargo.toml`:
-
-```toml
-[dependencies]
-bgpkit-parser = "0.13"
-```
+Add `bgpkit-parser` to your `Cargo.toml`.
 
 Parse a BGP MRT file in three lines:
 
