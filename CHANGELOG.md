@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### New features
+
+* **RPKI RTR Protocol Support**: Add full support for the RPKI-to-Router (RTR) protocol
+  - New `models::rpki::rtr` module with all PDU types: SerialNotify, SerialQuery, ResetQuery, CacheResponse, IPv4Prefix, IPv6Prefix, EndOfData, CacheReset, RouterKey, ErrorReport
+  - New `parser::rpki::rtr` module with parsing (`parse_rtr_pdu`, `read_rtr_pdu`) and encoding (`RtrEncode` trait)
+  - Support for both RTR v0 ([RFC 6810](https://datatracker.ietf.org/doc/html/rfc6810)) and v1 ([RFC 8210](https://datatracker.ietf.org/doc/html/rfc8210))
+  - Comprehensive error handling with `RtrError` enum
+  - New example `rtr_client.rs` demonstrating RTR client implementation with ROA fetching and route validation
+
 ## v0.13.0 - 2025-12-07
 
 ### Breaking changes

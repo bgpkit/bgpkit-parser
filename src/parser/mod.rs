@@ -10,6 +10,7 @@ pub mod bmp;
 pub mod filter;
 pub mod iters;
 pub mod mrt;
+pub mod rpki;
 
 #[cfg(feature = "rislive")]
 pub mod rislive;

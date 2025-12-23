@@ -550,6 +550,65 @@ See the [MrtRecord] documentation for the complete structure definition.
 - **Message-level analysis**: Work with UPDATE messages or RIB entries as units
 - **Memory efficiency**: Shared attributes aren't cloned for each prefix
 
+# RPKI RTR Protocol Support
+
+BGPKIT Parser includes support for the RPKI-to-Router (RTR) protocol, enabling downstream
+clients to communicate with RTR cache servers and fetch Route Origin Authorizations (ROAs).
+
+## Overview
+
+The RTR protocol is used to deliver validated RPKI data from a cache server to a router.
+BGPKIT Parser provides:
+- **PDU definitions**: All RTR protocol data structures for both v0 (RFC 6810) and v1 (RFC 8210)
+- **Parsing**: Decode binary RTR PDUs into structured Rust types
+- **Encoding**: Serialize RTR PDUs to binary format for sending to servers
+
+**Note**: This library provides PDU parsing/encoding only. Transport (TCP, SSH, TLS) and
+RPKI validation logic are out of scope and should be handled by downstream clients.
+
+## Quick Example
+
+```rust
+use bgpkit_parser::models::rpki::rtr::*;
+use bgpkit_parser::parser::rpki::rtr::{parse_rtr_pdu, RtrEncode};
+
+// Create a Reset Query to request the full ROA database
+let query = RtrResetQuery::new_v1();
+let bytes = query.encode();
+
+// Parse a PDU from bytes
+let (pdu, consumed) = parse_rtr_pdu(&bytes).unwrap();
+assert!(matches!(pdu, RtrPdu::ResetQuery(_)));
+```
+
+## Available PDU Types
+
+| PDU Type | Direction | Description |
+|----------|-----------|-------------|
+| Serial Notify | Server → Client | Notifies client of new data |
+| Serial Query | Client → Server | Requests incremental update |
+| Reset Query | Client → Server | Requests full database |
+| Cache Response | Server → Client | Begins data transfer |
+| IPv4 Prefix | Server → Client | ROA for IPv4 prefix |
+| IPv6 Prefix | Server → Client | ROA for IPv6 prefix |
+| End of Data | Server → Client | Ends data transfer |
+| Cache Reset | Server → Client | Cannot provide incremental update |
+| Router Key | Server → Client | BGPsec key (v1 only) |
+| Error Report | Bidirectional | Error notification |
+
+## Building an RTR Client
+
+See the [`rtr_client` example](https://github.com/bgpkit/bgpkit-parser/blob/main/examples/rtr_client.rs)
+for a complete working example that:
+1. Connects to an RTR server
+2. Sends a Reset Query
+3. Collects ROAs
+4. Validates a route announcement (1.1.1.0/24 → AS13335)
+
+```bash
+cargo run --example rtr_client -- rtr.rpki.cloudflare.com 8282
+```
+
 **Supported message types** (via enum variants):
 - `Bgp4MpUpdate`: BGP UPDATE messages from UPDATES files
 - `TableDumpV2Entry`: RIB entries from TableDumpV2 RIB dumps
@@ -691,6 +750,11 @@ Full support for standard, extended, and large communities:
 - [RFC 7153](https://datatracker.ietf.org/doc/html/rfc7153): IANA Registries for BGP Extended Communities
 - [RFC 8097](https://datatracker.ietf.org/doc/html/rfc8097): BGP Prefix Origin Validation State Extended Community
 - [RFC 8092](https://datatracker.ietf.org/doc/html/rfc8092): BGP Large Communities
+
+## RPKI-to-Router (RTR) Protocol
+
+- [RFC 6810](https://datatracker.ietf.org/doc/html/rfc6810): The Resource Public Key Infrastructure (RPKI) to Router Protocol
+- [RFC 8210](https://datatracker.ietf.org/doc/html/rfc8210): The Resource Public Key Infrastructure (RPKI) to Router Protocol, Version 1
 
 ## Advanced Features
 

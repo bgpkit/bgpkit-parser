@@ -55,6 +55,7 @@ mod bgp;
 mod err;
 mod mrt;
 mod network;
+pub mod rpki;
 
 pub use bgp::*;
 pub use err::BgpModelsError;
