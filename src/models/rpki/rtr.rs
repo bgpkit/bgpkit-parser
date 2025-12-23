@@ -832,6 +832,115 @@ mod tests {
     }
 
     #[test]
+    fn test_pdu_enum_all_types_and_versions() {
+        // Test pdu_type() and version() for all PDU variants
+        let pdus = vec![
+            (
+                RtrPdu::SerialNotify(RtrSerialNotify {
+                    version: RtrProtocolVersion::V0,
+                    session_id: 1,
+                    serial_number: 100,
+                }),
+                RtrPduType::SerialNotify,
+                RtrProtocolVersion::V0,
+            ),
+            (
+                RtrPdu::SerialQuery(RtrSerialQuery {
+                    version: RtrProtocolVersion::V1,
+                    session_id: 2,
+                    serial_number: 200,
+                }),
+                RtrPduType::SerialQuery,
+                RtrProtocolVersion::V1,
+            ),
+            (
+                RtrPdu::ResetQuery(RtrResetQuery {
+                    version: RtrProtocolVersion::V0,
+                }),
+                RtrPduType::ResetQuery,
+                RtrProtocolVersion::V0,
+            ),
+            (
+                RtrPdu::CacheResponse(RtrCacheResponse {
+                    version: RtrProtocolVersion::V1,
+                    session_id: 3,
+                }),
+                RtrPduType::CacheResponse,
+                RtrProtocolVersion::V1,
+            ),
+            (
+                RtrPdu::IPv4Prefix(RtrIPv4Prefix {
+                    version: RtrProtocolVersion::V0,
+                    flags: 1,
+                    prefix_length: 24,
+                    max_length: 24,
+                    prefix: Ipv4Addr::new(10, 0, 0, 0),
+                    asn: 65000.into(),
+                }),
+                RtrPduType::IPv4Prefix,
+                RtrProtocolVersion::V0,
+            ),
+            (
+                RtrPdu::IPv6Prefix(RtrIPv6Prefix {
+                    version: RtrProtocolVersion::V1,
+                    flags: 0,
+                    prefix_length: 48,
+                    max_length: 64,
+                    prefix: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0),
+                    asn: 65001.into(),
+                }),
+                RtrPduType::IPv6Prefix,
+                RtrProtocolVersion::V1,
+            ),
+            (
+                RtrPdu::EndOfData(RtrEndOfData {
+                    version: RtrProtocolVersion::V0,
+                    session_id: 4,
+                    serial_number: 300,
+                    refresh_interval: None,
+                    retry_interval: None,
+                    expire_interval: None,
+                }),
+                RtrPduType::EndOfData,
+                RtrProtocolVersion::V0,
+            ),
+            (
+                RtrPdu::CacheReset(RtrCacheReset {
+                    version: RtrProtocolVersion::V1,
+                }),
+                RtrPduType::CacheReset,
+                RtrProtocolVersion::V1,
+            ),
+            (
+                RtrPdu::RouterKey(RtrRouterKey {
+                    version: RtrProtocolVersion::V1,
+                    flags: 1,
+                    subject_key_identifier: [0; 20],
+                    asn: 65002.into(),
+                    subject_public_key_info: vec![],
+                }),
+                RtrPduType::RouterKey,
+                RtrProtocolVersion::V1,
+            ),
+            (
+                RtrPdu::ErrorReport(RtrErrorReport {
+                    version: RtrProtocolVersion::V0,
+                    error_code: RtrErrorCode::InternalError,
+                    erroneous_pdu: vec![],
+                    error_text: String::new(),
+                }),
+                RtrPduType::ErrorReport,
+                RtrProtocolVersion::V0,
+            ),
+        ];
+
+        for (pdu, expected_type, expected_version) in pdus {
+            assert_eq!(pdu.pdu_type(), expected_type);
+            assert_eq!(pdu.version(), expected_version);
+        }
+    }
+
+    #[test]
     fn test_pdu_from_impls() {
         let query = RtrResetQuery::new_v1();
         let pdu: RtrPdu = query.into();
@@ -839,13 +948,110 @@ mod tests {
     }
 
     #[test]
+    fn test_all_pdu_from_impls() {
+        // Test From impl for all PDU types
+        let notify = RtrSerialNotify {
+            version: RtrProtocolVersion::V1,
+            session_id: 1,
+            serial_number: 100,
+        };
+        let pdu: RtrPdu = notify.into();
+        assert!(matches!(pdu, RtrPdu::SerialNotify(_)));
+
+        let query = RtrSerialQuery::new(RtrProtocolVersion::V1, 1, 100);
+        let pdu: RtrPdu = query.into();
+        assert!(matches!(pdu, RtrPdu::SerialQuery(_)));
+
+        let response = RtrCacheResponse {
+            version: RtrProtocolVersion::V1,
+            session_id: 1,
+        };
+        let pdu: RtrPdu = response.into();
+        assert!(matches!(pdu, RtrPdu::CacheResponse(_)));
+
+        let prefix4 = RtrIPv4Prefix {
+            version: RtrProtocolVersion::V1,
+            flags: 1,
+            prefix_length: 24,
+            max_length: 24,
+            prefix: Ipv4Addr::new(10, 0, 0, 0),
+            asn: 65000.into(),
+        };
+        let pdu: RtrPdu = prefix4.into();
+        assert!(matches!(pdu, RtrPdu::IPv4Prefix(_)));
+
+        let prefix6 = RtrIPv6Prefix {
+            version: RtrProtocolVersion::V1,
+            flags: 1,
+            prefix_length: 48,
+            max_length: 48,
+            prefix: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0),
+            asn: 65000.into(),
+        };
+        let pdu: RtrPdu = prefix6.into();
+        assert!(matches!(pdu, RtrPdu::IPv6Prefix(_)));
+
+        let eod = RtrEndOfData {
+            version: RtrProtocolVersion::V1,
+            session_id: 1,
+            serial_number: 100,
+            refresh_interval: Some(3600),
+            retry_interval: Some(600),
+            expire_interval: Some(7200),
+        };
+        let pdu: RtrPdu = eod.into();
+        assert!(matches!(pdu, RtrPdu::EndOfData(_)));
+
+        let reset = RtrCacheReset {
+            version: RtrProtocolVersion::V1,
+        };
+        let pdu: RtrPdu = reset.into();
+        assert!(matches!(pdu, RtrPdu::CacheReset(_)));
+
+        let key = RtrRouterKey {
+            version: RtrProtocolVersion::V1,
+            flags: 1,
+            subject_key_identifier: [0; 20],
+            asn: 65000.into(),
+            subject_public_key_info: vec![],
+        };
+        let pdu: RtrPdu = key.into();
+        assert!(matches!(pdu, RtrPdu::RouterKey(_)));
+
+        let error = RtrErrorReport::new(
+            RtrProtocolVersion::V1,
+            RtrErrorCode::InternalError,
+            vec![],
+            String::new(),
+        );
+        let pdu: RtrPdu = error.into();
+        assert!(matches!(pdu, RtrPdu::ErrorReport(_)));
+    }
+
+    #[test]
     fn test_error_report_constructors() {
         let err = RtrErrorReport::unsupported_version(RtrProtocolVersion::V0, vec![1, 2, 3]);
         assert_eq!(err.error_code, RtrErrorCode::UnsupportedProtocolVersion);
+        assert_eq!(err.error_text, "Unsupported protocol version");
+
+        let err = RtrErrorReport::unsupported_pdu_type(RtrProtocolVersion::V1, vec![4, 5, 6]);
+        assert_eq!(err.error_code, RtrErrorCode::UnsupportedPduType);
+        assert_eq!(err.error_text, "Unsupported PDU type");
 
         let err = RtrErrorReport::corrupt_data(RtrProtocolVersion::V1, vec![], "test error");
         assert_eq!(err.error_code, RtrErrorCode::CorruptData);
         assert_eq!(err.error_text, "test error");
+
+        let err = RtrErrorReport::new(
+            RtrProtocolVersion::V0,
+            RtrErrorCode::NoDataAvailable,
+            vec![7, 8, 9],
+            "Custom error".to_string(),
+        );
+        assert_eq!(err.version, RtrProtocolVersion::V0);
+        assert_eq!(err.error_code, RtrErrorCode::NoDataAvailable);
+        assert_eq!(err.erroneous_pdu, vec![7, 8, 9]);
+        assert_eq!(err.error_text, "Custom error");
     }
 
     #[test]
@@ -863,5 +1069,166 @@ mod tests {
         let json = serde_json::to_string(&prefix).unwrap();
         let decoded: RtrIPv4Prefix = serde_json::from_str(&json).unwrap();
         assert_eq!(prefix, decoded);
+    }
+
+    #[test]
+    fn test_try_from_protocol_version() {
+        // Test TryFrom<u8> for RtrProtocolVersion
+        let v0: Result<RtrProtocolVersion, u8> = 0u8.try_into();
+        assert_eq!(v0, Ok(RtrProtocolVersion::V0));
+
+        let v1: Result<RtrProtocolVersion, u8> = 1u8.try_into();
+        assert_eq!(v1, Ok(RtrProtocolVersion::V1));
+
+        let invalid: Result<RtrProtocolVersion, u8> = 99u8.try_into();
+        assert_eq!(invalid, Err(99u8));
+
+        // Test From<RtrProtocolVersion> for u8
+        let byte: u8 = RtrProtocolVersion::V0.into();
+        assert_eq!(byte, 0);
+        let byte: u8 = RtrProtocolVersion::V1.into();
+        assert_eq!(byte, 1);
+    }
+
+    #[test]
+    fn test_try_from_pdu_type() {
+        // Test TryFrom<u8> for RtrPduType
+        let serial_notify: Result<RtrPduType, u8> = 0u8.try_into();
+        assert_eq!(serial_notify, Ok(RtrPduType::SerialNotify));
+
+        let error_report: Result<RtrPduType, u8> = 10u8.try_into();
+        assert_eq!(error_report, Ok(RtrPduType::ErrorReport));
+
+        let invalid: Result<RtrPduType, u8> = 5u8.try_into(); // Type 5 doesn't exist
+        assert_eq!(invalid, Err(5u8));
+
+        let invalid: Result<RtrPduType, u8> = 255u8.try_into();
+        assert_eq!(invalid, Err(255u8));
+
+        // Test From<RtrPduType> for u8
+        let byte: u8 = RtrPduType::SerialNotify.into();
+        assert_eq!(byte, 0);
+        let byte: u8 = RtrPduType::IPv6Prefix.into();
+        assert_eq!(byte, 6);
+        let byte: u8 = RtrPduType::ErrorReport.into();
+        assert_eq!(byte, 10);
+    }
+
+    #[test]
+    fn test_try_from_error_code() {
+        // Test TryFrom<u16> for RtrErrorCode
+        let corrupt: Result<RtrErrorCode, u16> = 0u16.try_into();
+        assert_eq!(corrupt, Ok(RtrErrorCode::CorruptData));
+
+        let unexpected: Result<RtrErrorCode, u16> = 8u16.try_into();
+        assert_eq!(unexpected, Ok(RtrErrorCode::UnexpectedProtocolVersion));
+
+        let invalid: Result<RtrErrorCode, u16> = 9u16.try_into();
+        assert_eq!(invalid, Err(9u16));
+
+        let invalid: Result<RtrErrorCode, u16> = 1000u16.try_into();
+        assert_eq!(invalid, Err(1000u16));
+
+        // Test From<RtrErrorCode> for u16
+        let code: u16 = RtrErrorCode::CorruptData.into();
+        assert_eq!(code, 0);
+        let code: u16 = RtrErrorCode::UnexpectedProtocolVersion.into();
+        assert_eq!(code, 8);
+    }
+
+    #[test]
+    fn test_ipv6_prefix_withdrawal() {
+        let withdrawal = RtrIPv6Prefix {
+            version: RtrProtocolVersion::V1,
+            flags: 0, // withdrawal
+            prefix_length: 48,
+            max_length: 64,
+            prefix: Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0),
+            asn: 65001.into(),
+        };
+        assert!(!withdrawal.is_announcement());
+        assert!(withdrawal.is_withdrawal());
+    }
+
+    #[test]
+    fn test_router_key_withdrawal() {
+        let withdrawal = RtrRouterKey {
+            version: RtrProtocolVersion::V1,
+            flags: 0, // withdrawal
+            subject_key_identifier: [1; 20],
+            asn: 65001.into(),
+            subject_public_key_info: vec![0xAB, 0xCD],
+        };
+        assert!(!withdrawal.is_announcement());
+        assert!(withdrawal.is_withdrawal());
+    }
+
+    #[test]
+    fn test_serial_query_new() {
+        let query = RtrSerialQuery::new(RtrProtocolVersion::V0, 12345, 67890);
+        assert_eq!(query.version, RtrProtocolVersion::V0);
+        assert_eq!(query.session_id, 12345);
+        assert_eq!(query.serial_number, 67890);
+    }
+
+    #[test]
+    fn test_reset_query_new() {
+        let v0 = RtrResetQuery::new(RtrProtocolVersion::V0);
+        assert_eq!(v0.version, RtrProtocolVersion::V0);
+
+        let v1 = RtrResetQuery::new(RtrProtocolVersion::V1);
+        assert_eq!(v1.version, RtrProtocolVersion::V1);
+    }
+
+    #[test]
+    fn test_protocol_version_default() {
+        let default = RtrProtocolVersion::default();
+        assert_eq!(default, RtrProtocolVersion::V1);
+    }
+
+    #[test]
+    fn test_all_error_codes() {
+        // Test all error code conversions
+        let codes = [
+            (0u16, RtrErrorCode::CorruptData),
+            (1u16, RtrErrorCode::InternalError),
+            (2u16, RtrErrorCode::NoDataAvailable),
+            (3u16, RtrErrorCode::InvalidRequest),
+            (4u16, RtrErrorCode::UnsupportedProtocolVersion),
+            (5u16, RtrErrorCode::UnsupportedPduType),
+            (6u16, RtrErrorCode::WithdrawalOfUnknownRecord),
+            (7u16, RtrErrorCode::DuplicateAnnouncementReceived),
+            (8u16, RtrErrorCode::UnexpectedProtocolVersion),
+        ];
+
+        for (value, expected) in codes {
+            assert_eq!(RtrErrorCode::from_u16(value), Some(expected));
+            assert_eq!(expected.to_u16(), value);
+        }
+    }
+
+    #[test]
+    fn test_all_pdu_types() {
+        // Test all PDU type conversions
+        let types = [
+            (0u8, RtrPduType::SerialNotify),
+            (1u8, RtrPduType::SerialQuery),
+            (2u8, RtrPduType::ResetQuery),
+            (3u8, RtrPduType::CacheResponse),
+            (4u8, RtrPduType::IPv4Prefix),
+            (6u8, RtrPduType::IPv6Prefix),
+            (7u8, RtrPduType::EndOfData),
+            (8u8, RtrPduType::CacheReset),
+            (9u8, RtrPduType::RouterKey),
+            (10u8, RtrPduType::ErrorReport),
+        ];
+
+        for (value, expected) in types {
+            assert_eq!(RtrPduType::from_u8(value), Some(expected));
+            assert_eq!(expected.to_u8(), value);
+        }
+
+        // Test that type 5 doesn't exist
+        assert_eq!(RtrPduType::from_u8(5), None);
     }
 }

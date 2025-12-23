@@ -1204,4 +1204,308 @@ mod tests {
         assert!(err.to_string().contains("4"));
         assert!(err.to_string().contains("8"));
     }
+
+    #[test]
+    fn test_error_display_all_variants() {
+        // Test Display for all RtrError variants
+        let io_err = RtrError::IoError(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset",
+        ));
+        assert!(io_err.to_string().contains("I/O error"));
+
+        let incomplete = RtrError::IncompletePdu {
+            available: 5,
+            needed: 10,
+        };
+        assert!(incomplete.to_string().contains("Incomplete PDU"));
+        assert!(incomplete.to_string().contains("5"));
+        assert!(incomplete.to_string().contains("10"));
+
+        let invalid_type = RtrError::InvalidPduType(99);
+        assert!(invalid_type.to_string().contains("Invalid PDU type"));
+        assert!(invalid_type.to_string().contains("99"));
+
+        let invalid_version = RtrError::InvalidProtocolVersion(5);
+        assert!(invalid_version
+            .to_string()
+            .contains("Invalid protocol version"));
+        assert!(invalid_version.to_string().contains("5"));
+
+        let invalid_error_code = RtrError::InvalidErrorCode(100);
+        assert!(invalid_error_code
+            .to_string()
+            .contains("Invalid error code"));
+        assert!(invalid_error_code.to_string().contains("100"));
+
+        let invalid_length = RtrError::InvalidLength {
+            expected: 20,
+            actual: 15,
+            pdu_type: 4,
+        };
+        assert!(invalid_length.to_string().contains("Invalid length"));
+        assert!(invalid_length.to_string().contains("20"));
+        assert!(invalid_length.to_string().contains("15"));
+        assert!(invalid_length.to_string().contains("4"));
+
+        let invalid_prefix = RtrError::InvalidPrefixLength {
+            prefix_len: 25,
+            max_len: 24,
+            max_allowed: 32,
+        };
+        assert!(invalid_prefix.to_string().contains("Invalid prefix length"));
+        assert!(invalid_prefix.to_string().contains("25"));
+        assert!(invalid_prefix.to_string().contains("24"));
+        assert!(invalid_prefix.to_string().contains("32"));
+
+        let invalid_utf8 = RtrError::InvalidUtf8;
+        assert!(invalid_utf8.to_string().contains("Invalid UTF-8"));
+
+        let router_key_v0 = RtrError::RouterKeyInV0;
+        assert!(router_key_v0.to_string().contains("Router Key PDU"));
+        assert!(router_key_v0.to_string().contains("v0"));
+    }
+
+    #[test]
+    fn test_error_source() {
+        use std::error::Error;
+
+        // IoError should have a source
+        let io_err = RtrError::IoError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert!(io_err.source().is_some());
+
+        // Other errors should not have a source
+        let incomplete = RtrError::IncompletePdu {
+            available: 1,
+            needed: 2,
+        };
+        assert!(incomplete.source().is_none());
+
+        let invalid_type = RtrError::InvalidPduType(5);
+        assert!(invalid_type.source().is_none());
+
+        let invalid_utf8 = RtrError::InvalidUtf8;
+        assert!(invalid_utf8.source().is_none());
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout");
+        let rtr_err: RtrError = io_err.into();
+        assert!(matches!(rtr_err, RtrError::IoError(_)));
+    }
+
+    #[test]
+    fn test_read_rtr_pdu_short_length() {
+        use std::io::Cursor;
+
+        // PDU with length less than header size
+        let bytes = vec![
+            1, // version
+            2, // type (Reset Query)
+            0, 0, // zero
+            0, 0, 0, 4, // length = 4 (less than header)
+        ];
+        let mut cursor = Cursor::new(bytes);
+        let result = read_rtr_pdu(&mut cursor);
+        assert!(matches!(result, Err(RtrError::InvalidLength { .. })));
+    }
+
+    #[test]
+    fn test_parse_invalid_error_code() {
+        // Error Report with invalid error code
+        let bytes = vec![
+            1,  // version
+            10, // type (Error Report)
+            0, 100, // error code = 100 (invalid)
+            0, 0, 0, 16, // length = 16 (minimum)
+            0, 0, 0, 0, // encapsulated PDU length = 0
+            0, 0, 0, 0, // error text length = 0
+        ];
+        let result = parse_rtr_pdu(&bytes);
+        assert!(matches!(result, Err(RtrError::InvalidErrorCode(100))));
+    }
+
+    #[test]
+    fn test_parse_error_report_invalid_utf8() {
+        // Error Report with invalid UTF-8 in error text
+        let bytes = vec![
+            1,  // version
+            10, // type (Error Report)
+            0, 0, // error code = 0
+            0, 0, 0, 20, // length = 20
+            0, 0, 0, 0, // encapsulated PDU length = 0
+            0, 0, 0, 4, // error text length = 4
+            0xFF, 0xFE, 0xFF, 0xFE, // invalid UTF-8
+        ];
+        let result = parse_rtr_pdu(&bytes);
+        assert!(matches!(result, Err(RtrError::InvalidUtf8)));
+    }
+
+    #[test]
+    fn test_parse_error_report_truncated() {
+        // Error Report with encapsulated PDU length exceeding bounds
+        let bytes = vec![
+            1,  // version
+            10, // type (Error Report)
+            0, 0, // error code = 0
+            0, 0, 0, 16, // length = 16
+            0, 0, 0, 100, // encapsulated PDU length = 100 (too large)
+            0, 0, 0, 0, // error text length = 0
+        ];
+        let result = parse_rtr_pdu(&bytes);
+        assert!(matches!(result, Err(RtrError::InvalidLength { .. })));
+    }
+
+    #[test]
+    fn test_parse_router_key_empty_spki() {
+        // Router Key with no SPKI (minimum length)
+        let mut bytes = vec![
+            1, // version
+            9, // type (Router Key)
+            0, 0, // zero
+            0, 0, 0, 34, // length = 34 (minimum)
+            1,  // flags
+            0,  // zero
+        ];
+        bytes.extend_from_slice(&[0u8; 20]); // SKI
+        bytes.extend_from_slice(&[0, 0, 0, 1]); // ASN = 1
+
+        let (pdu, consumed) = parse_rtr_pdu(&bytes).unwrap();
+        assert_eq!(consumed, 34);
+        match pdu {
+            RtrPdu::RouterKey(k) => {
+                assert!(k.subject_public_key_info.is_empty());
+            }
+            _ => panic!("Expected RouterKey"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ipv6_invalid_max_length() {
+        // IPv6 prefix with max_len > 128
+        let mut bytes = vec![
+            1, // version
+            6, // type (IPv6 Prefix)
+            0, 0, // zero
+            0, 0, 0, 32,  // length
+            1,   // flags
+            64,  // prefix_length
+            129, // max_length (129) - INVALID: > 128 for IPv6
+            0,   // zero
+        ];
+        bytes.extend_from_slice(&[0u8; 16]); // prefix
+        bytes.extend_from_slice(&[0, 0, 0, 1]); // ASN
+
+        let result = parse_rtr_pdu(&bytes);
+        assert!(matches!(result, Err(RtrError::InvalidPrefixLength { .. })));
+    }
+
+    #[test]
+    fn test_encode_all_pdu_types_v0() {
+        // Test encoding v0 PDUs
+        let notify = RtrSerialNotify {
+            version: RtrProtocolVersion::V0,
+            session_id: 100,
+            serial_number: 200,
+        };
+        let bytes = notify.encode();
+        assert_eq!(bytes[0], 0); // version 0
+
+        let response = RtrCacheResponse {
+            version: RtrProtocolVersion::V0,
+            session_id: 300,
+        };
+        let bytes = response.encode();
+        assert_eq!(bytes[0], 0); // version 0
+
+        let reset = RtrCacheReset {
+            version: RtrProtocolVersion::V0,
+        };
+        let bytes = reset.encode();
+        assert_eq!(bytes[0], 0); // version 0
+
+        let prefix4 = RtrIPv4Prefix {
+            version: RtrProtocolVersion::V0,
+            flags: 0,
+            prefix_length: 16,
+            max_length: 24,
+            prefix: Ipv4Addr::new(172, 16, 0, 0),
+            asn: Asn::from(64512u32),
+        };
+        let bytes = prefix4.encode();
+        assert_eq!(bytes[0], 0); // version 0
+        assert_eq!(bytes.len(), 20);
+
+        let prefix6 = RtrIPv6Prefix {
+            version: RtrProtocolVersion::V0,
+            flags: 1,
+            prefix_length: 32,
+            max_length: 48,
+            prefix: Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0),
+            asn: Asn::from(64513u32),
+        };
+        let bytes = prefix6.encode();
+        assert_eq!(bytes[0], 0); // version 0
+        assert_eq!(bytes.len(), 32);
+    }
+
+    #[test]
+    fn test_read_multiple_pdus() {
+        use std::io::Cursor;
+
+        // Create buffer with two PDUs
+        let query1 = RtrResetQuery::new_v1();
+        let query2 = RtrSerialQuery::new(RtrProtocolVersion::V1, 100, 200);
+
+        let mut buffer = query1.encode();
+        buffer.extend(query2.encode());
+
+        let mut cursor = Cursor::new(buffer);
+
+        // Read first PDU
+        let pdu1 = read_rtr_pdu(&mut cursor).unwrap();
+        assert!(matches!(pdu1, RtrPdu::ResetQuery(_)));
+
+        // Read second PDU
+        let pdu2 = read_rtr_pdu(&mut cursor).unwrap();
+        assert!(matches!(pdu2, RtrPdu::SerialQuery(_)));
+    }
+
+    #[test]
+    fn test_parse_with_extra_bytes() {
+        // PDU followed by extra bytes - should only consume PDU length
+        let query = RtrResetQuery::new_v1();
+        let mut bytes = query.encode();
+        bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // extra bytes
+
+        let (pdu, consumed) = parse_rtr_pdu(&bytes).unwrap();
+        assert!(matches!(pdu, RtrPdu::ResetQuery(_)));
+        assert_eq!(consumed, 8); // Only consumed the PDU, not extra bytes
+    }
+
+    #[test]
+    fn test_error_report_with_pdu_and_text() {
+        // Full error report with both encapsulated PDU and error text
+        let error = RtrErrorReport {
+            version: RtrProtocolVersion::V1,
+            error_code: RtrErrorCode::CorruptData,
+            erroneous_pdu: vec![1, 2, 3, 4, 5, 6, 7, 8], // 8 bytes
+            error_text: "Something went wrong!".to_string(), // 21 bytes
+        };
+        let bytes = error.encode();
+
+        let (pdu, _) = parse_rtr_pdu(&bytes).unwrap();
+        match pdu {
+            RtrPdu::ErrorReport(e) => {
+                assert_eq!(e.error_code, RtrErrorCode::CorruptData);
+                assert_eq!(e.erroneous_pdu, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+                assert_eq!(e.error_text, "Something went wrong!");
+            }
+            _ => panic!("Expected ErrorReport"),
+        }
+    }
 }
