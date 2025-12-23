@@ -101,10 +101,12 @@ for elem in parser {
 - `elem_type`: Filter by announcement (`a`) or withdrawal (`w`)
 - `as_path`: Match AS path with regex
 
-**Negative filters**: All filters support negation by prefixing the filter type with `!`. For example:
+**Negative filters**: Most filters support negation by prefixing the filter type with `!`. For example:
 - `!origin_asn`: Match elements where origin AS is NOT the specified value
 - `!prefix`: Match elements where prefix is NOT the specified value
 - `!peer_ip`: Match elements where peer IP is NOT the specified value
+
+**Note**: Timestamp filters (`ts_start`, `ts_end`) do not support negation.
 
 ```rust
 use bgpkit_parser::BgpkitParser;

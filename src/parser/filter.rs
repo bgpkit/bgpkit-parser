@@ -17,10 +17,12 @@ The available filters are:
 
 ### Negative Filters
 
-All filters support negation by prefixing the filter type with `!`. For example:
+Most filters support negation by prefixing the filter type with `!`. For example:
 - `!origin_asn` -- matches elements where origin AS is NOT the specified value
 - `!prefix` -- matches elements where prefix is NOT the specified value
 - `!peer_ip` -- matches elements where peer IP is NOT the specified value
+
+**Note**: Timestamp filters (`ts_start`, `ts_end`) do not support negation as the behavior would be unintuitive.
 
 [Filter::new] function takes a `str` as the filter type and `str` as the filter value and returns a
 Result of a [Filter] or a parsing error.
@@ -64,7 +66,7 @@ for elem in parser {
 ```
 
 Note, by default, the prefix filtering is for the exact prefix. You can include super-prefixes or
-sub-prefixes when fitlering by using `"prefix_super"`, `"prefix_sub"`, or  `"prefix_super_sub"` as
+sub-prefixes when filtering by using `"prefix_super"`, `"prefix_sub"`, or  `"prefix_super_sub"` as
 the filter type string.
 
 ### Note
@@ -143,6 +145,24 @@ impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         // Check for negation prefix
         let (negated, actual_filter_type) = if let Some(stripped) = filter_type.strip_prefix('!') {
+            // Reject double negation (e.g., "!!origin_asn")
+            if stripped.starts_with('!') {
+                return Err(FilterError(format!(
+                    "invalid filter type '{}': double negation is not allowed",
+                    filter_type
+                )));
+            }
+            // Reject negation for timestamp filters (unintuitive behavior)
+            if stripped == "ts_start"
+                || stripped == "start_ts"
+                || stripped == "ts_end"
+                || stripped == "end_ts"
+            {
+                return Err(FilterError(format!(
+                    "invalid filter type '{}': timestamp filters do not support negation",
+                    filter_type
+                )));
+            }
             (true, stripped)
         } else {
             (false, filter_type)
@@ -940,5 +960,76 @@ mod tests {
         let filters = vec![Filter::new("!prefix", "190.115.192.0/22").unwrap()];
         let count_without_prefix = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_prefix + count_without_prefix, elems.len());
+
+        // Test negated prefix_super filter
+        let filters = vec![Filter::Prefix(
+            IpNet::from_str("190.115.192.0/24").unwrap(),
+            PrefixMatchType::IncludeSuper,
+        )];
+        let count_with_super = elems.iter().filter(|e| e.match_filters(&filters)).count();
+
+        let filters = vec![Filter::new("!prefix_super", "190.115.192.0/24").unwrap()];
+        let count_without_super = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_with_super + count_without_super, elems.len());
+
+        // Test negated prefix_sub filter
+        let filters = vec![Filter::Prefix(
+            IpNet::from_str("190.115.192.0/22").unwrap(),
+            PrefixMatchType::IncludeSub,
+        )];
+        let count_with_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
+
+        let filters = vec![Filter::new("!prefix_sub", "190.115.192.0/22").unwrap()];
+        let count_without_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_with_sub + count_without_sub, elems.len());
+
+        // Test negated prefix_super_sub filter
+        let filters = vec![Filter::Prefix(
+            IpNet::from_str("190.115.192.0/23").unwrap(),
+            PrefixMatchType::IncludeSuperSub,
+        )];
+        let count_with_super_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
+
+        let filters = vec![Filter::new("!prefix_super_sub", "190.115.192.0/23").unwrap()];
+        let count_without_super_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_with_super_sub + count_without_super_sub, elems.len());
+    }
+
+    #[test]
+    fn test_double_negation_rejected() {
+        // Double negation should be rejected with a clear error message
+        let result = Filter::new("!!origin_asn", "13335");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("double negation"));
+
+        let result = Filter::new("!!!prefix", "10.0.0.0/8");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("double negation"));
+    }
+
+    #[test]
+    fn test_timestamp_negation_rejected() {
+        // Timestamp filter negation should be rejected
+        let result = Filter::new("!ts_start", "1637437798");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("timestamp filters do not support negation"));
+
+        let result = Filter::new("!ts_end", "1637437798");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("timestamp filters do not support negation"));
+
+        let result = Filter::new("!start_ts", "1637437798");
+        assert!(result.is_err());
+
+        let result = Filter::new("!end_ts", "1637437798");
+        assert!(result.is_err());
     }
 }

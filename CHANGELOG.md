@@ -6,10 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
-* **Negative Filter Support**: All filters now support negation by prefixing the filter type with `!`
+* **Negative Filter Support**: Most filters now support negation by prefixing the filter type with `!`
   - `!origin_asn`: Match elements where origin AS is NOT the specified value
   - `!prefix`: Match elements where prefix is NOT the specified value
   - `!peer_ip`, `!peer_asn`, `!type`, `!as_path`, `!community`, `!ip_version`: All support negation
+  - Note: Timestamp filters (`ts_start`, `ts_end`) do not support negation
   - Example: `.add_filter("!origin_asn", "13335")` matches all elements NOT from AS 13335
   - New `Filter::Negated(Box<Filter>)` variant wraps any filter to invert its match result
   - **CLI**: New `--filter` / `-f` option supports both positive and negative filter expressions
