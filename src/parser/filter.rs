@@ -15,6 +15,13 @@ The available filters are:
 - `as_path` -- regular expression for AS path string
 - `ip_version` -- IP version (`ipv4` or `ipv6`)
 
+### Negative Filters
+
+All filters support negation by prefixing the filter type with `!`. For example:
+- `!origin_asn` -- matches elements where origin AS is NOT the specified value
+- `!prefix` -- matches elements where prefix is NOT the specified value
+- `!peer_ip` -- matches elements where peer IP is NOT the specified value
+
 [Filter::new] function takes a `str` as the filter type and `str` as the filter value and returns a
 Result of a [Filter] or a parsing error.
 
@@ -42,6 +49,20 @@ for elem in parser {
 log::info!("done");
 ```
 
+### Example with Negative Filter
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+
+// Filter out all elements from AS 13335 (Cloudflare)
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("!origin_asn", "13335").unwrap();
+
+for elem in parser {
+    println!("{}", elem);
+}
+```
+
 Note, by default, the prefix filtering is for the exact prefix. You can include super-prefixes or
 sub-prefixes when fitlering by using `"prefix_super"`, `"prefix_sub"`, or  `"prefix_super_sub"` as
 the filter type string.
@@ -60,7 +81,7 @@ use ipnet::IpNet;
 use std::net::IpAddr;
 use std::str::FromStr;
 
-/// Filter enum: definition o types of filters
+/// Filter enum: definition of types of filters
 ///
 /// The available filters are (`filter_type` (`FilterType`) -- definition):
 /// - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
@@ -73,6 +94,10 @@ use std::str::FromStr;
 /// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
 /// - `community` (`ComparableRegex`) -- regular expression for community string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
+///
+/// **Negative filters**: All filters support negation by prefixing the filter type with `!`.
+/// For example, `!origin_asn` matches elements where origin AS is NOT the specified value.
+/// This creates a `Negated(Box<Filter>)` variant that inverts the match result.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
@@ -86,6 +111,8 @@ pub enum Filter {
     TsEnd(f64),
     AsPath(ComparableRegex),
     Community(ComparableRegex),
+    /// Negated filter - matches when the inner filter does NOT match
+    Negated(Box<Filter>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +141,23 @@ fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
 
 impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
+        // Check for negation prefix
+        let (negated, actual_filter_type) = if let Some(stripped) = filter_type.strip_prefix('!') {
+            (true, stripped)
+        } else {
+            (false, filter_type)
+        };
+
+        let base_filter = Self::new_base(actual_filter_type, filter_value)?;
+
+        if negated {
+            Ok(Filter::Negated(Box::new(base_filter)))
+        } else {
+            Ok(base_filter)
+        }
+    }
+
+    fn new_base(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         match filter_type {
             "origin_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::OriginAsn(v)),
@@ -272,6 +316,7 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
 impl Filterable for BgpElem {
     fn match_filter(&self, filter: &Filter) -> bool {
         match filter {
+            Filter::Negated(inner) => !self.match_filter(inner),
             Filter::OriginAsn(v) => {
                 let asn: Asn = (*v).into();
                 if let Some(origins) = &self.origin_asns {
@@ -463,6 +508,34 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_iter_with_negation() -> Result<()> {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Test negative filter with add_filter - exclude peer 185.1.8.65
+        // From test_filters_on_mrt_file, peer 185.1.8.65 has 3393 elements out of 8160 total
+        let parser = BgpkitParser::new(url)?.add_filter("!peer_ip", "185.1.8.65")?;
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 8160 - 3393);
+
+        // Test negative type filter - get all non-withdrawals
+        // From test_filters_on_mrt_file, there are 379 withdrawals out of 8160 total
+        let parser = BgpkitParser::new(url)?.add_filter("!type", "w")?;
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 8160 - 379);
+
+        // Test combining positive and negative filters
+        // Get elements from peer 185.1.8.50 that are NOT withdrawals
+        let parser = BgpkitParser::new(url)?
+            .add_filter("peer_ip", "185.1.8.50")?
+            .add_filter("!type", "w")?;
+        let count = parser.into_elem_iter().count();
+        // peer 185.1.8.50 has 1563 total, 39 withdrawals -> 1563 - 39 = 1524 non-withdrawals
+        assert_eq!(count, 1563 - 39);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_filter_iter_multi_peers() {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url)
@@ -524,6 +597,42 @@ mod tests {
     fn test_filter_new() {
         let filter = Filter::new("origin_asn", "12345").unwrap();
         assert_eq!(filter, Filter::OriginAsn(12345));
+
+        // Test negated filters
+        let filter = Filter::new("!origin_asn", "12345").unwrap();
+        assert_eq!(filter, Filter::Negated(Box::new(Filter::OriginAsn(12345))));
+
+        let filter = Filter::new("!prefix", "192.168.1.0/24").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Negated(Box::new(Filter::Prefix(
+                IpNet::from_str("192.168.1.0/24").unwrap(),
+                PrefixMatchType::Exact
+            )))
+        );
+
+        let filter = Filter::new("!peer_ip", "192.168.1.1").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Negated(Box::new(Filter::PeerIp(
+                IpAddr::from_str("192.168.1.1").unwrap()
+            )))
+        );
+
+        let filter = Filter::new("!peer_asn", "12345").unwrap();
+        assert_eq!(filter, Filter::Negated(Box::new(Filter::PeerAsn(12345))));
+
+        let filter = Filter::new("!type", "w").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Negated(Box::new(Filter::Type(ElemType::WITHDRAW)))
+        );
+
+        let filter = Filter::new("!ip_version", "4").unwrap();
+        assert_eq!(
+            filter,
+            Filter::Negated(Box::new(Filter::IpVersion(IpVersion::Ipv4)))
+        );
 
         let filter = Filter::new("prefix", "192.168.1.0/24").unwrap();
         assert_eq!(
@@ -672,5 +781,164 @@ mod tests {
         assert!(elem.match_filter(&filter));
 
         assert!(elem.match_filters(&filters));
+    }
+
+    #[test]
+    fn test_negated_filters() {
+        let elem = BgpElem {
+            timestamp: 1637437798_f64,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: Asn::new_32bit(12345),
+            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
+            next_hop: None,
+            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
+            origin_asns: Some(vec![Asn::new_16bit(12345)]),
+            origin: None,
+            local_pref: None,
+            med: None,
+            communities: Some(vec![MetaCommunity::Large(LargeCommunity::new(
+                12345,
+                [678910, 111213],
+            ))]),
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: None,
+            unknown: None,
+            elem_type: ElemType::ANNOUNCE,
+            deprecated: None,
+        };
+
+        // Test negated origin_asn filter
+        // elem has origin_asn 12345, so !origin_asn=12345 should NOT match
+        let filter = Filter::new("!origin_asn", "12345").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has origin_asn 12345, so !origin_asn=99999 should match
+        let filter = Filter::new("!origin_asn", "99999").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated prefix filter
+        // elem has prefix 192.168.1.0/24, so !prefix=192.168.1.0/24 should NOT match
+        let filter = Filter::new("!prefix", "192.168.1.0/24").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has prefix 192.168.1.0/24, so !prefix=10.0.0.0/8 should match
+        let filter = Filter::new("!prefix", "10.0.0.0/8").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated peer_ip filter
+        // elem has peer_ip 192.168.1.1, so !peer_ip=192.168.1.1 should NOT match
+        let filter = Filter::new("!peer_ip", "192.168.1.1").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has peer_ip 192.168.1.1, so !peer_ip=10.0.0.1 should match
+        let filter = Filter::new("!peer_ip", "10.0.0.1").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated peer_asn filter
+        // elem has peer_asn 12345, so !peer_asn=12345 should NOT match
+        let filter = Filter::new("!peer_asn", "12345").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has peer_asn 12345, so !peer_asn=99999 should match
+        let filter = Filter::new("!peer_asn", "99999").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated type filter
+        // elem has type ANNOUNCE, so !type=a should NOT match
+        let filter = Filter::new("!type", "a").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has type ANNOUNCE, so !type=w should match
+        let filter = Filter::new("!type", "w").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated ip_version filter
+        // elem has IPv4 prefix, so !ip_version=4 should NOT match
+        let filter = Filter::new("!ip_version", "4").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has IPv4 prefix, so !ip_version=6 should match
+        let filter = Filter::new("!ip_version", "6").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated as_path filter
+        // elem has as_path "174 1916 52888", so negated matching regex should NOT match
+        let filter = Filter::new("!as_path", r"174 1916 52888$").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        // elem has as_path "174 1916 52888", so negated non-matching regex should match
+        let filter = Filter::new("!as_path", r"99999$").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated community filter
+        let filter = Filter::new("!community", r"12345:678910:111213$").unwrap();
+        assert!(!elem.match_filter(&filter));
+
+        let filter = Filter::new("!community", r"99999:99999$").unwrap();
+        assert!(elem.match_filter(&filter));
+
+        // Test negated peer_ips filter
+        let filter = Filter::new("!peer_ips", "192.168.1.1, 10.0.0.1").unwrap();
+        assert!(!elem.match_filter(&filter)); // elem's peer_ip is in the list
+
+        let filter = Filter::new("!peer_ips", "10.0.0.1, 10.0.0.2").unwrap();
+        assert!(elem.match_filter(&filter)); // elem's peer_ip is NOT in the list
+
+        // Test combining positive and negated filters
+        let filters = vec![
+            Filter::new("origin_asn", "12345").unwrap(),   // matches
+            Filter::new("!peer_asn", "99999").unwrap(),    // matches (not 99999)
+            Filter::new("!prefix", "10.0.0.0/8").unwrap(), // matches (not 10.0.0.0/8)
+        ];
+        assert!(elem.match_filters(&filters));
+
+        // Test combining filters where one fails
+        let filters = vec![
+            Filter::new("origin_asn", "12345").unwrap(),  // matches
+            Filter::new("!origin_asn", "12345").unwrap(), // does NOT match
+        ];
+        assert!(!elem.match_filters(&filters));
+    }
+
+    #[test]
+    fn test_negated_filters_on_mrt_file() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+        let parser = BgpkitParser::new(url).unwrap();
+        let elems = parser.into_elem_iter().collect::<Vec<BgpElem>>();
+
+        // Count all elems from peer 185.1.8.65
+        let filters = vec![Filter::PeerIp(IpAddr::from_str("185.1.8.65").unwrap())];
+        let count_with_peer = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_with_peer, 3393);
+
+        // Count all elems NOT from peer 185.1.8.65
+        let filters = vec![Filter::new("!peer_ip", "185.1.8.65").unwrap()];
+        let count_without_peer = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_without_peer, elems.len() - 3393);
+
+        // Verify total adds up
+        assert_eq!(count_with_peer + count_without_peer, elems.len());
+
+        // Test negated type filter
+        let filters = vec![Filter::Type(ElemType::WITHDRAW)];
+        let count_withdrawals = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_withdrawals, 379);
+
+        let filters = vec![Filter::new("!type", "w").unwrap()];
+        let count_not_withdrawals = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_not_withdrawals, elems.len() - 379);
+
+        // Test negated prefix filter
+        let filters = vec![Filter::Prefix(
+            IpNet::from_str("190.115.192.0/22").unwrap(),
+            PrefixMatchType::Exact,
+        )];
+        let count_with_prefix = elems.iter().filter(|e| e.match_filters(&filters)).count();
+
+        let filters = vec![Filter::new("!prefix", "190.115.192.0/22").unwrap()];
+        let count_without_prefix = elems.iter().filter(|e| e.match_filters(&filters)).count();
+        assert_eq!(count_with_prefix + count_without_prefix, elems.len());
     }
 }

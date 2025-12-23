@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
+* **Negative Filter Support**: All filters now support negation by prefixing the filter type with `!`
+  - `!origin_asn`: Match elements where origin AS is NOT the specified value
+  - `!prefix`: Match elements where prefix is NOT the specified value
+  - `!peer_ip`, `!peer_asn`, `!type`, `!as_path`, `!community`, `!ip_version`: All support negation
+  - Example: `.add_filter("!origin_asn", "13335")` matches all elements NOT from AS 13335
+  - New `Filter::Negated(Box<Filter>)` variant wraps any filter to invert its match result
+  - **CLI**: New `--filter` / `-f` option supports both positive and negative filter expressions
+    - Positive: `--filter "origin_asn=13335"`
+    - Negative: `--filter "origin_asn!=13335"`
+    - Can be used multiple times: `--filter "peer_ip!=192.168.1.1" --filter "type!=w"`
+
 * **RPKI RTR Protocol Support**: Add full support for the RPKI-to-Router (RTR) protocol
   - New `models::rpki::rtr` module with all PDU types: SerialNotify, SerialQuery, ResetQuery, CacheResponse, IPv4Prefix, IPv6Prefix, EndOfData, CacheReset, RouterKey, ErrorReport
   - New `parser::rpki::rtr` module with parsing (`parse_rtr_pdu`, `read_rtr_pdu`) and encoding (`RtrEncode` trait)

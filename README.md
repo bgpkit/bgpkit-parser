@@ -101,6 +101,23 @@ for elem in parser {
 - `elem_type`: Filter by announcement (`a`) or withdrawal (`w`)
 - `as_path`: Match AS path with regex
 
+**Negative filters**: All filters support negation by prefixing the filter type with `!`. For example:
+- `!origin_asn`: Match elements where origin AS is NOT the specified value
+- `!prefix`: Match elements where prefix is NOT the specified value
+- `!peer_ip`: Match elements where peer IP is NOT the specified value
+
+```rust
+use bgpkit_parser::BgpkitParser;
+
+// Filter out all elements from AS 13335 (get everything EXCEPT AS 13335)
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("!origin_asn", "13335").unwrap();
+
+for elem in parser {
+    println!("{}", elem);
+}
+```
+
 #### Parsing Multiple MRT Files with BGPKIT Broker
 
 [BGPKIT Broker][broker-repo] library provides search API for all RouteViews and RIPE RIS MRT data files. Using the
@@ -453,6 +470,7 @@ Options:
   -e, --elems-count              Count BGP elems
   -r, --records-count            Count MRT records
   -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
+  -f, --filter <FILTERS>         Generic filter expression (key=value or key!=value)
   -p, --prefix <PREFIX>          Filter by network prefix
   -4, --ipv4-only                Filter by IPv4 only
   -6, --ipv6-only                Filter by IPv6 only
@@ -505,6 +523,18 @@ bgpkit-parser -c ~/.bgpkit-cache http://example.com/updates.mrt.bz2
 ```bash
 # IPv4 announcements from AS13335
 bgpkit-parser -o 13335 -m a -4 updates.bz2
+```
+
+#### Negative filters (exclude matching elements)
+```bash
+# Exclude elements from AS 13335
+bgpkit-parser --filter "origin_asn!=13335" updates.bz2
+
+# Exclude a specific peer
+bgpkit-parser --filter "peer_ip!=192.168.1.1" updates.bz2
+
+# Combine positive and negative filters
+bgpkit-parser -o 13335 --filter "peer_asn!=64496" updates.bz2
 ```
 
 ## Data Representation

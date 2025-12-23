@@ -82,6 +82,13 @@ struct Filters {
     #[clap(short = 'o', long)]
     origin_asn: Option<u32>,
 
+    /// Generic filter expression (can be used multiple times)
+    /// Format: "key=value" for positive match, "key!=value" for negative match
+    /// Examples: --filter "origin_asn!=13335" --filter "peer_ip!=192.168.1.1"
+    /// Supported keys: origin_asn, prefix, peer_ip, peer_ips, peer_asn, type, as_path, community, ip_version
+    #[clap(short = 'f', long = "filter")]
+    filters: Vec<String>,
+
     /// Filter by network prefix
     #[clap(short = 'p', long)]
     prefix: Option<IpNet>,
@@ -194,6 +201,25 @@ fn main() {
         parser = parser.add_filter("end_ts", v.to_string().as_str()).unwrap();
     }
 
+    // Process generic filter expressions
+    for filter_expr in &opts.filters.filters {
+        match parse_filter_expression(filter_expr) {
+            Ok((filter_type, filter_value)) => {
+                parser = match parser.add_filter(&filter_type, &filter_value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("Error adding filter '{}': {}", filter_expr, e);
+                        std::process::exit(1);
+                    }
+                };
+            }
+            Err(e) => {
+                eprintln!("Invalid filter expression '{}': {}", filter_expr, e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     match (opts.filters.ipv4_only, opts.filters.ipv6_only) {
         (true, true) => {
             eprintln!("Error: --ipv4-only and --ipv6-only cannot be used together");
@@ -304,5 +330,37 @@ fn format_record(record: &bgpkit_parser::MrtRecord, format: OutputFormat) -> Str
             // Use the Display implementation for MrtRecord
             format!("{}", record)
         }
+    }
+}
+
+/// Parse a filter expression in the format "key=value" or "key!=value"
+/// Returns (filter_type, filter_value) where filter_type may be prefixed with "!" for negation
+fn parse_filter_expression(expr: &str) -> Result<(String, String), String> {
+    // Check for "!=" (negative filter) first
+    if let Some(pos) = expr.find("!=") {
+        let key = expr[..pos].trim();
+        let value = expr[pos + 2..].trim();
+        if key.is_empty() {
+            return Err("filter key cannot be empty".to_string());
+        }
+        if value.is_empty() {
+            return Err("filter value cannot be empty".to_string());
+        }
+        // Prefix with "!" to indicate negation
+        Ok((format!("!{}", key), value.to_string()))
+    }
+    // Check for "=" (positive filter)
+    else if let Some(pos) = expr.find('=') {
+        let key = expr[..pos].trim();
+        let value = expr[pos + 1..].trim();
+        if key.is_empty() {
+            return Err("filter key cannot be empty".to_string());
+        }
+        if value.is_empty() {
+            return Err("filter value cannot be empty".to_string());
+        }
+        Ok((key.to_string(), value.to_string()))
+    } else {
+        Err("filter expression must contain '=' or '!=' (e.g., 'origin_asn=13335' or 'origin_asn!=13335')".to_string())
     }
 }
