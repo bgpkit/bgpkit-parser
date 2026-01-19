@@ -1,23 +1,31 @@
 use crate::models::BgpModelsError;
+use crate::models::RouteDistinguisher;
 #[cfg(feature = "parser")]
 use bytes::{BufMut, Bytes, BytesMut};
 use ipnet::IpNet;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-/// A representation of a network prefix with an optional path ID.
+/// A representation of a network prefix with optional path ID and route distinguisher.
+///
+/// For VPN routes (SAFI 128), the `route_distinguisher` field contains the 8-byte RD
+/// that makes the prefix unique within the VPN context.
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct NetworkPrefix {
     pub prefix: IpNet,
     pub path_id: Option<u32>,
+    /// Route Distinguisher for VPN routes (SAFI 128) - RFC 4364
+    pub route_distinguisher: Option<RouteDistinguisher>,
 }
 
 // Attempt to reduce the size of the debug output
 impl Debug for NetworkPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.path_id {
-            Some(path_id) => write!(f, "{}#{}", self.prefix, path_id),
-            None => write!(f, "{}", self.prefix),
+        match (&self.route_distinguisher, self.path_id) {
+            (Some(rd), Some(path_id)) => write!(f, "{}:{}#{}", rd, self.prefix, path_id),
+            (Some(rd), None) => write!(f, "{}:{}", rd, self.prefix),
+            (None, Some(path_id)) => write!(f, "{}#{}", self.prefix, path_id),
+            (None, None) => write!(f, "{}", self.prefix),
         }
     }
 }
@@ -30,13 +38,31 @@ impl FromStr for NetworkPrefix {
         Ok(NetworkPrefix {
             prefix,
             path_id: None,
+            route_distinguisher: None,
         })
     }
 }
 
 impl NetworkPrefix {
     pub fn new(prefix: IpNet, path_id: Option<u32>) -> NetworkPrefix {
-        NetworkPrefix { prefix, path_id }
+        NetworkPrefix {
+            prefix,
+            path_id,
+            route_distinguisher: None,
+        }
+    }
+
+    /// Create a new VPN prefix with a route distinguisher
+    pub fn new_vpn(
+        prefix: IpNet,
+        path_id: Option<u32>,
+        route_distinguisher: RouteDistinguisher,
+    ) -> NetworkPrefix {
+        NetworkPrefix {
+            prefix,
+            path_id,
+            route_distinguisher: Some(route_distinguisher),
+        }
     }
 
     #[cfg(feature = "parser")]
@@ -99,13 +125,26 @@ impl Display for NetworkPrefix {
 #[cfg(feature = "serde")]
 mod serde_impl {
     use super::*;
+    use crate::models::RouteDistinguisher;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     #[derive(Serialize, Deserialize)]
     #[serde(untagged, deny_unknown_fields)]
     enum SerdeNetworkPrefixRepr {
         PlainPrefix(IpNet),
-        WithPathId { prefix: IpNet, path_id: u32 },
+        WithPathId {
+            prefix: IpNet,
+            path_id: u32,
+        },
+        WithRd {
+            prefix: IpNet,
+            route_distinguisher: RouteDistinguisher,
+        },
+        WithPathIdAndRd {
+            prefix: IpNet,
+            path_id: u32,
+            route_distinguisher: RouteDistinguisher,
+        },
     }
 
     impl Serialize for NetworkPrefix {
@@ -113,13 +152,24 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            match self.path_id {
-                Some(path_id) => SerdeNetworkPrefixRepr::WithPathId {
+            match (self.path_id, &self.route_distinguisher) {
+                (Some(path_id), Some(rd)) => SerdeNetworkPrefixRepr::WithPathIdAndRd {
+                    prefix: self.prefix,
+                    path_id,
+                    route_distinguisher: *rd,
+                }
+                .serialize(serializer),
+                (Some(path_id), None) => SerdeNetworkPrefixRepr::WithPathId {
                     prefix: self.prefix,
                     path_id,
                 }
                 .serialize(serializer),
-                None => self.prefix.serialize(serializer),
+                (None, Some(rd)) => SerdeNetworkPrefixRepr::WithRd {
+                    prefix: self.prefix,
+                    route_distinguisher: *rd,
+                }
+                .serialize(serializer),
+                (None, None) => self.prefix.serialize(serializer),
             }
         }
     }
@@ -133,10 +183,29 @@ mod serde_impl {
                 SerdeNetworkPrefixRepr::PlainPrefix(prefix) => Ok(NetworkPrefix {
                     prefix,
                     path_id: None,
+                    route_distinguisher: None,
                 }),
                 SerdeNetworkPrefixRepr::WithPathId { prefix, path_id } => Ok(NetworkPrefix {
                     prefix,
                     path_id: Some(path_id),
+                    route_distinguisher: None,
+                }),
+                SerdeNetworkPrefixRepr::WithRd {
+                    prefix,
+                    route_distinguisher,
+                } => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: None,
+                    route_distinguisher: Some(route_distinguisher),
+                }),
+                SerdeNetworkPrefixRepr::WithPathIdAndRd {
+                    prefix,
+                    path_id,
+                    route_distinguisher,
+                } => Ok(NetworkPrefix {
+                    prefix,
+                    path_id: Some(path_id),
+                    route_distinguisher: Some(route_distinguisher),
                 }),
             }
         }

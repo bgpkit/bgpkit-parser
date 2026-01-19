@@ -1,11 +1,13 @@
 mod geo_peer_table;
 mod peer_index_table;
 mod rib_afi_entries;
+mod rib_generic_entries;
 
 use crate::error::ParserError;
 use crate::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table;
 use crate::messages::table_dump_v2::peer_index_table::parse_peer_index_table;
 use crate::messages::table_dump_v2::rib_afi_entries::parse_rib_afi_entries;
+use crate::messages::table_dump_v2::rib_generic_entries::parse_rib_generic_entries;
 use crate::models::*;
 #[cfg(test)]
 use bytes::BufMut;
@@ -46,10 +48,11 @@ pub fn parse_table_dump_v2_message(
         | TableDumpV2Type::RibIpv6MulticastAddPath => {
             TableDumpV2Message::RibAfi(parse_rib_afi_entries(&mut input, v2_type)?)
         }
-        TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => {
-            return Err(ParserError::Unsupported(
-                "TableDumpV2 RibGeneric is not currently supported".to_string(),
-            ))
+        TableDumpV2Type::RibGeneric => {
+            TableDumpV2Message::RibGeneric(parse_rib_generic_entries(&mut input, false)?)
+        }
+        TableDumpV2Type::RibGenericAddPath => {
+            TableDumpV2Message::RibGeneric(parse_rib_generic_entries(&mut input, true)?)
         }
         TableDumpV2Type::GeoPeerTable => {
             TableDumpV2Message::GeoPeerTable(parse_geo_peer_table(&mut input)?)
@@ -64,13 +67,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_unsupported_type() {
-        // Test RibGeneric (subtype 6) - should be unsupported
-        let msg = parse_table_dump_v2_message(6, Bytes::new());
-        assert!(msg.is_err());
+    fn test_rib_generic_vpn_parsing() {
+        // Test RibGeneric (subtype 6) with VPN NLRI
+        let mut bytes = bytes::BytesMut::new();
 
-        // Test RibGenericAddPath (subtype 13) - should be unsupported
-        let msg = parse_table_dump_v2_message(13, Bytes::new());
+        // Sequence number
+        bytes.put_u32(1);
+
+        // AFI (IPv4 = 1)
+        bytes.put_u16(1);
+
+        // SAFI (MplsVpn = 128)
+        bytes.put_u8(128);
+
+        // VPN NLRI: length + label + RD + prefix
+        // For a /24 prefix: 24 (label) + 64 (RD) + 24 (prefix) = 112 bits
+        bytes.put_u8(112); // Total bit length
+
+        // MPLS label (3 bytes)
+        bytes.put_u8(0x00);
+        bytes.put_u8(0x00);
+        bytes.put_u8(0x01);
+
+        // Route Distinguisher (8 bytes)
+        bytes.put_u64(0x0001FDE900000064); // Type 1: ASN 65001, Value 100
+
+        // Prefix (3 bytes for /24)
+        bytes.put_u8(10);
+        bytes.put_u8(0);
+        bytes.put_u8(0);
+
+        // Entry count
+        bytes.put_u16(0);
+
+        let bytes = bytes.freeze();
+        let result = parse_table_dump_v2_message(6, bytes);
+        assert!(result.is_ok());
+
+        if let Ok(TableDumpV2Message::RibGeneric(entries)) = result {
+            assert_eq!(entries.sequence_number, 1);
+            assert_eq!(entries.afi, Afi::Ipv4);
+            assert_eq!(entries.safi, Safi::MplsVpn);
+            assert!(entries.nlri.route_distinguisher.is_some());
+        } else {
+            panic!("Expected RibGeneric message");
+        }
+    }
+
+    #[test]
+    fn test_rib_generic_truncated() {
+        // Test RibGeneric with truncated data - should fail
+        let msg = parse_table_dump_v2_message(6, Bytes::new());
         assert!(msg.is_err());
     }
 

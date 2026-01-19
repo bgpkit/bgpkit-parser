@@ -144,6 +144,9 @@ pub struct BgpElem {
     /// The aggregated IP address of the item, represented as an optional [BgpIdentifier], i.e. `Ipv4Addr`.
     pub aggr_ip: Option<BgpIdentifier>,
     pub only_to_customer: Option<Asn>,
+    /// Route Distinguisher for VPN routes (SAFI 128) - RFC 4364
+    /// This is duplicated from `prefix.route_distinguisher` for convenience.
+    pub route_distinguisher: Option<RouteDistinguisher>,
     /// unknown attributes formatted as (TYPE, RAW_BYTES)
     pub unknown: Option<Vec<AttrRaw>>,
     /// deprecated attributes formatted as (TYPE, RAW_BYTES)
@@ -186,6 +189,7 @@ impl Default for BgpElem {
             aggr_asn: None,
             aggr_ip: None,
             only_to_customer: None,
+            route_distinguisher: None,
             unknown: None,
             deprecated: None,
         }

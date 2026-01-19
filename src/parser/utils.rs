@@ -210,6 +210,93 @@ pub trait ReadUtils: Buf {
         Ok(NetworkPrefix::new(prefix, path_id))
     }
 
+    /// Read VPN NLRI prefix (SAFI 128 - MPLS VPN).
+    ///
+    /// VPN NLRI format per RFC 4364:
+    /// - Label (3 octets / 24 bits)
+    /// - Route Distinguisher (8 octets / 64 bits)
+    /// - IP prefix (variable)
+    ///
+    /// The `bit_len` parameter is the total length in bits including label + RD + prefix.
+    fn read_vpn_nlri_prefix(
+        &mut self,
+        afi: &Afi,
+        add_path: bool,
+    ) -> Result<NetworkPrefix, ParserError> {
+        let path_id = if add_path {
+            Some(self.read_u32()?)
+        } else {
+            None
+        };
+
+        // Total length in bits (includes label + RD + prefix)
+        let total_bit_len = self.read_u8()? as usize;
+
+        // Label is 24 bits (3 bytes), RD is 64 bits (8 bytes)
+        // VPN prefix length = total_bit_len - 24 (label) - 64 (RD)
+        let vpn_overhead_bits = 24 + 64; // 88 bits
+        if total_bit_len < vpn_overhead_bits {
+            return Err(ParserError::ParseError(format!(
+                "Invalid VPN NLRI length: {total_bit_len} bits is less than minimum {vpn_overhead_bits} bits"
+            )));
+        }
+
+        // Read the 3-byte MPLS label (we skip it for now, but could extract it later)
+        self.has_n_remaining(3)?;
+        let _label_bytes = [self.get_u8(), self.get_u8(), self.get_u8()];
+
+        // Read the 8-byte Route Distinguisher
+        self.has_n_remaining(8)?;
+        let mut rd_bytes = [0u8; 8];
+        self.copy_to_slice(&mut rd_bytes);
+        let rd = RouteDistinguisher(rd_bytes);
+
+        // Calculate the actual IP prefix length
+        let prefix_bit_len = (total_bit_len - vpn_overhead_bits) as u8;
+        let prefix_byte_len = (prefix_bit_len as usize).div_ceil(8);
+
+        let addr: IpAddr = match afi {
+            Afi::Ipv4 => {
+                if prefix_byte_len > 4 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid VPN IPv4 prefix byte length: {prefix_byte_len}"
+                    )));
+                }
+                self.has_n_remaining(prefix_byte_len)?;
+                let mut buff = [0; 4];
+                self.copy_to_slice(&mut buff[..prefix_byte_len]);
+                IpAddr::V4(Ipv4Addr::from(buff))
+            }
+            Afi::Ipv6 => {
+                if prefix_byte_len > 16 {
+                    return Err(ParserError::ParseError(format!(
+                        "Invalid VPN IPv6 prefix byte length: {prefix_byte_len}"
+                    )));
+                }
+                self.has_n_remaining(prefix_byte_len)?;
+                let mut buff = [0; 16];
+                self.copy_to_slice(&mut buff[..prefix_byte_len]);
+                IpAddr::V6(Ipv6Addr::from(buff))
+            }
+            Afi::LinkState => {
+                return Err(ParserError::ParseError(
+                    "LinkState AFI not supported for VPN NLRI".to_string(),
+                ));
+            }
+        };
+
+        let prefix = match IpNet::new(addr, prefix_bit_len) {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(ParserError::ParseError(format!(
+                    "Invalid VPN network prefix length: {prefix_bit_len}"
+                )))
+            }
+        };
+
+        Ok(NetworkPrefix::new_vpn(prefix, path_id, rd))
+    }
+
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
         self.has_n_remaining(n_bytes)?;
         Ok(self.copy_to_bytes(n_bytes).into())
