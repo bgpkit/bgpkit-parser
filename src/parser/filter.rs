@@ -175,6 +175,10 @@ fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
 fn parse_asn_list(filter_value: &str) -> Result<Vec<u32>, ParserError> {
     let mut asns = vec![];
     for asn_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if asn_str.is_empty() {
+            continue;
+        }
         match u32::from_str(asn_str) {
             Ok(v) => asns.push(v),
             Err(_) => {
@@ -184,12 +188,22 @@ fn parse_asn_list(filter_value: &str) -> Result<Vec<u32>, ParserError> {
             }
         }
     }
+    // Validate that at least one ASN was provided
+    if asns.is_empty() {
+        return Err(FilterError(
+            "ASN list filter requires at least one ASN".to_string()
+        ));
+    }
     Ok(asns)
 }
 
 fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
     let mut prefixes = vec![];
     for prefix_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if prefix_str.is_empty() {
+            continue;
+        }
         match IpNet::from_str(prefix_str) {
             Ok(v) => prefixes.push(v),
             Err(_) => {
@@ -198,6 +212,12 @@ fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
                 )))
             }
         }
+    }
+    // Validate that at least one prefix was provided
+    if prefixes.is_empty() {
+        return Err(FilterError(
+            "prefix list filter requires at least one prefix".to_string()
+        ));
     }
     Ok(prefixes)
 }
@@ -1249,6 +1269,34 @@ mod tests {
         // Test invalid peer ASN in list
         let result = Filter::new("peer_asns", "12345,invalid,67890");
         assert!(result.is_err());
+
+        // Test empty ASN list
+        let result = Filter::new("origin_asns", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one ASN"));
+
+        // Test empty prefix list
+        let result = Filter::new("prefixes", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+
+        // Test only commas in ASN list (should error after filtering empty strings)
+        let result = Filter::new("origin_asns", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one ASN"));
+
+        // Test only commas in prefix list
+        let result = Filter::new("prefixes", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+
+        // Test trailing commas (should still work by skipping empty strings)
+        let result = Filter::new("origin_asns", "12345,67890,");
+        assert!(result.is_ok());
+
+        // Test consecutive commas (should still work by skipping empty strings)
+        let result = Filter::new("origin_asns", "12345,,67890");
+        assert!(result.is_ok());
     }
 
     #[test]
