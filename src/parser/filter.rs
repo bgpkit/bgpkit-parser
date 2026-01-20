@@ -116,7 +116,7 @@ use std::str::FromStr;
 /// - `prefix(_super, _sub, _super_sub)` (`Prefix(IpNet, PrefixMatchType)`) -- network prefix and match type
 /// - `prefixes(_super, _sub, _super_sub)` (`Prefixes(Vec<IpNet>, PrefixMatchType)`) -- multiple network prefixes (OR logic)
 /// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
-/// - `peer_ips` (`Vec<PeerIp(IpAddr)>`) -- peers' IP addresses
+/// - `peer_ips` (`PeerIps(Vec<IpAddr>)`) -- peers' IP addresses (OR logic)
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's AS number
 /// - `peer_asns` (`PeerAsns(Vec<u32>)`) -- multiple peer AS numbers (OR logic)
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
