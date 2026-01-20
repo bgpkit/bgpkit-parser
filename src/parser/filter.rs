@@ -117,7 +117,7 @@ use std::str::FromStr;
 /// - `prefixes(_super, _sub, _super_sub)` (`Prefixes(Vec<IpNet>, PrefixMatchType)`) -- multiple network prefixes (OR logic)
 /// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
 /// - `peer_ips` (`Vec<PeerIp(IpAddr)>`) -- peers' IP addresses
-/// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
+/// - `peer_asn` (`PeerAsn(u32)`) -- peer's AS number
 /// - `peer_asns` (`PeerAsns(Vec<u32>)`) -- multiple peer AS numbers (OR logic)
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
@@ -222,6 +222,31 @@ fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
     Ok(prefixes)
 }
 
+fn parse_ip_list(filter_value: &str) -> Result<Vec<IpAddr>, ParserError> {
+    let mut ips = vec![];
+    for ip_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if ip_str.is_empty() {
+            continue;
+        }
+        match IpAddr::from_str(ip_str) {
+            Ok(v) => ips.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse IP address from {ip_str}"
+                )))
+            }
+        }
+    }
+    // Validate that at least one IP was provided
+    if ips.is_empty() {
+        return Err(FilterError(
+            "IP list filter requires at least one IP address".to_string()
+        ));
+    }
+    Ok(ips)
+}
+
 impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         // Check for negation prefix
@@ -301,18 +326,7 @@ impl Filter {
                     "cannot parse peer IP from {filter_value}"
                 ))),
             },
-            "peer_ips" => {
-                let mut ips = vec![];
-                for ip_str in filter_value.replace(' ', "").split(',') {
-                    match IpAddr::from_str(ip_str) {
-                        Ok(v) => ips.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!("cannot parse peer IP from {ip_str}")))
-                        }
-                    }
-                }
-                Ok(Filter::PeerIps(ips))
-            }
+            "peer_ips" => Ok(Filter::PeerIps(parse_ip_list(filter_value)?)),
             "peer_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerAsn(v)),
                 Err(_) => Err(FilterError(format!(
@@ -1270,6 +1284,10 @@ mod tests {
         let result = Filter::new("peer_asns", "12345,invalid,67890");
         assert!(result.is_err());
 
+        // Test invalid peer IP in list
+        let result = Filter::new("peer_ips", "192.168.1.1,invalid_ip");
+        assert!(result.is_err());
+
         // Test empty ASN list
         let result = Filter::new("origin_asns", "");
         assert!(result.is_err());
@@ -1279,6 +1297,11 @@ mod tests {
         let result = Filter::new("prefixes", "");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+
+        // Test empty IP list
+        let result = Filter::new("peer_ips", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one IP"));
 
         // Test only commas in ASN list (should error after filtering empty strings)
         let result = Filter::new("origin_asns", ",,,");
@@ -1290,12 +1313,21 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("at least one prefix"));
 
+        // Test only commas in IP list
+        let result = Filter::new("peer_ips", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one IP"));
+
         // Test trailing commas (should still work by skipping empty strings)
         let result = Filter::new("origin_asns", "12345,67890,");
         assert!(result.is_ok());
 
         // Test consecutive commas (should still work by skipping empty strings)
         let result = Filter::new("origin_asns", "12345,,67890");
+        assert!(result.is_ok());
+
+        // Test trailing commas for peer IPs
+        let result = Filter::new("peer_ips", "192.168.1.1,192.168.1.2,");
         assert!(result.is_ok());
     }
 
