@@ -172,6 +172,36 @@ fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
     None
 }
 
+fn parse_asn_list(filter_value: &str) -> Result<Vec<u32>, ParserError> {
+    let mut asns = vec![];
+    for asn_str in filter_value.replace(' ', "").split(',') {
+        match u32::from_str(asn_str) {
+            Ok(v) => asns.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse ASN from {asn_str}"
+                )))
+            }
+        }
+    }
+    Ok(asns)
+}
+
+fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
+    let mut prefixes = vec![];
+    for prefix_str in filter_value.replace(' ', "").split(',') {
+        match IpNet::from_str(prefix_str) {
+            Ok(v) => prefixes.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse prefix from {prefix_str}"
+                )))
+            }
+        }
+    }
+    Ok(prefixes)
+}
+
 impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
         // Check for negation prefix
@@ -216,20 +246,7 @@ impl Filter {
                     "cannot parse origin asn from {filter_value}"
                 ))),
             },
-            "origin_asns" => {
-                let mut asns = vec![];
-                for asn_str in filter_value.replace(' ', "").split(',') {
-                    match u32::from_str(asn_str) {
-                        Ok(v) => asns.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse origin asn from {asn_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::OriginAsns(asns))
-            }
+            "origin_asns" => Ok(Filter::OriginAsns(parse_asn_list(filter_value)?)),
             "prefix" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::Exact)),
                 Err(_) => Err(FilterError(format!(
@@ -254,62 +271,10 @@ impl Filter {
                     "cannot parse prefix from {filter_value}"
                 ))),
             },
-            "prefixes" => {
-                let mut prefixes = vec![];
-                for prefix_str in filter_value.replace(' ', "").split(',') {
-                    match IpNet::from_str(prefix_str) {
-                        Ok(v) => prefixes.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse prefix from {prefix_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::Prefixes(prefixes, PrefixMatchType::Exact))
-            }
-            "prefixes_super" => {
-                let mut prefixes = vec![];
-                for prefix_str in filter_value.replace(' ', "").split(',') {
-                    match IpNet::from_str(prefix_str) {
-                        Ok(v) => prefixes.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse prefix from {prefix_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::Prefixes(prefixes, PrefixMatchType::IncludeSuper))
-            }
-            "prefixes_sub" => {
-                let mut prefixes = vec![];
-                for prefix_str in filter_value.replace(' ', "").split(',') {
-                    match IpNet::from_str(prefix_str) {
-                        Ok(v) => prefixes.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse prefix from {prefix_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::Prefixes(prefixes, PrefixMatchType::IncludeSub))
-            }
-            "prefixes_super_sub" => {
-                let mut prefixes = vec![];
-                for prefix_str in filter_value.replace(' ', "").split(',') {
-                    match IpNet::from_str(prefix_str) {
-                        Ok(v) => prefixes.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse prefix from {prefix_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::Prefixes(prefixes, PrefixMatchType::IncludeSuperSub))
-            }
+            "prefixes" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::Exact)),
+            "prefixes_super" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuper)),
+            "prefixes_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSub)),
+            "prefixes_super_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuperSub)),
             "peer_ip" => match IpAddr::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerIp(v)),
                 Err(_) => Err(FilterError(format!(
@@ -334,20 +299,7 @@ impl Filter {
                     "cannot parse peer asn from {filter_value}"
                 ))),
             },
-            "peer_asns" => {
-                let mut asns = vec![];
-                for asn_str in filter_value.replace(' ', "").split(',') {
-                    match u32::from_str(asn_str) {
-                        Ok(v) => asns.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!(
-                                "cannot parse peer asn from {asn_str}"
-                            )))
-                        }
-                    }
-                }
-                Ok(Filter::PeerAsns(asns))
-            }
+            "peer_asns" => Ok(Filter::PeerAsns(parse_asn_list(filter_value)?)),
             "type" => match filter_value {
                 "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
                 "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
