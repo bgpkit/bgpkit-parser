@@ -85,7 +85,8 @@ struct Filters {
     /// Generic filter expression (can be used multiple times)
     /// Format: "key=value" for positive match, "key!=value" for negative match
     /// Examples: --filter "origin_asn!=13335" --filter "peer_ip!=192.168.1.1"
-    /// Supported keys: origin_asn, prefix, peer_ip, peer_ips, peer_asn, type, as_path, community, ip_version
+    /// For multi-value filters: --filter "origin_asns!=13335,15169" excludes both ASNs
+    /// Supported keys: origin_asn, origin_asns, prefix, prefixes, peer_ip, peer_ips, peer_asn, peer_asns, type, as_path, community, ip_version
     #[clap(short = 'f', long = "filter")]
     filters: Vec<String>,
 
@@ -334,8 +335,22 @@ fn format_record(record: &bgpkit_parser::MrtRecord, format: OutputFormat) -> Str
 }
 
 /// Parse a filter expression in the format "key=value" or "key!=value"
-/// Returns (filter_type, filter_value) where filter_type may be prefixed with "!" for negation
+/// Returns (filter_type, filter_value) where filter_value may be prefixed with "!" for negation
+///
+/// For multi-value filters (e.g., "origin_asns!=13335,15169"), the negation is distributed
+/// to each value: ("origin_asns", "!13335,!15169")
 fn parse_filter_expression(expr: &str) -> Result<(String, String), String> {
+    // Multi-value filter types that support comma-separated values
+    let multi_value_filters = [
+        "origin_asns",
+        "prefixes",
+        "prefixes_super",
+        "prefixes_sub",
+        "prefixes_super_sub",
+        "peer_ips",
+        "peer_asns",
+    ];
+
     // Check for "!=" (negative filter) first
     if let Some(pos) = expr.find("!=") {
         let key = expr[..pos].trim();
@@ -346,8 +361,16 @@ fn parse_filter_expression(expr: &str) -> Result<(String, String), String> {
         if value.is_empty() {
             return Err("filter value cannot be empty".to_string());
         }
-        // Prefix with "!" to indicate negation
-        Ok((format!("!{}", key), value.to_string()))
+
+        // For multi-value filters, prefix each value with "!"
+        if multi_value_filters.contains(&key) {
+            let negated_values: Vec<String> =
+                value.split(',').map(|v| format!("!{}", v.trim())).collect();
+            Ok((key.to_string(), negated_values.join(",")))
+        } else {
+            // For single-value filters, prefix the value with "!"
+            Ok((key.to_string(), format!("!{}", value)))
+        }
     }
     // Check for "=" (positive filter)
     else if let Some(pos) = expr.find('=') {

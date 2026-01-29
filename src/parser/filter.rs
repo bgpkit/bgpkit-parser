@@ -20,10 +20,14 @@ The available filters are:
 
 ### Negative Filters
 
-Most filters support negation by prefixing the filter type with `!`. For example:
-- `!origin_asn` -- matches elements where origin AS is NOT the specified value
-- `!prefix` -- matches elements where prefix is NOT the specified value
-- `!peer_ip` -- matches elements where peer IP is NOT the specified value
+Most filters support negation by prefixing the filter value with `!`. For example:
+- `origin_asn=!13335` -- matches elements where origin AS is NOT 13335
+- `prefix=!10.0.0.0/8` -- matches elements where prefix is NOT 10.0.0.0/8
+- `peer_ip=!192.168.1.1` -- matches elements where peer IP is NOT 192.168.1.1
+
+For multi-value filters, you can negate all values:
+- `origin_asns=!13335,!15169` -- matches elements where origin AS is NOT 13335 AND NOT 15169
+- Mixing positive and negative values in the same filter is not allowed
 
 **Note**: Timestamp filters (`ts_start`, `ts_end`) do not support negation as the behavior would be unintuitive.
 
@@ -61,7 +65,7 @@ use bgpkit_parser::BgpkitParser;
 
 // Filter out all elements from AS 13335 (Cloudflare)
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-    .add_filter("!origin_asn", "13335").unwrap();
+    .add_filter("origin_asn", "!13335").unwrap();
 
 for elem in parser {
     println!("{}", elem);
@@ -76,6 +80,14 @@ use bgpkit_parser::BgpkitParser;
 // Filter elements from multiple origin ASNs (matches ANY of the specified ASNs)
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
     .add_filter("origin_asns", "13335,15169,8075").unwrap();
+
+for elem in parser {
+    println!("{}", elem);
+}
+
+// Filter elements NOT from these ASNs (matches if NOT ANY of the specified ASNs)
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("origin_asns", "!13335,!15169,!8075").unwrap();
 
 for elem in parser {
     println!("{}", elem);
@@ -125,8 +137,8 @@ use std::str::FromStr;
 /// - `community` (`ComparableRegex`) -- regular expression for community string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
 ///
-/// **Negative filters**: All filters support negation by prefixing the filter type with `!`.
-/// For example, `!origin_asn` matches elements where origin AS is NOT the specified value.
+/// **Negative filters**: Most filters support negation by prefixing the filter value with `!`.
+/// For example, `origin_asn=!13335` matches elements where origin AS is NOT 13335.
 /// This creates a `Negated(Box<Filter>)` variant that inverts the match result.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
@@ -172,43 +184,79 @@ fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
     None
 }
 
-fn parse_asn_list(filter_value: &str) -> Result<Vec<u32>, ParserError> {
+fn parse_asn_list(filter_value: &str) -> Result<(Vec<u32>, bool), ParserError> {
     let mut asns = vec![];
+    let mut all_negated: Option<bool> = None;
+
     for asn_str in filter_value.replace(' ', "").split(',') {
         // Skip empty strings (from consecutive or trailing commas)
         if asn_str.is_empty() {
             continue;
         }
-        match u32::from_str(asn_str) {
-            Ok(v) => asns.push(v),
-            Err(_) => {
-                return Err(FilterError(format!(
-                    "cannot parse ASN from {asn_str}"
-                )))
+
+        let (is_negated, actual_value) = if let Some(stripped) = asn_str.strip_prefix('!') {
+            (true, stripped)
+        } else {
+            (false, asn_str)
+        };
+
+        // Check for mixed positive/negative values
+        match all_negated {
+            None => all_negated = Some(is_negated),
+            Some(prev) if prev != is_negated => {
+                return Err(FilterError(
+                    "cannot mix positive and negative values in the same filter".to_string(),
+                ));
             }
+            _ => {}
+        }
+
+        match u32::from_str(actual_value) {
+            Ok(v) => asns.push(v),
+            Err(_) => return Err(FilterError(format!("cannot parse ASN from {actual_value}"))),
         }
     }
     // Validate that at least one ASN was provided
     if asns.is_empty() {
         return Err(FilterError(
-            "ASN list filter requires at least one ASN".to_string()
+            "ASN list filter requires at least one ASN".to_string(),
         ));
     }
-    Ok(asns)
+    Ok((asns, all_negated.unwrap_or(false)))
 }
 
-fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
+fn parse_prefix_list(filter_value: &str) -> Result<(Vec<IpNet>, bool), ParserError> {
     let mut prefixes = vec![];
+    let mut all_negated: Option<bool> = None;
+
     for prefix_str in filter_value.replace(' ', "").split(',') {
         // Skip empty strings (from consecutive or trailing commas)
         if prefix_str.is_empty() {
             continue;
         }
-        match IpNet::from_str(prefix_str) {
+
+        let (is_negated, actual_value) = if let Some(stripped) = prefix_str.strip_prefix('!') {
+            (true, stripped)
+        } else {
+            (false, prefix_str)
+        };
+
+        // Check for mixed positive/negative values
+        match all_negated {
+            None => all_negated = Some(is_negated),
+            Some(prev) if prev != is_negated => {
+                return Err(FilterError(
+                    "cannot mix positive and negative values in the same filter".to_string(),
+                ));
+            }
+            _ => {}
+        }
+
+        match IpNet::from_str(actual_value) {
             Ok(v) => prefixes.push(v),
             Err(_) => {
                 return Err(FilterError(format!(
-                    "cannot parse prefix from {prefix_str}"
+                    "cannot parse prefix from {actual_value}"
                 )))
             }
         }
@@ -216,24 +264,44 @@ fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
     // Validate that at least one prefix was provided
     if prefixes.is_empty() {
         return Err(FilterError(
-            "prefix list filter requires at least one prefix".to_string()
+            "prefix list filter requires at least one prefix".to_string(),
         ));
     }
-    Ok(prefixes)
+    Ok((prefixes, all_negated.unwrap_or(false)))
 }
 
-fn parse_ip_list(filter_value: &str) -> Result<Vec<IpAddr>, ParserError> {
+fn parse_ip_list(filter_value: &str) -> Result<(Vec<IpAddr>, bool), ParserError> {
     let mut ips = vec![];
+    let mut all_negated: Option<bool> = None;
+
     for ip_str in filter_value.replace(' ', "").split(',') {
         // Skip empty strings (from consecutive or trailing commas)
         if ip_str.is_empty() {
             continue;
         }
-        match IpAddr::from_str(ip_str) {
+
+        let (is_negated, actual_value) = if let Some(stripped) = ip_str.strip_prefix('!') {
+            (true, stripped)
+        } else {
+            (false, ip_str)
+        };
+
+        // Check for mixed positive/negative values
+        match all_negated {
+            None => all_negated = Some(is_negated),
+            Some(prev) if prev != is_negated => {
+                return Err(FilterError(
+                    "cannot mix positive and negative values in the same filter".to_string(),
+                ));
+            }
+            _ => {}
+        }
+
+        match IpAddr::from_str(actual_value) {
             Ok(v) => ips.push(v),
             Err(_) => {
                 return Err(FilterError(format!(
-                    "cannot parse IP address from {ip_str}"
+                    "cannot parse IP address from {actual_value}"
                 )))
             }
         }
@@ -241,40 +309,59 @@ fn parse_ip_list(filter_value: &str) -> Result<Vec<IpAddr>, ParserError> {
     // Validate that at least one IP was provided
     if ips.is_empty() {
         return Err(FilterError(
-            "IP list filter requires at least one IP address".to_string()
+            "IP list filter requires at least one IP address".to_string(),
         ));
     }
-    Ok(ips)
+    Ok((ips, all_negated.unwrap_or(false)))
 }
 
 impl Filter {
     pub fn new(filter_type: &str, filter_value: &str) -> Result<Filter, ParserError> {
-        // Check for negation prefix
-        let (negated, actual_filter_type) = if let Some(stripped) = filter_type.strip_prefix('!') {
-            // Reject double negation (e.g., "!!origin_asn")
+        // Multi-value filters handle their own negation detection internally
+        // (each value can be prefixed with !, and all must be consistent)
+        let multi_value_filters = [
+            "origin_asns",
+            "prefixes",
+            "prefixes_super",
+            "prefixes_sub",
+            "prefixes_super_sub",
+            "peer_ips",
+            "peer_asns",
+        ];
+
+        if multi_value_filters.contains(&filter_type) {
+            // Pass directly to new_base - it handles negation internally
+            return Self::new_base(filter_type, filter_value);
+        }
+
+        // For single-value filters, check for negation in filter_value (e.g., origin_asn=!13335)
+        let (negated, actual_value) = if let Some(stripped) = filter_value.strip_prefix('!') {
+            // Reject double negation (e.g., "!!13335")
             if stripped.starts_with('!') {
                 return Err(FilterError(format!(
-                    "invalid filter type '{}': double negation is not allowed",
-                    filter_type
-                )));
-            }
-            // Reject negation for timestamp filters (unintuitive behavior)
-            if stripped == "ts_start"
-                || stripped == "start_ts"
-                || stripped == "ts_end"
-                || stripped == "end_ts"
-            {
-                return Err(FilterError(format!(
-                    "invalid filter type '{}': timestamp filters do not support negation",
-                    filter_type
+                    "invalid filter value '{}': double negation is not allowed",
+                    filter_value
                 )));
             }
             (true, stripped)
         } else {
-            (false, filter_type)
+            (false, filter_value)
         };
 
-        let base_filter = Self::new_base(actual_filter_type, filter_value)?;
+        // Reject negation for timestamp filters (unintuitive behavior)
+        if negated
+            && (filter_type == "ts_start"
+                || filter_type == "start_ts"
+                || filter_type == "ts_end"
+                || filter_type == "end_ts")
+        {
+            return Err(FilterError(format!(
+                "timestamp filter '{}' does not support negation",
+                filter_type
+            )));
+        }
+
+        let base_filter = Self::new_base(filter_type, actual_value)?;
 
         if negated {
             Ok(Filter::Negated(Box::new(base_filter)))
@@ -291,7 +378,15 @@ impl Filter {
                     "cannot parse origin asn from {filter_value}"
                 ))),
             },
-            "origin_asns" => Ok(Filter::OriginAsns(parse_asn_list(filter_value)?)),
+            "origin_asns" => {
+                let (asns, negated) = parse_asn_list(filter_value)?;
+                let filter = Filter::OriginAsns(asns);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
             "prefix" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::Exact)),
                 Err(_) => Err(FilterError(format!(
@@ -316,24 +411,72 @@ impl Filter {
                     "cannot parse prefix from {filter_value}"
                 ))),
             },
-            "prefixes" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::Exact)),
-            "prefixes_super" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuper)),
-            "prefixes_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSub)),
-            "prefixes_super_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuperSub)),
+            "prefixes" => {
+                let (prefixes, negated) = parse_prefix_list(filter_value)?;
+                let filter = Filter::Prefixes(prefixes, PrefixMatchType::Exact);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
+            "prefixes_super" => {
+                let (prefixes, negated) = parse_prefix_list(filter_value)?;
+                let filter = Filter::Prefixes(prefixes, PrefixMatchType::IncludeSuper);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
+            "prefixes_sub" => {
+                let (prefixes, negated) = parse_prefix_list(filter_value)?;
+                let filter = Filter::Prefixes(prefixes, PrefixMatchType::IncludeSub);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
+            "prefixes_super_sub" => {
+                let (prefixes, negated) = parse_prefix_list(filter_value)?;
+                let filter = Filter::Prefixes(prefixes, PrefixMatchType::IncludeSuperSub);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
             "peer_ip" => match IpAddr::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerIp(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse peer IP from {filter_value}"
                 ))),
             },
-            "peer_ips" => Ok(Filter::PeerIps(parse_ip_list(filter_value)?)),
+            "peer_ips" => {
+                let (ips, negated) = parse_ip_list(filter_value)?;
+                let filter = Filter::PeerIps(ips);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
             "peer_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerAsn(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse peer asn from {filter_value}"
                 ))),
             },
-            "peer_asns" => Ok(Filter::PeerAsns(parse_asn_list(filter_value)?)),
+            "peer_asns" => {
+                let (asns, negated) = parse_asn_list(filter_value)?;
+                let filter = Filter::PeerAsns(asns);
+                if negated {
+                    Ok(Filter::Negated(Box::new(filter)))
+                } else {
+                    Ok(filter)
+                }
+            }
             "type" => match filter_value {
                 "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
                 "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
@@ -457,7 +600,9 @@ impl Filterable for BgpElem {
                 }
             }
             Filter::Prefix(v, t) => prefix_match(v, &self.prefix.prefix, t),
-            Filter::Prefixes(v, t) => v.iter().any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
+            Filter::Prefixes(v, t) => v
+                .iter()
+                .any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
             Filter::PeerIp(v) => self.peer_ip == *v,
             Filter::PeerIps(v) => v.contains(&self.peer_ip),
             Filter::PeerAsn(v) => self.peer_asn.eq(v),
@@ -646,13 +791,13 @@ mod tests {
 
         // Test negative filter with add_filter - exclude peer 185.1.8.65
         // From test_filters_on_mrt_file, peer 185.1.8.65 has 3393 elements out of 8160 total
-        let parser = BgpkitParser::new(url)?.add_filter("!peer_ip", "185.1.8.65")?;
+        let parser = BgpkitParser::new(url)?.add_filter("peer_ip", "!185.1.8.65")?;
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 8160 - 3393);
 
         // Test negative type filter - get all non-withdrawals
         // From test_filters_on_mrt_file, there are 379 withdrawals out of 8160 total
-        let parser = BgpkitParser::new(url)?.add_filter("!type", "w")?;
+        let parser = BgpkitParser::new(url)?.add_filter("type", "!w")?;
         let count = parser.into_elem_iter().count();
         assert_eq!(count, 8160 - 379);
 
@@ -660,7 +805,7 @@ mod tests {
         // Get elements from peer 185.1.8.50 that are NOT withdrawals
         let parser = BgpkitParser::new(url)?
             .add_filter("peer_ip", "185.1.8.50")?
-            .add_filter("!type", "w")?;
+            .add_filter("type", "!w")?;
         let count = parser.into_elem_iter().count();
         // peer 185.1.8.50 has 1563 total, 39 withdrawals -> 1563 - 39 = 1524 non-withdrawals
         assert_eq!(count, 1563 - 39);
@@ -731,11 +876,11 @@ mod tests {
         let filter = Filter::new("origin_asn", "12345").unwrap();
         assert_eq!(filter, Filter::OriginAsn(12345));
 
-        // Test negated filters
-        let filter = Filter::new("!origin_asn", "12345").unwrap();
+        // Test negated filters (value-based negation syntax)
+        let filter = Filter::new("origin_asn", "!12345").unwrap();
         assert_eq!(filter, Filter::Negated(Box::new(Filter::OriginAsn(12345))));
 
-        let filter = Filter::new("!prefix", "192.168.1.0/24").unwrap();
+        let filter = Filter::new("prefix", "!192.168.1.0/24").unwrap();
         assert_eq!(
             filter,
             Filter::Negated(Box::new(Filter::Prefix(
@@ -744,7 +889,7 @@ mod tests {
             )))
         );
 
-        let filter = Filter::new("!peer_ip", "192.168.1.1").unwrap();
+        let filter = Filter::new("peer_ip", "!192.168.1.1").unwrap();
         assert_eq!(
             filter,
             Filter::Negated(Box::new(Filter::PeerIp(
@@ -752,16 +897,16 @@ mod tests {
             )))
         );
 
-        let filter = Filter::new("!peer_asn", "12345").unwrap();
+        let filter = Filter::new("peer_asn", "!12345").unwrap();
         assert_eq!(filter, Filter::Negated(Box::new(Filter::PeerAsn(12345))));
 
-        let filter = Filter::new("!type", "w").unwrap();
+        let filter = Filter::new("type", "!w").unwrap();
         assert_eq!(
             filter,
             Filter::Negated(Box::new(Filter::Type(ElemType::WITHDRAW)))
         );
 
-        let filter = Filter::new("!ip_version", "4").unwrap();
+        let filter = Filter::new("ip_version", "!4").unwrap();
         assert_eq!(
             filter,
             Filter::Negated(Box::new(Filter::IpVersion(IpVersion::Ipv4)))
@@ -942,95 +1087,95 @@ mod tests {
             deprecated: None,
         };
 
-        // Test negated origin_asn filter
-        // elem has origin_asn 12345, so !origin_asn=12345 should NOT match
-        let filter = Filter::new("!origin_asn", "12345").unwrap();
+        // Test negated origin_asn filter (using value-based negation: origin_asn=!12345)
+        // elem has origin_asn 12345, so origin_asn=!12345 should NOT match
+        let filter = Filter::new("origin_asn", "!12345").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has origin_asn 12345, so !origin_asn=99999 should match
-        let filter = Filter::new("!origin_asn", "99999").unwrap();
+        // elem has origin_asn 12345, so origin_asn=!99999 should match
+        let filter = Filter::new("origin_asn", "!99999").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated prefix filter
-        // elem has prefix 192.168.1.0/24, so !prefix=192.168.1.0/24 should NOT match
-        let filter = Filter::new("!prefix", "192.168.1.0/24").unwrap();
+        // elem has prefix 192.168.1.0/24, so prefix=!192.168.1.0/24 should NOT match
+        let filter = Filter::new("prefix", "!192.168.1.0/24").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has prefix 192.168.1.0/24, so !prefix=10.0.0.0/8 should match
-        let filter = Filter::new("!prefix", "10.0.0.0/8").unwrap();
+        // elem has prefix 192.168.1.0/24, so prefix=!10.0.0.0/8 should match
+        let filter = Filter::new("prefix", "!10.0.0.0/8").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated peer_ip filter
-        // elem has peer_ip 192.168.1.1, so !peer_ip=192.168.1.1 should NOT match
-        let filter = Filter::new("!peer_ip", "192.168.1.1").unwrap();
+        // elem has peer_ip 192.168.1.1, so peer_ip=!192.168.1.1 should NOT match
+        let filter = Filter::new("peer_ip", "!192.168.1.1").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has peer_ip 192.168.1.1, so !peer_ip=10.0.0.1 should match
-        let filter = Filter::new("!peer_ip", "10.0.0.1").unwrap();
+        // elem has peer_ip 192.168.1.1, so peer_ip=!10.0.0.1 should match
+        let filter = Filter::new("peer_ip", "!10.0.0.1").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated peer_asn filter
-        // elem has peer_asn 12345, so !peer_asn=12345 should NOT match
-        let filter = Filter::new("!peer_asn", "12345").unwrap();
+        // elem has peer_asn 12345, so peer_asn=!12345 should NOT match
+        let filter = Filter::new("peer_asn", "!12345").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has peer_asn 12345, so !peer_asn=99999 should match
-        let filter = Filter::new("!peer_asn", "99999").unwrap();
+        // elem has peer_asn 12345, so peer_asn=!99999 should match
+        let filter = Filter::new("peer_asn", "!99999").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated type filter
-        // elem has type ANNOUNCE, so !type=a should NOT match
-        let filter = Filter::new("!type", "a").unwrap();
+        // elem has type ANNOUNCE, so type=!a should NOT match
+        let filter = Filter::new("type", "!a").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has type ANNOUNCE, so !type=w should match
-        let filter = Filter::new("!type", "w").unwrap();
+        // elem has type ANNOUNCE, so type=!w should match
+        let filter = Filter::new("type", "!w").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated ip_version filter
-        // elem has IPv4 prefix, so !ip_version=4 should NOT match
-        let filter = Filter::new("!ip_version", "4").unwrap();
+        // elem has IPv4 prefix, so ip_version=!4 should NOT match
+        let filter = Filter::new("ip_version", "!4").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        // elem has IPv4 prefix, so !ip_version=6 should match
-        let filter = Filter::new("!ip_version", "6").unwrap();
+        // elem has IPv4 prefix, so ip_version=!6 should match
+        let filter = Filter::new("ip_version", "!6").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated as_path filter
         // elem has as_path "174 1916 52888", so negated matching regex should NOT match
-        let filter = Filter::new("!as_path", r"174 1916 52888$").unwrap();
+        let filter = Filter::new("as_path", r"!174 1916 52888$").unwrap();
         assert!(!elem.match_filter(&filter));
 
         // elem has as_path "174 1916 52888", so negated non-matching regex should match
-        let filter = Filter::new("!as_path", r"99999$").unwrap();
+        let filter = Filter::new("as_path", r"!99999$").unwrap();
         assert!(elem.match_filter(&filter));
 
         // Test negated community filter
-        let filter = Filter::new("!community", r"12345:678910:111213$").unwrap();
+        let filter = Filter::new("community", r"!12345:678910:111213$").unwrap();
         assert!(!elem.match_filter(&filter));
 
-        let filter = Filter::new("!community", r"99999:99999$").unwrap();
+        let filter = Filter::new("community", r"!99999:99999$").unwrap();
         assert!(elem.match_filter(&filter));
 
-        // Test negated peer_ips filter
-        let filter = Filter::new("!peer_ips", "192.168.1.1, 10.0.0.1").unwrap();
+        // Test negated peer_ips filter (multi-value uses !value,!value syntax)
+        let filter = Filter::new("peer_ips", "!192.168.1.1, !10.0.0.1").unwrap();
         assert!(!elem.match_filter(&filter)); // elem's peer_ip is in the list
 
-        let filter = Filter::new("!peer_ips", "10.0.0.1, 10.0.0.2").unwrap();
+        let filter = Filter::new("peer_ips", "!10.0.0.1, !10.0.0.2").unwrap();
         assert!(elem.match_filter(&filter)); // elem's peer_ip is NOT in the list
 
         // Test combining positive and negated filters
         let filters = vec![
             Filter::new("origin_asn", "12345").unwrap(),   // matches
-            Filter::new("!peer_asn", "99999").unwrap(),    // matches (not 99999)
-            Filter::new("!prefix", "10.0.0.0/8").unwrap(), // matches (not 10.0.0.0/8)
+            Filter::new("peer_asn", "!99999").unwrap(),    // matches (not 99999)
+            Filter::new("prefix", "!10.0.0.0/8").unwrap(), // matches (not 10.0.0.0/8)
         ];
         assert!(elem.match_filters(&filters));
 
         // Test combining filters where one fails
         let filters = vec![
             Filter::new("origin_asn", "12345").unwrap(),  // matches
-            Filter::new("!origin_asn", "12345").unwrap(), // does NOT match
+            Filter::new("origin_asn", "!12345").unwrap(), // does NOT match
         ];
         assert!(!elem.match_filters(&filters));
     }
@@ -1046,8 +1191,8 @@ mod tests {
         let count_with_peer = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_peer, 3393);
 
-        // Count all elems NOT from peer 185.1.8.65
-        let filters = vec![Filter::new("!peer_ip", "185.1.8.65").unwrap()];
+        // Count all elems NOT from peer 185.1.8.65 (using value-based negation)
+        let filters = vec![Filter::new("peer_ip", "!185.1.8.65").unwrap()];
         let count_without_peer = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_without_peer, elems.len() - 3393);
 
@@ -1059,51 +1204,51 @@ mod tests {
         let count_withdrawals = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_withdrawals, 379);
 
-        let filters = vec![Filter::new("!type", "w").unwrap()];
+        let filters = vec![Filter::new("type", "!w").unwrap()];
         let count_not_withdrawals = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_not_withdrawals, elems.len() - 379);
 
-        // Test negated prefix filter
+        // Test negated prefix filter (using value-based negation)
         let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/22").unwrap(),
             PrefixMatchType::Exact,
         )];
         let count_with_prefix = elems.iter().filter(|e| e.match_filters(&filters)).count();
 
-        let filters = vec![Filter::new("!prefix", "190.115.192.0/22").unwrap()];
+        let filters = vec![Filter::new("prefix", "!190.115.192.0/22").unwrap()];
         let count_without_prefix = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_prefix + count_without_prefix, elems.len());
 
-        // Test negated prefix_super filter
+        // Test negated prefix_super filter (using value-based negation)
         let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/24").unwrap(),
             PrefixMatchType::IncludeSuper,
         )];
         let count_with_super = elems.iter().filter(|e| e.match_filters(&filters)).count();
 
-        let filters = vec![Filter::new("!prefix_super", "190.115.192.0/24").unwrap()];
+        let filters = vec![Filter::new("prefix_super", "!190.115.192.0/24").unwrap()];
         let count_without_super = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_super + count_without_super, elems.len());
 
-        // Test negated prefix_sub filter
+        // Test negated prefix_sub filter (using value-based negation)
         let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/22").unwrap(),
             PrefixMatchType::IncludeSub,
         )];
         let count_with_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
 
-        let filters = vec![Filter::new("!prefix_sub", "190.115.192.0/22").unwrap()];
+        let filters = vec![Filter::new("prefix_sub", "!190.115.192.0/22").unwrap()];
         let count_without_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_sub + count_without_sub, elems.len());
 
-        // Test negated prefix_super_sub filter
+        // Test negated prefix_super_sub filter (using value-based negation)
         let filters = vec![Filter::Prefix(
             IpNet::from_str("190.115.192.0/23").unwrap(),
             PrefixMatchType::IncludeSuperSub,
         )];
         let count_with_super_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
 
-        let filters = vec![Filter::new("!prefix_super_sub", "190.115.192.0/23").unwrap()];
+        let filters = vec![Filter::new("prefix_super_sub", "!190.115.192.0/23").unwrap()];
         let count_without_super_sub = elems.iter().filter(|e| e.match_filters(&filters)).count();
         assert_eq!(count_with_super_sub + count_without_super_sub, elems.len());
     }
@@ -1111,12 +1256,13 @@ mod tests {
     #[test]
     fn test_double_negation_rejected() {
         // Double negation should be rejected with a clear error message
-        let result = Filter::new("!!origin_asn", "13335");
+        // Value-based negation: origin_asn=!!13335
+        let result = Filter::new("origin_asn", "!!13335");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("double negation"));
 
-        let result = Filter::new("!!!prefix", "10.0.0.0/8");
+        let result = Filter::new("prefix", "!!!10.0.0.0/8");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("double negation"));
@@ -1124,25 +1270,25 @@ mod tests {
 
     #[test]
     fn test_timestamp_negation_rejected() {
-        // Timestamp filter negation should be rejected
-        let result = Filter::new("!ts_start", "1637437798");
+        // Timestamp filter negation should be rejected (value-based negation)
+        let result = Filter::new("ts_start", "!1637437798");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err
             .to_string()
-            .contains("timestamp filters do not support negation"));
+            .contains("timestamp filter 'ts_start' does not support negation"));
 
-        let result = Filter::new("!ts_end", "1637437798");
+        let result = Filter::new("ts_end", "!1637437798");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err
             .to_string()
-            .contains("timestamp filters do not support negation"));
+            .contains("timestamp filter 'ts_end' does not support negation"));
 
-        let result = Filter::new("!start_ts", "1637437798");
+        let result = Filter::new("start_ts", "!1637437798");
         assert!(result.is_err());
 
-        let result = Filter::new("!end_ts", "1637437798");
+        let result = Filter::new("end_ts", "!1637437798");
         assert!(result.is_err());
     }
 
@@ -1177,7 +1323,7 @@ mod tests {
         // Test parsing multiple prefixes
         let prefix1 = IpNet::from_str("190.115.192.0/22").unwrap();
         let prefix2 = IpNet::from_str("2804:100::/32").unwrap();
-        
+
         let filter = Filter::new("prefixes", "190.115.192.0/22,2804:100::/32").unwrap();
         match filter {
             Filter::Prefixes(prefixes, match_type) => {
@@ -1255,16 +1401,16 @@ mod tests {
 
     #[test]
     fn test_negated_multiple_filters() -> Result<()> {
-        // Test negated origin_asns
-        let filter = Filter::new("!origin_asns", "13335,15169").unwrap();
+        // Test negated origin_asns (using value-based negation: !value,!value)
+        let filter = Filter::new("origin_asns", "!13335,!15169").unwrap();
         assert!(matches!(filter, Filter::Negated(_)));
 
         // Test negated prefixes
-        let filter = Filter::new("!prefixes", "1.1.1.0/24,8.8.8.0/24").unwrap();
+        let filter = Filter::new("prefixes", "!1.1.1.0/24,!8.8.8.0/24").unwrap();
         assert!(matches!(filter, Filter::Negated(_)));
 
         // Test negated peer_asns
-        let filter = Filter::new("!peer_asns", "12345,67890").unwrap();
+        let filter = Filter::new("peer_asns", "!12345,!67890").unwrap();
         assert!(matches!(filter, Filter::Negated(_)));
 
         Ok(())
@@ -1288,6 +1434,35 @@ mod tests {
         let result = Filter::new("peer_ips", "192.168.1.1,invalid_ip");
         assert!(result.is_err());
 
+        // Test mixed positive/negative values (not allowed)
+        let result = Filter::new("origin_asns", "12345,!67890");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot mix positive and negative values"));
+
+        let result = Filter::new("prefixes", "1.1.1.0/24,!8.8.8.0/24");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot mix positive and negative values"));
+
+        let result = Filter::new("peer_ips", "192.168.1.1,!10.0.0.1");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot mix positive and negative values"));
+
+        let result = Filter::new("peer_asns", "!12345,67890");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot mix positive and negative values"));
+
         // Test empty ASN list
         let result = Filter::new("origin_asns", "");
         assert!(result.is_err());
@@ -1296,7 +1471,10 @@ mod tests {
         // Test empty prefix list
         let result = Filter::new("prefixes", "");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least one prefix"));
 
         // Test empty IP list
         let result = Filter::new("peer_ips", "");
@@ -1311,7 +1489,10 @@ mod tests {
         // Test only commas in prefix list
         let result = Filter::new("prefixes", ",,,");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least one prefix"));
 
         // Test only commas in IP list
         let result = Filter::new("peer_ips", ",,,");
@@ -1376,11 +1557,11 @@ mod tests {
         let filter = Filter::new("peer_asns", "67890,99999").unwrap();
         assert!(!elem.match_filter(&filter)); // Should NOT match
 
-        // Test negated multiple filters
-        let filter = Filter::new("!origin_asns", "67890,99999").unwrap();
+        // Test negated multiple filters (using value-based negation: !value,!value)
+        let filter = Filter::new("origin_asns", "!67890,!99999").unwrap();
         assert!(elem.match_filter(&filter)); // Should match because origin ASN is NOT in the list
 
-        let filter = Filter::new("!origin_asns", "12345,67890").unwrap();
+        let filter = Filter::new("origin_asns", "!12345,!67890").unwrap();
         assert!(!elem.match_filter(&filter)); // Should NOT match because origin ASN IS in the list
     }
 }
