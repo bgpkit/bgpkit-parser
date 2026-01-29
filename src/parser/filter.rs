@@ -6,10 +6,13 @@ the filtering mechanism for [BgpElem].
 
 The available filters are:
 - `origin_asn` -- origin AS number
+- `origin_asns` -- multiple origin AS numbers (OR logic)
 - `prefix` -- network prefix and match type
+- `prefixes` -- multiple network prefixes (OR logic)
 - `peer_ip` -- peer's IP address
-- `peer_ips` -- peers' IP addresses
-- `peer_asn` -- peer's IP address
+- `peer_ips` -- peers' IP addresses (OR logic)
+- `peer_asn` -- peer's AS number
+- `peer_asns` -- multiple peer AS numbers (OR logic)
 - `type` -- message type (`withdraw` or `announce`)
 - `ts_start` -- start and end unix timestamp
 - `as_path` -- regular expression for AS path string
@@ -65,9 +68,31 @@ for elem in parser {
 }
 ```
 
+### Example with Multiple Filters (OR Logic)
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+
+// Filter elements from multiple origin ASNs (matches ANY of the specified ASNs)
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("origin_asns", "13335,15169,8075").unwrap();
+
+for elem in parser {
+    println!("{}", elem);
+}
+
+// Filter elements matching multiple prefixes (matches ANY of the specified prefixes)
+let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
+    .add_filter("prefixes", "1.1.1.0/24,8.8.8.0/24").unwrap();
+
+for elem in parser {
+    println!("{}", elem);
+}
+```
+
 Note, by default, the prefix filtering is for the exact prefix. You can include super-prefixes or
 sub-prefixes when filtering by using `"prefix_super"`, `"prefix_sub"`, or  `"prefix_super_sub"` as
-the filter type string.
+the filter type string. For multiple prefixes, use `"prefixes_super"`, `"prefixes_sub"`, or `"prefixes_super_sub"`.
 
 ### Note
 
@@ -87,10 +112,13 @@ use std::str::FromStr;
 ///
 /// The available filters are (`filter_type` (`FilterType`) -- definition):
 /// - `origin_asn` (`OriginAsn(u32)`) -- origin AS number
+/// - `origin_asns` (`OriginAsns(Vec<u32>)`) -- multiple origin AS numbers (OR logic)
 /// - `prefix(_super, _sub, _super_sub)` (`Prefix(IpNet, PrefixMatchType)`) -- network prefix and match type
+/// - `prefixes(_super, _sub, _super_sub)` (`Prefixes(Vec<IpNet>, PrefixMatchType)`) -- multiple network prefixes (OR logic)
 /// - `peer_ip` (`PeerIp(IpAddr)`) -- peer's IP address
-/// - `peer_ips` (`Vec<PeerIp(IpAddr)>`) -- peers' IP addresses
-/// - `peer_asn` (`PeerAsn(u32)`) -- peer's IP address
+/// - `peer_ips` (`PeerIps(Vec<IpAddr>)`) -- peers' IP addresses (OR logic)
+/// - `peer_asn` (`PeerAsn(u32)`) -- peer's AS number
+/// - `peer_asns` (`PeerAsns(Vec<u32>)`) -- multiple peer AS numbers (OR logic)
 /// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
 /// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
@@ -103,10 +131,13 @@ use std::str::FromStr;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
+    OriginAsns(Vec<u32>),
     Prefix(IpNet, PrefixMatchType),
+    Prefixes(Vec<IpNet>, PrefixMatchType),
     PeerIp(IpAddr),
     PeerIps(Vec<IpAddr>),
     PeerAsn(u32),
+    PeerAsns(Vec<u32>),
     Type(ElemType),
     IpVersion(IpVersion),
     TsStart(f64),
@@ -139,6 +170,81 @@ fn parse_time_str(time_str: &str) -> Option<chrono::NaiveDateTime> {
         return Some(t.naive_utc());
     }
     None
+}
+
+fn parse_asn_list(filter_value: &str) -> Result<Vec<u32>, ParserError> {
+    let mut asns = vec![];
+    for asn_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if asn_str.is_empty() {
+            continue;
+        }
+        match u32::from_str(asn_str) {
+            Ok(v) => asns.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse ASN from {asn_str}"
+                )))
+            }
+        }
+    }
+    // Validate that at least one ASN was provided
+    if asns.is_empty() {
+        return Err(FilterError(
+            "ASN list filter requires at least one ASN".to_string()
+        ));
+    }
+    Ok(asns)
+}
+
+fn parse_prefix_list(filter_value: &str) -> Result<Vec<IpNet>, ParserError> {
+    let mut prefixes = vec![];
+    for prefix_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if prefix_str.is_empty() {
+            continue;
+        }
+        match IpNet::from_str(prefix_str) {
+            Ok(v) => prefixes.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse prefix from {prefix_str}"
+                )))
+            }
+        }
+    }
+    // Validate that at least one prefix was provided
+    if prefixes.is_empty() {
+        return Err(FilterError(
+            "prefix list filter requires at least one prefix".to_string()
+        ));
+    }
+    Ok(prefixes)
+}
+
+fn parse_ip_list(filter_value: &str) -> Result<Vec<IpAddr>, ParserError> {
+    let mut ips = vec![];
+    for ip_str in filter_value.replace(' ', "").split(',') {
+        // Skip empty strings (from consecutive or trailing commas)
+        if ip_str.is_empty() {
+            continue;
+        }
+        match IpAddr::from_str(ip_str) {
+            Ok(v) => ips.push(v),
+            Err(_) => {
+                return Err(FilterError(format!(
+                    "cannot parse IP address from {ip_str}"
+                )))
+            }
+        }
+    }
+    // Validate that at least one IP was provided
+    if ips.is_empty() {
+        return Err(FilterError(
+            "IP list filter requires at least one IP address".to_string()
+        ));
+    }
+    Ok(ips)
 }
 
 impl Filter {
@@ -185,6 +291,7 @@ impl Filter {
                     "cannot parse origin asn from {filter_value}"
                 ))),
             },
+            "origin_asns" => Ok(Filter::OriginAsns(parse_asn_list(filter_value)?)),
             "prefix" => match IpNet::from_str(filter_value) {
                 Ok(v) => Ok(Filter::Prefix(v, PrefixMatchType::Exact)),
                 Err(_) => Err(FilterError(format!(
@@ -209,30 +316,24 @@ impl Filter {
                     "cannot parse prefix from {filter_value}"
                 ))),
             },
+            "prefixes" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::Exact)),
+            "prefixes_super" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuper)),
+            "prefixes_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSub)),
+            "prefixes_super_sub" => Ok(Filter::Prefixes(parse_prefix_list(filter_value)?, PrefixMatchType::IncludeSuperSub)),
             "peer_ip" => match IpAddr::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerIp(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse peer IP from {filter_value}"
                 ))),
             },
-            "peer_ips" => {
-                let mut ips = vec![];
-                for ip_str in filter_value.replace(' ', "").split(',') {
-                    match IpAddr::from_str(ip_str) {
-                        Ok(v) => ips.push(v),
-                        Err(_) => {
-                            return Err(FilterError(format!("cannot parse peer IP from {ip_str}")))
-                        }
-                    }
-                }
-                Ok(Filter::PeerIps(ips))
-            }
+            "peer_ips" => Ok(Filter::PeerIps(parse_ip_list(filter_value)?)),
             "peer_asn" => match u32::from_str(filter_value) {
                 Ok(v) => Ok(Filter::PeerAsn(v)),
                 Err(_) => Err(FilterError(format!(
                     "cannot parse peer asn from {filter_value}"
                 ))),
             },
+            "peer_asns" => Ok(Filter::PeerAsns(parse_asn_list(filter_value)?)),
             "type" => match filter_value {
                 "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
                 "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
@@ -345,10 +446,22 @@ impl Filterable for BgpElem {
                     false
                 }
             }
+            Filter::OriginAsns(v) => {
+                if let Some(origins) = &self.origin_asns {
+                    v.iter().any(|asn| {
+                        let asn_obj: Asn = (*asn).into();
+                        origins.contains(&asn_obj)
+                    })
+                } else {
+                    false
+                }
+            }
             Filter::Prefix(v, t) => prefix_match(v, &self.prefix.prefix, t),
+            Filter::Prefixes(v, t) => v.iter().any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
             Filter::PeerIp(v) => self.peer_ip == *v,
             Filter::PeerIps(v) => v.contains(&self.peer_ip),
             Filter::PeerAsn(v) => self.peer_asn.eq(v),
+            Filter::PeerAsns(v) => v.iter().any(|asn| self.peer_asn.eq(asn)),
             Filter::Type(v) => self.elem_type.eq(v),
             Filter::TsStart(v) => self.timestamp >= *v,
             Filter::TsEnd(v) => self.timestamp <= *v,
@@ -1031,5 +1144,243 @@ mod tests {
 
         let result = Filter::new("!end_ts", "1637437798");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiple_origin_asns() -> Result<()> {
+        // Test parsing multiple origin ASNs
+        let filter = Filter::new("origin_asns", "12345,67890,13335").unwrap();
+        match filter {
+            Filter::OriginAsns(asns) => {
+                assert_eq!(asns.len(), 3);
+                assert!(asns.contains(&12345));
+                assert!(asns.contains(&67890));
+                assert!(asns.contains(&13335));
+            }
+            _ => panic!("Expected OriginAsns filter"),
+        }
+
+        // Test with spaces in the list
+        let filter = Filter::new("origin_asns", "12345, 67890, 13335").unwrap();
+        match filter {
+            Filter::OriginAsns(asns) => {
+                assert_eq!(asns.len(), 3);
+            }
+            _ => panic!("Expected OriginAsns filter"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_prefixes() -> Result<()> {
+        // Test parsing multiple prefixes
+        let prefix1 = IpNet::from_str("190.115.192.0/22").unwrap();
+        let prefix2 = IpNet::from_str("2804:100::/32").unwrap();
+        
+        let filter = Filter::new("prefixes", "190.115.192.0/22,2804:100::/32").unwrap();
+        match filter {
+            Filter::Prefixes(prefixes, match_type) => {
+                assert_eq!(prefixes.len(), 2);
+                assert!(prefixes.contains(&prefix1));
+                assert!(prefixes.contains(&prefix2));
+                assert_eq!(match_type, PrefixMatchType::Exact);
+            }
+            _ => panic!("Expected Prefixes filter"),
+        }
+
+        // Test with spaces
+        let filter = Filter::new("prefixes", "190.115.192.0/22, 2804:100::/32").unwrap();
+        match filter {
+            Filter::Prefixes(prefixes, _) => {
+                assert_eq!(prefixes.len(), 2);
+            }
+            _ => panic!("Expected Prefixes filter"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_prefixes_with_match_types() -> Result<()> {
+        // Test prefixes_super
+        let filter = Filter::new("prefixes_super", "190.115.192.0/24,2804:100::/32").unwrap();
+        match filter {
+            Filter::Prefixes(prefixes, match_type) => {
+                assert_eq!(prefixes.len(), 2);
+                assert_eq!(match_type, PrefixMatchType::IncludeSuper);
+            }
+            _ => panic!("Expected Prefixes filter with IncludeSuper"),
+        }
+
+        // Test prefixes_sub
+        let filter = Filter::new("prefixes_sub", "190.115.192.0/22,2804:100::/32").unwrap();
+        match filter {
+            Filter::Prefixes(prefixes, match_type) => {
+                assert_eq!(prefixes.len(), 2);
+                assert_eq!(match_type, PrefixMatchType::IncludeSub);
+            }
+            _ => panic!("Expected Prefixes filter with IncludeSub"),
+        }
+
+        // Test prefixes_super_sub
+        let filter = Filter::new("prefixes_super_sub", "190.115.192.0/23,2804:100::/32").unwrap();
+        match filter {
+            Filter::Prefixes(prefixes, match_type) => {
+                assert_eq!(prefixes.len(), 2);
+                assert_eq!(match_type, PrefixMatchType::IncludeSuperSub);
+            }
+            _ => panic!("Expected Prefixes filter with IncludeSuperSub"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_peer_asns() -> Result<()> {
+        // Test parsing multiple peer ASNs
+        let filter = Filter::new("peer_asns", "12345,67890,13335").unwrap();
+        match filter {
+            Filter::PeerAsns(asns) => {
+                assert_eq!(asns.len(), 3);
+                assert!(asns.contains(&12345));
+                assert!(asns.contains(&67890));
+                assert!(asns.contains(&13335));
+            }
+            _ => panic!("Expected PeerAsns filter"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_negated_multiple_filters() -> Result<()> {
+        // Test negated origin_asns
+        let filter = Filter::new("!origin_asns", "13335,15169").unwrap();
+        assert!(matches!(filter, Filter::Negated(_)));
+
+        // Test negated prefixes
+        let filter = Filter::new("!prefixes", "1.1.1.0/24,8.8.8.0/24").unwrap();
+        assert!(matches!(filter, Filter::Negated(_)));
+
+        // Test negated peer_asns
+        let filter = Filter::new("!peer_asns", "12345,67890").unwrap();
+        assert!(matches!(filter, Filter::Negated(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid_multiple_filters() {
+        // Test invalid origin ASN in list
+        let result = Filter::new("origin_asns", "12345,not_a_number,67890");
+        assert!(result.is_err());
+
+        // Test invalid prefix in list
+        let result = Filter::new("prefixes", "1.1.1.0/24,invalid_prefix");
+        assert!(result.is_err());
+
+        // Test invalid peer ASN in list
+        let result = Filter::new("peer_asns", "12345,invalid,67890");
+        assert!(result.is_err());
+
+        // Test invalid peer IP in list
+        let result = Filter::new("peer_ips", "192.168.1.1,invalid_ip");
+        assert!(result.is_err());
+
+        // Test empty ASN list
+        let result = Filter::new("origin_asns", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one ASN"));
+
+        // Test empty prefix list
+        let result = Filter::new("prefixes", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+
+        // Test empty IP list
+        let result = Filter::new("peer_ips", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one IP"));
+
+        // Test only commas in ASN list (should error after filtering empty strings)
+        let result = Filter::new("origin_asns", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one ASN"));
+
+        // Test only commas in prefix list
+        let result = Filter::new("prefixes", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one prefix"));
+
+        // Test only commas in IP list
+        let result = Filter::new("peer_ips", ",,,");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one IP"));
+
+        // Test trailing commas (should still work by skipping empty strings)
+        let result = Filter::new("origin_asns", "12345,67890,");
+        assert!(result.is_ok());
+
+        // Test consecutive commas (should still work by skipping empty strings)
+        let result = Filter::new("origin_asns", "12345,,67890");
+        assert!(result.is_ok());
+
+        // Test trailing commas for peer IPs
+        let result = Filter::new("peer_ips", "192.168.1.1,192.168.1.2,");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multiple_filters_or_logic_behavior() {
+        // Create a test element
+        let elem = BgpElem {
+            timestamp: 1637437798_f64,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: Asn::new_32bit(12345),
+            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
+            next_hop: None,
+            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
+            origin_asns: Some(vec![Asn::new_16bit(12345)]),
+            origin: None,
+            local_pref: None,
+            med: None,
+            communities: None,
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: None,
+            unknown: None,
+            elem_type: ElemType::ANNOUNCE,
+            deprecated: None,
+        };
+
+        // Test OriginAsns with OR logic - element has origin ASN 12345
+        let filter = Filter::new("origin_asns", "12345,67890,99999").unwrap();
+        assert!(elem.match_filter(&filter)); // Should match because 12345 is in the list
+
+        let filter = Filter::new("origin_asns", "67890,99999").unwrap();
+        assert!(!elem.match_filter(&filter)); // Should NOT match because 12345 is not in the list
+
+        // Test Prefixes with OR logic - element has prefix 192.168.1.0/24
+        let filter = Filter::new("prefixes", "192.168.1.0/24,10.0.0.0/8,172.16.0.0/12").unwrap();
+        assert!(elem.match_filter(&filter)); // Should match
+
+        let filter = Filter::new("prefixes", "10.0.0.0/8,172.16.0.0/12").unwrap();
+        assert!(!elem.match_filter(&filter)); // Should NOT match
+
+        // Test PeerAsns with OR logic - element has peer ASN 12345
+        let filter = Filter::new("peer_asns", "12345,67890").unwrap();
+        assert!(elem.match_filter(&filter)); // Should match
+
+        let filter = Filter::new("peer_asns", "67890,99999").unwrap();
+        assert!(!elem.match_filter(&filter)); // Should NOT match
+
+        // Test negated multiple filters
+        let filter = Filter::new("!origin_asns", "67890,99999").unwrap();
+        assert!(elem.match_filter(&filter)); // Should match because origin ASN is NOT in the list
+
+        let filter = Filter::new("!origin_asns", "12345,67890").unwrap();
+        assert!(!elem.match_filter(&filter)); // Should NOT match because origin ASN IS in the list
     }
 }
