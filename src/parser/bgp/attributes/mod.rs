@@ -459,7 +459,7 @@ impl Attribute {
 impl Attributes {
     pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
-        for attr in &self.inner {
+        for attr in self.attributes_iter() {
             bytes.extend(attr.encode(asn_len));
         }
         bytes.freeze()
@@ -481,9 +481,9 @@ mod tests {
         let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
         assert!(attributes.is_ok());
         let attributes = attributes.unwrap();
-        assert_eq!(attributes.inner.len(), 1);
+        assert_eq!(attributes.len(), 1);
         assert_eq!(
-            attributes.inner[0].value.attr_type(),
+            attributes.first().unwrap().value.attr_type(),
             AttrType::Unknown(254)
         );
     }
