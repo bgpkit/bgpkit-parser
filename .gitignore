@@ -18,3 +18,5 @@ examples/debug-file.rs
 
 # local benchmark results
 benchmarks
+docs/
+*.md

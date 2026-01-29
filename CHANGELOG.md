@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.15.0 - 2026-01-28
+
+### Breaking changes
+
+* **Negative Filter Syntax Change**: Negative filters now use value-based negation instead of type-based negation
+  - Old syntax (v0.14.0): `.add_filter("!origin_asn", "13335")` - **no longer supported**
+  - New syntax: `.add_filter("origin_asn", "!13335")` - prefix the value with `!`
+  - For multi-value filters, prefix each value: `.add_filter("origin_asns", "!13335,!15169")`
+  - Mixing positive and negative values in the same filter is not allowed and will return an error
+  - CLI syntax remains the same: `--filter "origin_asn!=13335"` (internally converted to value-based negation)
+
+### New features
+
+* **OR Logic Filters**: New filter types that accept comma-separated values with OR logic
+  - `origin_asns`: Match elements from ANY of the specified origin ASNs
+  - `prefixes`: Match elements for ANY of the specified prefixes (also supports `prefixes_super`, `prefixes_sub`, `prefixes_super_sub`)
+  - `peer_asns`: Match elements from ANY of the specified peer ASNs
+  - `peer_ips`: Now validates input and requires at least one IP address
+  - Example: `.add_filter("origin_asns", "13335,15169,8075")` matches elements from Cloudflare, Google, or Microsoft
+  - All multi-value filters support negation with `!` prefix on each value
+  - New example `multiple_filters_or_logic.rs` demonstrating OR logic and negative filters
+
 ## v0.14.0 - 2025-12-22
 
 ### New features
