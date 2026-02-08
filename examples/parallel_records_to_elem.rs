@@ -1,16 +1,18 @@
 use bgpkit_parser::Elementor;
 use bgpkit_parser::models::*;
 use bgpkit_parser::BgpkitParser;
+use std::sync::{Arc, Mutex};
+
+const CHUNK_SIZE: usize = 16_384;
 
 /// an very simple example that reads a remote BGP data file and print out the message count.
 fn main() -> Result<(), Box<dyn std::error::Error>>{
     let url = "http://archive.routeviews.org/route-views.amsix/bgpdata/2023.02/UPDATES/updates.20230222.0430.bz2";
-    let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
 
     // Iterate over the file in order
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
     let t0 = std::time::Instant::now();
-    let mut cnt=  0;
+    let mut cnt = 0;
     for _ in parser.into_elem_iter() {
         cnt += 1;
     }
@@ -30,6 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     println!("Time elapsed: {:?}s (to chunk into raw records)", t0.elapsed());
 
     // Iterate with a shared Elementor
+    // We then take chunks of records (taking the lock of the Mutex on the parser) and parse those in parallel.
+    //
+    // This is not the most beautiful pattern, but it works.
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
 
     let mut record_iter = parser.into_raw_record_iter().peekable();
@@ -37,8 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     let t0 = std::time::Instant::now();
 
-    // Peek to see if the first element is apeer index table. If so, consume it and set it.
-    // See if the first element is a peer index table, if so, we use it.
+    // Peek to see if the first element is a peer index table. If so, consume it and set it.
     if let Some(potential_peer_index) = record_iter.peek().cloned() {
         if let Ok(pit) = potential_peer_index.parse() {
             if matches!(pit.message, MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_))) {
@@ -48,15 +52,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         }
     }
 
-    let total: u64 = record_iter.map(|record| {
-        if let Ok(record) = record.parse() {
-            if let Ok(iter) = elementor.record_to_elems_iter(record) {
-                let count = iter.count();
-                return count as u64;
-            }
-        }
-        0
-    }).sum();
+    let iter = Arc::new(Mutex::new(record_iter));
+    let num_threads = std::thread::available_parallelism()?.get();
+
+    let total: u64 = std::thread::scope(|s| {
+        let elementor = &elementor;
+        let handles: Vec<_> = (0..num_threads)
+            .map(|_| {
+                let iter = Arc::clone(&iter);
+                s.spawn(move || {
+                    let mut local_count: u64 = 0;
+                    loop {
+                        // lock the iterator and take a chunk of records.
+                        let chunk: Vec<_> = {
+                            let mut it = iter.lock().unwrap();
+                            (&mut *it).take(CHUNK_SIZE).collect()
+                        };
+                        if chunk.is_empty() {
+                            break;
+                        }
+                        for record in chunk {
+                            if let Ok(record) = record.parse() {
+                                if let Ok(elems) = elementor.record_to_elems_iter(record) {
+                                    local_count += elems.count() as u64;
+                                }
+                            }
+                        }
+                    }
+                    local_count
+                })
+            })
+            .collect();
+
+        handles.into_iter().map(|h| h.join().unwrap()).sum()
+    });
 
     println!("Total records: {total}");
     println!("Time elapsed: {:?}", t0.elapsed());
