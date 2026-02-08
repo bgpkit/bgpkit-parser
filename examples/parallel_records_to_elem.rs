@@ -1,7 +1,7 @@
 use bgpkit_parser::Elementor;
 use bgpkit_parser::models::*;
 use bgpkit_parser::BgpkitParser;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 const CHUNK_SIZE: usize = 16_384;
 
@@ -12,10 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     // Iterate over the file in order
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
     let t0 = std::time::Instant::now();
-    let mut cnt = 0;
-    for _ in parser.into_elem_iter() {
-        cnt += 1;
-    }
+    let cnt = parser.into_elem_iter().count();
 
     println!("Total number of routes: {cnt}");
     println!("Time elapsed: {:?}", t0.elapsed());
@@ -24,12 +21,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
 
     let t0 = std::time::Instant::now();
-    let mut cnt = 0;
-    for _ in parser.into_raw_record_iter() {
-        cnt += 1;
-    }
+    let cnt = parser.into_raw_record_iter().count();
     println!("Total number of records: {cnt}");
     println!("Time elapsed: {:?}s (to chunk into raw records)", t0.elapsed());
+
+    // Iterate over the BGPElem's after parsing with Elementor, using the default pattern where we mutate the elementor.
+    let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
+    let mut elementor = Elementor::new();
+
+    let t0 = std::time::Instant::now();
+    let mut cnt = 0;
+    for raw_record in parser.into_raw_record_iter() {
+        if let Ok(record) = raw_record.parse() {
+            cnt += elementor.record_to_elems(record).iter().count();
+        }
+        cnt += 1;
+    }
+    println!("Total number of routes: {cnt}");
+    println!("Time elapsed: {:?}s (parse to RawRecord, turn into BgpElem using Elementor)", t0.elapsed());
+
+
 
     // Iterate with a shared Elementor
     // We then take chunks of records (taking the lock of the Mutex on the parser) and parse those in parallel.
@@ -52,15 +63,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         }
     }
 
-    let iter = Arc::new(Mutex::new(record_iter));
+    let iter = Mutex::new(record_iter);
     let num_threads = std::thread::available_parallelism()?.get();
 
     let total: u64 = std::thread::scope(|s| {
         let elementor = &elementor;
         let handles: Vec<_> = (0..num_threads)
             .map(|_| {
-                let iter = Arc::clone(&iter);
-                s.spawn(move || {
+                s.spawn(|| {
                     let mut local_count: u64 = 0;
                     loop {
                         // lock the iterator and take a chunk of records.
@@ -88,6 +98,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     });
 
     println!("Total records: {total}");
-    println!("Time elapsed: {:?}", t0.elapsed());
+    println!("Time elapsed: {:?} (set peer index table on Elementor, iterate in parallel over chunks)", t0.elapsed());
     Ok(())
 }
