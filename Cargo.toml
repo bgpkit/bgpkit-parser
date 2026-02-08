@@ -38,6 +38,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 # Parser dependencies #
 #######################
 bytes = { version = "1.7", optional = true }
+zerocopy = { version = "0.8", features = ["derive"], optional = true }
 hex = { version = "0.4.3", optional = true } # bmp/openbmp parsing
 oneio = { version = "0.20.0", default-features = false, features = ["http", "gz", "bz"], optional = true }
 regex = { version = "1", optional = true } # used in parser filter
@@ -60,6 +61,7 @@ parser = [
     "bytes",
     "chrono",
     "regex",
+    "zerocopy",
 ]
 cli = [
     "clap",

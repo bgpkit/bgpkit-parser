@@ -1,7 +1,71 @@
 use crate::models::{CommonHeader, EntryType};
 use crate::ParserError;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use std::io::Read;
+use zerocopy::big_endian::{U16, U32};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+/// On-wire MRT common header layout (12 bytes, network byte order).
+#[derive(IntoBytes, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RawMrtCommonHeader {
+    timestamp: U32,
+    entry_type: U16,
+    entry_subtype: U16,
+    length: U32,
+}
+
+const _: () = assert!(size_of::<RawMrtCommonHeader>() == 12);
+
+/// On-wire MRT header with microseconds included (16 bytes, network byte order)
+#[derive(IntoBytes, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RawMrtEtCommonHeader {
+    timestamp: U32,
+    entry_type: U16,
+    entry_subtype: U16,
+    length: U32,
+    microseconds: U32,
+}
+
+const _: () = assert!(size_of::<RawMrtEtCommonHeader>() == 16);
+
+enum RawMrtHeader {
+    Standard(RawMrtCommonHeader),
+    Et(RawMrtEtCommonHeader),
+}
+
+impl From<&CommonHeader> for RawMrtHeader {
+    fn from(header: &CommonHeader) -> Self {
+        match header.microsecond_timestamp {
+            None => RawMrtHeader::Standard(RawMrtCommonHeader {
+                timestamp: U32::new(header.timestamp),
+                entry_type: U16::new(header.entry_type as u16),
+                entry_subtype: U16::new(header.entry_subtype),
+                length: U32::new(header.length),
+            }),
+            Some(microseconds) => RawMrtHeader::Et(RawMrtEtCommonHeader {
+                timestamp: U32::new(header.timestamp),
+                entry_type: U16::new(header.entry_type as u16),
+                entry_subtype: U16::new(header.entry_subtype),
+                // Internally, we use the length of the MRT payload.
+                // However in the header, the length inclused the space used by the extra timestamp
+                // data.
+                length: U32::new(header.length + 4),
+                microseconds: U32::new(microseconds),
+            }),
+        }
+    }
+}
+
+impl RawMrtHeader {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            RawMrtHeader::Standard(raw) => raw.as_bytes(),
+            RawMrtHeader::Et(raw) => raw.as_bytes(),
+        }
+    }
+}
 
 /// Result of parsing a common header, including the raw bytes.
 pub struct ParsedHeader {
@@ -56,14 +120,16 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 pub fn parse_common_header_with_bytes<T: Read>(input: &mut T) -> Result<ParsedHeader, ParserError> {
     let mut base_bytes = [0u8; 12];
     input.read_exact(&mut base_bytes)?;
-    let mut data = &base_bytes[..];
 
-    let timestamp = data.get_u32();
-    let entry_type_raw = data.get_u16();
-    let entry_type = EntryType::try_from(entry_type_raw)?;
-    let entry_subtype = data.get_u16();
+    // Single bounds check via zerocopy instead of four sequential cursor reads.
+    let raw = RawMrtCommonHeader::ref_from_bytes(&base_bytes)
+        .expect("base_bytes is exactly 12 bytes with no alignment requirement");
+
+    let timestamp = raw.timestamp.get();
+    let entry_type = EntryType::try_from(raw.entry_type.get())?;
+    let entry_subtype = raw.entry_subtype.get();
     // the length field does not include the length of the common header
-    let mut length = data.get_u32();
+    let mut length = raw.length.get();
 
     let (microsecond_timestamp, raw_bytes) = match &entry_type {
         EntryType::BGP4MP_ET => {
@@ -76,15 +142,11 @@ pub fn parse_common_header_with_bytes<T: Read>(input: &mut T) -> Result<ParsedHe
                 ));
             }
             length -= 4;
-            let mut et_bytes = [0u8; 4];
-            input.read_exact(&mut et_bytes)?;
-            let microseconds = (&et_bytes[..]).get_u32();
-
-            // Combine base header bytes + ET bytes
-            let mut combined = BytesMut::with_capacity(16);
-            combined.put_slice(&base_bytes);
-            combined.put_slice(&et_bytes);
-            (Some(microseconds), combined.freeze())
+            let mut combined = [0u8; 16];
+            combined[..12].copy_from_slice(&base_bytes);
+            input.read_exact(&mut combined[12..])?;
+            let microseconds = u32::from_be_bytes(combined[12..16].try_into().unwrap());
+            (Some(microseconds), Bytes::copy_from_slice(&combined))
         }
         _ => (None, Bytes::copy_from_slice(&base_bytes)),
     };
@@ -103,21 +165,8 @@ pub fn parse_common_header_with_bytes<T: Read>(input: &mut T) -> Result<ParsedHe
 
 impl CommonHeader {
     pub fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::new();
-        bytes.put_slice(&self.timestamp.to_be_bytes());
-        bytes.put_u16(self.entry_type as u16);
-        bytes.put_u16(self.entry_subtype);
-
-        match self.microsecond_timestamp {
-            None => bytes.put_u32(self.length),
-            Some(microseconds) => {
-                // When the microsecond timestamp is present, the length must be adjusted to account
-                // for the stace used by the extra timestamp data.
-                bytes.put_u32(self.length + 4);
-                bytes.put_u32(microseconds);
-            }
-        };
-        bytes.freeze()
+        let raw = RawMrtHeader::from(self);
+        Bytes::copy_from_slice(raw.as_bytes())
     }
 }
 
