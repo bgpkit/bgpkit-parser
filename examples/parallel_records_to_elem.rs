@@ -7,7 +7,7 @@ const CHUNK_SIZE: usize = 16_384;
 
 /// an very simple example that reads a remote BGP data file and print out the message count.
 fn main() -> Result<(), Box<dyn std::error::Error>>{
-    let url = "http://archive.routeviews.org/route-views.amsix/bgpdata/2023.02/UPDATES/updates.20230222.0430.bz2";
+    let url = "https://data.ris.ripe.net/rrc00/2026.02/bview.20260208.0800.gz";
 
     // Iterate over the file in order
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
