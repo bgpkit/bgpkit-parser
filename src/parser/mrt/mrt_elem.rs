@@ -19,6 +19,40 @@ pub struct Elementor {
     pub peer_table: Option<PeerIndexTable>,
 }
 
+/// Error returned by [`Elementor::record_to_elems_iter`].
+#[derive(Debug)]
+pub enum ElemError {
+    /// The record contains a [`PeerIndexTable`]. The contained table can be
+    /// passed to [`Elementor::with_peer_table`] to create an initialized elementor.
+    UnexpectedPeerIndexTable(PeerIndexTable),
+    /// A peer table is required for processing TableDumpV2 RIB entries,
+    /// but none has been set on this elementor.
+    MissingPeerTable,
+    /// The record contains a [`RibGenericEntries`] which is not yet supported.
+    UnsupportedRibGeneric,
+}
+
+impl Display for ElemError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElemError::UnexpectedPeerIndexTable(_) => {
+                write!(f, "unexpected PeerIndexTable record")
+            }
+            ElemError::MissingPeerTable => {
+                write!(
+                    f,
+                    "peer table not set; call set_peer_table or use with_peer_table first"
+                )
+            }
+            ElemError::UnsupportedRibGeneric => {
+                write!(f, "RibGenericEntries not yet supported")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ElemError {}
+
 // use macro_rules! <name of macro>{<Body>}
 macro_rules! get_attr_value {
     ($a:tt, $b:expr) => {
@@ -162,6 +196,130 @@ fn get_relevant_attributes(
     )
 }
 
+fn rib_entry_to_elem(prefix: NetworkPrefix, peer: &Peer, entry: RibEntry) -> BgpElem {
+    let (
+        as_path,
+        as4_path,
+        origin,
+        next_hop,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggregator,
+        announced,
+        _withdrawn,
+        only_to_customer,
+        unknown,
+        deprecated,
+    ) = get_relevant_attributes(entry.attributes);
+
+    let path = match (as_path, as4_path) {
+        (None, None) => None,
+        (Some(v), None) => Some(v),
+        (None, Some(v)) => Some(v),
+        (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2)),
+    };
+
+    let next_hop = match next_hop {
+        Some(v) => Some(v),
+        None => announced.and_then(|v| {
+            v.next_hop.map(|h| match h {
+                NextHopAddress::Ipv4(v) => IpAddr::from(v),
+                NextHopAddress::Ipv6(v) => IpAddr::from(v),
+                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(v),
+                NextHopAddress::VpnIpv6(_, v) => IpAddr::from(v),
+                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => IpAddr::from(v),
+            })
+        }),
+    };
+
+    let origin_asns = path
+        .as_ref()
+        .map(|as_path| as_path.iter_origins().collect());
+
+    BgpElem {
+        timestamp: entry.originated_time as f64,
+        elem_type: ElemType::ANNOUNCE,
+        peer_ip: peer.peer_ip,
+        peer_asn: peer.peer_asn,
+        prefix,
+        next_hop,
+        as_path: path,
+        origin,
+        origin_asns,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggr_asn: aggregator.map(|v| v.0),
+        aggr_ip: aggregator.map(|v| v.1),
+        only_to_customer,
+        unknown,
+        deprecated,
+    }
+}
+
+/// Iterator over [`BgpElem`]s produced from a single [`MrtRecord`],
+/// without requiring a mutable reference to the [`Elementor`].
+///
+/// This avoids allocating a `Vec` for the common RIB table dump case
+/// by lazily converting each [`RibEntry`] into a [`BgpElem`] on demand.
+pub enum RecordElemIter<'a> {
+    #[doc(hidden)]
+    Empty,
+    #[doc(hidden)]
+    TableDump(Option<BgpElem>),
+    #[doc(hidden)]
+    RibAfi {
+        peer_table: &'a PeerIndexTable,
+        prefix: NetworkPrefix,
+        entries: std::vec::IntoIter<RibEntry>,
+    },
+    #[doc(hidden)]
+    Bgp4Mp(std::vec::IntoIter<BgpElem>),
+}
+
+impl Iterator for RecordElemIter<'_> {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        match self {
+            RecordElemIter::Empty => None,
+            RecordElemIter::TableDump(elem) => elem.take(),
+            RecordElemIter::Bgp4Mp(iter) => iter.next(),
+            RecordElemIter::RibAfi {
+                peer_table,
+                prefix,
+                entries,
+            } => {
+                let entry = entries.next()?;
+                let pid = entry.peer_index;
+                match peer_table.get_peer_by_id(&pid) {
+                    Some(peer) => Some(rib_entry_to_elem(*prefix, peer, entry)),
+                    None => {
+                        error!("peer ID {} not found in peer_index table", pid);
+                        *self = RecordElemIter::Empty;
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            RecordElemIter::Empty => (0, Some(0)),
+            RecordElemIter::TableDump(elem) => {
+                let n = elem.is_some() as usize;
+                (n, Some(n))
+            }
+            RecordElemIter::Bgp4Mp(iter) => iter.size_hint(),
+            RecordElemIter::RibAfi { entries, .. } => (0, Some(entries.len())),
+        }
+    }
+}
+
 impl Elementor {
     pub fn new() -> Elementor {
         Self::default()
@@ -203,6 +361,122 @@ impl Elementor {
             Ok(())
         } else {
             Err(ParseError("peer_table is not a PeerIndexTable".to_string()))
+        }
+    }
+
+    /// Creates an [`Elementor`] with the given [`PeerIndexTable`] already set.
+    pub fn with_peer_table(peer_table: PeerIndexTable) -> Elementor {
+        Elementor {
+            peer_table: Some(peer_table),
+        }
+    }
+
+    /// Convert a [`MrtRecord`] into an iterator of [`BgpElem`]s without
+    /// requiring `&mut self`.
+    ///
+    /// Unlike [`record_to_elems`](Elementor::record_to_elems), this method:
+    /// - Takes `&self` instead of `&mut self`, since the peer table must
+    ///   already be set via [`set_peer_table`](Elementor::set_peer_table) or
+    ///   [`with_peer_table`](Elementor::with_peer_table).
+    /// - Returns an error if the record contains a [`PeerIndexTable`] (which
+    ///   would require mutation).
+    /// - Returns a lazy [`RecordElemIter`] instead of collecting into a `Vec`,
+    ///   avoiding allocation for the common RIB table dump case.
+    ///
+    /// # Errors
+    ///
+    /// - [`ElemError::UnexpectedPeerIndexTable`] if the record is a PeerIndexTable message.
+    /// - [`ElemError::MissingPeerTable`] if the record requires a peer table but none is set.
+    pub fn record_to_elems_iter(
+        &self,
+        record: MrtRecord,
+    ) -> Result<RecordElemIter<'_>, ElemError> {
+        let timestamp = {
+            let t = record.common_header.timestamp;
+            if let Some(micro) = &record.common_header.microsecond_timestamp {
+                let m = (*micro as f64) / 1000000.0;
+                t as f64 + m
+            } else {
+                f64::from(t)
+            }
+        };
+
+        match record.message {
+            MrtMessage::TableDumpMessage(msg) => {
+                let (
+                    as_path,
+                    _as4_path,
+                    origin,
+                    next_hop,
+                    local_pref,
+                    med,
+                    communities,
+                    atomic,
+                    aggregator,
+                    _announced,
+                    _withdrawn,
+                    only_to_customer,
+                    unknown,
+                    deprecated,
+                ) = get_relevant_attributes(msg.attributes);
+
+                let origin_asns = as_path
+                    .as_ref()
+                    .map(|as_path| as_path.iter_origins().collect());
+
+                Ok(RecordElemIter::TableDump(Some(BgpElem {
+                    timestamp: msg.originated_time as f64,
+                    elem_type: ElemType::ANNOUNCE,
+                    peer_ip: msg.peer_ip,
+                    peer_asn: msg.peer_asn,
+                    prefix: msg.prefix,
+                    next_hop,
+                    as_path,
+                    origin,
+                    origin_asns,
+                    local_pref,
+                    med,
+                    communities,
+                    atomic,
+                    aggr_asn: aggregator.map(|v| v.0),
+                    aggr_ip: aggregator.map(|v| v.1),
+                    only_to_customer,
+                    unknown,
+                    deprecated,
+                })))
+            }
+
+            MrtMessage::TableDumpV2Message(msg) => match msg {
+                TableDumpV2Message::PeerIndexTable(p) => {
+                    Err(ElemError::UnexpectedPeerIndexTable(p))
+                }
+                TableDumpV2Message::RibAfi(t) => {
+                    let peer_table = self
+                        .peer_table
+                        .as_ref()
+                        .ok_or(ElemError::MissingPeerTable)?;
+                    Ok(RecordElemIter::RibAfi {
+                        peer_table,
+                        prefix: t.prefix,
+                        entries: t.rib_entries.into_iter(),
+                    })
+                }
+                TableDumpV2Message::RibGeneric(_) => Err(ElemError::UnsupportedRibGeneric),
+                TableDumpV2Message::GeoPeerTable(_) => Ok(RecordElemIter::Empty),
+            },
+
+            MrtMessage::Bgp4Mp(msg) => match msg {
+                Bgp4MpEnum::StateChange(_) => Ok(RecordElemIter::Empty),
+                Bgp4MpEnum::Message(v) => {
+                    let elems = Elementor::bgp_to_elems(
+                        v.bgp_message,
+                        timestamp,
+                        &v.peer_ip,
+                        &v.peer_asn,
+                    );
+                    Ok(RecordElemIter::Bgp4Mp(elems.into_iter()))
+                }
+            },
         }
     }
 

@@ -49,7 +49,7 @@ impl<R: Read> Iterator for RecordIterator<R> {
                             return Some(v);
                         }
                         let elems = self.elementor.record_to_elems(v.clone());
-                        if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
+                        if self.parser.filters.is_empty() || elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
                             Some(v)
                         } else {
                             continue;
