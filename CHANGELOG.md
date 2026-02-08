@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### New features
+
+* **Immutable Elementor API**: New methods enable parallel processing of MRT records
+  - `Elementor::with_peer_table(peer_table)` creates a pre-initialized Elementor
+  - `Elementor::record_to_elems_iter(&self, record)` returns a lazy iterator without requiring `&mut self`
+  - `BgpkitParser::into_elementor_and_raw_record_iter()` returns `(Elementor, iterator)` with PeerIndexTable pre-extracted
+  - `BgpkitParser::into_elementor_and_record_iter()` returns `(Elementor, iterator)` with PeerIndexTable pre-extracted
+  - New `RecordElemIter` and `BgpUpdateElemIter` types for lazy element iteration
+  - New `ElemError` type for explicit error handling
+  - Parallel processing example demonstrating multi-threaded parsing with significant speedup
+
 ## v0.15.0 - 2026-01-28
 
 ### Breaking changes
