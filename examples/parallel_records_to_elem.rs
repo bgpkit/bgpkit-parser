@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cnt = parser.into_elem_iter().count();
 
     println!("Total number of routes: {cnt}");
-    println!("Time elapsed: {:?}", t0.elapsed());
+    println!("Time elapsed: {:?} (BgpkitParser::into_elem_iter() -> count", t0.elapsed());
 
     // Scan the raw records
     let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cnt = parser.into_raw_record_iter().count();
     println!("Total number of records: {cnt}");
     println!(
-        "Time elapsed: {:?}s (to chunk into raw records)",
+        "Time elapsed: {:?}s (BgpkitParser::raw_record_iter -> count)",
         t0.elapsed()
     );
 
@@ -36,12 +36,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cnt = 0;
     for raw_record in parser.into_raw_record_iter() {
         if let Ok(record) = raw_record.parse() {
-            cnt += elementor.record_to_elems(record).iter().count();
+            cnt += elementor.record_to_elems(record).len();
         }
     }
     println!("Total number of routes: {cnt}");
     println!(
-        "Time elapsed: {:?}s (parse to RawRecord, turn into BgpElem using Elementor)",
+        "Time elapsed: {:?}s (parser -> RawRecord -> Elementor::record_to_elems)",
         t0.elapsed()
     );
 
@@ -102,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Total records: {total}");
     println!(
-        "Time elapsed: {:?} (set peer index table on Elementor, iterate in parallel over chunks)",
+        "Time elapsed: {:?} (Elementor::with_peer_table, iterate in parallel over chunks)",
         t0.elapsed()
     );
     Ok(())

@@ -24,7 +24,7 @@ pub struct Elementor {
 pub enum ElemError {
     /// The record contains a [`PeerIndexTable`]. The contained table can be
     /// passed to [`Elementor::with_peer_table`] to create an initialized elementor.
-    UnexpectedPeerIndexTable(PeerIndexTable),
+    UnexpectedPeerIndexTable(Box<PeerIndexTable>),
     /// A peer table is required for processing TableDumpV2 RIB entries,
     /// but none has been set on this elementor.
     MissingPeerTable,
@@ -342,8 +342,10 @@ pub struct BgpUpdateElemIter {
     unknown: Option<Vec<AttrRaw>>,
     deprecated: Option<Vec<AttrRaw>>,
     // Prefix iterators (two chained sources each)
-    announced: std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
-    withdrawn: std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    announced:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    withdrawn:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
     in_withdrawn_phase: bool,
 }
 
@@ -406,10 +408,7 @@ impl Iterator for BgpUpdateElemIter {
             self.announced.size_hint()
         };
         let (wd_lo, wd_hi) = self.withdrawn.size_hint();
-        (
-            ann_lo + wd_lo,
-            ann_hi.and_then(|a| wd_hi.map(|w| a + w)),
-        )
+        (ann_lo + wd_lo, ann_hi.and_then(|a| wd_hi.map(|w| a + w)))
     }
 }
 
@@ -480,10 +479,7 @@ impl Elementor {
     ///
     /// - [`ElemError::UnexpectedPeerIndexTable`] if the record is a PeerIndexTable message.
     /// - [`ElemError::MissingPeerTable`] if the record requires a peer table but none is set.
-    pub fn record_to_elems_iter(
-        &self,
-        record: MrtRecord,
-    ) -> Result<RecordElemIter<'_>, ElemError> {
+    pub fn record_to_elems_iter(&self, record: MrtRecord) -> Result<RecordElemIter<'_>, ElemError> {
         let timestamp = {
             let t = record.common_header.timestamp;
             if let Some(micro) = &record.common_header.microsecond_timestamp {
@@ -541,7 +537,7 @@ impl Elementor {
 
             MrtMessage::TableDumpV2Message(msg) => match msg {
                 TableDumpV2Message::PeerIndexTable(p) => {
-                    Err(ElemError::UnexpectedPeerIndexTable(p))
+                    Err(ElemError::UnexpectedPeerIndexTable(Box::new(p)))
                 }
                 TableDumpV2Message::RibAfi(t) => {
                     let peer_table = self
@@ -673,14 +669,8 @@ impl Elementor {
             aggr_ip: aggregator.as_ref().map(|v| v.1),
             unknown,
             deprecated,
-            announced: msg
-                .announced_prefixes
-                .into_iter()
-                .chain(nlri_announced),
-            withdrawn: msg
-                .withdrawn_prefixes
-                .into_iter()
-                .chain(nlri_withdrawn),
+            announced: msg.announced_prefixes.into_iter().chain(nlri_announced),
+            withdrawn: msg.withdrawn_prefixes.into_iter().chain(nlri_withdrawn),
             in_withdrawn_phase: false,
         }
     }
@@ -697,17 +687,14 @@ impl Elementor {
             MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) => {
                 self.set_peer_table(record);
                 vec![]
-            },
-            _ => {
-                match self.record_to_elems_iter(record) {
-                    Ok(iter) => iter.collect(),
-                    Err(e) => {
-                        error!("{}", e);
-                        vec![]
-                    }
-
-                }
             }
+            _ => match self.record_to_elems_iter(record) {
+                Ok(iter) => iter.collect(),
+                Err(e) => {
+                    error!("{}", e);
+                    vec![]
+                }
+            },
         }
     }
 }
