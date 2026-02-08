@@ -686,187 +686,29 @@ impl Elementor {
     }
 
     /// Convert a [MrtRecord] to a vector of [BgpElem]s.
+    ///
+    /// If the record is a [`PeerIndexTable`], it is consumed to set the internal
+    /// peer table. Errors are logged.
+    ///
+    /// For a non-mutating, lazy alternative, see
+    /// [`record_to_elems_iter`](Elementor::record_to_elems_iter).
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
-        let mut elems = vec![];
-        let t = record.common_header.timestamp;
-        let timestamp: f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
-            let m = (*micro as f64) / 1000000.0;
-            t as f64 + m
-        } else {
-            f64::from(t)
-        };
-
         match record.message {
-            MrtMessage::TableDumpMessage(msg) => {
-                let (
-                    as_path,
-                    _as4_path, // Table dump v1 does not have 4-byte AS number
-                    origin,
-                    next_hop,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggregator,
-                    _announced,
-                    _withdrawn,
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                ) = get_relevant_attributes(msg.attributes);
-
-                let origin_asns = as_path
-                    .as_ref()
-                    .map(|as_path| as_path.iter_origins().collect());
-
-                elems.push(BgpElem {
-                    timestamp: msg.originated_time as f64,
-                    elem_type: ElemType::ANNOUNCE,
-                    peer_ip: msg.peer_ip,
-                    peer_asn: msg.peer_asn,
-                    prefix: msg.prefix,
-                    next_hop,
-                    as_path,
-                    origin,
-                    origin_asns,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggr_asn: aggregator.map(|v| v.0),
-                    aggr_ip: aggregator.map(|v| v.1),
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                });
-            }
-
-            MrtMessage::TableDumpV2Message(msg) => {
-                match msg {
-                    TableDumpV2Message::PeerIndexTable(p) => {
-                        self.peer_table = Some(p);
-                    }
-                    TableDumpV2Message::RibAfi(t) => {
-                        let prefix = t.prefix;
-                        for e in t.rib_entries {
-                            let pid = e.peer_index;
-                            let peer = match self.peer_table.as_ref() {
-                                None => {
-                                    error!("peer_table is None");
-                                    break;
-                                }
-                                Some(table) => match table.get_peer_by_id(&pid) {
-                                    None => {
-                                        error!("peer ID {} not found in peer_index table", pid);
-                                        break;
-                                    }
-                                    Some(peer) => peer,
-                                },
-                            };
-                            let (
-                                as_path,
-                                as4_path, // Table dump v1 does not have 4-byte AS number
-                                origin,
-                                next_hop,
-                                local_pref,
-                                med,
-                                communities,
-                                atomic,
-                                aggregator,
-                                announced,
-                                _withdrawn,
-                                only_to_customer,
-                                unknown,
-                                deprecated,
-                            ) = get_relevant_attributes(e.attributes);
-
-                            let path = match (as_path, as4_path) {
-                                (None, None) => None,
-                                (Some(v), None) => Some(v),
-                                (None, Some(v)) => Some(v),
-                                (Some(v1), Some(v2)) => {
-                                    Some(AsPath::merge_aspath_as4path(&v1, &v2))
-                                }
-                            };
-
-                            let next = match next_hop {
-                                None => {
-                                    if let Some(v) = announced {
-                                        if let Some(h) = v.next_hop {
-                                            match h {
-                                                NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6LinkLocal(v, _) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                                // RFC 8950: VPN next hops - return the IPv6 address part
-                                                NextHopAddress::VpnIpv6(_, v) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Some(v) => Some(v),
-                            };
-
-                            let origin_asns = path
-                                .as_ref()
-                                .map(|as_path| as_path.iter_origins().collect());
-
-                            elems.push(BgpElem {
-                                timestamp: e.originated_time as f64,
-                                elem_type: ElemType::ANNOUNCE,
-                                peer_ip: peer.peer_ip,
-                                peer_asn: peer.peer_asn,
-                                prefix,
-                                next_hop: next,
-                                as_path: path,
-                                origin,
-                                origin_asns,
-                                local_pref,
-                                med,
-                                communities,
-                                atomic,
-                                aggr_asn: aggregator.map(|v| v.0),
-                                aggr_ip: aggregator.map(|v| v.1),
-                                only_to_customer,
-                                unknown,
-                                deprecated,
-                            });
-                        }
-                    }
-                    TableDumpV2Message::RibGeneric(_t) => {
-                        warn!(
-                            "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
-                        );
-                    }
-                    TableDumpV2Message::GeoPeerTable(_t) => {
-                        // GeoPeerTable doesn't generate BGP elements, it provides geo-location context
-                        // for other peer entries. No BGP elements are generated from this message type.
-                    }
-                }
-            }
-            MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4MpEnum::StateChange(_) => {}
-                Bgp4MpEnum::Message(v) => {
-                    elems.extend(Elementor::bgp_to_elems(
-                        v.bgp_message,
-                        timestamp,
-                        &v.peer_ip,
-                        &v.peer_asn,
-                    ));
-                }
+            MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) => {
+                self.set_peer_table(record);
+                vec![]
             },
+            _ => {
+                match self.record_to_elems_iter(record) {
+                    Ok(iter) => iter.collect(),
+                    Err(e) => {
+                        error!("{}", e);
+                        vec![]
+                    }
+
+                }
+            }
         }
-        elems
     }
 }
 
