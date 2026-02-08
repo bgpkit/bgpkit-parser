@@ -277,7 +277,7 @@ pub enum RecordElemIter<'a> {
         entries: std::vec::IntoIter<RibEntry>,
     },
     #[doc(hidden)]
-    Bgp4Mp(std::vec::IntoIter<BgpElem>),
+    Bgp4Mp(BgpUpdateElemIter),
 }
 
 impl Iterator for RecordElemIter<'_> {
@@ -317,6 +317,99 @@ impl Iterator for RecordElemIter<'_> {
             RecordElemIter::Bgp4Mp(iter) => iter.size_hint(),
             RecordElemIter::RibAfi { entries, .. } => (0, Some(entries.len())),
         }
+    }
+}
+
+/// Iterator over [`BgpElem`]s produced from a [`BgpUpdateMessage`],
+/// avoiding allocation by lazily yielding elements from announced and
+/// withdrawn prefixes in two phases.
+pub struct BgpUpdateElemIter {
+    timestamp: f64,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    only_to_customer: Option<Asn>,
+    // Announce-specific shared attributes
+    path: Option<AsPath>,
+    origin_asns: Option<Vec<Asn>>,
+    origin: Option<Origin>,
+    next_hop: Option<IpAddr>,
+    local_pref: Option<u32>,
+    med: Option<u32>,
+    communities: Option<Vec<MetaCommunity>>,
+    atomic: bool,
+    aggr_asn: Option<Asn>,
+    aggr_ip: Option<BgpIdentifier>,
+    unknown: Option<Vec<AttrRaw>>,
+    deprecated: Option<Vec<AttrRaw>>,
+    // Prefix iterators (two chained sources each)
+    announced: std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    withdrawn: std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    in_withdrawn_phase: bool,
+}
+
+impl Iterator for BgpUpdateElemIter {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        if !self.in_withdrawn_phase {
+            if let Some(prefix) = self.announced.next() {
+                return Some(BgpElem {
+                    timestamp: self.timestamp,
+                    elem_type: ElemType::ANNOUNCE,
+                    peer_ip: self.peer_ip,
+                    peer_asn: self.peer_asn,
+                    prefix,
+                    next_hop: self.next_hop,
+                    as_path: self.path.clone(),
+                    origin: self.origin,
+                    origin_asns: self.origin_asns.clone(),
+                    local_pref: self.local_pref,
+                    med: self.med,
+                    communities: self.communities.clone(),
+                    atomic: self.atomic,
+                    aggr_asn: self.aggr_asn,
+                    aggr_ip: self.aggr_ip,
+                    only_to_customer: self.only_to_customer,
+                    unknown: self.unknown.clone(),
+                    deprecated: self.deprecated.clone(),
+                });
+            }
+            self.in_withdrawn_phase = true;
+        }
+
+        self.withdrawn.next().map(|prefix| BgpElem {
+            timestamp: self.timestamp,
+            elem_type: ElemType::WITHDRAW,
+            peer_ip: self.peer_ip,
+            peer_asn: self.peer_asn,
+            prefix,
+            next_hop: None,
+            as_path: None,
+            origin: None,
+            origin_asns: None,
+            local_pref: None,
+            med: None,
+            communities: None,
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: self.only_to_customer,
+            unknown: None,
+            deprecated: None,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (ann_lo, ann_hi) = if self.in_withdrawn_phase {
+            (0, Some(0))
+        } else {
+            self.announced.size_hint()
+        };
+        let (wd_lo, wd_hi) = self.withdrawn.size_hint();
+        (
+            ann_lo + wd_lo,
+            ann_hi.and_then(|a| wd_hi.map(|w| a + w)),
+        )
     }
 }
 
@@ -468,13 +561,15 @@ impl Elementor {
             MrtMessage::Bgp4Mp(msg) => match msg {
                 Bgp4MpEnum::StateChange(_) => Ok(RecordElemIter::Empty),
                 Bgp4MpEnum::Message(v) => {
-                    let elems = Elementor::bgp_to_elems(
+                    match Elementor::bgp_to_elems_iter(
                         v.bgp_message,
                         timestamp,
                         &v.peer_ip,
                         &v.peer_asn,
-                    );
-                    Ok(RecordElemIter::Bgp4Mp(elems.into_iter()))
+                    ) {
+                        Some(iter) => Ok(RecordElemIter::Bgp4Mp(iter)),
+                        None => Ok(RecordElemIter::Empty),
+                    }
                 }
             },
         }
@@ -490,13 +585,25 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> Vec<BgpElem> {
+        Elementor::bgp_to_elems_iter(msg, timestamp, peer_ip, peer_asn)
+            .map(|iter| iter.collect())
+            .unwrap_or_default()
+    }
+
+    /// Convert a [BgpMessage] into an iterator of [BgpElem]s.
+    ///
+    /// Returns `None` for non-Update messages (Open, Notification, KeepAlive).
+    pub fn bgp_to_elems_iter(
+        msg: BgpMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> Option<BgpUpdateElemIter> {
         match msg {
-            BgpMessage::Update(msg) => {
-                Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
-            }
-            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => {
-                vec![]
-            }
+            BgpMessage::Update(msg) => Some(Elementor::bgp_update_to_elems_iter(
+                msg, timestamp, peer_ip, peer_asn,
+            )),
+            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => None,
         }
     }
 
@@ -507,11 +614,20 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> Vec<BgpElem> {
-        let mut elems = vec![];
+        Elementor::bgp_update_to_elems_iter(msg, timestamp, peer_ip, peer_asn).collect()
+    }
 
+    /// Convert a [BgpUpdateMessage] into a [`BgpUpdateElemIter`] that lazily
+    /// yields [BgpElem]s without allocating a `Vec`.
+    pub fn bgp_update_to_elems_iter(
+        msg: BgpUpdateMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> BgpUpdateElemIter {
         let (
             as_path,
-            as4_path, // Table dump v1 does not have 4-byte AS number
+            as4_path,
             origin,
             next_hop,
             local_pref,
@@ -537,93 +653,36 @@ impl Elementor {
             .as_ref()
             .map(|as_path| as_path.iter_origins().collect());
 
-        elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
+        let nlri_announced = announced.map(|n| n.prefixes).unwrap_or_default();
+        let nlri_withdrawn = withdrawn.map(|n| n.prefixes).unwrap_or_default();
+
+        BgpUpdateElemIter {
             timestamp,
-            elem_type: ElemType::ANNOUNCE,
             peer_ip: *peer_ip,
             peer_asn: *peer_asn,
-            prefix: p,
-            next_hop,
-            as_path: path.clone(),
-            origin_asns: origin_asns.clone(),
+            only_to_customer,
+            path,
+            origin_asns,
             origin,
+            next_hop,
             local_pref,
             med,
-            communities: communities.clone(),
+            communities,
             atomic,
             aggr_asn: aggregator.as_ref().map(|v| v.0),
             aggr_ip: aggregator.as_ref().map(|v| v.1),
-            only_to_customer,
-            unknown: unknown.clone(),
-            deprecated: deprecated.clone(),
-        }));
-
-        if let Some(nlri) = announced {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp,
-                elem_type: ElemType::ANNOUNCE,
-                peer_ip: *peer_ip,
-                peer_asn: *peer_asn,
-                prefix: p,
-                next_hop,
-                as_path: path.clone(),
-                origin,
-                origin_asns: origin_asns.clone(),
-                local_pref,
-                med,
-                communities: communities.clone(),
-                atomic,
-                aggr_asn: aggregator.as_ref().map(|v| v.0),
-                aggr_ip: aggregator.as_ref().map(|v| v.1),
-                only_to_customer,
-                unknown: unknown.clone(),
-                deprecated: deprecated.clone(),
-            }));
+            unknown,
+            deprecated,
+            announced: msg
+                .announced_prefixes
+                .into_iter()
+                .chain(nlri_announced),
+            withdrawn: msg
+                .withdrawn_prefixes
+                .into_iter()
+                .chain(nlri_withdrawn),
+            in_withdrawn_phase: false,
         }
-
-        elems.extend(msg.withdrawn_prefixes.into_iter().map(|p| BgpElem {
-            timestamp,
-            elem_type: ElemType::WITHDRAW,
-            peer_ip: *peer_ip,
-            peer_asn: *peer_asn,
-            prefix: p,
-            next_hop: None,
-            as_path: None,
-            origin: None,
-            origin_asns: None,
-            local_pref: None,
-            med: None,
-            communities: None,
-            atomic: false,
-            aggr_asn: None,
-            aggr_ip: None,
-            only_to_customer,
-            unknown: None,
-            deprecated: None,
-        }));
-        if let Some(nlri) = withdrawn {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp,
-                elem_type: ElemType::WITHDRAW,
-                peer_ip: *peer_ip,
-                peer_asn: *peer_asn,
-                prefix: p,
-                next_hop: None,
-                as_path: None,
-                origin: None,
-                origin_asns: None,
-                local_pref: None,
-                med: None,
-                communities: None,
-                atomic: false,
-                aggr_asn: None,
-                aggr_ip: None,
-                only_to_customer,
-                unknown: None,
-                deprecated: None,
-            }));
-        };
-        elems
     }
 
     /// Convert a [MrtRecord] to a vector of [BgpElem]s.

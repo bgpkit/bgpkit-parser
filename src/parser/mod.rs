@@ -18,7 +18,7 @@ pub mod rislive;
 pub(crate) use self::utils::*;
 
 use crate::models::MrtRecord;
-pub use mrt::mrt_elem::{ElemError, Elementor, RecordElemIter};
+pub use mrt::mrt_elem::{BgpUpdateElemIter, ElemError, Elementor, RecordElemIter};
 #[cfg(feature = "oneio")]
 use oneio::{get_cache_reader, get_reader};
 
