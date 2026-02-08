@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("\nTotal number of routes (sequential mutable Elementor): {cnt}");
     println!(
-        "Time elapsed: {:?}s (parser -> RawRecord -> Elementor::record_to_elems)",
+        "Time elapsed: {:?} (parser -> RawRecord -> Elementor::record_to_elems)",
         t0.elapsed()
     );
 

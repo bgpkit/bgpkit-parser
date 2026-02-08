@@ -315,7 +315,10 @@ impl Iterator for RecordElemIter<'_> {
                 (n, Some(n))
             }
             RecordElemIter::Bgp4Mp(iter) => iter.size_hint(),
-            RecordElemIter::RibAfi { entries, .. } => (0, Some(entries.len())),
+            RecordElemIter::RibAfi { entries, .. } => {
+                let len = entries.len();
+                (len, Some(len))
+            }
         }
     }
 }
@@ -1037,5 +1040,273 @@ mod tests {
         ) = get_relevant_attributes(attributes);
 
         assert_eq!(next_hop, Some(IpAddr::from_str("10.0.0.2").unwrap()));
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_equivalence_tabledumpv2_small() {
+        // rib-example-small.bz2 is a TableDumpV2 file (starts with PeerIndexTable)
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        // Skip the PeerIndexTable
+        let peer_index_table = record_iter.next().unwrap();
+        let _ = elementor.record_to_elems(peer_index_table);
+
+        // Process the first RIB entry
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_equivalence_bgp4mp() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires large RIB file download"]
+    fn test_record_to_elems_iter_equivalence_tabledumpv2() {
+        let url = "https://data.ris.ripe.net/rrc00/2023.01/bview.20230101.0000.gz";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        let peer_index_table = record_iter.next().unwrap();
+        let _ = elementor.record_to_elems(peer_index_table);
+
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_tabledumpv2_with_peer_table() {
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        let peer_index_table = record_iter.next().unwrap();
+        let mut elementor = Elementor::with_peer_table(
+            if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(pit)) =
+                peer_index_table.message
+            {
+                pit
+            } else {
+                panic!("Expected PeerIndexTable");
+            },
+        );
+
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_error_unexpected_peer_index_table() {
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+
+        let result = elementor.record_to_elems_iter(record);
+        assert!(matches!(
+            result,
+            Err(ElemError::UnexpectedPeerIndexTable(_))
+        ));
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_error_missing_peer_table() {
+        // rib-example-small.bz2 is a TableDumpV2 file (starts with PeerIndexTable)
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        // Skip the PeerIndexTable without consuming it via record_to_elems
+        // which would set the peer table in the elementor
+        let _peer_index_table = record_iter.next().unwrap();
+
+        // Now try to process a RIB entry without having set the peer table
+        let record = record_iter.next().unwrap();
+        let result = elementor.record_to_elems_iter(record);
+        assert!(matches!(result, Err(ElemError::MissingPeerTable)));
+    }
+
+    #[test]
+    fn test_bgp_to_elems_iter_equivalence() {
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let attributes = vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65000, 65001, 65002]),
+                is_as4: false,
+            },
+            AttributeValue::NextHop(peer_ip),
+        ]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+        let attributes = Attributes::from(attributes);
+
+        let announced_prefixes = vec![NetworkPrefix::from_str("10.0.0.0/24").unwrap()];
+
+        let bgp_message = BgpMessage::Update(BgpUpdateMessage {
+            attributes,
+            announced_prefixes,
+            withdrawn_prefixes: vec![],
+        });
+
+        let elems_vec =
+            Elementor::bgp_to_elems(bgp_message.clone(), timestamp, &peer_ip, &peer_asn);
+        let elems_iter: Vec<BgpElem> =
+            Elementor::bgp_to_elems_iter(bgp_message, timestamp, &peer_ip, &peer_asn)
+                .unwrap()
+                .collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert_eq!(elems_vec.len(), 1);
+    }
+
+    #[test]
+    fn test_bgp_to_elems_iter_non_update_messages() {
+        use std::net::Ipv4Addr;
+
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let open_msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        };
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::Open(open_msg),
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+
+        let notification_msg = BgpNotificationMessage {
+            error: BgpError::Unknown(0, 0),
+            data: vec![],
+        };
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::Notification(notification_msg),
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::KeepAlive,
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_bgp_update_to_elems_iter_equivalence() {
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let attributes = vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65000, 65001, 65002]),
+                is_as4: false,
+            },
+            AttributeValue::NextHop(peer_ip),
+        ]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+        let attributes = Attributes::from(attributes);
+
+        let announced_prefixes = vec![NetworkPrefix::from_str("10.0.0.0/24").unwrap()];
+        let withdrawn_prefixes = vec![NetworkPrefix::from_str("10.0.1.0/24").unwrap()];
+
+        let update = BgpUpdateMessage {
+            attributes,
+            announced_prefixes,
+            withdrawn_prefixes,
+        };
+
+        let elems_vec =
+            Elementor::bgp_update_to_elems(update.clone(), timestamp, &peer_ip, &peer_asn);
+        let elems_iter: Vec<BgpElem> =
+            Elementor::bgp_update_to_elems_iter(update, timestamp, &peer_ip, &peer_asn).collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert_eq!(elems_vec.len(), 2);
+    }
+
+    #[test]
+    fn test_record_elem_iter_size_hint() {
+        use std::collections::HashMap;
+
+        let peer_table = PeerIndexTable {
+            collector_bgp_id: BgpIdentifier::from_str("10.0.0.1").unwrap(),
+            view_name: "".to_string(),
+            id_peer_map: HashMap::new(),
+            peer_ip_id_map: HashMap::new(),
+        };
+
+        let entries: Vec<RibEntry> = vec![];
+        let iter = RecordElemIter::RibAfi {
+            peer_table: &peer_table,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            entries: entries.into_iter(),
+        };
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+
+        let entries: Vec<RibEntry> = (0..5)
+            .map(|i| RibEntry {
+                peer_index: i as u16,
+                originated_time: 0,
+                path_id: None,
+                attributes: Attributes::default(),
+            })
+            .collect();
+        let iter = RecordElemIter::RibAfi {
+            peer_table: &peer_table,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            entries: entries.into_iter(),
+        };
+        assert_eq!(iter.size_hint(), (5, Some(5)));
     }
 }
