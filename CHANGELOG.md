@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Performance improvements
+
+* Use zerocopy for MRT header parsing
+  - Replaced manual byte parsing with zerocopy's `FromBytes` trait for `RawMrtCommonHeader` and `RawMrtEtCommonHeader`
+  - Reduces bounds checking overhead by using compile-time verified struct layouts
+  - Added compile-time assertions to ensure header sizes match wire format (12 bytes standard, 16 bytes ET)
+  - Encoding now uses zerocopy's `IntoBytes` trait for efficient byte conversion
+
 ### New features
 
 * **Immutable Elementor API**: New methods enable parallel processing of MRT records
@@ -14,6 +22,10 @@ All notable changes to this project will be documented in this file.
   - New `RecordElemIter` and `BgpUpdateElemIter` types for lazy element iteration
   - New `ElemError` type for explicit error handling
   - Parallel processing example demonstrating multi-threaded parsing with significant speedup
+
+### Testing
+
+* Added benchmarks for `into_raw_record_iter` for both updates and RIB dumps
 
 ## v0.15.0 - 2026-01-28
 
