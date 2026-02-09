@@ -19,6 +19,40 @@ pub struct Elementor {
     pub peer_table: Option<PeerIndexTable>,
 }
 
+/// Error returned by [`Elementor::record_to_elems_iter`].
+#[derive(Debug)]
+pub enum ElemError {
+    /// The record contains a [`PeerIndexTable`]. The contained table can be
+    /// passed to [`Elementor::with_peer_table`] to create an initialized elementor.
+    UnexpectedPeerIndexTable(Box<PeerIndexTable>),
+    /// A peer table is required for processing TableDumpV2 RIB entries,
+    /// but none has been set on this elementor.
+    MissingPeerTable,
+    /// The record contains a [`RibGenericEntries`] which is not yet supported.
+    UnsupportedRibGeneric,
+}
+
+impl Display for ElemError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElemError::UnexpectedPeerIndexTable(_) => {
+                write!(f, "unexpected PeerIndexTable record")
+            }
+            ElemError::MissingPeerTable => {
+                write!(
+                    f,
+                    "peer table not set; call set_peer_table or use with_peer_table first"
+                )
+            }
+            ElemError::UnsupportedRibGeneric => {
+                write!(f, "RibGenericEntries not yet supported")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ElemError {}
+
 // use macro_rules! <name of macro>{<Body>}
 macro_rules! get_attr_value {
     ($a:tt, $b:expr) => {
@@ -162,6 +196,225 @@ fn get_relevant_attributes(
     )
 }
 
+fn rib_entry_to_elem(prefix: NetworkPrefix, peer: &Peer, entry: RibEntry) -> BgpElem {
+    let (
+        as_path,
+        as4_path,
+        origin,
+        next_hop,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggregator,
+        announced,
+        _withdrawn,
+        only_to_customer,
+        unknown,
+        deprecated,
+    ) = get_relevant_attributes(entry.attributes);
+
+    let path = match (as_path, as4_path) {
+        (None, None) => None,
+        (Some(v), None) => Some(v),
+        (None, Some(v)) => Some(v),
+        (Some(v1), Some(v2)) => Some(AsPath::merge_aspath_as4path(&v1, &v2)),
+    };
+
+    let next_hop = match next_hop {
+        Some(v) => Some(v),
+        None => announced.and_then(|v| {
+            v.next_hop.map(|h| match h {
+                NextHopAddress::Ipv4(v) => IpAddr::from(v),
+                NextHopAddress::Ipv6(v) => IpAddr::from(v),
+                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(v),
+                NextHopAddress::VpnIpv6(_, v) => IpAddr::from(v),
+                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => IpAddr::from(v),
+            })
+        }),
+    };
+
+    let origin_asns = path
+        .as_ref()
+        .map(|as_path| as_path.iter_origins().collect());
+
+    BgpElem {
+        timestamp: entry.originated_time as f64,
+        elem_type: ElemType::ANNOUNCE,
+        peer_ip: peer.peer_ip,
+        peer_asn: peer.peer_asn,
+        prefix,
+        next_hop,
+        as_path: path,
+        origin,
+        origin_asns,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggr_asn: aggregator.map(|v| v.0),
+        aggr_ip: aggregator.map(|v| v.1),
+        only_to_customer,
+        unknown,
+        deprecated,
+    }
+}
+
+/// Iterator over [`BgpElem`]s produced from a single [`MrtRecord`],
+/// without requiring a mutable reference to the [`Elementor`].
+///
+/// This avoids allocating a `Vec` for the common RIB table dump case
+/// by lazily converting each [`RibEntry`] into a [`BgpElem`] on demand.
+pub enum RecordElemIter<'a> {
+    #[doc(hidden)]
+    Empty,
+    #[doc(hidden)]
+    TableDump(Option<BgpElem>),
+    #[doc(hidden)]
+    RibAfi {
+        peer_table: &'a PeerIndexTable,
+        prefix: NetworkPrefix,
+        entries: std::vec::IntoIter<RibEntry>,
+    },
+    #[doc(hidden)]
+    Bgp4Mp(BgpUpdateElemIter),
+}
+
+impl Iterator for RecordElemIter<'_> {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        match self {
+            RecordElemIter::Empty => None,
+            RecordElemIter::TableDump(elem) => elem.take(),
+            RecordElemIter::Bgp4Mp(iter) => iter.next(),
+            RecordElemIter::RibAfi {
+                peer_table,
+                prefix,
+                entries,
+            } => {
+                let entry = entries.next()?;
+                let pid = entry.peer_index;
+                match peer_table.get_peer_by_id(&pid) {
+                    Some(peer) => Some(rib_entry_to_elem(*prefix, peer, entry)),
+                    None => {
+                        error!("peer ID {} not found in peer_index table", pid);
+                        *self = RecordElemIter::Empty;
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            RecordElemIter::Empty => (0, Some(0)),
+            RecordElemIter::TableDump(elem) => {
+                let n = elem.is_some() as usize;
+                (n, Some(n))
+            }
+            RecordElemIter::Bgp4Mp(iter) => iter.size_hint(),
+            RecordElemIter::RibAfi { entries, .. } => {
+                let len = entries.len();
+                (len, Some(len))
+            }
+        }
+    }
+}
+
+/// Iterator over [`BgpElem`]s produced from a [`BgpUpdateMessage`],
+/// avoiding allocation by lazily yielding elements from announced and
+/// withdrawn prefixes in two phases.
+pub struct BgpUpdateElemIter {
+    timestamp: f64,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    only_to_customer: Option<Asn>,
+    // Announce-specific shared attributes
+    path: Option<AsPath>,
+    origin_asns: Option<Vec<Asn>>,
+    origin: Option<Origin>,
+    next_hop: Option<IpAddr>,
+    local_pref: Option<u32>,
+    med: Option<u32>,
+    communities: Option<Vec<MetaCommunity>>,
+    atomic: bool,
+    aggr_asn: Option<Asn>,
+    aggr_ip: Option<BgpIdentifier>,
+    unknown: Option<Vec<AttrRaw>>,
+    deprecated: Option<Vec<AttrRaw>>,
+    // Prefix iterators (two chained sources each)
+    announced:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    withdrawn:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    in_withdrawn_phase: bool,
+}
+
+impl Iterator for BgpUpdateElemIter {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        if !self.in_withdrawn_phase {
+            if let Some(prefix) = self.announced.next() {
+                return Some(BgpElem {
+                    timestamp: self.timestamp,
+                    elem_type: ElemType::ANNOUNCE,
+                    peer_ip: self.peer_ip,
+                    peer_asn: self.peer_asn,
+                    prefix,
+                    next_hop: self.next_hop,
+                    as_path: self.path.clone(),
+                    origin: self.origin,
+                    origin_asns: self.origin_asns.clone(),
+                    local_pref: self.local_pref,
+                    med: self.med,
+                    communities: self.communities.clone(),
+                    atomic: self.atomic,
+                    aggr_asn: self.aggr_asn,
+                    aggr_ip: self.aggr_ip,
+                    only_to_customer: self.only_to_customer,
+                    unknown: self.unknown.clone(),
+                    deprecated: self.deprecated.clone(),
+                });
+            }
+            self.in_withdrawn_phase = true;
+        }
+
+        self.withdrawn.next().map(|prefix| BgpElem {
+            timestamp: self.timestamp,
+            elem_type: ElemType::WITHDRAW,
+            peer_ip: self.peer_ip,
+            peer_asn: self.peer_asn,
+            prefix,
+            next_hop: None,
+            as_path: None,
+            origin: None,
+            origin_asns: None,
+            local_pref: None,
+            med: None,
+            communities: None,
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: self.only_to_customer,
+            unknown: None,
+            deprecated: None,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (ann_lo, ann_hi) = if self.in_withdrawn_phase {
+            (0, Some(0))
+        } else {
+            self.announced.size_hint()
+        };
+        let (wd_lo, wd_hi) = self.withdrawn.size_hint();
+        (ann_lo + wd_lo, ann_hi.and_then(|a| wd_hi.map(|w| a + w)))
+    }
+}
+
 impl Elementor {
     pub fn new() -> Elementor {
         Self::default()
@@ -206,6 +459,121 @@ impl Elementor {
         }
     }
 
+    /// Creates an [`Elementor`] with the given [`PeerIndexTable`] already set.
+    pub fn with_peer_table(peer_table: PeerIndexTable) -> Elementor {
+        Elementor {
+            peer_table: Some(peer_table),
+        }
+    }
+
+    /// Convert a [`MrtRecord`] into an iterator of [`BgpElem`]s without
+    /// requiring `&mut self`.
+    ///
+    /// Unlike [`record_to_elems`](Elementor::record_to_elems), this method:
+    /// - Takes `&self` instead of `&mut self`, since the peer table must
+    ///   already be set via [`set_peer_table`](Elementor::set_peer_table) or
+    ///   [`with_peer_table`](Elementor::with_peer_table).
+    /// - Returns an error if the record contains a [`PeerIndexTable`] (which
+    ///   would require mutation).
+    /// - Returns a lazy [`RecordElemIter`] instead of collecting into a `Vec`,
+    ///   avoiding allocation for the common RIB table dump case.
+    ///
+    /// # Errors
+    ///
+    /// - [`ElemError::UnexpectedPeerIndexTable`] if the record is a PeerIndexTable message.
+    /// - [`ElemError::MissingPeerTable`] if the record requires a peer table but none is set.
+    pub fn record_to_elems_iter(&self, record: MrtRecord) -> Result<RecordElemIter<'_>, ElemError> {
+        let timestamp = {
+            let t = record.common_header.timestamp;
+            if let Some(micro) = &record.common_header.microsecond_timestamp {
+                let m = (*micro as f64) / 1000000.0;
+                t as f64 + m
+            } else {
+                f64::from(t)
+            }
+        };
+
+        match record.message {
+            MrtMessage::TableDumpMessage(msg) => {
+                let (
+                    as_path,
+                    _as4_path,
+                    origin,
+                    next_hop,
+                    local_pref,
+                    med,
+                    communities,
+                    atomic,
+                    aggregator,
+                    _announced,
+                    _withdrawn,
+                    only_to_customer,
+                    unknown,
+                    deprecated,
+                ) = get_relevant_attributes(msg.attributes);
+
+                let origin_asns = as_path
+                    .as_ref()
+                    .map(|as_path| as_path.iter_origins().collect());
+
+                Ok(RecordElemIter::TableDump(Some(BgpElem {
+                    timestamp: msg.originated_time as f64,
+                    elem_type: ElemType::ANNOUNCE,
+                    peer_ip: msg.peer_ip,
+                    peer_asn: msg.peer_asn,
+                    prefix: msg.prefix,
+                    next_hop,
+                    as_path,
+                    origin,
+                    origin_asns,
+                    local_pref,
+                    med,
+                    communities,
+                    atomic,
+                    aggr_asn: aggregator.map(|v| v.0),
+                    aggr_ip: aggregator.map(|v| v.1),
+                    only_to_customer,
+                    unknown,
+                    deprecated,
+                })))
+            }
+
+            MrtMessage::TableDumpV2Message(msg) => match msg {
+                TableDumpV2Message::PeerIndexTable(p) => {
+                    Err(ElemError::UnexpectedPeerIndexTable(Box::new(p)))
+                }
+                TableDumpV2Message::RibAfi(t) => {
+                    let peer_table = self
+                        .peer_table
+                        .as_ref()
+                        .ok_or(ElemError::MissingPeerTable)?;
+                    Ok(RecordElemIter::RibAfi {
+                        peer_table,
+                        prefix: t.prefix,
+                        entries: t.rib_entries.into_iter(),
+                    })
+                }
+                TableDumpV2Message::RibGeneric(_) => Err(ElemError::UnsupportedRibGeneric),
+                TableDumpV2Message::GeoPeerTable(_) => Ok(RecordElemIter::Empty),
+            },
+
+            MrtMessage::Bgp4Mp(msg) => match msg {
+                Bgp4MpEnum::StateChange(_) => Ok(RecordElemIter::Empty),
+                Bgp4MpEnum::Message(v) => {
+                    match Elementor::bgp_to_elems_iter(
+                        v.bgp_message,
+                        timestamp,
+                        &v.peer_ip,
+                        &v.peer_asn,
+                    ) {
+                        Some(iter) => Ok(RecordElemIter::Bgp4Mp(iter)),
+                        None => Ok(RecordElemIter::Empty),
+                    }
+                }
+            },
+        }
+    }
+
     /// Convert a [BgpMessage] to a vector of [BgpElem]s.
     ///
     /// A [BgpMessage] may include `Update`, `Open`, `Notification` or `KeepAlive` messages,
@@ -216,13 +584,25 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> Vec<BgpElem> {
+        Elementor::bgp_to_elems_iter(msg, timestamp, peer_ip, peer_asn)
+            .map(|iter| iter.collect())
+            .unwrap_or_default()
+    }
+
+    /// Convert a [BgpMessage] into an iterator of [BgpElem]s.
+    ///
+    /// Returns `None` for non-Update messages (Open, Notification, KeepAlive).
+    pub fn bgp_to_elems_iter(
+        msg: BgpMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> Option<BgpUpdateElemIter> {
         match msg {
-            BgpMessage::Update(msg) => {
-                Elementor::bgp_update_to_elems(msg, timestamp, peer_ip, peer_asn)
-            }
-            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => {
-                vec![]
-            }
+            BgpMessage::Update(msg) => Some(Elementor::bgp_update_to_elems_iter(
+                msg, timestamp, peer_ip, peer_asn,
+            )),
+            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => None,
         }
     }
 
@@ -233,11 +613,20 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> Vec<BgpElem> {
-        let mut elems = vec![];
+        Elementor::bgp_update_to_elems_iter(msg, timestamp, peer_ip, peer_asn).collect()
+    }
 
+    /// Convert a [BgpUpdateMessage] into a [`BgpUpdateElemIter`] that lazily
+    /// yields [BgpElem]s without allocating a `Vec`.
+    pub fn bgp_update_to_elems_iter(
+        msg: BgpUpdateMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+    ) -> BgpUpdateElemIter {
         let (
             as_path,
-            as4_path, // Table dump v1 does not have 4-byte AS number
+            as4_path,
             origin,
             next_hop,
             local_pref,
@@ -263,277 +652,53 @@ impl Elementor {
             .as_ref()
             .map(|as_path| as_path.iter_origins().collect());
 
-        elems.extend(msg.announced_prefixes.into_iter().map(|p| BgpElem {
+        let nlri_announced = announced.map(|n| n.prefixes).unwrap_or_default();
+        let nlri_withdrawn = withdrawn.map(|n| n.prefixes).unwrap_or_default();
+
+        BgpUpdateElemIter {
             timestamp,
-            elem_type: ElemType::ANNOUNCE,
             peer_ip: *peer_ip,
             peer_asn: *peer_asn,
-            prefix: p,
-            next_hop,
-            as_path: path.clone(),
-            origin_asns: origin_asns.clone(),
+            only_to_customer,
+            path,
+            origin_asns,
             origin,
+            next_hop,
             local_pref,
             med,
-            communities: communities.clone(),
+            communities,
             atomic,
             aggr_asn: aggregator.as_ref().map(|v| v.0),
             aggr_ip: aggregator.as_ref().map(|v| v.1),
-            only_to_customer,
-            unknown: unknown.clone(),
-            deprecated: deprecated.clone(),
-        }));
-
-        if let Some(nlri) = announced {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp,
-                elem_type: ElemType::ANNOUNCE,
-                peer_ip: *peer_ip,
-                peer_asn: *peer_asn,
-                prefix: p,
-                next_hop,
-                as_path: path.clone(),
-                origin,
-                origin_asns: origin_asns.clone(),
-                local_pref,
-                med,
-                communities: communities.clone(),
-                atomic,
-                aggr_asn: aggregator.as_ref().map(|v| v.0),
-                aggr_ip: aggregator.as_ref().map(|v| v.1),
-                only_to_customer,
-                unknown: unknown.clone(),
-                deprecated: deprecated.clone(),
-            }));
+            unknown,
+            deprecated,
+            announced: msg.announced_prefixes.into_iter().chain(nlri_announced),
+            withdrawn: msg.withdrawn_prefixes.into_iter().chain(nlri_withdrawn),
+            in_withdrawn_phase: false,
         }
-
-        elems.extend(msg.withdrawn_prefixes.into_iter().map(|p| BgpElem {
-            timestamp,
-            elem_type: ElemType::WITHDRAW,
-            peer_ip: *peer_ip,
-            peer_asn: *peer_asn,
-            prefix: p,
-            next_hop: None,
-            as_path: None,
-            origin: None,
-            origin_asns: None,
-            local_pref: None,
-            med: None,
-            communities: None,
-            atomic: false,
-            aggr_asn: None,
-            aggr_ip: None,
-            only_to_customer,
-            unknown: None,
-            deprecated: None,
-        }));
-        if let Some(nlri) = withdrawn {
-            elems.extend(nlri.prefixes.into_iter().map(|p| BgpElem {
-                timestamp,
-                elem_type: ElemType::WITHDRAW,
-                peer_ip: *peer_ip,
-                peer_asn: *peer_asn,
-                prefix: p,
-                next_hop: None,
-                as_path: None,
-                origin: None,
-                origin_asns: None,
-                local_pref: None,
-                med: None,
-                communities: None,
-                atomic: false,
-                aggr_asn: None,
-                aggr_ip: None,
-                only_to_customer,
-                unknown: None,
-                deprecated: None,
-            }));
-        };
-        elems
     }
 
     /// Convert a [MrtRecord] to a vector of [BgpElem]s.
+    ///
+    /// If the record is a [`PeerIndexTable`], it is consumed to set the internal
+    /// peer table. Errors are logged.
+    ///
+    /// For a non-mutating, lazy alternative, see
+    /// [`record_to_elems_iter`](Elementor::record_to_elems_iter).
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
-        let mut elems = vec![];
-        let t = record.common_header.timestamp;
-        let timestamp: f64 = if let Some(micro) = &record.common_header.microsecond_timestamp {
-            let m = (*micro as f64) / 1000000.0;
-            t as f64 + m
-        } else {
-            f64::from(t)
-        };
-
         match record.message {
-            MrtMessage::TableDumpMessage(msg) => {
-                let (
-                    as_path,
-                    _as4_path, // Table dump v1 does not have 4-byte AS number
-                    origin,
-                    next_hop,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggregator,
-                    _announced,
-                    _withdrawn,
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                ) = get_relevant_attributes(msg.attributes);
-
-                let origin_asns = as_path
-                    .as_ref()
-                    .map(|as_path| as_path.iter_origins().collect());
-
-                elems.push(BgpElem {
-                    timestamp: msg.originated_time as f64,
-                    elem_type: ElemType::ANNOUNCE,
-                    peer_ip: msg.peer_ip,
-                    peer_asn: msg.peer_asn,
-                    prefix: msg.prefix,
-                    next_hop,
-                    as_path,
-                    origin,
-                    origin_asns,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggr_asn: aggregator.map(|v| v.0),
-                    aggr_ip: aggregator.map(|v| v.1),
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                });
+            MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) => {
+                self.set_peer_table(record);
+                vec![]
             }
-
-            MrtMessage::TableDumpV2Message(msg) => {
-                match msg {
-                    TableDumpV2Message::PeerIndexTable(p) => {
-                        self.peer_table = Some(p);
-                    }
-                    TableDumpV2Message::RibAfi(t) => {
-                        let prefix = t.prefix;
-                        for e in t.rib_entries {
-                            let pid = e.peer_index;
-                            let peer = match self.peer_table.as_ref() {
-                                None => {
-                                    error!("peer_table is None");
-                                    break;
-                                }
-                                Some(table) => match table.get_peer_by_id(&pid) {
-                                    None => {
-                                        error!("peer ID {} not found in peer_index table", pid);
-                                        break;
-                                    }
-                                    Some(peer) => peer,
-                                },
-                            };
-                            let (
-                                as_path,
-                                as4_path, // Table dump v1 does not have 4-byte AS number
-                                origin,
-                                next_hop,
-                                local_pref,
-                                med,
-                                communities,
-                                atomic,
-                                aggregator,
-                                announced,
-                                _withdrawn,
-                                only_to_customer,
-                                unknown,
-                                deprecated,
-                            ) = get_relevant_attributes(e.attributes);
-
-                            let path = match (as_path, as4_path) {
-                                (None, None) => None,
-                                (Some(v), None) => Some(v),
-                                (None, Some(v)) => Some(v),
-                                (Some(v1), Some(v2)) => {
-                                    Some(AsPath::merge_aspath_as4path(&v1, &v2))
-                                }
-                            };
-
-                            let next = match next_hop {
-                                None => {
-                                    if let Some(v) = announced {
-                                        if let Some(h) = v.next_hop {
-                                            match h {
-                                                NextHopAddress::Ipv4(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6(v) => Some(IpAddr::from(v)),
-                                                NextHopAddress::Ipv6LinkLocal(v, _) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                                // RFC 8950: VPN next hops - return the IPv6 address part
-                                                NextHopAddress::VpnIpv6(_, v) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => {
-                                                    Some(IpAddr::from(v))
-                                                }
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Some(v) => Some(v),
-                            };
-
-                            let origin_asns = path
-                                .as_ref()
-                                .map(|as_path| as_path.iter_origins().collect());
-
-                            elems.push(BgpElem {
-                                timestamp: e.originated_time as f64,
-                                elem_type: ElemType::ANNOUNCE,
-                                peer_ip: peer.peer_ip,
-                                peer_asn: peer.peer_asn,
-                                prefix,
-                                next_hop: next,
-                                as_path: path,
-                                origin,
-                                origin_asns,
-                                local_pref,
-                                med,
-                                communities,
-                                atomic,
-                                aggr_asn: aggregator.map(|v| v.0),
-                                aggr_ip: aggregator.map(|v| v.1),
-                                only_to_customer,
-                                unknown,
-                                deprecated,
-                            });
-                        }
-                    }
-                    TableDumpV2Message::RibGeneric(_t) => {
-                        warn!(
-                            "to_elem for TableDumpV2Message::RibGenericEntries not yet implemented"
-                        );
-                    }
-                    TableDumpV2Message::GeoPeerTable(_t) => {
-                        // GeoPeerTable doesn't generate BGP elements, it provides geo-location context
-                        // for other peer entries. No BGP elements are generated from this message type.
-                    }
-                }
-            }
-            MrtMessage::Bgp4Mp(msg) => match msg {
-                Bgp4MpEnum::StateChange(_) => {}
-                Bgp4MpEnum::Message(v) => {
-                    elems.extend(Elementor::bgp_to_elems(
-                        v.bgp_message,
-                        timestamp,
-                        &v.peer_ip,
-                        &v.peer_asn,
-                    ));
+            _ => match self.record_to_elems_iter(record) {
+                Ok(iter) => iter.collect(),
+                Err(e) => {
+                    error!("{}", e);
+                    vec![]
                 }
             },
         }
-        elems
     }
 }
 
@@ -875,5 +1040,273 @@ mod tests {
         ) = get_relevant_attributes(attributes);
 
         assert_eq!(next_hop, Some(IpAddr::from_str("10.0.0.2").unwrap()));
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_equivalence_tabledumpv2_small() {
+        // rib-example-small.bz2 is a TableDumpV2 file (starts with PeerIndexTable)
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        // Skip the PeerIndexTable
+        let peer_index_table = record_iter.next().unwrap();
+        let _ = elementor.record_to_elems(peer_index_table);
+
+        // Process the first RIB entry
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_equivalence_bgp4mp() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires large RIB file download"]
+    fn test_record_to_elems_iter_equivalence_tabledumpv2() {
+        let url = "https://data.ris.ripe.net/rrc00/2023.01/bview.20230101.0000.gz";
+
+        let mut elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        let peer_index_table = record_iter.next().unwrap();
+        let _ = elementor.record_to_elems(peer_index_table);
+
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_tabledumpv2_with_peer_table() {
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        let peer_index_table = record_iter.next().unwrap();
+        let mut elementor = Elementor::with_peer_table(
+            if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(pit)) =
+                peer_index_table.message
+            {
+                pit
+            } else {
+                panic!("Expected PeerIndexTable");
+            },
+        );
+
+        let record = record_iter.next().unwrap();
+        let elems_vec = elementor.record_to_elems(record.clone());
+        let elems_iter: Vec<BgpElem> = elementor.record_to_elems_iter(record).unwrap().collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert!(!elems_vec.is_empty());
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_error_unexpected_peer_index_table() {
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+        let record = record_iter.next().unwrap();
+
+        let result = elementor.record_to_elems_iter(record);
+        assert!(matches!(
+            result,
+            Err(ElemError::UnexpectedPeerIndexTable(_))
+        ));
+    }
+
+    #[test]
+    fn test_record_to_elems_iter_error_missing_peer_table() {
+        // rib-example-small.bz2 is a TableDumpV2 file (starts with PeerIndexTable)
+        let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+
+        let elementor = Elementor::new();
+        let parser = BgpkitParser::new(url).unwrap();
+        let mut record_iter = parser.into_record_iter();
+
+        // Skip the PeerIndexTable without consuming it via record_to_elems
+        // which would set the peer table in the elementor
+        let _peer_index_table = record_iter.next().unwrap();
+
+        // Now try to process a RIB entry without having set the peer table
+        let record = record_iter.next().unwrap();
+        let result = elementor.record_to_elems_iter(record);
+        assert!(matches!(result, Err(ElemError::MissingPeerTable)));
+    }
+
+    #[test]
+    fn test_bgp_to_elems_iter_equivalence() {
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let attributes = vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65000, 65001, 65002]),
+                is_as4: false,
+            },
+            AttributeValue::NextHop(peer_ip),
+        ]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+        let attributes = Attributes::from(attributes);
+
+        let announced_prefixes = vec![NetworkPrefix::from_str("10.0.0.0/24").unwrap()];
+
+        let bgp_message = BgpMessage::Update(BgpUpdateMessage {
+            attributes,
+            announced_prefixes,
+            withdrawn_prefixes: vec![],
+        });
+
+        let elems_vec =
+            Elementor::bgp_to_elems(bgp_message.clone(), timestamp, &peer_ip, &peer_asn);
+        let elems_iter: Vec<BgpElem> =
+            Elementor::bgp_to_elems_iter(bgp_message, timestamp, &peer_ip, &peer_asn)
+                .unwrap()
+                .collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert_eq!(elems_vec.len(), 1);
+    }
+
+    #[test]
+    fn test_bgp_to_elems_iter_non_update_messages() {
+        use std::net::Ipv4Addr;
+
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let open_msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_32bit(1),
+            hold_time: 180,
+            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        };
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::Open(open_msg),
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+
+        let notification_msg = BgpNotificationMessage {
+            error: BgpError::Unknown(0, 0),
+            data: vec![],
+        };
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::Notification(notification_msg),
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+
+        assert!(Elementor::bgp_to_elems_iter(
+            BgpMessage::KeepAlive,
+            timestamp,
+            &peer_ip,
+            &peer_asn
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_bgp_update_to_elems_iter_equivalence() {
+        let timestamp = 0.0;
+        let peer_ip = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_asn = Asn::new_32bit(65000);
+
+        let attributes = vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65000, 65001, 65002]),
+                is_as4: false,
+            },
+            AttributeValue::NextHop(peer_ip),
+        ]
+        .into_iter()
+        .map(Attribute::from)
+        .collect::<Vec<Attribute>>();
+        let attributes = Attributes::from(attributes);
+
+        let announced_prefixes = vec![NetworkPrefix::from_str("10.0.0.0/24").unwrap()];
+        let withdrawn_prefixes = vec![NetworkPrefix::from_str("10.0.1.0/24").unwrap()];
+
+        let update = BgpUpdateMessage {
+            attributes,
+            announced_prefixes,
+            withdrawn_prefixes,
+        };
+
+        let elems_vec =
+            Elementor::bgp_update_to_elems(update.clone(), timestamp, &peer_ip, &peer_asn);
+        let elems_iter: Vec<BgpElem> =
+            Elementor::bgp_update_to_elems_iter(update, timestamp, &peer_ip, &peer_asn).collect();
+        assert_eq!(elems_vec, elems_iter);
+        assert_eq!(elems_vec.len(), 2);
+    }
+
+    #[test]
+    fn test_record_elem_iter_size_hint() {
+        use std::collections::HashMap;
+
+        let peer_table = PeerIndexTable {
+            collector_bgp_id: BgpIdentifier::from_str("10.0.0.1").unwrap(),
+            view_name: "".to_string(),
+            id_peer_map: HashMap::new(),
+            peer_ip_id_map: HashMap::new(),
+        };
+
+        let entries: Vec<RibEntry> = vec![];
+        let iter = RecordElemIter::RibAfi {
+            peer_table: &peer_table,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            entries: entries.into_iter(),
+        };
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+
+        let entries: Vec<RibEntry> = (0..5)
+            .map(|i| RibEntry {
+                peer_index: i as u16,
+                originated_time: 0,
+                path_id: None,
+                attributes: Attributes::default(),
+            })
+            .collect();
+        let iter = RecordElemIter::RibAfi {
+            peer_table: &peer_table,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            entries: entries.into_iter(),
+        };
+        assert_eq!(iter.size_hint(), (5, Some(5)));
     }
 }

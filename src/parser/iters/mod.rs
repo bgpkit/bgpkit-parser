@@ -24,7 +24,10 @@ pub use update::{
 };
 
 use crate::models::BgpElem;
+use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
+use crate::Elementor;
+use crate::RawMrtRecord;
 use std::io::Read;
 
 /// Use [ElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
@@ -167,5 +170,66 @@ impl<R> BgpkitParser<R> {
     /// ```
     pub fn into_fallible_update_iter(self) -> FallibleUpdateIterator<R> {
         FallibleUpdateIterator::new(self)
+    }
+
+    /// Creates an Elementor pre-initialized with PeerIndexTable and an iterator over raw records.
+    ///
+    /// This is useful for parallel processing where the Elementor needs to be shared across threads.
+    /// The Elementor is created with the PeerIndexTable from the first record if present,
+    /// otherwise a new Elementor is created.
+    ///
+    /// # Example
+    /// See the `parallel_records_to_elem` example for full usage.
+    /// ```ignore
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let parser = BgpkitParser::new_cached(url, "/tmp")?;
+    /// let (elementor, records) = parser.into_elementor_and_raw_record_iter();
+    /// ```
+    ///
+    pub fn into_elementor_and_raw_record_iter(
+        self,
+    ) -> (Elementor, impl Iterator<Item = RawMrtRecord>)
+    where
+        R: Read,
+    {
+        let mut raw_iter = RawRecordIterator::new(self).peekable();
+        let elementor = match raw_iter.peek().cloned().and_then(|r| r.parse().ok()) {
+            Some(MrtRecord {
+                message: MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(pit)),
+                ..
+            }) => {
+                raw_iter.next();
+                Elementor::with_peer_table(pit)
+            }
+            _ => Elementor::new(),
+        };
+        (elementor, raw_iter)
+    }
+
+    /// Creates an Elementor pre-initialized with PeerIndexTable and an iterator over parsed records.
+    ///
+    /// This is useful for parallel processing where the Elementor needs to be shared across threads.
+    /// The Elementor is created with the PeerIndexTable from the first record if present,
+    /// otherwise a new Elementor is created.
+    ///
+    /// # Example
+    /// See the `parallel_records_to_elem` example for full usage.
+    pub fn into_elementor_and_record_iter(self) -> (Elementor, impl Iterator<Item = MrtRecord>)
+    where
+        R: Read,
+    {
+        let mut record_iter = RecordIterator::new(self).peekable();
+        let elementor = match record_iter.peek().cloned() {
+            Some(MrtRecord {
+                message: MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(pit)),
+                ..
+            }) => {
+                record_iter.next();
+                Elementor::with_peer_table(pit)
+            }
+            _ => Elementor::new(),
+        };
+        (elementor, record_iter)
     }
 }
