@@ -49,7 +49,7 @@ impl From<&CommonHeader> for RawMrtHeader {
                 entry_type: U16::new(header.entry_type as u16),
                 entry_subtype: U16::new(header.entry_subtype),
                 // Internally, we use the length of the MRT payload.
-                // However in the header, the length inclused the space used by the extra timestamp
+                // However in the header, the length includes the space used by the extra timestamp
                 // data.
                 length: U32::new(header.length + 4),
                 microseconds: U32::new(microseconds),
