@@ -145,7 +145,7 @@ impl TableDumpMessage {
 
         // encode attributes
         let mut attr_bytes = BytesMut::new();
-        for attr in &self.attributes.inner {
+        for attr in self.attributes.attributes_iter() {
             // asn_len always 16 bites
             attr_bytes.extend(attr.encode(AsnLength::Bits16));
         }

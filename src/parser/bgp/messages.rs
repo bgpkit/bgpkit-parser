@@ -476,7 +476,7 @@ impl BgpUpdateMessage {
             return false;
         }
 
-        if self.attributes.inner.is_empty() {
+        if self.attributes.is_empty() {
             // no attributes, no prefixes:
             // case 1 end-of-rib
             return true;
@@ -484,13 +484,13 @@ impl BgpUpdateMessage {
 
         // has some attributes, it can only be withdrawal with no prefixes
 
-        if self.attributes.inner.len() > 1 {
+        if self.attributes.len() > 1 {
             // has more than one attributes, not end-of-rib
             return false;
         }
 
         // has only one attribute, check if it is withdrawal attribute
-        if let AttributeValue::MpUnreachNlri(nlri) = &self.attributes.inner.first().unwrap().value {
+        if let AttributeValue::MpUnreachNlri(nlri) = &self.attributes.first().unwrap().value {
             if nlri.prefixes.is_empty() {
                 // the only attribute is MP_UNREACH_NLRI with no prefixes:
                 // case 2 end-of-rib
