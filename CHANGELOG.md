@@ -27,6 +27,11 @@ All notable changes to this project will be documented in this file.
 
 * Added benchmarks for `into_raw_record_iter` for both updates and RIB dumps
 
+### Bug fixes
+
+* Fix `Attributes::from_iter` for `AttributeValue` to apply default BGP attribute flags instead of empty flags
+  - Prevents malformed encoding for well-known mandatory attributes such as `ORIGIN` and `AS_PATH`
+
 ## v0.15.0 - 2026-01-28
 
 ### Breaking changes
