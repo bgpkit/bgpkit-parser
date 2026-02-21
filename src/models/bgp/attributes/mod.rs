@@ -357,13 +357,7 @@ impl Extend<AttributeValue> for Attributes {
 impl FromIterator<AttributeValue> for Attributes {
     fn from_iter<T: IntoIterator<Item = AttributeValue>>(iter: T) -> Self {
         Attributes {
-            inner: iter
-                .into_iter()
-                .map(|value| Attribute {
-                    value,
-                    flag: AttrFlags::empty(),
-                })
-                .collect(),
+            inner: iter.into_iter().map(Attribute::from).collect(),
             validation_warnings: Vec::new(),
         }
     }
@@ -615,6 +609,26 @@ mod tests {
         let attr_value = AttributeValue::Origin(Origin::IGP);
         let flags = attr_value.default_flags();
         assert_eq!(flags, AttrFlags::TRANSITIVE);
+    }
+
+    #[test]
+    fn test_from_iter_attribute_value_uses_default_flags() {
+        let attributes = Attributes::from_iter(vec![
+            AttributeValue::Origin(Origin::IGP),
+            AttributeValue::AsPath {
+                path: AsPath::new(),
+                is_as4: false,
+            },
+        ]);
+
+        assert_eq!(
+            attributes.get_attr(AttrType::ORIGIN).unwrap().flag,
+            AttrFlags::TRANSITIVE
+        );
+        assert_eq!(
+            attributes.get_attr(AttrType::AS_PATH).unwrap().flag,
+            AttrFlags::TRANSITIVE
+        );
     }
 
     #[test]
