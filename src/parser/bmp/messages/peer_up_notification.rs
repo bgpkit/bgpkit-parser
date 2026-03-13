@@ -190,7 +190,7 @@ mod tests {
             version: 0,
             asn: Default::default(),
             hold_time: 0,
-            sender_ip: Ipv4Addr::new(0, 0, 0, 0),
+            bgp_identifier: Ipv4Addr::new(0, 0, 0, 0),
             extended_length: false,
             opt_params: vec![],
         });
@@ -309,7 +309,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_16bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![],
         });
@@ -320,7 +320,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_16bit(65002),
             hold_time: 90,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 2),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 2),
             extended_length: false,
             opt_params: vec![],
         });
@@ -428,7 +428,7 @@ mod tests {
             version: 4,
             asn: Default::default(),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(0, 0, 0, 0),
+            bgp_identifier: Ipv4Addr::new(0, 0, 0, 0),
             extended_length: false,
             opt_params: vec![],
         });
@@ -470,7 +470,7 @@ mod tests {
             version: 4,
             asn: Default::default(),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(0, 0, 0, 0),
+            bgp_identifier: Ipv4Addr::new(0, 0, 0, 0),
             extended_length: false,
             opt_params: vec![],
         });
@@ -524,7 +524,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![], // No capabilities
         });
@@ -562,7 +562,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -612,7 +612,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -667,7 +667,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -730,7 +730,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -784,7 +784,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -839,7 +839,7 @@ mod tests {
             version: 4,
             asn: crate::models::Asn::new_32bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 168, 1, 1),
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
             extended_length: false,
             opt_params: vec![],
         });

@@ -81,7 +81,7 @@ mod tests {
             version: 4,
             asn: Asn::new_32bit(1),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![],
         });

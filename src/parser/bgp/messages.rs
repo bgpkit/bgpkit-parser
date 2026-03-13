@@ -189,7 +189,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     let asn = Asn::new_16bit(input.read_u16()?);
     let hold_time = input.read_u16()?;
 
-    let sender_ip = input.read_ipv4_address()?;
+    let bgp_identifier = input.read_ipv4_address()?;
     let mut opt_params_len: u16 = input.read_u8()? as u16;
 
     let mut extended_length = false;
@@ -341,7 +341,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
         version,
         asn,
         hold_time,
-        sender_ip,
+        bgp_identifier,
         extended_length,
         opt_params: params,
     })
@@ -353,7 +353,7 @@ impl BgpOpenMessage {
         buf.put_u8(self.version);
         buf.put_u16(self.asn.into());
         buf.put_u16(self.hold_time);
-        buf.extend(encode_ipaddr(&self.sender_ip.into()));
+        buf.extend(encode_ipaddr(&self.bgp_identifier.into()));
         buf.put_u8(self.opt_params.len() as u8);
         for param in &self.opt_params {
             buf.put_u8(param.param_type);
@@ -740,7 +740,7 @@ mod tests {
         assert_eq!(msg.version, 4);
         assert_eq!(msg.asn, Asn::new_16bit(1));
         assert_eq!(msg.hold_time, 180);
-        assert_eq!(msg.sender_ip, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(msg.bgp_identifier, Ipv4Addr::new(192, 0, 2, 1));
         assert!(!msg.extended_length);
         assert_eq!(msg.opt_params.len(), 0);
     }
@@ -751,7 +751,7 @@ mod tests {
             version: 4,
             asn: Asn::new_16bit(1),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![],
         };
@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(msg.version, 4);
         assert_eq!(msg.asn, Asn::new_16bit(65001));
         assert_eq!(msg.hold_time, 180);
-        assert_eq!(msg.sender_ip, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(msg.bgp_identifier, Ipv4Addr::new(192, 0, 2, 1));
         assert!(!msg.extended_length);
         assert_eq!(msg.opt_params.len(), 1);
 
@@ -1042,7 +1042,7 @@ mod tests {
             version: 4,
             asn: Asn::new_16bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![opt_param],
         };
@@ -1110,7 +1110,7 @@ mod tests {
             version: 4,
             asn: Asn::new_16bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -1129,7 +1129,7 @@ mod tests {
         assert_eq!(parsed.version, msg.version);
         assert_eq!(parsed.asn, msg.asn);
         assert_eq!(parsed.hold_time, msg.hold_time);
-        assert_eq!(parsed.sender_ip, msg.sender_ip);
+        assert_eq!(parsed.bgp_identifier, msg.bgp_identifier);
         assert_eq!(parsed.opt_params.len(), 1);
 
         // Verify the capability was encoded and parsed correctly
@@ -1169,7 +1169,7 @@ mod tests {
             version: 4,
             asn: Asn::new_16bit(65001),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -1188,7 +1188,7 @@ mod tests {
         assert_eq!(parsed.version, msg.version);
         assert_eq!(parsed.asn, msg.asn);
         assert_eq!(parsed.hold_time, msg.hold_time);
-        assert_eq!(parsed.sender_ip, msg.sender_ip);
+        assert_eq!(parsed.bgp_identifier, msg.bgp_identifier);
         assert_eq!(parsed.extended_length, msg.extended_length);
         assert_eq!(parsed.opt_params.len(), 1);
 
@@ -1233,7 +1233,7 @@ mod tests {
             version: 4,
             asn: Asn::new_32bit(65000),
             hold_time: 180,
-            sender_ip: "10.0.0.1".parse().unwrap(),
+            bgp_identifier: "10.0.0.1".parse().unwrap(),
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
@@ -1258,7 +1258,7 @@ mod tests {
         assert_eq!(parsed.asn, Asn::new_32bit(65000));
         assert_eq!(parsed.hold_time, 180);
         assert_eq!(
-            parsed.sender_ip,
+            parsed.bgp_identifier,
             "10.0.0.1".parse::<std::net::Ipv4Addr>().unwrap()
         );
         assert_eq!(parsed.opt_params.len(), 1);
@@ -1305,7 +1305,7 @@ mod tests {
             version: 4,
             asn: Asn::new_32bit(65001),
             hold_time: 90,
-            sender_ip: "192.168.1.1".parse().unwrap(),
+            bgp_identifier: "192.168.1.1".parse().unwrap(),
             extended_length: false,
             opt_params: vec![
                 OptParam {

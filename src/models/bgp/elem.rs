@@ -107,6 +107,12 @@ pub struct BgpElem {
     pub peer_ip: IpAddr,
     /// The peer ASN (Autonomous System Number) of the item.
     pub peer_asn: Asn,
+    /// The BGP Identifier (Router ID) of the peer, if available.
+    ///
+    /// Present in MRT TableDumpV2 records (from the PEER_INDEX_TABLE) and in BGP OPEN messages.
+    /// Not available when processing BGP UPDATE messages without an accompanying OPEN message
+    /// (e.g. Bgp4Mp records), in which case this field is `None`.
+    pub peer_bgp_id: Option<BgpIdentifier>,
     /// The network prefix of the item.
     pub prefix: NetworkPrefix,
     /// The next hop IP address for the item, if available.
@@ -174,6 +180,7 @@ impl Default for BgpElem {
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("0.0.0.0").unwrap(),
             peer_asn: 0.into(),
+            peer_bgp_id: None,
             prefix: NetworkPrefix::from_str("0.0.0.0/0").unwrap(),
             next_hop: Some(IpAddr::from_str("0.0.0.0").unwrap()),
             as_path: None,
