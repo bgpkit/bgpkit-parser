@@ -31,6 +31,8 @@ All notable changes to this project will be documented in this file.
 
 * Fix `Attributes::from_iter` for `AttributeValue` to apply default BGP attribute flags instead of empty flags
   - Prevents malformed encoding for well-known mandatory attributes such as `ORIGIN` and `AS_PATH`
+* Preserve add-path `path_id` when encoding TABLE_DUMP_V2 RIB entries and emit add-path RIB subtypes from `MrtRibEncoder` when entries carry path IDs
+* Encode BGP4MP ASNs using the subtype-selected ASN width and always refresh MRT header lengths during record encoding
 
 ## v0.15.0 - 2026-01-28
 

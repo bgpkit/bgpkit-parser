@@ -14,6 +14,15 @@ use ipnet::IpNet;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 
+fn rib_type_for_prefix(prefix: &IpNet, has_add_path: bool) -> TableDumpV2Type {
+    match (prefix.addr().is_ipv6(), has_add_path) {
+        (true, true) => TableDumpV2Type::RibIpv6UnicastAddPath,
+        (true, false) => TableDumpV2Type::RibIpv6Unicast,
+        (false, true) => TableDumpV2Type::RibIpv4UnicastAddPath,
+        (false, false) => TableDumpV2Type::RibIpv4Unicast,
+    }
+}
+
 #[derive(Default)]
 pub struct MrtRibEncoder {
     index_table: PeerIndexTable,
@@ -93,10 +102,8 @@ impl MrtRibEncoder {
 
         // encode each RibAfiEntries
         for (entry_count, (prefix, entries_map)) in self.per_prefix_entries_map.iter().enumerate() {
-            let rib_type = match prefix.addr().is_ipv6() {
-                true => TableDumpV2Type::RibIpv6Unicast,
-                false => TableDumpV2Type::RibIpv4Unicast,
-            };
+            let has_add_path = entries_map.values().any(|entry| entry.path_id.is_some());
+            let rib_type = rib_type_for_prefix(prefix, has_add_path);
 
             let mut prefix_rib_entry = RibAfiEntries {
                 rib_type,
@@ -174,6 +181,32 @@ mod tests {
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
             let _parsed = parse_mrt_record(&mut cursor).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_encoding_rib_with_add_path() {
+        let mut encoder = MrtRibEncoder::new();
+        let mut elem = BgpElem {
+            peer_ip: IpAddr::V4("10.0.0.1".parse().unwrap()),
+            peer_asn: Asn::from(65000),
+            ..Default::default()
+        };
+        elem.prefix = NetworkPrefix::new("10.250.0.0/24".parse().unwrap(), Some(42));
+        encoder.process_elem(&elem);
+
+        let bytes = encoder.export_bytes();
+        let mut cursor = Cursor::new(bytes);
+        let _peer_table = parse_mrt_record(&mut cursor).unwrap();
+        let parsed = parse_mrt_record(&mut cursor).unwrap();
+
+        match parsed.message {
+            MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(rib)) => {
+                assert_eq!(rib.rib_type, TableDumpV2Type::RibIpv4UnicastAddPath);
+                assert_eq!(rib.rib_entries.len(), 1);
+                assert_eq!(rib.rib_entries[0].path_id, Some(42));
+            }
+            other => panic!("unexpected MRT message: {other:?}"),
         }
     }
 }
