@@ -105,8 +105,8 @@ pub fn parse_bgp4mp_message(
 impl Bgp4MpMessage {
     pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
-        bytes.extend(self.peer_asn.encode());
-        bytes.extend(self.local_asn.encode());
+        bytes.extend(encode_asn(&self.peer_asn, &asn_len));
+        bytes.extend(encode_asn(&self.local_asn, &asn_len));
         bytes.put_u16(self.interface_index);
         bytes.put_u16(address_family(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.peer_ip));
@@ -184,5 +184,40 @@ impl Bgp4MpStateChange {
         bytes.put_u16(self.old_state as u16);
         bytes.put_u16(self.new_state as u16);
         bytes.freeze()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_bgp4mp_message_encode_uses_subtype_asn_width() {
+        let message = Bgp4MpMessage {
+            msg_type: Bgp4MpType::Message,
+            peer_asn: Asn::new_32bit(65000),
+            local_asn: Asn::new_32bit(65001),
+            interface_index: 1,
+            peer_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+            local_ip: IpAddr::from_str("10.0.0.2").unwrap(),
+            bgp_message: BgpMessage::KeepAlive,
+        };
+
+        let encoded = message.encode(AsnLength::Bits16);
+        let parsed = parse_bgp4mp(Bgp4MpType::Message as u16, encoded).unwrap();
+
+        match parsed {
+            Bgp4MpEnum::Message(parsed) => {
+                assert_eq!(parsed.peer_asn, Asn::new_16bit(65000));
+                assert_eq!(parsed.local_asn, Asn::new_16bit(65001));
+                assert_eq!(parsed.interface_index, 1);
+                assert_eq!(parsed.peer_ip, message.peer_ip);
+                assert_eq!(parsed.local_ip, message.local_ip);
+                assert_eq!(parsed.bgp_message, BgpMessage::KeepAlive);
+            }
+            other => panic!("unexpected BGP4MP message: {other:?}"),
+        }
     }
 }

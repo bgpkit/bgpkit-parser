@@ -228,10 +228,14 @@ impl MrtRecord {
     pub fn encode(&self) -> Bytes {
         let message_bytes = self.message.encode(self.common_header.entry_subtype);
         let mut new_header = self.common_header;
-        if message_bytes.len() < new_header.length as usize {
-            warn!("message length is less than the length in the header");
-            new_header.length = message_bytes.len() as u32;
+        if message_bytes.len() != new_header.length as usize {
+            warn!(
+                "message length {} does not match the length in the header {}",
+                message_bytes.len(),
+                new_header.length
+            );
         }
+        new_header.length = message_bytes.len() as u32;
         let header_bytes = new_header.encode();
 
         // // debug begins
@@ -308,6 +312,7 @@ mod tests {
     use super::*;
     use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
     use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
+    use std::io::Cursor;
     use std::net::Ipv4Addr;
     use tempfile::tempdir;
 
@@ -471,5 +476,37 @@ mod tests {
 
         let result = parse_mrt_body(0, 0, data.freeze());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mrt_record_encode_updates_header_length() {
+        let record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1609459200,
+                microsecond_timestamp: None,
+                entry_type: EntryType::BGP4MP,
+                entry_subtype: Bgp4MpType::MessageAs4 as u16,
+                length: 0,
+            },
+            message: MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
+                msg_type: Bgp4MpType::MessageAs4,
+                peer_asn: Asn::new_32bit(65000),
+                local_asn: Asn::new_32bit(65001),
+                interface_index: 1,
+                peer_ip: IpAddr::from_str("10.0.0.1").unwrap(),
+                local_ip: IpAddr::from_str("10.0.0.2").unwrap(),
+                bgp_message: BgpMessage::KeepAlive,
+            })),
+        };
+
+        let encoded = record.encode();
+        let mut cursor = Cursor::new(encoded);
+        let parsed = parse_mrt_record(&mut cursor).unwrap();
+        let expected_len = parsed
+            .message
+            .encode(parsed.common_header.entry_subtype)
+            .len() as u32;
+
+        assert_eq!(parsed.common_header.length, expected_len);
     }
 }

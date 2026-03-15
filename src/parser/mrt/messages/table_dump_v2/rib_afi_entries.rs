@@ -37,6 +37,16 @@ fn extract_afi_safi_from_rib_type(rib_type: &TableDumpV2Type) -> Result<(Afi, Sa
     Ok((afi, safi))
 }
 
+fn is_add_path_rib_type(rib_type: TableDumpV2Type) -> bool {
+    matches!(
+        rib_type,
+        TableDumpV2Type::RibIpv4UnicastAddPath
+            | TableDumpV2Type::RibIpv4MulticastAddPath
+            | TableDumpV2Type::RibIpv6UnicastAddPath
+            | TableDumpV2Type::RibIpv6MulticastAddPath
+    )
+}
+
 /// RIB AFI-specific entries
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
@@ -45,14 +55,7 @@ pub fn parse_rib_afi_entries(
     rib_type: TableDumpV2Type,
 ) -> Result<RibAfiEntries, ParserError> {
     let (afi, safi) = extract_afi_safi_from_rib_type(&rib_type)?;
-
-    let is_add_path = matches!(
-        rib_type,
-        TableDumpV2Type::RibIpv4UnicastAddPath
-            | TableDumpV2Type::RibIpv4MulticastAddPath
-            | TableDumpV2Type::RibIpv6UnicastAddPath
-            | TableDumpV2Type::RibIpv6MulticastAddPath
-    );
+    let is_add_path = is_add_path_rib_type(rib_type);
 
     let sequence_number = data.read_u32()?;
 
@@ -154,6 +157,7 @@ pub fn parse_rib_entry(
 impl RibAfiEntries {
     pub fn encode(&self) -> Bytes {
         let mut bytes = BytesMut::new();
+        let is_add_path = is_add_path_rib_type(self.rib_type);
 
         bytes.put_u32(self.sequence_number);
         bytes.extend(self.prefix.encode());
@@ -162,7 +166,7 @@ impl RibAfiEntries {
         bytes.put_u16(entry_count as u16);
 
         for entry in &self.rib_entries {
-            bytes.extend(entry.encode());
+            bytes.extend(entry.encode_for_rib_type(is_add_path));
         }
 
         bytes.freeze()
@@ -171,9 +175,18 @@ impl RibAfiEntries {
 
 impl RibEntry {
     pub fn encode(&self) -> Bytes {
+        self.encode_for_rib_type(self.path_id.is_some())
+    }
+
+    fn encode_for_rib_type(&self, include_path_id: bool) -> Bytes {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.peer_index);
         bytes.put_u32(self.originated_time);
+        if include_path_id {
+            if let Some(path_id) = self.path_id {
+                bytes.put_u32(path_id);
+            }
+        }
         let attr_bytes = self.attributes.encode(AsnLength::Bits32);
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.extend(attr_bytes);
@@ -184,6 +197,8 @@ impl RibEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Buf;
+    use std::str::FromStr;
 
     #[test]
     fn test_extract_afi_safi_from_rib_type() {
@@ -246,7 +261,45 @@ mod tests {
             attributes,
         };
 
-        // This should exercise the self.attributes.encode(AsnLength::Bits32) line
-        let _encoded = rib_entry.encode();
+        let mut encoded = rib_entry.encode();
+        assert_eq!(encoded.read_u16().unwrap(), 1);
+        assert_eq!(encoded.read_u32().unwrap(), 12345);
+        assert_eq!(encoded.read_u32().unwrap(), 42);
+        let attr_len = encoded.read_u16().unwrap() as usize;
+        assert_eq!(encoded.remaining(), attr_len);
+    }
+
+    #[test]
+    fn test_rib_afi_entries_encode_roundtrip_add_path() {
+        use crate::models::{AttributeValue, Attributes, Origin};
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+
+        let rib = RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4UnicastAddPath,
+            sequence_number: 7,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![RibEntry {
+                peer_index: 3,
+                originated_time: 12345,
+                path_id: Some(42),
+                attributes,
+            }],
+        };
+
+        let encoded = rib.encode();
+        let parsed = parse_rib_afi_entries(&mut encoded.clone(), rib.rib_type).unwrap();
+        assert_eq!(parsed.rib_type, rib.rib_type);
+        assert_eq!(parsed.sequence_number, rib.sequence_number);
+        assert_eq!(parsed.prefix, rib.prefix);
+        assert_eq!(parsed.rib_entries.len(), 1);
+        assert_eq!(parsed.rib_entries[0].peer_index, 3);
+        assert_eq!(parsed.rib_entries[0].originated_time, 12345);
+        assert_eq!(parsed.rib_entries[0].path_id, Some(42));
+        assert_eq!(
+            parsed.rib_entries[0].attributes.inner,
+            rib.rib_entries[0].attributes.inner
+        );
     }
 }
