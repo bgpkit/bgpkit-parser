@@ -150,7 +150,29 @@ mod tests {
     use super::*;
     use crate::models::capabilities::{BgpCapabilityType, MultiprotocolExtensionsCapability};
     use bytes::BytesMut;
+    use std::cell::RefCell;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::{Arc, Mutex, Once};
+
+    thread_local! {
+        static WARNING_CAPTURE: RefCell<Option<Arc<Mutex<Vec<String>>>>> = const { RefCell::new(None) };
+    }
+
+    struct WarningCaptureGuard {
+        warnings: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl WarningCaptureGuard {
+        fn warnings(&self) -> &Arc<Mutex<Vec<String>>> {
+            &self.warnings
+        }
+    }
+
+    impl Drop for WarningCaptureGuard {
+        fn drop(&mut self) {
+            clear_warning_logger();
+        }
+    }
 
     #[test]
     fn test_parse_peer_up_notification() {
@@ -208,11 +230,12 @@ mod tests {
     }
 
     // Helper function to set up warning capture for tests
-    fn setup_warning_logger() -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+    fn setup_warning_logger() -> WarningCaptureGuard {
         use log::{Level, Record};
-        use std::sync::{Arc, Mutex};
 
-        struct TestLogger(Arc<Mutex<Vec<String>>>);
+        static LOGGER_INIT: Once = Once::new();
+
+        struct TestLogger;
 
         impl log::Log for TestLogger {
             fn enabled(&self, metadata: &log::Metadata) -> bool {
@@ -221,18 +244,38 @@ mod tests {
 
             fn log(&self, record: &Record) {
                 if record.level() <= Level::Warn {
-                    self.0.lock().unwrap().push(record.args().to_string());
+                    WARNING_CAPTURE.with(|capture| {
+                        if let Some(warnings) = capture.borrow().as_ref() {
+                            match warnings.lock() {
+                                Ok(mut warnings) => warnings.push(record.args().to_string()),
+                                Err(poisoned) => {
+                                    poisoned.into_inner().push(record.args().to_string());
+                                }
+                            }
+                        }
+                    });
                 }
             }
 
             fn flush(&self) {}
         }
 
+        LOGGER_INIT.call_once(|| {
+            log::set_boxed_logger(Box::new(TestLogger)).unwrap();
+            log::set_max_level(log::LevelFilter::Warn);
+        });
+
         let warnings = Arc::new(Mutex::new(Vec::new()));
-        let logger = TestLogger(warnings.clone());
-        let _ = log::set_boxed_logger(Box::new(logger));
-        log::set_max_level(log::LevelFilter::Warn);
-        warnings
+        WARNING_CAPTURE.with(|capture| {
+            *capture.borrow_mut() = Some(warnings.clone());
+        });
+        WarningCaptureGuard { warnings }
+    }
+
+    fn clear_warning_logger() {
+        WARNING_CAPTURE.with(|capture| {
+            *capture.borrow_mut() = None;
+        });
     }
 
     // Note: These tests verify that the parser handles LocalRib validation correctly.
@@ -329,7 +372,7 @@ mod tests {
         assert_eq!(peer_notification.tlvs[0].info_value, "TestNode");
 
         // The main assertion: verify no warnings were logged
-        let captured_warnings = warnings.lock().unwrap();
+        let captured_warnings = warnings.warnings().lock().unwrap();
         assert!(
             captured_warnings.is_empty(),
             "Test should not produce warnings, but got: {:?}",
