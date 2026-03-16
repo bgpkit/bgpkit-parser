@@ -5,6 +5,28 @@ use crate::parser::ReadUtils;
 #[cfg(feature = "parser")]
 use bytes::{BufMut, Bytes, BytesMut};
 use num_enum::{FromPrimitive, IntoPrimitive};
+#[cfg(feature = "parser")]
+use zerocopy::big_endian::{U16, U32};
+#[cfg(feature = "parser")]
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+/// On-wire Multiprotocol Extensions capability layout (4 bytes).
+#[cfg(feature = "parser")]
+#[derive(IntoBytes, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RawMultiprotocolExtensions {
+    afi: U16,
+    reserved: u8,
+    safi: u8,
+}
+
+/// On-wire 4-octet AS capability layout (4 bytes).
+#[cfg(feature = "parser")]
+#[derive(IntoBytes, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RawFourOctetAs {
+    asn: U32,
+}
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
@@ -173,19 +195,17 @@ impl MultiprotocolExtensionsCapability {
     /// - Reserved (1 byte) - should be 0
     /// - SAFI (1 byte)
     #[cfg(feature = "parser")]
-    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
-        if data.len() != 4 {
-            return Err(ParserError::ParseError(format!(
+    pub fn parse(data: Bytes) -> Result<Self, ParserError> {
+        let raw = RawMultiprotocolExtensions::ref_from_bytes(&data).map_err(|_| {
+            ParserError::ParseError(format!(
                 "Multiprotocol Extensions capability length {} is not 4",
                 data.len()
-            )));
-        }
+            ))
+        })?;
 
-        let afi = data.read_afi()?;
-        let _reserved = data.read_u8()?; // Reserved field, should be 0 but ignored
-        let safi_u8 = data.read_u8()?;
-        let safi = Safi::try_from(safi_u8)
-            .map_err(|_| ParserError::ParseError(format!("Unknown SAFI type: {}", safi_u8)))?;
+        let afi = Afi::try_from(raw.afi.get())?;
+        let safi = Safi::try_from(raw.safi)
+            .map_err(|_| ParserError::ParseError(format!("Unknown SAFI type: {}", raw.safi)))?;
 
         Ok(MultiprotocolExtensionsCapability::new(afi, safi))
     }
@@ -193,11 +213,12 @@ impl MultiprotocolExtensionsCapability {
     /// Encode Multiprotocol Extensions capability to raw bytes - RFC 2858, Section 7
     #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::with_capacity(4);
-        bytes.put_u16(self.afi as u16); // AFI (2 bytes)
-        bytes.put_u8(0); // Reserved (1 byte) - set to 0
-        bytes.put_u8(self.safi as u8); // SAFI (1 byte)
-        bytes.freeze()
+        let raw = RawMultiprotocolExtensions {
+            afi: U16::new(self.afi as u16),
+            reserved: 0,
+            safi: self.safi as u8,
+        };
+        Bytes::copy_from_slice(raw.as_bytes())
     }
 }
 
@@ -515,24 +536,24 @@ impl FourOctetAsCapability {
     /// Parse 4-octet AS capability from raw bytes - RFC 6793
     /// Format: 4 bytes containing the AS number
     #[cfg(feature = "parser")]
-    pub fn parse(mut data: Bytes) -> Result<Self, ParserError> {
-        if data.len() != 4 {
-            return Err(ParserError::ParseError(format!(
+    pub fn parse(data: Bytes) -> Result<Self, ParserError> {
+        let raw = RawFourOctetAs::ref_from_bytes(&data).map_err(|_| {
+            ParserError::ParseError(format!(
                 "4-octet AS capability length {} is not 4",
                 data.len()
-            )));
-        }
+            ))
+        })?;
 
-        let asn = data.read_u32()?;
-        Ok(FourOctetAsCapability::new(asn))
+        Ok(FourOctetAsCapability::new(raw.asn.get()))
     }
 
     /// Encode 4-octet AS capability to raw bytes - RFC 6793
     #[cfg(feature = "parser")]
     pub fn encode(&self) -> Bytes {
-        let mut bytes = BytesMut::with_capacity(4);
-        bytes.put_u32(self.asn);
-        bytes.freeze()
+        let raw = RawFourOctetAs {
+            asn: U32::new(self.asn),
+        };
+        Bytes::copy_from_slice(raw.as_bytes())
     }
 }
 

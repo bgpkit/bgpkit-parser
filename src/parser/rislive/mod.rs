@@ -159,6 +159,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                     elem_type: ElemType::ANNOUNCE,
                                     peer_ip: ris_msg.peer,
                                     peer_asn: ris_msg.peer_asn,
+                                    peer_bgp_id: None,
                                     prefix: NetworkPrefix {
                                         prefix: p,
                                         path_id: None,
@@ -190,6 +191,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                 elem_type: ElemType::WITHDRAW,
                                 peer_ip: ris_msg.peer,
                                 peer_asn: ris_msg.peer_asn,
+                                peer_bgp_id: None,
                                 prefix: NetworkPrefix {
                                     prefix: p,
                                     path_id: None,
