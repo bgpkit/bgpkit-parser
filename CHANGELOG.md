@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking changes
+
+* **`BgpOpenMessage::sender_ip` renamed to `bgp_identifier`**: The field type remains `Ipv4Addr` (aliased as `BgpIdentifier`), but the name now correctly reflects RFC 4271 terminology — this is the BGP Identifier, not necessarily the sender's IP address.
+
+### New features
+
+* **`BgpElem::peer_bgp_id` field**: `BgpElem` now exposes an optional `peer_bgp_id: Option<BgpIdentifier>` containing the peer's BGP Identifier (Router ID) when available. Populated from the PEER_INDEX_TABLE in TableDumpV2/RIB records; `None` for BGP4MP records.
+
 ### Performance improvements
 
 * Use zerocopy for MRT header parsing
@@ -11,6 +19,9 @@ All notable changes to this project will be documented in this file.
   - Reduces bounds checking overhead by using compile-time verified struct layouts
   - Added compile-time assertions to ensure header sizes match wire format (12 bytes standard, 16 bytes ET)
   - Encoding now uses zerocopy's `IntoBytes` trait for efficient byte conversion
+* Use zerocopy for BGP OPEN message and capability parsing
+  - `RawBgpOpenHeader` (10 bytes), `RawMultiprotocolExtensions` (4 bytes), and `RawFourOctetAs` (4 bytes) use zerocopy struct layouts
+  - Replaces sequential cursor reads with single bounds-checked struct references
 
 ### New features
 

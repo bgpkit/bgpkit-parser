@@ -88,7 +88,7 @@ pub struct BgpOpenMessage {
     pub version: u8,
     pub asn: Asn,
     pub hold_time: u16,
-    pub sender_ip: Ipv4Addr,
+    pub bgp_identifier: BgpIdentifier,
     pub extended_length: bool,
     pub opt_params: Vec<OptParam>,
 }
@@ -201,7 +201,7 @@ mod tests {
             version: 4,
             asn: Asn::new_32bit(1),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![],
         });
@@ -227,7 +227,7 @@ mod tests {
             version: 4,
             asn: Asn::new_32bit(1),
             hold_time: 180,
-            sender_ip: Ipv4Addr::new(192, 0, 2, 1),
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
             extended_length: false,
             opt_params: vec![],
         });
