@@ -22,6 +22,7 @@ required-features = ["cli"]
 # normal Rust library usage. Both are listed so the crate works for native
 # consumers and wasm-pack alike.
 [lib]
+path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
