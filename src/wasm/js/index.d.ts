@@ -31,6 +31,34 @@ export function parseMrtFile(data: Uint8Array): BgpElem[];
  */
 export function parseBgpUpdate(data: Uint8Array): BgpElem[];
 
+/**
+ * Parse a single MRT record from the start of a buffer.
+ * Returns null when there are no more records.
+ *
+ * Slice off `bytesRead` bytes before the next call to advance.
+ */
+export function parseMrtRecord(data: Uint8Array): MrtRecordResult | null;
+
+/**
+ * Reset the internal MRT parser state. Call before parsing a new file
+ * with `parseMrtRecord` to clear the PeerIndexTable from a previous file.
+ * (Called automatically by `parseMrtRecords`.)
+ */
+export function resetMrtParser(): void;
+
+/**
+ * Generator that yields MRT records one at a time, automatically slicing
+ * the buffer as it advances. Resets parser state before starting.
+ */
+export function parseMrtRecords(
+  data: Uint8Array
+): Generator<MrtRecordResult, void, unknown>;
+
+export interface MrtRecordResult {
+  elems: BgpElem[];
+  bytesRead: number;
+}
+
 // ── BMP message types (discriminated union on `type`) ────────────────
 
 export type BmpParsedMessage =

@@ -17,6 +17,8 @@
 //!   messages (e.g. from the RouteViews Kafka stream)
 //! - [`parseBmpMessage`](parse_bmp_message) — parse raw BMP messages
 //! - [`parseMrtFile`](parse_mrt_file) — parse a decompressed MRT file into BGP elements
+//! - [`parseMrtRecord`](parse_mrt_record_wasm) — parse a single MRT record at a
+//!   given offset (for incremental/streaming parsing)
 //! - [`parseBgpUpdate`](parse_bgp_update) — parse a single BGP UPDATE message
 
 use crate::models::*;
@@ -304,6 +306,47 @@ fn parse_mrt_file_core(data: &[u8]) -> Result<String, String> {
     serde_json::to_string(&all_elems).map_err(|e| e.to_string())
 }
 
+/// Result of parsing a single MRT record: the elems + number of bytes consumed.
+#[derive(serde::Serialize)]
+struct MrtRecordResult {
+    elems: Vec<BgpElem>,
+    #[serde(rename = "bytesRead")]
+    bytes_read: u32,
+}
+
+use std::cell::RefCell;
+
+thread_local! {
+    /// Persistent Elementor for streaming MRT parsing. Retains the
+    /// PeerIndexTable across calls so TABLE_DUMP_V2 RIB entries resolve correctly.
+    static MRT_ELEMENTOR: RefCell<Elementor> = RefCell::new(Elementor::default());
+}
+
+/// Parse one MRT record from the start of `data`.
+/// Returns a JSON `{elems, bytesRead}` string, or empty string when no more records.
+///
+/// Uses a thread-local `Elementor` to retain the PeerIndexTable across calls,
+/// which is required for TABLE_DUMP_V2 (RIB dump) files. Call
+/// `resetMrtParser()` before starting a new file.
+fn parse_mrt_record_core(data: &[u8]) -> Result<String, String> {
+    if data.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut cursor = Cursor::new(data);
+
+    let record = match parse_mrt_record(&mut cursor) {
+        Ok(r) => r,
+        Err(_) => return Ok(String::new()), // no more valid records
+    };
+
+    let bytes_read = cursor.position() as u32;
+    let elems = MRT_ELEMENTOR.with(|e| e.borrow_mut().record_to_elems(record));
+
+    let result = MrtRecordResult { elems, bytes_read };
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
 /// Parse a single BGP UPDATE message, returning a JSON array string.
 fn parse_bgp_update_core(data: &[u8]) -> Result<String, String> {
     let mut bytes = Bytes::from(data.to_vec());
@@ -362,6 +405,31 @@ pub fn parse_bmp_message(data: &[u8], timestamp: f64) -> Result<String, JsError>
 #[wasm_bindgen(js_name = "parseMrtFile")]
 pub fn parse_mrt_file(data: &[u8]) -> Result<String, JsError> {
     parse_mrt_file_core(data).map_err(|e| JsError::new(&e))
+}
+
+/// Reset the internal MRT parser state.
+///
+/// Call this before parsing a new MRT file with `parseMrtRecord` to clear
+/// the PeerIndexTable from a previous file.
+#[wasm_bindgen(js_name = "resetMrtParser")]
+pub fn reset_mrt_parser() {
+    MRT_ELEMENTOR.with(|e| *e.borrow_mut() = Elementor::default());
+}
+
+/// Parse a single MRT record from the start of the given buffer.
+///
+/// Returns a JSON object `{ elems: BgpElem[], bytesRead: number }` on success.
+/// Returns an empty string when there are no more records (the JS wrapper
+/// converts this to `null`).
+///
+/// The caller should slice off `bytesRead` bytes from the front of the buffer
+/// before the next call. This enables streaming/incremental MRT parsing without
+/// passing the full buffer each time.
+///
+/// Throws a JavaScript `Error` on malformed data.
+#[wasm_bindgen(js_name = "parseMrtRecord")]
+pub fn parse_mrt_record_wasm(data: &[u8]) -> Result<String, JsError> {
+    parse_mrt_record_core(data).map_err(|e| JsError::new(&e))
 }
 
 /// Parse a single BGP UPDATE message into BGP elements.
@@ -556,6 +624,18 @@ mod tests {
     fn test_parse_mrt_empty() {
         let json = parse_mrt_file_core(&[]).unwrap();
         assert_eq!(json, "[]");
+    }
+
+    #[test]
+    fn test_parse_mrt_record_empty() {
+        let result = parse_mrt_record_core(&[]).unwrap();
+        assert_eq!(result, ""); // no records → empty string
+    }
+
+    #[test]
+    fn test_parse_mrt_record_invalid() {
+        let result = parse_mrt_record_core(&[0, 1, 2]).unwrap();
+        assert_eq!(result, ""); // invalid data → empty string
     }
 
     #[test]
