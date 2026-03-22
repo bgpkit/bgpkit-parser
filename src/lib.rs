@@ -834,6 +834,8 @@ pub mod error;
 pub mod models;
 #[cfg(feature = "parser")]
 pub mod parser;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use models::BgpElem;
 pub use models::MrtRecord;

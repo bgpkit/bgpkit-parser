@@ -10,6 +10,15 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
+* **WebAssembly (WASM) support (experimental)**: New `wasm` feature flag compiles the BMP/BGP/MRT parsing core to WebAssembly for use in JavaScript environments. Published as [`@bgpkit/parser`](https://www.npmjs.com/package/@bgpkit/parser) on npm with support for Node.js (CommonJS), bundlers (ES modules), and browsers/workers (ES modules with manual init). This feature is experimental and the API may change in future releases.
+  - `parseOpenBmpMessage(data)`: parses OpenBMP-wrapped BMP frames (e.g. RouteViews Kafka stream). Returns a discriminated union on the `type` field covering all 7 BMP message types.
+  - `parseBmpMessage(data, timestamp)`: parses raw BMP frames (without an OpenBMP header).
+  - `parseMrtFile(data)`: parses decompressed MRT files (TABLE_DUMP, TABLE_DUMP_V2, BGP4MP) into `BgpElem[]`.
+  - `parseBgpUpdate(data)`: parses a single BGP UPDATE message into `BgpElem[]`.
+  - Multi-target build script (`src/wasm/build.sh`) produces nodejs, bundler, and web targets in a single npm package.
+  - JS wrapper handles JSON deserialization; TypeScript types included.
+  - Node.js examples in `examples/wasm/`: Kafka OpenBMP stream consumer and MRT file parser.
+
 * **`BgpElem::peer_bgp_id` field**: `BgpElem` now exposes an optional `peer_bgp_id: Option<BgpIdentifier>` containing the peer's BGP Identifier (Router ID) when available. Populated from the PEER_INDEX_TABLE in TableDumpV2/RIB records; `None` for BGP4MP records.
 
 ### Performance improvements

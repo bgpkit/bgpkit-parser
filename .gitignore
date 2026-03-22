@@ -20,3 +20,10 @@ examples/debug-file.rs
 benchmarks
 docs/
 *.md
+!examples/**/*.md
+!src/wasm/**/*.md
+
+# WASM build artifacts
+pkg/
+pkg-*/
+node_modules/

@@ -18,6 +18,12 @@ name = "bgpkit-parser"
 path = "src/bin/main.rs"
 required-features = ["cli"]
 
+# cdylib is required by wasm-pack for WASM builds; rlib is the default for
+# normal Rust library usage. Both are listed so the crate works for native
+# consumers and wasm-pack alike.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 
 ##############
@@ -44,6 +50,7 @@ oneio = { version = "0.20.0", default-features = false, features = ["http", "gz"
 regex = { version = "1", optional = true } # used in parser filter
 chrono = { version = "0.4.38", optional = true } # parser filter
 serde_json = { version = "1.0", optional = true } # RIS Live parsing
+wasm-bindgen = { version = "0.2", optional = true }
 
 ####################
 # CLI dependencies #
@@ -75,6 +82,15 @@ rislive = [
     "serde",
     "serde_json",
     "hex",
+]
+
+# WebAssembly bindings for browser/Node.js usage.
+# Build with: wasm-pack build --target nodejs --no-default-features --features wasm
+wasm = [
+    "parser",
+    "serde",
+    "serde_json",
+    "dep:wasm-bindgen",
 ]
 serde = [
     "dep:serde",

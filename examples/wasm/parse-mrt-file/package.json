@@ -1,0 +1,15 @@
+{
+  "name": "bgpkit-parser-mrt-example",
+  "version": "1.0.0",
+  "description": "Parse MRT files into BGP elements using @bgpkit/parser (WebAssembly)",
+  "main": "parse-mrt.js",
+  "scripts": {
+    "start": "node parse-mrt.js"
+  },
+  "dependencies": {
+    "@bgpkit/parser": "^0.15.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
