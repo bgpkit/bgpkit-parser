@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Bug fixes
+
+* **WASM `only_to_customer` serialization**: Added test to verify that messages without the OTC (Only To Customer) attribute correctly serialize `only_to_customer` as `null` (not `0`) in JSON output. This ensures JavaScript consumers can properly distinguish between "no OTC attribute" (`null`) and "OTC with AS 0" (`0`).
+* **OTC attribute on withdrawal messages**: Withdrawal elements no longer inherit the `only_to_customer` value from their associated UPDATE message. Since the OTC attribute (RFC 9234) is used for route leak detection on route advertisements, it is not semantically meaningful for withdrawals. Withdrawal elements now correctly have `only_to_customer: null`.
+
 ### Breaking changes
 
 * **`BgpOpenMessage::sender_ip` renamed to `bgp_identifier`**: The field type remains `Ipv4Addr` (aliased as `BgpIdentifier`), but the name now correctly reflects RFC 4271 terminology — this is the BGP Identifier, not necessarily the sender's IP address.

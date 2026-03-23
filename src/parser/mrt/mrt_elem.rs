@@ -402,7 +402,7 @@ impl Iterator for BgpUpdateElemIter {
             atomic: false,
             aggr_asn: None,
             aggr_ip: None,
-            only_to_customer: self.only_to_customer,
+            only_to_customer: None,
             unknown: None,
             deprecated: None,
         })
