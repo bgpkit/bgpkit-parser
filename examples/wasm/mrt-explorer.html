@@ -95,28 +95,35 @@ select option { background: #0d1117; }
 <body>
 <div id="root"></div>
 
-<!-- Load WASM in a real ES module (Babel won't touch this) -->
+<!--
+  Load WASM in a real ES module (Babel won't touch this).
+  Uses jsdelivr which serves raw npm files — esm.sh rewrites JS and breaks
+  import.meta.url / WASM path resolution. We use the /web entry point which
+  has async init() suitable for browsers.
+-->
 <script type="module">
 (async () => {
+  const VER = "0.15.2";
+  const BASE = "https://cdn.jsdelivr.net/npm/@bgpkit/parser@" + VER;
+
   try {
-    const CDN = "https://esm.sh/@bgpkit/parser@0.15.0";
-    const mod = await import(CDN);
-    if (typeof mod.default === "function") {
-      try { await mod.default(CDN + "/bgpkit_parser_bg.wasm"); }
-      catch { await mod.default(); }
-    }
-    const recFn = mod.parseMrtRecords ?? mod.parse_mrt_records;
-    if (!recFn) throw new Error("parseMrtRecords not exported");
+    // Load the web entry point (has init() for async WASM loading)
+    const mod = await import(BASE + "/web.mjs");
+
+    // Explicitly pass the WASM URL so the module doesn't rely on import.meta.url
+    await mod.init(BASE + "/web/bgpkit_parser_bg.wasm");
+
     // Wrap the generator into a batch function for the UI
     window.__bgpkit_wasm = {
       status: "ready",
       parseMrt: (data) => {
         const allElems = [];
-        for (const { elems } of recFn(data)) allElems.push(...elems);
+        for (const { elems } of mod.parseMrtRecords(data)) allElems.push(...elems);
         return allElems;
       },
     };
   } catch (e) {
+    console.error("WASM load failed:", e);
     window.__bgpkit_wasm = { status: "error", error: e.message };
   }
   window.dispatchEvent(new Event("bgpkit-wasm-loaded"));
