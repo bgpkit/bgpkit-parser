@@ -13,9 +13,17 @@ export {
   OpenBmpHeader,
   BmpPeerHeader,
   BgpElem,
+  MrtRecordResult,
 } from './index';
 
-export { parseOpenBmpMessage, parseBmpMessage, parseMrtFile, parseBgpUpdate } from './index';
+export {
+  parseOpenBmpMessage,
+  parseBmpMessage,
+  parseBgpUpdate,
+  parseMrtRecord,
+  resetMrtParser,
+  parseMrtRecords,
+} from './index';
 
 /**
  * Initialize the WASM module. Must be called (and awaited) before using

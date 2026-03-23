@@ -11,7 +11,7 @@
  */
 
 const https = require('https');
-const { parseOpenBmpMessage, parseBmpMessage, parseBgpUpdate, parseMrtFile } = require('@bgpkit/parser');
+const { parseOpenBmpMessage, parseBmpMessage, parseBgpUpdate, parseMrtRecords } = require('@bgpkit/parser');
 
 let passed = 0;
 let failed = 0;
@@ -134,11 +134,11 @@ function testBgpUpdate() {
   assert(elem.next_hop === '192.0.2.1', `next_hop is ${elem.next_hop}`);
 }
 
-// ── Test 5: parseMrtFile ─────────────────────────────────────────────────────
+// ── Test 5: parseMrtRecords (streaming) ──────────────────────────────────────
 
-function testMrtFile() {
+function testMrtRecords() {
   return new Promise((resolve) => {
-    console.log('\n[5/5] parseMrtFile');
+    console.log('\n[5/5] parseMrtRecords');
     console.log('  ↓ downloading test MRT file...');
 
     const url = 'https://spaces.bgpkit.org/parser/update-example';
@@ -163,12 +163,14 @@ function handleResponse(res, resolve) {
     const raw = Buffer.concat(chunks);
     console.log(`  ↓ downloaded ${(raw.length / 1024).toFixed(0)} KB`);
 
-    const elems = parseMrtFile(raw);
+    const allElems = [];
+    for (const { elems } of parseMrtRecords(raw)) {
+      allElems.push(...elems);
+    }
 
-    assert(Array.isArray(elems), 'returns an array');
-    assert(elems.length > 0, `parsed ${elems.length} elements`);
+    assert(allElems.length > 0, `parsed ${allElems.length} elements`);
 
-    const announce = elems.find((e) => e.type === 'ANNOUNCE');
+    const announce = allElems.find((e) => e.type === 'ANNOUNCE');
     if (announce) {
       assert(typeof announce.prefix === 'string', `sample prefix: ${announce.prefix}`);
       assert(typeof announce.peer_ip === 'string', `sample peer_ip: ${announce.peer_ip}`);
@@ -192,7 +194,7 @@ async function main() {
   testOpenBmpNull();
   testBmpMessage();
   testBgpUpdate();
-  await testMrtFile();
+  await testMrtRecords();
 
   console.log(`\n${passed + failed} assertions: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);

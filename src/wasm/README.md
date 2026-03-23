@@ -4,155 +4,194 @@
 > format, and build process may change in future releases.
 
 This module compiles bgpkit-parser's BGP/BMP/MRT parsing code to WebAssembly
-for use in JavaScript and TypeScript environments (Node.js, bundlers, Cloudflare
-Workers).
+for use in JavaScript and TypeScript environments.
 
-## Quick Start
-
-### Prerequisites
-
-- [Rust](https://rustup.rs/) (stable toolchain)
-- [`wasm-pack`](https://rustwasm.github.io/wasm-pack/installer/):
-  ```sh
-  cargo install wasm-pack
-  ```
-- The `wasm32-unknown-unknown` target:
-  ```sh
-  rustup target add wasm32-unknown-unknown
-  ```
-
-### Building and Publishing
-
-The build script compiles all three targets (Node.js, bundler, web) and
-assembles a single npm package in `pkg/`:
+## Install
 
 ```sh
-# From the repository root
-bash src/wasm/build.sh
-
-# Publish to npm
-cd pkg && npm publish
+npm install @bgpkit/parser
 ```
 
-The resulting `pkg/` directory contains:
+## Use Cases and Examples
 
-```
-pkg/
-├── nodejs/          # CommonJS, sync WASM loading (Node.js)
-├── bundler/         # ES modules (webpack, vite, rollup)
-├── web/             # ES modules + init() (browsers, Cloudflare Workers)
-├── index.js         # CJS entry point
-├── index.mjs        # ESM entry point
-├── index.d.ts       # TypeScript types
-├── web.mjs          # Web entry point (requires init())
-├── web.d.ts         # Web TypeScript types
-└── package.json     # npm package manifest with conditional exports
-```
+### 1. Real-time BMP stream processing (Node.js)
 
-The `package.json` uses [conditional exports](https://nodejs.org/api/packages.html#conditional-exports)
-so that `require('@bgpkit/parser')` loads the Node.js target and
-`import '@bgpkit/parser'` loads the bundler target automatically. The web
-target is available as a separate subpath import (`@bgpkit/parser/web`).
+Parse OpenBMP messages from the RouteViews Kafka stream. Each Kafka message
+is a small binary frame — no memory concerns.
 
-### Building a single target
-
-If you only need one target (e.g. for the Kafka example), you can build it
-directly:
-
-```sh
-wasm-pack build --target nodejs --no-default-features --features wasm
-```
-
-## API
-
-Four parsing functions are exported, all accepting `Uint8Array` input and
-returning parsed JavaScript objects:
-
-### `parseOpenBmpMessage(data: Uint8Array): BmpParsedMessage | null`
-
-Parse an OpenBMP-wrapped BMP message as received from the
-[RouteViews Kafka stream](http://www.routeviews.org/routeviews/).
-Returns `null` for non-router OpenBMP frames (e.g. collector heartbeats).
+**Requires Node.js** — Kafka clients need raw TCP sockets, which are not
+available in browsers or Cloudflare Workers.
 
 ```js
+const { Kafka } = require('kafkajs');
 const { parseOpenBmpMessage } = require('@bgpkit/parser');
 
-// `raw` is a Buffer/Uint8Array from a Kafka message value
-const msg = parseOpenBmpMessage(raw);
-if (msg && msg.type === 'RouteMonitoring') {
-  for (const elem of msg.elems) {
-    console.log(elem.type, elem.prefix, elem.as_path);
-  }
-}
+const kafka = new Kafka({
+  brokers: ['stream.routeviews.org:9092'],
+});
+
+const consumer = kafka.consumer({ groupId: 'my-app' });
+await consumer.connect();
+await consumer.subscribe({ topic: /^routeviews\.amsix\..+\.bmp_raw$/ });
+
+await consumer.run({
+  eachMessage: async ({ message }) => {
+    const msg = parseOpenBmpMessage(message.value);
+    if (!msg) return; // non-router frame (e.g. collector heartbeat)
+
+    switch (msg.type) {
+      case 'RouteMonitoring':
+        for (const elem of msg.elems) {
+          console.log(elem.type, elem.prefix, elem.as_path);
+        }
+        break;
+      case 'PeerUpNotification':
+        console.log(`Peer up: ${msg.peerHeader.peerIp} AS${msg.peerHeader.peerAsn}`);
+        break;
+      case 'PeerDownNotification':
+        console.log(`Peer down: ${msg.peerHeader.peerIp} (${msg.reason})`);
+        break;
+    }
+  },
+});
 ```
 
-### `parseBmpMessage(data: Uint8Array, timestamp: number): BmpParsedMessage`
-
-Parse a raw BMP message without an OpenBMP wrapper. The `timestamp` parameter
-provides the collection time in seconds since Unix epoch.
+If you have raw BMP messages without the OpenBMP wrapper (e.g. from your own
+BMP collector), use `parseBmpMessage` instead:
 
 ```js
 const { parseBmpMessage } = require('@bgpkit/parser');
 
 const msg = parseBmpMessage(bmpBytes, Date.now() / 1000);
-switch (msg.type) {
-  case 'RouteMonitoring':
-    console.log(`${msg.elems.length} BGP elements`);
-    break;
-  case 'PeerUpNotification':
-    console.log(`Peer up: ${msg.peerHeader.peerIp}`);
-    break;
-  case 'PeerDownNotification':
-    console.log(`Peer down: ${msg.peerHeader.peerIp} (${msg.reason})`);
-    break;
+```
+
+### 2. MRT updates file analysis (Node.js)
+
+Parse MRT updates files from RouteViews or RIPE RIS archives. Updates files
+are typically 5–50 MB compressed (20–200 MB decompressed) and fit comfortably
+in memory.
+
+Supports gzip (`.gz`, RIPE RIS) and bzip2 (`.bz2`, RouteViews) compression.
+For bz2, install an optional dependency: `npm install seek-bzip`.
+
+**Using `streamMrtFrom`** (handles fetch + decompression):
+
+```js
+const { streamMrtFrom } = require('@bgpkit/parser');
+
+// RIPE RIS (gzip)
+for await (const { elems } of streamMrtFrom('https://data.ris.ripe.net/rrc00/2025.01/updates.20250101.0000.gz')) {
+  for (const elem of elems) {
+    console.log(elem.type, elem.prefix, elem.as_path);
+  }
+}
+
+// RouteViews (bzip2 — requires: npm install seek-bzip)
+for await (const { elems } of streamMrtFrom('https://archive.routeviews.org/route-views.amsix/bgpdata/2025.01/UPDATES/updates.20250101.0000.bz2')) {
+  for (const elem of elems) {
+    console.log(elem.type, elem.prefix, elem.as_path);
+  }
 }
 ```
 
-### `parseMrtFile(data: Uint8Array): BgpElem[]`
-
-Parse a fully decompressed MRT file into an array of BGP elements. Handles
-TABLE_DUMP, TABLE_DUMP_V2, and BGP4MP record types. The caller is responsible
-for bzip2/gzip decompression before passing the raw bytes.
+**Using `parseMrtRecords`** with manual I/O:
 
 ```js
 const fs = require('fs');
 const zlib = require('zlib');
-const { parseMrtFile } = require('@bgpkit/parser');
+const { parseMrtRecords } = require('@bgpkit/parser');
 
-const compressed = fs.readFileSync('rib.20260101.0000.bz2');
-const raw = zlib.bunzip2Sync(compressed); // or use a bzip2 library
-const elems = parseMrtFile(raw);
+const raw = zlib.gunzipSync(fs.readFileSync('updates.20250101.0000.gz'));
 
-console.log(`Parsed ${elems.length} BGP elements`);
-for (const elem of elems.slice(0, 10)) {
-  console.log(elem.type, elem.prefix, elem.as_path);
+for (const { elems } of parseMrtRecords(raw)) {
+  for (const elem of elems) {
+    if (elem.type === 'ANNOUNCE') {
+      console.log(elem.prefix, elem.next_hop, elem.as_path);
+    }
+  }
 }
 ```
 
-### `parseBgpUpdate(data: Uint8Array): BgpElem[]`
+### 3. MRT file analysis (browser)
 
-Parse a single BGP UPDATE message into BGP elements. Expects the full BGP
-message including the 16-byte marker, 2-byte length, and 1-byte type header.
-Assumes 4-byte ASN encoding.
+Parse MRT files dropped or fetched in the browser. Uses the web entry point
+which requires calling `init()` before any parsing.
 
-The returned elements have `timestamp: 0` and unspecified peer IP/ASN since
-those are not part of the BGP message itself.
+```js
+import { init, parseMrtRecords } from '@bgpkit/parser/web';
+
+await init();
+
+// Fetch and decompress a gzip-compressed MRT file
+const res = await fetch('https://data.ris.ripe.net/rrc00/2025.01/updates.20250101.0000.gz');
+const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+const raw = new Uint8Array(await new Response(stream).arrayBuffer());
+
+for (const { elems } of parseMrtRecords(raw)) {
+  for (const elem of elems) {
+    console.log(elem.type, elem.prefix, elem.as_path);
+  }
+}
+```
+
+### 4. Individual BGP UPDATE parsing (all platforms)
+
+Parse a single BGP UPDATE message extracted from a pcap capture or received
+via an API. The message must include the 16-byte marker, 2-byte length, and
+1-byte type header.
 
 ```js
 const { parseBgpUpdate } = require('@bgpkit/parser');
 
-// bgpBytes includes the 16-byte marker + length + type header
-const elems = parseBgpUpdate(bgpBytes);
+const elems = parseBgpUpdate(bgpMessageBytes);
 for (const elem of elems) {
-  console.log(elem.prefix, elem.next_hop);
+  console.log(elem.type, elem.prefix, elem.next_hop, elem.as_path);
 }
 ```
 
-## BMP Message Types
+## Memory Considerations
 
-The BMP parsing functions return a discriminated union on the `type` field.
-All message types include a `timestamp` and an optional `openBmpHeader`
-(present only when parsed via `parseOpenBmpMessage`).
+MRT parsing requires the **entire decompressed file** in memory as a
+`Uint8Array` before parsing begins. `parseMrtRecords` then iterates
+record-by-record, so parsed output stays small — but the raw bytes remain in
+memory throughout.
+
+| File type | Typical decompressed size | Practical? |
+|---|---|---|
+| MRT updates (5-min) | 20–200 MB | Yes, all platforms |
+| MRT updates (15-min) | 50–500 MB | Yes, Node.js; may exceed browser/Worker limits |
+| Full RIB dump | 500 MB – 2+ GB | Not recommended — use the native Rust crate |
+
+BMP and BGP UPDATE messages are small (KB-sized) and have no memory concerns.
+
+## API Reference
+
+### Core parsing functions (all platforms)
+
+| Function | Input | Output | Use case |
+|---|---|---|---|
+| `parseOpenBmpMessage(data)` | `Uint8Array` | `BmpParsedMessage \| null` | Real-time BMP streams |
+| `parseBmpMessage(data, timestamp)` | `Uint8Array`, `number` | `BmpParsedMessage` | Real-time BMP streams |
+| `parseBgpUpdate(data)` | `Uint8Array` | `BgpElem[]` | Individual BGP messages |
+| `parseMrtRecords(data)` | `Uint8Array` | `Generator<MrtRecordResult>` | MRT file analysis |
+| `parseMrtRecord(data)` | `Uint8Array` | `MrtRecordResult \| null` | MRT file analysis (low-level) |
+| `resetMrtParser()` | — | `void` | Clear state between MRT files |
+
+### Node.js I/O helpers
+
+| Function | Input | Output | Description |
+|---|---|---|---|
+| `streamMrtFrom(pathOrUrl)` | `string` | `AsyncGenerator<MrtRecordResult>` | Fetch + decompress + stream-parse |
+| `openMrt(pathOrUrl)` | `string` | `Promise<Buffer>` | Fetch + decompress only |
+
+These use Node.js `fs`, `http`, `https`, and `zlib` modules. They are **not
+available** in bundler, browser, or Cloudflare Worker environments.
+
+### BMP message types
+
+BMP parsing functions return a discriminated union on the `type` field. All
+types include `timestamp` and `openBmpHeader` (present only via
+`parseOpenBmpMessage`).
 
 | `type` | Additional fields |
 |---|---|
@@ -166,28 +205,26 @@ All message types include a `timestamp` and an optional `openBmpHeader`
 
 ## Platform Support
 
-| Platform | Import | Notes |
-|---|---|---|
-| Node.js (CJS) | `require('@bgpkit/parser')` | Uses `nodejs` target, sync WASM loading |
-| Node.js (ESM) | `import { ... } from '@bgpkit/parser'` | Uses `bundler` target |
-| Bundler | `import { ... } from '@bgpkit/parser'` | webpack, vite, rollup |
-| Browser / CF Workers | `import { init, ... } from '@bgpkit/parser/web'` | Must call `await init()` first |
+| Platform | Import | Parsing | I/O helpers | Kafka |
+|---|---|---|---|---|
+| Node.js (CJS) | `require('@bgpkit/parser')` | Yes | Yes | Yes (via kafkajs) |
+| Node.js (ESM) | `import from '@bgpkit/parser'` | Yes | No | Yes (via kafkajs) |
+| Bundler (webpack, vite) | `import from '@bgpkit/parser'` | Yes | No | No |
+| Browser | `import from '@bgpkit/parser/web'` | Yes (after `init()`) | No | No |
+| Cloudflare Workers | `import from '@bgpkit/parser/web'` | Yes (after `init()`) | No | No (no TCP sockets) |
 
-### Web target usage
+### Web target
 
-The web target requires explicit initialization before calling any parsing
-functions:
+The web target requires calling `init()` before any parsing functions:
 
 ```js
 import { init, parseOpenBmpMessage } from '@bgpkit/parser/web';
 
-await init();  // load and compile the WASM module
-
+await init();
 const msg = parseOpenBmpMessage(data);
 ```
 
-You can optionally pass a URL or `ArrayBuffer` of the `.wasm` file to `init()`
-if the default path doesn't work in your environment:
+You can pass a custom URL to the `.wasm` file if the default path doesn't work:
 
 ```js
 await init(new URL('./bgpkit_parser_bg.wasm', import.meta.url));
@@ -195,6 +232,41 @@ await init(new URL('./bgpkit_parser_bg.wasm', import.meta.url));
 
 ### Cloudflare Workers
 
-Use the `@bgpkit/parser/web` entry point. Note that Workers cannot connect to
-Kafka directly (no raw TCP sockets), so BMP message bytes must arrive via HTTP
-(e.g. from a proxy service).
+Use the `@bgpkit/parser/web` entry point. Workers cannot connect to Kafka
+(no raw TCP sockets), so BMP/BGP data must arrive via HTTP requests.
+
+Workers have a 128 MB memory limit on the free plan (up to 256 MB on paid),
+which is sufficient for MRT updates files and individual message parsing, but
+not for full RIB dumps.
+
+## Versioning
+
+The npm package version tracks the Rust crate's minor version. For Rust crate
+version `0.X.Y`, the npm package is published as `0.X.Z` where `Z` increments
+independently for JS-specific changes.
+
+## Building from Source
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (stable toolchain)
+- [`wasm-pack`](https://rustwasm.github.io/wasm-pack/installer/):
+  `cargo install wasm-pack`
+- The `wasm32-unknown-unknown` target:
+  `rustup target add wasm32-unknown-unknown`
+
+### Build
+
+```sh
+# From the repository root — builds all targets (nodejs, bundler, web)
+bash src/wasm/build.sh
+
+# Output is in pkg/
+cd pkg && npm publish
+```
+
+To build a single target:
+
+```sh
+wasm-pack build --target nodejs --no-default-features --features wasm
+```

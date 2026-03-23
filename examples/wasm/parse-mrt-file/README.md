@@ -10,12 +10,14 @@ one JSON object per line. It accepts both URLs and local files.
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 18
+- For bz2-compressed files (RouteViews): `npm install seek-bzip`
 
 ## Run
 
 ```sh
 cd examples/wasm/parse-mrt-file
 npm install
+npm install seek-bzip  # optional, for .bz2 files
 
 # Parse directly from a URL (fetches and decompresses in memory)
 node parse-mrt.js https://data.ris.ripe.net/rrc06/2026.03/updates.20260322.2105.gz

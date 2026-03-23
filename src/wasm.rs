@@ -16,9 +16,9 @@
 //! - [`parseOpenBmpMessage`](parse_openbmp_message) — parse OpenBMP-wrapped BMP
 //!   messages (e.g. from the RouteViews Kafka stream)
 //! - [`parseBmpMessage`](parse_bmp_message) — parse raw BMP messages
-//! - [`parseMrtFile`](parse_mrt_file) — parse a decompressed MRT file into BGP elements
-//! - [`parseMrtRecord`](parse_mrt_record_wasm) — parse a single MRT record at a
-//!   given offset (for incremental/streaming parsing)
+//! - [`parseMrtRecord`](parse_mrt_record_wasm) — parse a single MRT record
+//!   (for incremental/streaming parsing)
+//! - [`resetMrtParser`](reset_mrt_parser) — reset MRT parser state between files
 //! - [`parseBgpUpdate`](parse_bgp_update) — parse a single BGP UPDATE message
 
 use crate::models::*;
@@ -292,20 +292,6 @@ fn parse_bmp_message_core(data: &[u8], timestamp: f64) -> Result<String, String>
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
-/// Parse a decompressed MRT file, returning a JSON array string.
-fn parse_mrt_file_core(data: &[u8]) -> Result<String, String> {
-    let mut cursor = Cursor::new(data);
-    let mut elementor = Elementor::default();
-    let mut all_elems: Vec<BgpElem> = Vec::new();
-
-    while let Ok(record) = parse_mrt_record(&mut cursor) {
-        let elems = elementor.record_to_elems(record);
-        all_elems.extend(elems);
-    }
-
-    serde_json::to_string(&all_elems).map_err(|e| e.to_string())
-}
-
 /// Result of parsing a single MRT record: the elems + number of bytes consumed.
 #[derive(serde::Serialize)]
 struct MrtRecordResult {
@@ -389,22 +375,6 @@ pub fn parse_openbmp_message(data: &[u8]) -> Result<String, JsError> {
 #[wasm_bindgen(js_name = "parseBmpMessage")]
 pub fn parse_bmp_message(data: &[u8], timestamp: f64) -> Result<String, JsError> {
     parse_bmp_message_core(data, timestamp).map_err(|e| JsError::new(&e))
-}
-
-/// Parse a decompressed MRT file into BGP elements.
-///
-/// Accepts the raw bytes of a fully decompressed MRT file (the caller is
-/// responsible for bzip2/gzip decompression). Returns a JSON array of
-/// `BgpElem` objects.
-///
-/// Handles TABLE_DUMP, TABLE_DUMP_V2, and BGP4MP record types. For
-/// TABLE_DUMP_V2, the PeerIndexTable record is consumed internally to
-/// resolve peer information.
-///
-/// Throws a JavaScript `Error` if the file cannot be parsed at all.
-#[wasm_bindgen(js_name = "parseMrtFile")]
-pub fn parse_mrt_file(data: &[u8]) -> Result<String, JsError> {
-    parse_mrt_file_core(data).map_err(|e| JsError::new(&e))
 }
 
 /// Reset the internal MRT parser state.
@@ -618,12 +588,6 @@ mod tests {
     fn test_parse_bgp_update_invalid() {
         let result = parse_bgp_update_core(&[0xFF; 16]);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_mrt_empty() {
-        let json = parse_mrt_file_core(&[]).unwrap();
-        assert_eq!(json, "[]");
     }
 
     #[test]

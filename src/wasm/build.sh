@@ -61,6 +61,9 @@ cp "$WASM_DIR/web.mjs"     "$OUT_DIR/"
 cp "$WASM_DIR/web.d.ts"    "$OUT_DIR/"
 cp "$WASM_DIR/package.json" "$OUT_DIR/"
 
+# README for npm (displayed on npmjs.com)
+cp "$REPO_ROOT/src/wasm/README.md" "$OUT_DIR/"
+
 # Cleanup temp directories
 rm -rf pkg-nodejs pkg-bundler pkg-web
 

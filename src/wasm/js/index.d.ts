@@ -20,12 +20,6 @@ export function parseBmpMessage(
 ): BmpParsedMessage;
 
 /**
- * Parse a decompressed MRT file into BGP elements.
- * Handles TABLE_DUMP, TABLE_DUMP_V2, and BGP4MP record types.
- */
-export function parseMrtFile(data: Uint8Array): BgpElem[];
-
-/**
  * Parse a single BGP UPDATE message (with 16-byte marker + 2-byte length
  * + type header) into BGP elements. Assumes 4-byte ASN encoding.
  */
@@ -58,6 +52,22 @@ export interface MrtRecordResult {
   elems: BgpElem[];
   bytesRead: number;
 }
+
+// ── High-level I/O helpers (Node.js only) ────────────────────────────
+
+/**
+ * Open an MRT file from a local path or URL, automatically decompressing
+ * based on the file extension (.gz, .bz2).
+ */
+export function openMrt(pathOrUrl: string): Promise<Buffer>;
+
+/**
+ * Async generator that streams MRT records from a local path or URL.
+ * Handles fetching, decompression, and incremental parsing.
+ */
+export function streamMrtFrom(
+  pathOrUrl: string
+): AsyncGenerator<MrtRecordResult, void, unknown>;
 
 // ── BMP message types (discriminated union on `type`) ────────────────
 
