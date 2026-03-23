@@ -27,3 +27,4 @@ docs/
 pkg/
 pkg-*/
 node_modules/
+.wrangler/

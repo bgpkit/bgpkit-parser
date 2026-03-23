@@ -117,6 +117,9 @@ for (const { elems } of parseMrtRecords(raw)) {
 Parse MRT files dropped or fetched in the browser. Uses the web entry point
 which requires calling `init()` before any parsing.
 
+**Live demo**: [mrt-explorer.labs.bgpkit.com](https://mrt-explorer.labs.bgpkit.com/)
+([source](examples/wasm/mrt-explorer.html))
+
 ```js
 import { init, parseMrtRecords } from '@bgpkit/parser/web';
 

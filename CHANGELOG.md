@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
   - Multi-target build script (`src/wasm/build.sh`) produces nodejs, bundler, and web targets in a single npm package
   - JS wrapper handles JSON deserialization; TypeScript types included
   - Node.js examples in `examples/wasm/`: Kafka OpenBMP stream consumer and MRT file parser
+  - Browser-based MRT explorer demo: [mrt-explorer.labs.bgpkit.com](https://mrt-explorer.labs.bgpkit.com/)
 
 * **`BgpElem::peer_bgp_id` field**: `BgpElem` now exposes an optional `peer_bgp_id: Option<BgpIdentifier>` containing the peer's BGP Identifier (Router ID) when available. Populated from the PEER_INDEX_TABLE in TableDumpV2/RIB records; `None` for BGP4MP records.
 
