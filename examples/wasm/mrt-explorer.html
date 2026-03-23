@@ -363,7 +363,7 @@ function MrtExplorer() {
             MRT Explorer
           </span>
           <span style={{ color: "#2a3042", fontSize: "11px" }}>powered by</span>
-          <span style={{
+          <a href="https://www.npmjs.com/package/@bgpkit/parser" target="_blank" rel="noopener" style={{
             background: "rgba(122, 162, 247, 0.1)",
             border: "1px solid rgba(122, 162, 247, 0.2)",
             color: "#7aa2f7",
@@ -371,10 +371,19 @@ function MrtExplorer() {
             borderRadius: "2px",
             fontSize: "11px",
             letterSpacing: "0.04em",
-          }}>@bgpkit/parser</span>
+            textDecoration: "none",
+            transition: "all 0.15s",
+          }} onMouseOver={(e) => { e.target.style.background = "rgba(122, 162, 247, 0.2)"; e.target.style.borderColor = "#7aa2f7"; }}
+             onMouseOut={(e) => { e.target.style.background = "rgba(122, 162, 247, 0.1)"; e.target.style.borderColor = "rgba(122, 162, 247, 0.2)"; }}>@bgpkit/parser</a>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "11px" }}>
+          <a href="https://bgpkit.com" target="_blank" rel="noopener" style={{ color: "#506073", textDecoration: "none", transition: "color 0.15s" }}
+             onMouseOver={(e) => e.target.style.color = "#c5cdd9"} onMouseOut={(e) => e.target.style.color = "#506073"}>bgpkit.com</a>
+          <a href="https://github.com/bgpkit" target="_blank" rel="noopener" style={{ color: "#506073", textDecoration: "none", transition: "color 0.15s" }}
+             onMouseOver={(e) => e.target.style.color = "#c5cdd9"} onMouseOut={(e) => e.target.style.color = "#506073"}>GitHub</a>
+          <span style={{ color: "#1a2030" }}>{"|"}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
           <span style={{
             width: 7, height: 7, borderRadius: "50%",
             background: wasmStatus === "ready" ? "#73da94" : wasmStatus === "error" ? "#f7768e" : "#e0af68",
@@ -387,6 +396,7 @@ function MrtExplorer() {
           {wasmStatus === "error" && (
             <span style={{ color: "#f7768e", marginLeft: 4 }}>{truncate(wasmError, 60)}</span>
           )}
+          </div>
         </div>
       </div>
 
