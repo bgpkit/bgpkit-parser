@@ -1,0 +1,17 @@
+{
+  "name": "bgpkit-parser-kafka-example",
+  "version": "1.0.0",
+  "description": "Route-views Kafka stream consumer using @bgpkit/parser (WebAssembly)",
+  "main": "kafka-stream.js",
+  "scripts": {
+    "start": "node kafka-stream.js",
+    "start:quiet": "node kafka-stream.js 2>/dev/null"
+  },
+  "dependencies": {
+    "@bgpkit/parser": "^0.15.0",
+    "kafkajs": "^2.2.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

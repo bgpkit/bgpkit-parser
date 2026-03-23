@@ -1,0 +1,58 @@
+{
+  "name": "@bgpkit/parser",
+  "version": "0.15.2",
+  "description": "BGP/BMP/MRT message parser compiled to WebAssembly",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bgpkit/bgpkit-parser"
+  },
+  "main": "./index.js",
+  "module": "./index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "node": {
+        "require": {
+          "types": "./index.d.ts",
+          "default": "./index.js"
+        },
+        "import": {
+          "types": "./index.d.ts",
+          "default": "./index.mjs"
+        }
+      },
+      "default": {
+        "types": "./index.d.ts",
+        "default": "./index.mjs"
+      }
+    },
+    "./web": {
+      "types": "./web.d.ts",
+      "default": "./web.mjs"
+    }
+  },
+  "files": [
+    "nodejs/",
+    "bundler/",
+    "web/",
+    "index.js",
+    "index.mjs",
+    "index.d.ts",
+    "web.mjs",
+    "web.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "bgp",
+    "bmp",
+    "mrt",
+    "wasm",
+    "parser",
+    "routeviews",
+    "bgpkit"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

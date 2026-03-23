@@ -1,0 +1,11 @@
+{
+  "name": "bgpkit-parser-wasm-test",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node test-published.js"
+  },
+  "dependencies": {
+    "@bgpkit/parser": "0.15.0"
+  }
+}
