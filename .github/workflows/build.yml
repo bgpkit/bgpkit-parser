@@ -71,7 +71,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: ~/.cargo/bin
       - name: Install cargo-msrv
-        uses: taiki-e/install-action@cargo-msrv
+        run: cargo install cargo-msrv --locked
       - name: Verify MSRV
         run: cargo msrv verify
