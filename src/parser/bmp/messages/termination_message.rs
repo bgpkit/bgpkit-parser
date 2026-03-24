@@ -38,7 +38,7 @@ pub enum TerminationReason {
 
 ///Type-Length-Value Type
 ///
-/// For more, see: https://datatracker.ietf.org/doc/html/rfc1213
+/// For more, see: <https://datatracker.ietf.org/doc/html/rfc1213>
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]

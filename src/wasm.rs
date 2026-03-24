@@ -630,4 +630,61 @@ mod tests {
         assert!(!header.is_post_policy);
         assert!(!header.is_adj_rib_out);
     }
+
+    #[test]
+    fn test_bgp_update_without_otc_serializes_null() {
+        // Create a BGP UPDATE without OTC attribute and verify it serializes to null
+        let data = make_bgp_update_announce([10, 0, 0, 0], 24, [192, 168, 1, 1]);
+        let json = parse_bgp_update_core(&data).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elems = v.as_array().unwrap();
+        assert_eq!(elems.len(), 1);
+
+        // Verify only_to_customer is null (not 0)
+        let otc = &elems[0]["only_to_customer"];
+        assert!(
+            otc.is_null(),
+            "only_to_customer should be null for messages without OTC, got: {:?}",
+            otc
+        );
+    }
+}
+
+#[cfg(test)]
+mod otc_tests {
+    use super::*;
+
+    #[test]
+    fn test_option_asn_serialization() {
+        // Test that Option<Asn> serializes correctly for WASM
+        let some_asn: Option<Asn> = Some(Asn::new_32bit(12345));
+        let json = serde_json::to_string(&some_asn).unwrap();
+        assert_eq!(json, "12345", "Some(Asn) should serialize as numeric value");
+
+        let none_asn: Option<Asn> = None;
+        let json = serde_json::to_string(&none_asn).unwrap();
+        assert_eq!(json, "null", "None should serialize as null");
+
+        // Test BgpElem with and without OTC
+        let elem_with_otc = BgpElem {
+            only_to_customer: Some(Asn::new_32bit(12345)),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&elem_with_otc).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v.get("only_to_customer").unwrap(), 12345);
+
+        let elem_without_otc = BgpElem {
+            only_to_customer: None,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&elem_without_otc).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let otc_field = v.get("only_to_customer").unwrap();
+        assert!(
+            otc_field.is_null(),
+            "BgpElem without OTC should have null, got: {:?}",
+            otc_field
+        );
+    }
 }

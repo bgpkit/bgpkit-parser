@@ -187,8 +187,8 @@ impl BmpPerPeerHeader {
 
 /// Peer type
 ///
-/// - RFC7854: https://datatracker.ietf.org/doc/html/rfc7854#section-4.2
-/// - RFC9069: https://datatracker.ietf.org/doc/html/rfc9069
+/// - RFC7854: <https://datatracker.ietf.org/doc/html/rfc7854#section-4.2>
+/// - RFC9069: <https://datatracker.ietf.org/doc/html/rfc9069>
 #[derive(Debug, Copy, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
