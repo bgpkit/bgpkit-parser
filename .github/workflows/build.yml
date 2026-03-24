@@ -14,12 +14,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  format:
+    name: Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Run format check
+        run: cargo fmt --check
 
-      - name: Build
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --all-features --no-deps
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build default
         run: cargo build
 
       - name: Build cli
@@ -34,8 +65,13 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Check MSRV
-        run: cargo install cargo-msrv --locked && cargo msrv verify
+  msrv:
+    name: Check MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-msrv
+        uses: taiki-e/install-action@cargo-msrv
+      - name: Verify MSRV
+        run: cargo msrv verify

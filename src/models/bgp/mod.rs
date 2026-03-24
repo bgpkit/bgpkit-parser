@@ -156,7 +156,7 @@ pub struct BgpUpdateMessage {
     /// and will **not** be included here. Accessing this field directly may cause you to miss
     /// IPv6 or multi-protocol prefixes.
     ///
-    /// Instead, use [`Elementor::bgp_update_to_elems`] to reliably extract all withdrawn prefixes from the update,
+    /// Instead, use [`Elementor::bgp_update_to_elems`](crate::Elementor::bgp_update_to_elems) to reliably extract all withdrawn prefixes from the update,
     /// or combine this field with prefixes found in the `MpUnreachNlri` attribute manually.
     ///
     /// See
@@ -174,7 +174,7 @@ pub struct BgpUpdateMessage {
     /// and will **not** be included here. Accessing this field directly may cause you to miss
     /// IPv6 or multi-protocol prefixes.
     ///
-    /// Instead, use [`Elementor::bgp_update_to_elems`] to reliably extract all announced prefixes from the update,
+    /// Instead, use [`Elementor::bgp_update_to_elems`](crate::Elementor::bgp_update_to_elems) to reliably extract all announced prefixes from the update,
     /// or combine this field with prefixes found in the `MpReachNlri` attribute manually.
     ///
     /// See

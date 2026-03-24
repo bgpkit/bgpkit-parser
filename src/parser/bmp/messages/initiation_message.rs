@@ -20,7 +20,7 @@ pub struct InitiationTlv {
 
 ///Type-Length-Value Type
 ///
-/// https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs
+/// <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs>
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]

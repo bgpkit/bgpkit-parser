@@ -173,7 +173,7 @@ impl BgpNotificationMessage {
 ///
 /// The parsing of BGP OPEN message also includes decoding the BGP capabilities.
 ///
-/// RFC 4271: https://datatracker.ietf.org/doc/html/rfc4271
+/// RFC 4271: <https://datatracker.ietf.org/doc/html/rfc4271>
 /// ```text
 ///       0                   1                   2                   3
 ///       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1

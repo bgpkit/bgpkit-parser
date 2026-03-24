@@ -67,7 +67,7 @@ pub struct RisSubscribe {
     ///
     /// Examples:
     /// * "789$"
-    /// * "^123,456,789,[789,10111]$"
+    /// * "^123,456,789,\[789,10111\]$"
     /// * "!6666$"
     /// * "!^3333"
     #[serde(skip_serializing_if = "Option::is_none")]
