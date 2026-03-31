@@ -95,7 +95,7 @@ pub fn parse_peer_up_notification(
                 }
             });
             if !has_multiprotocol_capability {
-                warn!("RFC 9069: Local RIB peer up notification should include multiprotocol capabilities in fabricated OPEN messages (parsing PeerUpNotification)");
+                warn!("RFC 9069: Local RIB peer up notification should include multiprotocol capabilities in fabricated OPEN messages (parsing Peer Up Notification)");
             }
         }
     }
@@ -115,7 +115,7 @@ pub fn parse_peer_up_notification(
                 // RFC 9069: VrTableName MUST be UTF-8 string of 1-255 bytes
                 if info_value.is_empty() || info_value.len() > 255 {
                     warn!(
-                        "RFC 9069: VrTableName TLV length must be 1-255 bytes, found {} bytes (parsing PeerUpNotification)",
+                        "RFC 9069: VrTableName TLV length must be 1-255 bytes, found {} bytes (parsing Peer Up Notification)",
                         info_value.len()
                     );
                 }
@@ -132,7 +132,7 @@ pub fn parse_peer_up_notification(
     // RFC 9069: Local RIB instances SHOULD include VrTableName TLV
     if let Some(BmpPeerType::LocalRib) = peer_type {
         if !has_vr_table_name {
-            warn!("RFC 9069: Local RIB peer up notification should include VrTableName TLV (parsing PeerUpNotification)");
+            warn!("RFC 9069: Local RIB peer up notification should include VrTableName TLV (parsing Peer Up Notification)");
         }
     }
     Ok(PeerUpNotification {
