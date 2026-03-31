@@ -261,8 +261,8 @@ pub fn parse_attributes(
 
         if data.remaining() < attr_length {
             warn!(
-                "not enough bytes: input bytes left - {}, want to read - {}; skipping",
-                bytes_left, attr_length
+                "{:?} attribute encodes a length ({}) that is longer than the remaining attribute data ({}). Skipping remaining attribute data for BGP message",
+                attr_type, attr_length, bytes_left
             );
             // break and return already parsed attributes
             break;

@@ -120,7 +120,7 @@ pub fn parse_bgp_message(
 
     if data.remaining() != bgp_msg_length {
         warn!(
-            "BGP message length {} does not match the actual length {}",
+            "BGP message length {} does not match the actual length {} (parsing BGP message)",
             bgp_msg_length,
             data.remaining()
         );
@@ -256,10 +256,10 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
                 // let pos_end = input.position() + opt_params_len as u64;
                 if input.remaining() != opt_params_len as usize {
                     warn!(
-                        "BGP open message length {} does not match the actual length {}",
-                        opt_params_len,
-                        input.remaining()
-                    );
+                    "BGP open message length {} does not match the actual length {} (parsing BGP OPEN message)",
+                    opt_params_len,
+                    input.remaining()
+                );
                 }
 
                 param_type = input.read_u8()?;
@@ -422,7 +422,7 @@ fn read_nlri(
     }
     if length == 1 {
         // 1 byte does not make sense
-        warn!("seeing strange one-byte NLRI field");
+        warn!("seeing strange one-byte NLRI field (parsing NLRI in BGP UPDATE message)");
         input.advance(1); // skip the byte
         return Ok(vec![]);
     }

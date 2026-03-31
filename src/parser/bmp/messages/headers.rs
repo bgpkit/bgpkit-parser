@@ -372,7 +372,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
 
             // Validate that peer address is zero-filled as required by RFC 9069
             if peer_addr_bytes != [0u8; 16] {
-                warn!("RFC 9069 violation: Local RIB peer address MUST be zero-filled, but found non-zero bytes");
+                warn!("RFC 9069 violation: Local RIB peer address MUST be zero-filled, but found non-zero bytes (parsing BMP Per-Peer Header)");
             }
 
             // Local RIB peer address is always zero-filled per RFC 9069
@@ -385,7 +385,7 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
 
             // RFC 9069: Validate that peer BGP ID is non-zero for meaningful instances
             if peer_bgp_id == Ipv4Addr::from(0) && peer_distinguisher != 0 {
-                warn!("RFC 9069: Local RIB peer BGP ID should be set to VRF instance router-id for non-global instances");
+                warn!("RFC 9069: Local RIB peer BGP ID should be set to VRF instance router-id for non-global instances (parsing BMP Per-Peer Header)");
             }
 
             let t_sec = data.read_u32()?;
