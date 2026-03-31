@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Improvements
+
+* **Enhanced warning messages**: Added context to 14 warning messages across BGP, BMP, and MRT parsers to help identify which parsing stage encountered an issue. Also fixed typo in NLRI warning ("NRLI" → "NLRI").
+
 ### Bug fixes
 
 * **WASM `only_to_customer` serialization**: Added test to verify that messages without the OTC (Only To Customer) attribute correctly serialize `only_to_customer` as `null` (not `0`) in JSON output. This ensures JavaScript consumers can properly distinguish between "no OTC attribute" (`null`) and "OTC with AS 0" (`0`).

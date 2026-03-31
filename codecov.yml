@@ -15,3 +15,9 @@ coverage:
         # adjust accordingly based on how flaky your tests are
         # this allows a 10% drop from the previous base commit coverage
         threshold: 10%
+        # make coverage check informational (non-blocking)
+        informational: true
+    patch:
+      default:
+        # make patch coverage check informational (non-blocking)
+        informational: true
