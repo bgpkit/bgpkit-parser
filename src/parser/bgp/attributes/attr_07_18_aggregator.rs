@@ -32,7 +32,7 @@ pub fn parse_aggregator(
     };
     if asn_len_found != *asn_len {
         warn!(
-            "Aggregator attribute with ASN length set to {:?} but found {:?}",
+            "Aggregator attribute with ASN length set to {:?} but found {:?} (parsing Aggregator attribute)",
             asn_len, asn_len_found
         );
     }

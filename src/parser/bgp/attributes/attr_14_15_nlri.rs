@@ -70,7 +70,7 @@ pub fn parse_nlri(
             if reachable {
                 // skip reserved byte for reachable NRLI
                 if input.read_u8()? != 0 {
-                    warn!("NRLI reserved byte not 0");
+                    warn!("NLRI reserved byte not 0 (parsing NLRI prefixes)");
                 }
             }
             let ls_nlri = parse_link_state_nlri(input, afi, safi, next_hop, reachable)?;
@@ -85,7 +85,7 @@ pub fn parse_nlri(
                         if reachable {
                             // skip reserved byte for reachable NRLI
                             if input.read_u8()? != 0 {
-                                warn!("NRLI reserved byte not 0");
+                                warn!("NLRI reserved byte not 0 (parsing NLRI Link-State)");
                             }
                         }
                         parse_nlri_list(input, additional_paths, &afi)?
@@ -97,7 +97,7 @@ pub fn parse_nlri(
                     if reachable {
                         // skip reserved byte for reachable NRLI
                         if input.read_u8()? != 0 {
-                            warn!("NRLI reserved byte not 0");
+                            warn!("NLRI reserved byte not 0 (parsing NLRI prefixes)");
                         }
                     }
                     parse_nlri_list(input, additional_paths, &afi)?
@@ -131,7 +131,7 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
 
     if let Some(next_hop) = &nlri.next_hop {
         if !reachable {
-            warn!("NLRI next hop should not be set for unreachable NLRI");
+            warn!("NLRI next hop should not be set for unreachable NLRI (encoding NLRI)");
         }
         // encode next hop
         let next_hop_bytes = match next_hop {

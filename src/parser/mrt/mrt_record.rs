@@ -230,7 +230,7 @@ impl MrtRecord {
         let mut new_header = self.common_header;
         if message_bytes.len() != new_header.length as usize {
             warn!(
-                "message length {} does not match the length in the header {}",
+                "message length {} does not match the length in the header {} (encoding MrtRecord)",
                 message_bytes.len(),
                 new_header.length
             );

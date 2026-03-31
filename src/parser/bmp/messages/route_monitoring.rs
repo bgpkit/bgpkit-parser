@@ -19,7 +19,7 @@ pub fn parse_route_monitoring(
     // RFC 9069: Local RIB MUST use 4-byte ASN encoding
     if let Some(BmpPeerType::LocalRib) = peer_type {
         if *asn_len != AsnLength::Bits32 {
-            warn!("RFC 9069 violation: Local RIB route monitoring MUST use 4-byte ASN encoding");
+            warn!("RFC 9069 violation: Local RIB route monitoring MUST use 4-byte ASN encoding (parsing RouteMonitoring)");
         }
     }
 

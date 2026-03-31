@@ -78,7 +78,7 @@ pub fn parse_rib_afi_entries(
         let entry = match parse_rib_entry(data, is_add_path, &afi, &safi, prefix) {
             Ok(entry) => entry,
             Err(e) => {
-                warn!("early break due to error {}", e);
+                warn!("early break due to error {} while parsing RibAfiEntries", e);
                 break;
             }
         };
