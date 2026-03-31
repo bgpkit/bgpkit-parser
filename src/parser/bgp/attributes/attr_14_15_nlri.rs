@@ -70,7 +70,7 @@ pub fn parse_nlri(
             if reachable {
                 // skip reserved byte for reachable NRLI
                 if input.read_u8()? != 0 {
-                    warn!("NLRI reserved byte not 0 (parsing NLRI prefixes)");
+                    warn!("NLRI reserved byte not 0 (parsing NLRI Link-State)");
                 }
             }
             let ls_nlri = parse_link_state_nlri(input, afi, safi, next_hop, reachable)?;
@@ -85,7 +85,7 @@ pub fn parse_nlri(
                         if reachable {
                             // skip reserved byte for reachable NRLI
                             if input.read_u8()? != 0 {
-                                warn!("NLRI reserved byte not 0 (parsing NLRI Link-State)");
+                                warn!("NLRI reserved byte not 0 (parsing NLRI prefixes)");
                             }
                         }
                         parse_nlri_list(input, additional_paths, &afi)?
