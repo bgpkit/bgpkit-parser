@@ -135,6 +135,54 @@ impl<R> BgpkitParser<R> {
         }
     }
 
+    /// Add a filter to the parser by specifying filter type and value as strings.
+    ///
+    /// This method parses the filter type and value strings to create a [`Filter`] and adds it
+    /// to the parser's filter list. For the full list of available filter types and their
+    /// formats, see the [`Filter`] struct documentation.
+    ///
+    /// # Available Filter Types
+    ///
+    /// - `origin_asn` - Origin AS number (e.g., "12345")
+    /// - `origin_asns` - Multiple origin AS numbers, comma-separated (e.g., "12345,67890")
+    /// - `prefix` - Exact prefix match (e.g., "192.168.1.0/24")
+    /// - `prefix_super` - Match prefix and super-prefixes
+    /// - `prefix_sub` - Match prefix and sub-prefixes
+    /// - `prefix_super_sub` - Match prefix, super-prefixes, and sub-prefixes
+    /// - `prefixes` - Multiple prefixes (e.g., "1.1.1.0/24,8.8.8.0/24")
+    /// - `peer_ip` - Peer IP address (e.g., "192.168.1.1")
+    /// - `peer_ips` - Multiple peer IPs (e.g., "192.168.1.1,192.168.1.2")
+    /// - `peer_asn` - Peer AS number (e.g., "12345")
+    /// - `peer_asns` - Multiple peer AS numbers (e.g., "12345,67890")
+    /// - `type` - Message type: "a"/"announce" or "w"/"withdraw"
+    /// - `ts_start` - Start timestamp (unix timestamp or RFC3339)
+    /// - `ts_end` - End timestamp (unix timestamp or RFC3339)
+    /// - `as_path` - AS path regex pattern
+    /// - `community` - Community regex pattern
+    /// - `ip_version` - IP version: "4"/"ipv4" or "6"/"ipv6"
+    ///
+    /// # Negative Filters
+    ///
+    /// Most filters support negation by prefixing the value with `!`. For example:
+    /// - `origin_asn=!13335` matches elements where origin AS is NOT 13335
+    /// - `prefix=!10.0.0.0/8` matches elements where prefix is NOT 10.0.0.0/8
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let parser = BgpkitParser::new("https://spaces.bgpkit.org/parser/update-example.gz")
+    ///     .unwrap()
+    ///     .add_filter("peer_ip", "185.1.8.65")
+    ///     .unwrap()
+    ///     .add_filter("type", "w")
+    ///     .unwrap();
+    ///
+    /// for elem in parser {
+    ///     println!("{}", elem);
+    /// }
+    /// ```
     pub fn add_filter(
         self,
         filter_type: &str,
@@ -148,6 +196,62 @@ impl<R> BgpkitParser<R> {
             filters,
             options: self.options,
         })
+    }
+
+    /// Add multiple filters to the parser.
+    ///
+    /// This method extends the existing filters with the provided slice of filters.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    /// use bgpkit_parser::parser::Filter;
+    ///
+    /// let filters = vec![
+    ///     Filter::new("peer_ip", "185.1.8.65").unwrap(),
+    ///     Filter::new("type", "w").unwrap(),
+    /// ];
+    ///
+    /// let parser = BgpkitParser::new("https://spaces.bgpkit.org/parser/update-example.gz")
+    ///     .unwrap()
+    ///     .add_filters(&filters);
+    /// ```
+    pub fn add_filters(mut self, filters: &[Filter]) -> Self {
+        self.filters.extend(filters.iter().cloned());
+        self
+    }
+
+    /// Set filters directly, replacing any existing filters.
+    ///
+    /// This method allows passing a pre-built `Vec<Filter>` directly to the parser,
+    /// bypassing the need to parse filter strings. This is useful when you want to
+    /// build filter specifications independently and reuse them across multiple parsers.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    /// use bgpkit_parser::parser::Filter;
+    ///
+    /// // Build filters independently
+    /// let filters = vec![
+    ///     Filter::new("peer_ip", "185.1.8.65").unwrap(),
+    ///     Filter::new("type", "w").unwrap(),
+    /// ];
+    ///
+    /// // Apply to multiple parsers (no manual clone needed)
+    /// let parser1 = BgpkitParser::new("https://spaces.bgpkit.org/parser/update-example.gz")
+    ///     .unwrap()
+    ///     .with_filters(&filters);
+    ///
+    /// let parser2 = BgpkitParser::new("https://spaces.bgpkit.org/parser/update-example.gz")
+    ///     .unwrap()
+    ///     .with_filters(&filters);
+    /// ```
+    pub fn with_filters(mut self, filters: &[Filter]) -> Self {
+        self.filters = filters.to_vec();
+        self
     }
 }
 
@@ -217,5 +321,113 @@ mod tests {
         let suffix = "";
         let result = add_suffix_to_filename(filename, suffix);
         assert_eq!(result, "example..txt");
+    }
+
+    #[test]
+    fn test_with_filters() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Build filters independently
+        let filters = vec![
+            Filter::new("peer_ip", "185.1.8.65").unwrap(),
+            Filter::new("type", "w").unwrap(),
+        ];
+
+        // Test with_filters - sets filters directly
+        let parser = BgpkitParser::new(url).unwrap().with_filters(&filters);
+        let count = parser.into_elem_iter().count();
+
+        // peer 185.1.8.65 has 3393 total, 132 withdrawals
+        assert_eq!(count, 132);
+
+        // Test that with_filters replaces existing filters
+        let filters1 = vec![Filter::new("peer_ip", "185.1.8.65").unwrap()];
+        let filters2 = vec![Filter::new("peer_ip", "185.1.8.50").unwrap()];
+
+        let parser = BgpkitParser::new(url)
+            .unwrap()
+            .with_filters(&filters1)
+            .with_filters(&filters2); // Should replace filters1
+        let count = parser.into_elem_iter().count();
+
+        // peer 185.1.8.50 has 1563 elements
+        assert_eq!(count, 1563);
+    }
+
+    #[test]
+    fn test_add_filters() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Build filters independently
+        let filters = vec![
+            Filter::new("peer_ip", "185.1.8.65").unwrap(),
+            Filter::new("type", "w").unwrap(),
+        ];
+
+        // Test add_filters - extends existing filters
+        let parser = BgpkitParser::new(url).unwrap().add_filters(&filters);
+        let count = parser.into_elem_iter().count();
+
+        // peer 185.1.8.65 has 3393 total, 132 withdrawals
+        assert_eq!(count, 132);
+
+        // Test combining add_filter and add_filters
+        let parser = BgpkitParser::new(url)
+            .unwrap()
+            .add_filter("peer_ip", "185.1.8.65")
+            .unwrap()
+            .add_filters(&[Filter::new("type", "w").unwrap()]);
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 132);
+    }
+
+    #[test]
+    fn test_with_filters_empty() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Test with empty filters - should return all elements
+        let parser = BgpkitParser::new(url).unwrap().with_filters(&[]);
+        let count = parser.into_elem_iter().count();
+
+        // Total elements in the file
+        assert_eq!(count, 8160);
+    }
+
+    #[test]
+    fn test_add_filters_empty() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Test adding empty filters - should not change behavior
+        let parser = BgpkitParser::new(url)
+            .unwrap()
+            .add_filter("peer_ip", "185.1.8.65")
+            .unwrap()
+            .add_filters(&[]);
+        let count = parser.into_elem_iter().count();
+
+        // peer 185.1.8.65 has 3393 elements
+        assert_eq!(count, 3393);
+    }
+
+    #[test]
+    fn test_with_filters_reuse() {
+        let url = "https://spaces.bgpkit.org/parser/update-example.gz";
+
+        // Build filters once
+        let filters = vec![
+            Filter::new("peer_ip", "185.1.8.65").unwrap(),
+            Filter::new("type", "w").unwrap(),
+        ];
+
+        // Apply to multiple parsers (simulating reuse pattern - no clone needed)
+        let parser1 = BgpkitParser::new(url).unwrap().with_filters(&filters);
+        let count1 = parser1.into_elem_iter().count();
+
+        let parser2 = BgpkitParser::new(url).unwrap().with_filters(&filters);
+        let count2 = parser2.into_elem_iter().count();
+
+        // Both should have same count: 132 withdrawals from peer 185.1.8.65
+        assert_eq!(count1, 132);
+        assert_eq!(count2, 132);
     }
 }

@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 
 * **Enhanced warning messages**: Added context to 14 warning messages across BGP, BMP, and MRT parsers to help identify which parsing stage encountered an issue. Also fixed typo in NLRI warning ("NRLI" → "NLRI").
+* **Codecov configuration**: Added `require_base: true` to ensure Codecov only posts coverage reports when a valid base commit coverage exists, preventing comparisons against outdated baselines.
 
 ### Bug fixes
 
@@ -49,6 +50,27 @@ All notable changes to this project will be documented in this file.
   - Replaces sequential cursor reads with single bounds-checked struct references
 
 ### New features
+
+* **`with_filters` and `add_filters` methods**: Added new methods to `BgpkitParser` for passing pre-built `Vec<Filter>` directly, addressing issue #271.
+  - `with_filters(filters: &[Filter])` - replaces all existing filters with the provided slice; clones internally so no manual clone needed
+  - `add_filters(filters: &[Filter])` - extends existing filters with the provided slice
+  - Both methods enable building filter specifications independently and reusing them across multiple parsers without string parsing overhead
+  - Added rust documentation to `add_filter` method with complete list of available filter types
+
+  Example:
+  ```rust
+  use bgpkit_parser::BgpkitParser;
+  use bgpkit_parser::parser::Filter;
+
+  let filters = vec![
+      Filter::new("peer_ip", "185.1.8.65").unwrap(),
+      Filter::new("type", "w").unwrap(),
+  ];
+
+  // Reuse across multiple parsers
+  let parser1 = BgpkitParser::new(url1).unwrap().with_filters(&filters);
+  let parser2 = BgpkitParser::new(url2).unwrap().with_filters(&filters);
+  ```
 
 * **Immutable Elementor API**: New methods enable parallel processing of MRT records
   - `Elementor::with_peer_table(peer_table)` creates a pre-initialized Elementor
