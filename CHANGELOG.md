@@ -50,6 +50,12 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
+* **`with_filters` and `add_filters` methods**: Added new methods to `BgpkitParser` for passing pre-built `Vec<Filter>` directly, addressing issue #271.
+  - `with_filters(filters: Vec<Filter>)` - replaces all existing filters with the provided vector
+  - `add_filters(filters: &[Filter])` - extends existing filters with the provided slice (replaces the previous `todo!()` placeholder)
+  - Both methods enable building filter specifications independently and reusing them across multiple parsers without string parsing overhead
+  - Added rust documentation to `add_filter` method with complete list of available filter types
+
 * **Immutable Elementor API**: New methods enable parallel processing of MRT records
   - `Elementor::with_peer_table(peer_table)` creates a pre-initialized Elementor
   - `Elementor::record_to_elems_iter(&self, record)` returns a lazy iterator without requiring `&mut self`

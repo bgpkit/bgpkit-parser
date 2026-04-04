@@ -21,3 +21,8 @@ coverage:
       default:
         # make patch coverage check informational (non-blocking)
         informational: true
+# Ensure Codecov waits for all statuses to be reported before posting a comment
+# This helps avoid posting coverage reports on incomplete CI runs
+comment:
+  require_changes: true
+  require_base: true
