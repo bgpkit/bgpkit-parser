@@ -69,7 +69,7 @@ fn main() {
     let mut downloaded = false;
     if src.starts_with("http://") || src.starts_with("https://") {
         if !local_path.exists() {
-            download(src.as_str(), local_path.to_str().unwrap(), None)
+            download(src.as_str(), local_path.to_str().unwrap())
                 .expect("failed to download source to local file");
             downloaded = true;
         } else {
