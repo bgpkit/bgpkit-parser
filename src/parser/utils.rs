@@ -156,72 +156,11 @@ pub trait ReadUtils: Buf {
         afi: &Afi,
         add_path: bool,
     ) -> Result<NetworkPrefix, ParserError> {
-        let path_id = if add_path {
-            Some(self.read_u32()?)
-        } else {
-            None
-        };
-
-        // Length in bits
-        let bit_len = self.read_u8()?;
-
-        // Validate prefix length immediately after reading
-        // IPv4 prefix length must be <= 32, IPv6 <= 128
-        let max_bit_len: u8 = match afi {
-            Afi::Ipv4 => 32,
-            Afi::Ipv6 => 128,
-            Afi::LinkState => 0, // Link-State doesn't use traditional prefixes
-        };
-
-        if bit_len > max_bit_len {
-            return Err(ParserError::ParseError(format!(
-                "Invalid prefix length: {bit_len} (max {max_bit_len} for {afi:?})"
-            )));
-        }
-
-        // Convert to bytes
-        let byte_len: usize = (bit_len as usize).div_ceil(8);
-        let addr: IpAddr = match afi {
-            Afi::Ipv4 => {
-                // 4 bytes -- u32
-                if byte_len > 4 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv4 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
-                    )));
-                }
-                self.has_n_remaining(byte_len)?;
-                let mut buff = [0; 4];
-                self.copy_to_slice(&mut buff[..byte_len]);
-                IpAddr::V4(Ipv4Addr::from(buff))
-            }
-            Afi::Ipv6 => {
-                // 16 bytes
-                if byte_len > 16 {
-                    return Err(ParserError::ParseError(format!(
-                        "Invalid byte length for IPv6 prefix. byte_len: {byte_len}, bit_len: {bit_len}"
-                    )));
-                }
-                self.has_n_remaining(byte_len)?;
-                let mut buff = [0; 16];
-                self.copy_to_slice(&mut buff[..byte_len]);
-                IpAddr::V6(Ipv6Addr::from(buff))
-            }
-            Afi::LinkState => {
-                // Link-State doesn't use traditional IP prefixes
-                // Use IPv4 zero address as placeholder
-                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
-            }
-        };
-        let prefix = match IpNet::new(addr, bit_len) {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(ParserError::ParseError(format!(
-                    "Invalid network prefix length: {bit_len}"
-                )))
-            }
-        };
-
-        Ok(NetworkPrefix::new(prefix, path_id))
+        // Use try_parse_prefix on remaining bytes, then advance
+        let data = self.chunk();
+        let (prefix, consumed) = try_parse_prefix(data, afi, add_path)?;
+        self.advance(consumed);
+        Ok(prefix)
     }
 
     fn read_n_bytes(&mut self, n_bytes: usize) -> Result<Vec<u8>, ParserError> {
@@ -353,7 +292,7 @@ pub fn parse_nlri_list(
         // Try parsing
         let (prefix, consumed) = match try_parse_prefix(data, afi, is_add_path) {
             Ok(result) => result,
-            Err(e) if use_heuristic => {
+            Err(_) if use_heuristic => {
                 // Heuristic was wrong, retry with original add_path setting
                 debug!(
                     "NLRI: Add-Path heuristic failed, retrying with add_path={}",
