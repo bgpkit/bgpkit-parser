@@ -48,3 +48,14 @@ cargo fmt -- --check
 - The `bgpkit-parser` binary requires the `cli` feature (`required-features = ["cli"]`).
 - Examples under `examples/` may require specific features (see `[[example]]` entries in `Cargo.toml`).
 - Benchmarks use Criterion (`[[bench]]` entries).
+
+## Finding Missing Implementations
+
+When looking for incomplete or missing BGP attribute implementations, check `src/parser/bgp/attributes/README.md`. This file contains:
+
+1. **Unit Test Coverage** table — lists fully implemented attributes with RFC references
+2. **Known Limitations** table — lists attributes that are:
+   - Type defined in `AttrType` enum but have no parser (e.g., PMSI_TUNNEL, BGPSEC_PATH)
+   - Model structs exist but parser/encoder not yet implemented (e.g., AIGP, ATTR_SET)
+
+Use this file to identify which attributes need implementation work and their corresponding RFCs.

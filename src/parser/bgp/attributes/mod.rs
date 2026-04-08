@@ -441,6 +441,14 @@ impl Attribute {
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
             AttributeValue::Deprecated(v) => Bytes::from(v.bytes.to_owned()),
             AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),
+            AttributeValue::Aigp(_v) => {
+                // AIGP encoding not yet implemented - return empty bytes
+                Bytes::new()
+            }
+            AttributeValue::AttrSet(_v) => {
+                // ATTR_SET encoding not yet implemented - return empty bytes
+                Bytes::new()
+            }
         };
 
         match self.is_extended() {

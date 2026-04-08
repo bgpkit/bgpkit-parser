@@ -165,6 +165,20 @@ pub trait ReadUtils: Buf {
         // Length in bits
         let bit_len = self.read_u8()?;
 
+        // Validate prefix length immediately after reading
+        // IPv4 prefix length must be <= 32, IPv6 <= 128
+        let max_bit_len: u8 = match afi {
+            Afi::Ipv4 => 32,
+            Afi::Ipv6 => 128,
+            Afi::LinkState => 0, // Link-State doesn't use traditional prefixes
+        };
+
+        if bit_len > max_bit_len {
+            return Err(ParserError::ParseError(format!(
+                "Invalid prefix length: {bit_len} (max {max_bit_len} for {afi:?})"
+            )));
+        }
+
         // Convert to bytes
         let byte_len: usize = (bit_len as usize).div_ceil(8);
         let addr: IpAddr = match afi {
@@ -594,6 +608,64 @@ mod tests {
             Some(1),
         );
         assert_eq!(buf.read_nlri_prefix(&Afi::Ipv4, true).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_read_nlri_prefix_length_validation() {
+        // Test IPv4 prefix length > 32 (e.g., 33, 255) is rejected
+        for invalid_len in [33u8, 255] {
+            let mut buf = Bytes::from(vec![invalid_len, 0xC0, 0xA8, 0x01]);
+            let result = buf.read_nlri_prefix(&Afi::Ipv4, false);
+            assert!(
+                result.is_err(),
+                "IPv4 prefix length {} should be rejected",
+                invalid_len
+            );
+            if let Err(ParserError::ParseError(msg)) = result {
+                assert!(msg.contains("Invalid prefix length"));
+            }
+        }
+
+        // Test IPv6 prefix length > 128 (e.g., 129, 255) is rejected
+        for invalid_len in [129u8, 255] {
+            let mut buf = Bytes::from(vec![invalid_len, 0x20, 0x01, 0x0D, 0xB8]);
+            let result = buf.read_nlri_prefix(&Afi::Ipv6, false);
+            assert!(
+                result.is_err(),
+                "IPv6 prefix length {} should be rejected",
+                invalid_len
+            );
+            if let Err(ParserError::ParseError(msg)) = result {
+                assert!(msg.contains("Invalid prefix length"));
+            }
+        }
+
+        // Test valid IPv4 prefix lengths pass (0-32)
+        for valid_len in [0u8, 1, 32] {
+            // Provide enough bytes for any byte_len calculation
+            let mut buf = Bytes::from(vec![valid_len, 0x00, 0x00, 0x00, 0x00]);
+            let result = buf.read_nlri_prefix(&Afi::Ipv4, false);
+            assert!(
+                result.is_ok(),
+                "IPv4 prefix length {} should be valid",
+                valid_len
+            );
+        }
+
+        // Test valid IPv6 prefix lengths pass (0-128)
+        for valid_len in [0u8, 1, 64, 128] {
+            // Provide enough bytes for any byte_len calculation (max 16 bytes)
+            let buf_data: Vec<u8> = std::iter::once(valid_len)
+                .chain(std::iter::repeat_n(0x00, 16))
+                .collect();
+            let mut buf = Bytes::from(buf_data);
+            let result = buf.read_nlri_prefix(&Afi::Ipv6, false);
+            assert!(
+                result.is_ok(),
+                "IPv6 prefix length {} should be valid",
+                valid_len
+            );
+        }
     }
 
     #[test]

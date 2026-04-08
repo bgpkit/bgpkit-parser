@@ -443,6 +443,66 @@ impl From<AttributeValue> for Attribute {
     }
 }
 
+/// AIGP TLV (Type-Length-Value) entry - RFC 7311
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AigpTlv {
+    pub tlv_type: u8,
+    pub length: u16,
+    pub value: Vec<u8>,
+}
+
+/// AIGP (Accumulated IGP Metric) Attribute - RFC 7311
+///
+/// Type 26, optional non-transitive attribute containing TLVs.
+/// The AIGP TLV (Type=1) contains an 8-octet accumulated metric value.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Aigp {
+    pub tlvs: Vec<AigpTlv>,
+}
+
+impl Aigp {
+    /// Get the accumulated metric from the first AIGP TLV (Type=1)
+    pub fn accumulated_metric(&self) -> Option<u64> {
+        self.tlvs
+            .iter()
+            .find(|tlv| tlv.tlv_type == 1)
+            .and_then(|tlv| {
+                if tlv.value.len() >= 8 {
+                    Some(u64::from_be_bytes([
+                        tlv.value[0],
+                        tlv.value[1],
+                        tlv.value[2],
+                        tlv.value[3],
+                        tlv.value[4],
+                        tlv.value[5],
+                        tlv.value[6],
+                        tlv.value[7],
+                    ]))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+/// ATTR_SET Attribute - RFC 6368
+///
+/// Used in BGP/MPLS IP VPNs to transparently carry customer BGP path attributes
+/// through the VPN core. Acts as a stack where attributes are "pushed" at the
+/// PE ingress and "popped" at the PE egress.
+///
+/// Type 128, optional transitive attribute.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AttrSet {
+    /// Origin AS number (customer network AS)
+    pub origin_as: Asn,
+    /// Nested path attributes
+    pub attributes: Attributes,
+}
+
 /// The `AttributeValue` enum represents different kinds of Attribute values.
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -477,6 +537,10 @@ pub enum AttributeValue {
     Development(Vec<u8>),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
+    /// AIGP (Accumulated IGP Metric) attribute - RFC 7311
+    Aigp(Aigp),
+    /// ATTR_SET attribute - RFC 6368
+    AttrSet(AttrSet),
 }
 
 impl From<Origin> for AttributeValue {
@@ -534,6 +598,8 @@ impl AttributeValue {
             AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
+            AttributeValue::Aigp(_) => AttrType::AIGP,
+            AttributeValue::AttrSet(_) => AttrType::ATTR_SET,
         }
     }
 
@@ -559,6 +625,8 @@ impl AttributeValue {
             AttributeValue::MpReachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::LinkState(_) => Some(OptionalNonTransitive),
+            AttributeValue::Aigp(_) => Some(OptionalNonTransitive),
+            AttributeValue::AttrSet(_) => Some(OptionalTransitive),
             _ => None,
         }
     }
