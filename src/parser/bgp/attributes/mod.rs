@@ -180,7 +180,10 @@ pub fn parse_attributes(
     safi: Option<Safi>,
     prefixes: Option<&[NetworkPrefix]>,
 ) -> Result<Attributes, ParserError> {
-    let mut attributes: Vec<Attribute> = Vec::with_capacity(20);
+    // Estimate capacity from data size: each attribute is at least 3 bytes
+    // (flag + type + length). Cap at 256 to avoid over-allocation for corrupted data.
+    let estimated_attrs = (data.remaining() / 3).min(256);
+    let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs.max(8));
     let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
     // boolean flags for seen attributes - small dataset in hot loop.
     let mut seen_attributes: [bool; 256] = [false; 256];

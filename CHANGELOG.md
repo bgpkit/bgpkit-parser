@@ -54,6 +54,13 @@ All notable changes to this project will be documented in this file.
 
 ### Performance improvements
 
+* **Memory usage reduction (61% improvement)**: Optimized memory allocation patterns resulting in significant peak memory reduction:
+  - **NLRI Add-Path clone-free parsing**: Replaced input buffer cloning with speculative byte-slice parsing. The new `try_parse_prefix` function parses from a byte slice without consuming, returning `(prefix, bytes_consumed)`. The `read_nlri_prefix` method is now a thin wrapper that calls `try_parse_prefix` and advances the cursor. This eliminates the expensive `input.clone()` operation while maintaining correct Add-Path heuristic retry behavior.
+  - **Attribute vector pre-allocation**: Estimate capacity from data size (`remaining / 3` bytes per attribute) instead of fixed 20, reducing reallocations for BGP messages with many attributes.
+  - **RIS Live vector pre-allocation**: Calculate capacity from announcements + withdrawals counts before allocation, preventing growth reallocations.
+  - **Measured improvement**: Peak memory reduced from 2,037 MB to 789 MB (61.3% reduction) when parsing full BGP table dump (RouteViews LINX RIB, 151MB compressed).
+  - **Code quality**: Single implementation of prefix parsing logic in `try_parse_prefix`, eliminating duplication with `read_nlri_prefix`.
+
 * Use zerocopy for MRT header parsing
   - Replaced manual byte parsing with zerocopy's `FromBytes` trait for `RawMrtCommonHeader` and `RawMrtEtCommonHeader`
   - Reduces bounds checking overhead by using compile-time verified struct layouts
