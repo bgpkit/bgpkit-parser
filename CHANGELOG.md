@@ -4,10 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-### Improvements
+## v0.16.0 - 2026-04-07
 
-* **Enhanced warning messages**: Added context to 14 warning messages across BGP, BMP, and MRT parsers to help identify which parsing stage encountered an issue. Also fixed typo in NLRI warning ("NRLI" → "NLRI").
-* **Codecov configuration**: Added `require_base: true` to ensure Codecov only posts coverage reports when a valid base commit coverage exists, preventing comparisons against outdated baselines.
+### Breaking changes
+
+* **`BgpOpenMessage::sender_ip` renamed to `bgp_identifier`**: The field type remains `Ipv4Addr` (aliased as `BgpIdentifier`), but the name now correctly reflects RFC 4271 terminology — this is the BGP Identifier, not necessarily the sender's IP address.
 
 ### Security improvements
 
@@ -22,15 +23,6 @@ All notable changes to this project will be documented in this file.
 * **Timestamp overflow handling**: Fixed timestamp truncation for values beyond 2106 (u32::MAX) using proper bounds checking.
 * **Encoding truncation checks**: Added overflow warnings for `as u8`/`as u16` casts in encoding functions.
 * **IPv4 enforcement for AGGREGATOR/ORIGINATOR_ID**: Encoders now reject IPv6 addresses for these attributes (BGP specifications require IPv4 only).
-
-### Bug fixes
-
-* **WASM `only_to_customer` serialization**: Added test to verify that messages without the OTC (Only To Customer) attribute correctly serialize `only_to_customer` as `null` (not `0`) in JSON output. This ensures JavaScript consumers can properly distinguish between "no OTC attribute" (`null`) and "OTC with AS 0" (`0`).
-* **OTC attribute on withdrawal messages**: Withdrawal elements no longer inherit the `only_to_customer` value from their associated UPDATE message. Since the OTC attribute (RFC 9234) is used for route leak detection on route advertisements, it is not semantically meaningful for withdrawals. Withdrawal elements now correctly have `only_to_customer: null`.
-
-### Breaking changes
-
-* **`BgpOpenMessage::sender_ip` renamed to `bgp_identifier`**: The field type remains `Ipv4Addr` (aliased as `BgpIdentifier`), but the name now correctly reflects RFC 4271 terminology — this is the BGP Identifier, not necessarily the sender's IP address.
 
 ### New features
 
@@ -51,26 +43,6 @@ All notable changes to this project will be documented in this file.
   - Browser-based MRT explorer demo: [mrt-explorer.labs.bgpkit.com](https://mrt-explorer.labs.bgpkit.com/)
 
 * **`BgpElem::peer_bgp_id` field**: `BgpElem` now exposes an optional `peer_bgp_id: Option<BgpIdentifier>` containing the peer's BGP Identifier (Router ID) when available. Populated from the PEER_INDEX_TABLE in TableDumpV2/RIB records; `None` for BGP4MP records.
-
-### Performance improvements
-
-* **Memory usage reduction (61% improvement)**: Optimized memory allocation patterns resulting in significant peak memory reduction:
-  - **NLRI Add-Path clone-free parsing**: Replaced input buffer cloning with speculative byte-slice parsing. The new `try_parse_prefix` function parses from a byte slice without consuming, returning `(prefix, bytes_consumed)`. The `read_nlri_prefix` method is now a thin wrapper that calls `try_parse_prefix` and advances the cursor. This eliminates the expensive `input.clone()` operation while maintaining correct Add-Path heuristic retry behavior.
-  - **Attribute vector pre-allocation**: Estimate capacity from data size (`remaining / 3` bytes per attribute) instead of fixed 20, reducing reallocations for BGP messages with many attributes.
-  - **RIS Live vector pre-allocation**: Calculate capacity from announcements + withdrawals counts before allocation, preventing growth reallocations.
-  - **Measured improvement**: Peak memory reduced from 2,037 MB to 789 MB (61.3% reduction) when parsing full BGP table dump (RouteViews LINX RIB, 151MB compressed).
-  - **Code quality**: Single implementation of prefix parsing logic in `try_parse_prefix`, eliminating duplication with `read_nlri_prefix`.
-
-* Use zerocopy for MRT header parsing
-  - Replaced manual byte parsing with zerocopy's `FromBytes` trait for `RawMrtCommonHeader` and `RawMrtEtCommonHeader`
-  - Reduces bounds checking overhead by using compile-time verified struct layouts
-  - Added compile-time assertions to ensure header sizes match wire format (12 bytes standard, 16 bytes ET)
-  - Encoding now uses zerocopy's `IntoBytes` trait for efficient byte conversion
-* Use zerocopy for BGP OPEN message and capability parsing
-  - `RawBgpOpenHeader` (10 bytes), `RawMultiprotocolExtensions` (4 bytes), and `RawFourOctetAs` (4 bytes) use zerocopy struct layouts
-  - Replaces sequential cursor reads with single bounds-checked struct references
-
-### New features
 
 * **`with_filters` and `add_filters` methods**: Added new methods to `BgpkitParser` for passing pre-built `Vec<Filter>` directly, addressing issue #271.
   - `with_filters(filters: &[Filter])` - replaces all existing filters with the provided slice; clones internally so no manual clone needed
@@ -102,16 +74,41 @@ All notable changes to this project will be documented in this file.
   - New `ElemError` type for explicit error handling
   - Parallel processing example demonstrating multi-threaded parsing with significant speedup
 
-### Testing
+### Performance improvements
 
-* Added benchmarks for `into_raw_record_iter` for both updates and RIB dumps
+* **Memory usage reduction (61% improvement)**: Optimized memory allocation patterns resulting in significant peak memory reduction:
+  - **NLRI Add-Path clone-free parsing**: Replaced input buffer cloning with speculative byte-slice parsing. The new `try_parse_prefix` function parses from a byte slice without consuming, returning `(prefix, bytes_consumed)`. The `read_nlri_prefix` method is now a thin wrapper that calls `try_parse_prefix` and advances the cursor. This eliminates the expensive `input.clone()` operation while maintaining correct Add-Path heuristic retry behavior.
+  - **Attribute vector pre-allocation**: Estimate capacity from data size (`remaining / 3` bytes per attribute) instead of fixed 20, reducing reallocations for BGP messages with many attributes.
+  - **RIS Live vector pre-allocation**: Calculate capacity from announcements + withdrawals counts before allocation, preventing growth reallocations.
+  - **Measured improvement**: Peak memory reduced from 2,037 MB to 789 MB (61.3% reduction) when parsing full BGP table dump (RouteViews LINX RIB, 151MB compressed).
+  - **Code quality**: Single implementation of prefix parsing logic in `try_parse_prefix`, eliminating duplication with `read_nlri_prefix`.
+
+* Use zerocopy for MRT header parsing
+  - Replaced manual byte parsing with zerocopy's `FromBytes` trait for `RawMrtCommonHeader` and `RawMrtEtCommonHeader`
+  - Reduces bounds checking overhead by using compile-time verified struct layouts
+  - Added compile-time assertions to ensure header sizes match wire format (12 bytes standard, 16 bytes ET)
+  - Encoding now uses zerocopy's `IntoBytes` trait for efficient byte conversion
+* Use zerocopy for BGP OPEN message and capability parsing
+  - `RawBgpOpenHeader` (10 bytes), `RawMultiprotocolExtensions` (4 bytes), and `RawFourOctetAs` (4 bytes) use zerocopy struct layouts
+  - Replaces sequential cursor reads with single bounds-checked struct references
+
+### Code improvements
+
+* **Enhanced warning messages**: Added context to 14 warning messages across BGP, BMP, and MRT parsers to help identify which parsing stage encountered an issue. Also fixed typo in NLRI warning ("NRLI" → "NLRI").
+* **Codecov configuration**: Added `require_base: true` to ensure Codecov only posts coverage reports when a valid base commit coverage exists, preventing comparisons against outdated baselines.
 
 ### Bug fixes
 
+* **WASM `only_to_customer` serialization**: Added test to verify that messages without the OTC (Only To Customer) attribute correctly serialize `only_to_customer` as `null` (not `0`) in JSON output. This ensures JavaScript consumers can properly distinguish between "no OTC attribute" (`null`) and "OTC with AS 0" (`0`).
+* **OTC attribute on withdrawal messages**: Withdrawal elements no longer inherit the `only_to_customer` value from their associated UPDATE message. Since the OTC attribute (RFC 9234) is used for route leak detection on route advertisements, it is not semantically meaningful for withdrawals. Withdrawal elements now correctly have `only_to_customer: null`.
 * Fix `Attributes::from_iter` for `AttributeValue` to apply default BGP attribute flags instead of empty flags
   - Prevents malformed encoding for well-known mandatory attributes such as `ORIGIN` and `AS_PATH`
 * Preserve add-path `path_id` when encoding TABLE_DUMP_V2 RIB entries and emit add-path RIB subtypes from `MrtRibEncoder` when entries carry path IDs
 * Encode BGP4MP ASNs using the subtype-selected ASN width and always refresh MRT header lengths during record encoding
+
+### Testing
+
+* Added benchmarks for `into_raw_record_iter` for both updates and RIB dumps
 
 ## v0.15.0 - 2026-01-28
 
