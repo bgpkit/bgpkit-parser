@@ -103,7 +103,14 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     announcements,
                     withdrawals,
                 } => {
-                    let mut elems: Vec<BgpElem> = vec![];
+                    // Pre-allocate capacity based on announcements + withdrawals
+                    let announce_count: usize = announcements
+                        .as_ref()
+                        .map(|a| a.iter().map(|ann| ann.prefixes.len()).sum())
+                        .unwrap_or(0);
+                    let withdraw_count: usize = withdrawals.as_ref().map(|w| w.len()).unwrap_or(0);
+                    let mut elems: Vec<BgpElem> =
+                        Vec::with_capacity(announce_count + withdraw_count);
 
                     // parse community
                     let communities = community.map(|values| {

@@ -54,6 +54,12 @@ All notable changes to this project will be documented in this file.
 
 ### Performance improvements
 
+* **Memory usage reduction (61% improvement)**: Optimized memory allocation patterns resulting in significant peak memory reduction:
+  - **NLRI Add-Path lazy clone**: Eliminated unnecessary buffer retention when Add-Path heuristic is correct (common case). Previously cloned buffers were retained for entire parse; now dropped early when not needed for retry.
+  - **Attribute vector pre-allocation**: Estimate capacity from data size (`remaining / 3` bytes per attribute) instead of fixed 20, reducing reallocations for BGP messages with many attributes.
+  - **RIS Live vector pre-allocation**: Calculate capacity from announcements + withdrawals counts before allocation, preventing growth reallocations.
+  - **Measured improvement**: Peak memory reduced from 2,037 MB to 789 MB (61.3% reduction) when parsing full BGP table dump (RouteViews LINX RIB, 151MB compressed).
+
 * Use zerocopy for MRT header parsing
   - Replaced manual byte parsing with zerocopy's `FromBytes` trait for `RawMrtCommonHeader` and `RawMrtEtCommonHeader`
   - Reduces bounds checking overhead by using compile-time verified struct layouts
