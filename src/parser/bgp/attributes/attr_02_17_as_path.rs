@@ -27,6 +27,20 @@ fn parse_as_path_segment(
 ) -> Result<AsPathSegment, ParserError> {
     let segment_type = input.read_u8()?;
     let count = input.read_u8()? as usize;
+
+    // Validate AS_PATH segment count against remaining buffer size
+    // to prevent reading beyond buffer bounds
+    let required_bytes = count
+        .checked_mul(asn_len.bytes())
+        .ok_or_else(|| ParserError::ParseError("AS path segment too large".to_string()))?;
+    if input.remaining() < required_bytes {
+        return Err(ParserError::TruncatedMsg(format!(
+            "AS_PATH segment requires {} bytes, only {} remaining",
+            required_bytes,
+            input.remaining()
+        )));
+    }
+
     let path = input.read_asns(asn_len, count)?;
     match segment_type {
         AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
@@ -241,5 +255,39 @@ mod tests {
         let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
         let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
         assert_eq!(data, encoded_bytes);
+    }
+
+    #[test]
+    fn test_as_path_count_validation() {
+        // Test that excessive count value is rejected (16-bit ASN)
+        // count=100, but buffer only has 2 bytes
+        let data = Bytes::from(vec![
+            2,   // sequence
+            100, // 100 ASes claimed, but buffer is too small
+            0, 1, // Only 2 bytes available (1 ASN, not 100)
+        ]);
+        let result = parse_as_path(data, &AsnLength::Bits16);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ParserError::TruncatedMsg(_))));
+
+        // Test that excessive count value is rejected (32-bit ASN)
+        // count=50, but buffer only has 4 bytes
+        let data = Bytes::from(vec![
+            2,  // sequence
+            50, // 50 ASes claimed (need 200 bytes), but buffer is too small
+            0, 0, 0, 1, // Only 4 bytes available (1 ASN, not 50)
+        ]);
+        let result = parse_as_path(data, &AsnLength::Bits32);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ParserError::TruncatedMsg(_))));
+
+        // Test valid count passes
+        let data = Bytes::from(vec![
+            2, // sequence
+            2, // 2 ASes
+            0, 1, 0, 2, // 2 ASNs (4 bytes for 16-bit)
+        ]);
+        let result = parse_as_path(data, &AsnLength::Bits16);
+        assert!(result.is_ok());
     }
 }

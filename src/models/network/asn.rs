@@ -20,6 +20,14 @@ impl AsnLength {
             AsnLength::Bits32 => true,
         }
     }
+
+    /// Return the number of bytes used to encode an ASN of this length.
+    pub const fn bytes(&self) -> usize {
+        match self {
+            AsnLength::Bits16 => 2,
+            AsnLength::Bits32 => 4,
+        }
+    }
 }
 
 /// ASN -- Autonomous System Number

@@ -9,6 +9,20 @@ All notable changes to this project will be documented in this file.
 * **Enhanced warning messages**: Added context to 14 warning messages across BGP, BMP, and MRT parsers to help identify which parsing stage encountered an issue. Also fixed typo in NLRI warning ("NRLI" → "NLRI").
 * **Codecov configuration**: Added `require_base: true` to ensure Codecov only posts coverage reports when a valid base commit coverage exists, preventing comparisons against outdated baselines.
 
+### Security improvements
+
+* **AS_PATH segment count validation**: Added bounds check to prevent buffer over-read when parsing AS_PATH segments. Validates that `count * asn_len.bytes()` does not exceed remaining buffer size (CWE-126).
+* **BGP message length underflow protection**: Added saturating arithmetic to prevent integer underflow when calculating message length (CWE-191).
+* **NLRI prefix length validation**: Enforce maximum prefix lengths (32 bits for IPv4, 128 bits for IPv6) immediately after reading length byte (CWE-20).
+* **BGP marker RFC 4271 compliance**: Fixed marker encoding to use 16 bytes of 0xFF as required by RFC 4271. Added validation on parse with warning for non-compliant markers.
+* **Communities divisibility validation**: Validate that Communities (4 bytes), Extended Communities (8 bytes), and Large Communities (12 bytes) attribute lengths are properly divisible by their respective sizes.
+* **FlowSpec traffic rate validation**: Added NaN and infinity checks for FlowSpec Traffic Rate extended communities to prevent undefined behavior in downstream calculations.
+* **FlowSpec DSCP byte offset**: Corrected Traffic Marking extended community parsing per RFC 5575 (DSCP at proper byte offset).
+* **Production code safety**: Replaced `assert_eq!` with `debug_assert_eq!` in production parsing code to prevent panics on malformed input.
+* **Timestamp overflow handling**: Fixed timestamp truncation for values beyond 2106 (u32::MAX) using proper bounds checking.
+* **Encoding truncation checks**: Added overflow warnings for `as u8`/`as u16` casts in encoding functions.
+* **IPv4 enforcement for AGGREGATOR/ORIGINATOR_ID**: Encoders now reject IPv6 addresses for these attributes (BGP specifications require IPv4 only).
+
 ### Bug fixes
 
 * **WASM `only_to_customer` serialization**: Added test to verify that messages without the OTC (Only To Customer) attribute correctly serialize `only_to_customer` as `null` (not `0`) in JSON output. This ensures JavaScript consumers can properly distinguish between "no OTC attribute" (`null`) and "OTC with AS 0" (`0`).

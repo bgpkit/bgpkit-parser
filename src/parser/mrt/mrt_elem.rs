@@ -147,7 +147,9 @@ fn get_relevant_attributes(
             | AttributeValue::Clusters(_)
             | AttributeValue::Development(_)
             | AttributeValue::LinkState(_)
-            | AttributeValue::TunnelEncapsulation(_) => {}
+            | AttributeValue::TunnelEncapsulation(_)
+            | AttributeValue::Aigp(_)
+            | AttributeValue::AttrSet(_) => {}
         };
     }
 

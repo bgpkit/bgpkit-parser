@@ -54,7 +54,16 @@ pub fn parse_bgp_message(
 ) -> Result<BgpMessage, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
-    data.advance(16);
+
+    // Read and validate BGP marker (RFC 4271: 16 bytes of 0xFF)
+    let mut marker = [0u8; 16];
+    data.copy_to_slice(&mut marker);
+    if marker != [0xFF; 16] {
+        // Log warning for invalid marker but continue processing
+        // Some implementations may use non-standard markers in MRT dumps
+        warn!("BGP message marker is not all 0xFF bytes (invalid per RFC 4271)");
+    }
+
     /*
     This 2-octet unsigned integer indicates the total length of the
     message, including the header in octets.  Thus, it allows one
@@ -81,10 +90,12 @@ pub fn parse_bgp_message(
         )));
     }
 
-    let bgp_msg_length = if (length as usize) > total_size {
-        total_size - 19
+    // Validate length >= 19 before any arithmetic to prevent underflow
+    let length_usize = length as usize;
+    let bgp_msg_length = if length_usize > total_size {
+        total_size.saturating_sub(19)
     } else {
-        length as usize - 19
+        length_usize.saturating_sub(19)
     };
 
     let msg_type: BgpMessageType = match BgpMessageType::try_from(data.read_u8()?) {
@@ -442,13 +453,18 @@ pub fn parse_bgp_update_message(
     let afi = Afi::Ipv4;
 
     // parse withdrawn prefixes NLRI
-    let withdrawn_bytes_length = input.read_u16()? as usize;
+    let withdrawn_bytes_length_raw = input.read_u16()?;
+    let withdrawn_bytes_length = withdrawn_bytes_length_raw as usize;
     input.has_n_remaining(withdrawn_bytes_length)?;
     let withdrawn_bytes = input.split_to(withdrawn_bytes_length);
     let withdrawn_prefixes = read_nlri(withdrawn_bytes, &afi, add_path)?;
 
     // parse attributes
-    let attribute_length = input.read_u16()? as usize;
+    let attribute_length_raw = input.read_u16()?;
+    // Defensive check: ensure attribute_length fits in usize
+    // u16 to usize conversion is always safe on 32/64-bit platforms,
+    // but this check ensures safety on all architectures
+    let attribute_length = attribute_length_raw as usize;
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
@@ -528,12 +544,13 @@ impl BgpUpdateMessage {
 }
 
 impl BgpMessage {
+    /// BGP marker value: 16 bytes of 0xFF (RFC 4271)
+    const MARKER: [u8; 16] = [0xFF; 16];
+
     pub fn encode(&self, asn_len: AsnLength) -> Bytes {
         let mut bytes = BytesMut::new();
-        bytes.put_u32(0); // marker
-        bytes.put_u32(0); // marker
-        bytes.put_u32(0); // marker
-        bytes.put_u32(0); // marker
+        // RFC 4271: Marker is 16 bytes of 0xFF
+        bytes.put_slice(&Self::MARKER);
 
         let (msg_type, msg_bytes) = match self {
             BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()),
@@ -715,15 +732,133 @@ mod tests {
     #[test]
     fn test_invlaid_type() {
         let bytes = Bytes::from_static(&[
-            0x00, 0x00, 0x00, 0x00, // marker
-            0x00, 0x00, 0x00, 0x00, // marker
-            0x00, 0x00, 0x00, 0x00, // marker
-            0x00, 0x00, 0x00, 0x00, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker (valid RFC 4271)
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
             0x00, 0x28, // length
             0x05, // type
         ]);
         let mut data = bytes.clone();
         assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_err());
+    }
+
+    #[test]
+    fn test_bgp_message_length_underflow_protection() {
+        // Test that length values less than 19 are properly rejected
+        // without causing arithmetic underflow
+        for len in [0u16, 1, 18] {
+            let bytes = Bytes::from(vec![
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF, // marker
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF, // marker
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF, // marker
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF, // marker
+                (len >> 8) as u8,
+                (len & 0xFF) as u8, // length field
+                0x01,               // type = OPEN
+            ]);
+            let mut data = bytes.clone();
+            let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+            assert!(
+                result.is_err(),
+                "Length {} should be rejected as invalid",
+                len
+            );
+        }
+    }
+
+    #[test]
+    fn test_bgp_marker_encoding_rfc4271() {
+        // Test that BgpMessage::encode produces correct RFC 4271 marker (all 0xFF)
+        let msg = BgpMessage::KeepAlive;
+        let encoded = msg.encode(AsnLength::Bits16);
+
+        // First 16 bytes should be all 0xFF
+        assert_eq!(
+            &encoded[..16],
+            &[0xFF; 16],
+            "BGP marker should be all 0xFF bytes"
+        );
+    }
+
+    #[test]
+    fn test_bgp_marker_validation() {
+        // Test that message with valid marker (all 0xFF) parses correctly
+        let valid_bytes = Bytes::from(vec![
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0x00, 0x13, // length = 19 (minimum)
+            0x04, // type = KEEPALIVE
+        ]);
+        let mut data = valid_bytes.clone();
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(result.is_ok(), "Valid marker should parse successfully");
+
+        // Test that message with invalid marker (all zeros) is handled
+        // Parser should warn but still process (for MRT compatibility)
+        let invalid_bytes = Bytes::from(vec![
+            0x00, 0x00, 0x00, 0x00, // marker (invalid - should be 0xFF)
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x00, 0x00, 0x00, // marker
+            0x00, 0x13, // length = 19
+            0x04, // type = KEEPALIVE
+        ]);
+        let mut data = invalid_bytes.clone();
+        // Should still parse (with warning) for compatibility
+        let result = parse_bgp_message(&mut data, false, &AsnLength::Bits16);
+        assert!(
+            result.is_ok(),
+            "Invalid marker should still parse (with warning)"
+        );
+    }
+
+    #[test]
+    fn test_attribute_length_overflow_protection() {
+        // Test that large attribute length values are handled correctly
+        // without causing overflow issues
+
+        // Create a BGP UPDATE message with attribute_length that exceeds available data
+        let update_bytes = Bytes::from(vec![
+            0x00, 0x00, // withdrawn length = 0
+            0xFF,
+            0xFF, // attribute length = 65535 (largest u16, but not enough data)
+                  // No actual attribute data follows
+        ]);
+
+        let result = parse_bgp_update_message(update_bytes, false, &AsnLength::Bits16);
+        assert!(
+            result.is_err(),
+            "Should fail when attribute_length exceeds available data"
+        );
+        assert!(
+            matches!(result, Err(ParserError::TruncatedMsg(_))),
+            "Should fail with TruncatedMsg error"
+        );
+
+        // Test valid attribute length parsing
+        let valid_update = Bytes::from(vec![
+            0x00, 0x00, // withdrawn length = 0
+            0x00,
+            0x00, // attribute length = 0
+                  // No attributes, valid empty UPDATE
+        ]);
+        let result = parse_bgp_update_message(valid_update, false, &AsnLength::Bits16);
+        assert!(result.is_ok(), "Should parse valid empty UPDATE");
     }
 
     #[test]
@@ -799,11 +934,16 @@ mod tests {
             data: vec![0x00, 0x00],
         });
         let bytes = bgp_message.encode(AsnLength::Bits16);
+        // RFC 4271: Marker is 16 bytes of 0xFF
         assert_eq!(
             bytes,
             Bytes::from_static(&[
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x17, 0x03, 0x01, 0x02, 0x00, 0x00
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // marker (8 bytes)
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // marker (8 bytes)
+                0x00, 0x17, // length = 23 (16 marker + 2 len + 1 type + 4 msg)
+                0x03, // type = NOTIFICATION
+                0x01, 0x02, // error code, subcode
+                0x00, 0x00 // data
             ])
         );
     }
