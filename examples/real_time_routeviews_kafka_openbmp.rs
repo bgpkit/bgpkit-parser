@@ -61,9 +61,18 @@ fn consume_and_print(
                     Ok(msg) => {
                         let per_peer_header = msg.per_peer_header.unwrap();
                         if let BmpMessageBody::RouteMonitoring(m) = msg.message_body {
+                            // FIX for issue #279: Use BMP per-peer timestamp (BGP event time)
+                            // instead of OpenBMP header timestamp (collection time).
+                            // Fall back to OpenBMP timestamp only when per-peer timestamp is unavailable.
+                            let timestamp = if per_peer_header.timestamp > 0.0 {
+                                per_peer_header.timestamp
+                            } else {
+                                header.timestamp
+                            };
+
                             for elem in Elementor::bgp_to_elems(
                                 m.bgp_message,
-                                header.timestamp,
+                                timestamp,
                                 &per_peer_header.peer_ip,
                                 &per_peer_header.peer_asn,
                             ) {
