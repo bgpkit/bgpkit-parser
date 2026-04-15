@@ -140,7 +140,7 @@ pub fn parse_rib_entry(
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = parse_attributes(
+    let mut attributes = parse_attributes(
         attr_data_slice,
         &AsnLength::Bits32,
         is_add_path,
@@ -148,6 +148,9 @@ pub fn parse_rib_entry(
         Some(*safi),
         Some(&[prefix]),
     )?;
+
+    // validate mandatory attributes (RIB entry is always an announcement)
+    attributes.check_mandatory_attributes(true, *afi == Afi::Ipv4);
 
     Ok(RibEntry {
         peer_index,

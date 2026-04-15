@@ -185,8 +185,15 @@ pub fn parse_attributes(
     let estimated_attrs = (data.remaining() / 3).min(256);
     let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs.max(8));
     let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
-    // boolean flags for seen attributes - small dataset in hot loop.
-    let mut seen_attributes: [bool; 256] = [false; 256];
+
+    // Bitmask for seen attributes (256 bits total, using 4x u64). Fits in registers/cache easily.
+    let mut seen_attributes: [u64; 4] = [0; 4];
+    let has_attr = |seen: &[u64; 4], attr: u8| -> bool {
+        (seen[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
+    };
+    let set_attr = |seen: &mut [u64; 4], attr: u8| {
+        seen[(attr / 64) as usize] |= 1u64 << (attr % 64);
+    };
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -223,13 +230,13 @@ pub fn parse_attributes(
         let parsed_attr_type = AttrType::from(attr_type);
 
         // RFC 7606: Check for duplicate attributes
-        if seen_attributes[attr_type as usize] {
+        if has_attr(&seen_attributes, attr_type) {
             validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
                 attr_type: parsed_attr_type,
             });
             // Continue processing - don't skip duplicate for now
         }
-        seen_attributes[attr_type as usize] = true;
+        set_attr(&mut seen_attributes, attr_type);
 
         // Validate attribute flags and length
         validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
@@ -378,25 +385,11 @@ pub fn parse_attributes(
         };
     }
 
-    // Check for missing well-known mandatory attributes
-    let mandatory_attributes = [
-        AttrType::ORIGIN,
-        AttrType::AS_PATH,
-        AttrType::NEXT_HOP,
-        // LOCAL_PREFERENCE is only mandatory for IBGP, so we don't check it here
-    ];
-
-    for &mandatory_attr in &mandatory_attributes {
-        if !seen_attributes[u8::from(mandatory_attr) as usize] {
-            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: mandatory_attr,
-            });
-        }
-    }
-
-    let mut result = Attributes::from(attributes);
-    result.validation_warnings = validation_warnings;
-    Ok(result)
+    Ok(Attributes {
+        inner: attributes,
+        validation_warnings,
+        attr_mask: seen_attributes,
+    })
 }
 
 impl Attribute {
@@ -527,19 +520,25 @@ mod tests {
 
     #[test]
     fn test_rfc7606_missing_mandatory_attribute() {
-        // Empty attributes - should have warnings for missing mandatory attributes
-        let data = Bytes::from(vec![]);
+        // Attributes with only LOCAL_PREF (missing ORIGIN, AS_PATH, NEXT_HOP)
+        let data = Bytes::from(vec![
+            0x40, 0x05, 0x04, 0x00, 0x00, 0x00, 0x64, // LOCAL_PREF = 100
+        ]);
         let asn_len = AsnLength::Bits16;
         let add_path = false;
         let afi = None;
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as an announcement with standard NLRI
+        attributes.check_mandatory_attributes(true, true);
 
         // Should have warnings for missing mandatory attributes
         assert!(attributes.has_validation_warnings());
         let warnings = attributes.validation_warnings();
+        // LOCAL_PREF is not a withdrawal, so ORIGIN, AS_PATH, NEXT_HOP are required
         assert_eq!(warnings.len(), 3); // ORIGIN, AS_PATH, NEXT_HOP
 
         for warning in warnings {
@@ -553,6 +552,69 @@ mod tests {
                 _ => panic!("Expected MissingWellKnownAttribute warning"),
             }
         }
+    }
+
+    #[test]
+    fn test_mp_reach_no_next_hop() {
+        // Attributes with MP_REACH_NLRI (missing ORIGIN, AS_PATH)
+        // MP_REACH_NLRI is type 14 (0x0E).
+        // We just need a dummy MP_REACH_NLRI.
+        let data = Bytes::from(vec![
+            0x80, 0x0E, 0x06, 0x00, 0x01, 0x01, // AFI=1, SAFI=1
+            0x00, // Next Hop Len = 0 (invalid for parsing, but enough to trigger logic)
+            0x00, // Reserved
+            0x00, // NLRI
+        ]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as an announcement but NO standard NLRI (MP only)
+        attributes.check_mandatory_attributes(true, false);
+
+        // Should NOT have NEXT_HOP warning because MP_REACH_NLRI is present and has_standard_nlri is false
+        let warnings = attributes.validation_warnings();
+        let has_next_hop_warning = warnings.iter().any(|w| {
+            matches!(
+                w,
+                BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::NEXT_HOP
+                }
+            )
+        });
+        assert!(!has_next_hop_warning);
+    }
+
+    #[test]
+    fn test_pure_withdrawal_no_warnings() {
+        // Empty attributes - pure withdrawal
+        let data = Bytes::from(vec![]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as a withdrawal
+        attributes.check_mandatory_attributes(false, false);
+
+        // Should have NO warnings
+        assert!(!attributes.has_validation_warnings());
+
+        // Attributes with only MP_UNREACH_NLRI - pure withdrawal
+        let data = Bytes::from(vec![
+            0x80, 0x0F, 0x03, 0x00, 0x01, 0x01, // AFI=1, SAFI=1
+        ]);
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        attributes.check_mandatory_attributes(false, false);
+        assert!(!attributes.has_validation_warnings());
     }
 
     #[test]
