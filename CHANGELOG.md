@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+* **RFC 4760 mandatory attribute validation**: Fixed validation to properly handle multiprotocol BGP (MP-BGP) conditional mandatory attributes:
+  - Pure withdrawals (no announcements): no mandatory attributes required
+  - MP_REACH_NLRI only: ORIGIN and AS_PATH required, NEXT_HOP not required (embedded in MP_REACH_NLRI)
+  - IPv4 NLRI: ORIGIN, AS_PATH, and NEXT_HOP all required
+  - Mixed (IPv4 NLRI + MP_REACH_NLRI): ORIGIN, AS_PATH required; NEXT_HOP required because IPv4 NLRI is present
+
+### Added
+
+* **`Attributes::check_mandatory_attributes()`**: New method to validate mandatory attributes with proper NLRI context awareness. Must be called after NLRI parsing to correctly determine requirements.
+* **`Attributes::attr_mask`**: Internal `[u64; 4]` bitmask field for O(1) attribute presence tracking (32 bytes vs 256 bytes for `[bool; 256]`)
+* **Integration tests**: Added `tests/test_bgp_update_validation.rs` with comprehensive scenario coverage for all validation cases
+
+### Changed
+
+* **`parse_attributes()`**: Removed inline mandatory attribute validation; validation now performed by callers via `Attributes::check_mandatory_attributes()` after NLRI context is known
+* **`Attributes::has_attr()`**: Now O(1) via bitmask lookup instead of O(n) vector scan
+* **`Attributes` Debug impl**: Changed from derived to manual implementation (excludes internal `attr_mask` field)
+* **All `Attributes` constructors**: Updated to compute and populate `attr_mask` from `inner` vector
+
 ## v0.16.0 - 2026-04-07
 
 ### Breaking changes
