@@ -530,7 +530,8 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
         // Manually trigger mandatory check as an announcement with standard NLRI
         attributes.check_mandatory_attributes(true, true);
 
@@ -556,11 +557,10 @@ mod tests {
     #[test]
     fn test_mp_reach_no_next_hop() {
         // Attributes with MP_REACH_NLRI (missing ORIGIN, AS_PATH)
-        // MP_REACH_NLRI is type 14 (0x0E). 
+        // MP_REACH_NLRI is type 14 (0x0E).
         // We just need a dummy MP_REACH_NLRI.
         let data = Bytes::from(vec![
-            0x80, 0x0E, 0x06, 
-            0x00, 0x01, 0x01, // AFI=1, SAFI=1
+            0x80, 0x0E, 0x06, 0x00, 0x01, 0x01, // AFI=1, SAFI=1
             0x00, // Next Hop Len = 0 (invalid for parsing, but enough to trigger logic)
             0x00, // Reserved
             0x00, // NLRI
@@ -571,14 +571,20 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
         // Manually trigger mandatory check as an announcement but NO standard NLRI (MP only)
         attributes.check_mandatory_attributes(true, false);
 
         // Should NOT have NEXT_HOP warning because MP_REACH_NLRI is present and has_standard_nlri is false
         let warnings = attributes.validation_warnings();
         let has_next_hop_warning = warnings.iter().any(|w| {
-            matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type: AttrType::NEXT_HOP })
+            matches!(
+                w,
+                BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::NEXT_HOP
+                }
+            )
         });
         assert!(!has_next_hop_warning);
     }
@@ -593,7 +599,8 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
         // Manually trigger mandatory check as a withdrawal
         attributes.check_mandatory_attributes(false, false);
 
@@ -602,10 +609,10 @@ mod tests {
 
         // Attributes with only MP_UNREACH_NLRI - pure withdrawal
         let data = Bytes::from(vec![
-            0x80, 0x0F, 0x03, 
-            0x00, 0x01, 0x01, // AFI=1, SAFI=1
+            0x80, 0x0F, 0x03, 0x00, 0x01, 0x01, // AFI=1, SAFI=1
         ]);
-        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
         attributes.check_mandatory_attributes(false, false);
         assert!(!attributes.has_validation_warnings());
     }

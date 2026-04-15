@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+* **RFC 4760 mandatory attribute validation**: Fixed validation logic to properly handle multiprotocol BGP (MP-BGP) scenarios:
+  - Pure withdrawals (no announcements): no mandatory attributes required
+  - MP_REACH_NLRI announcements: ORIGIN and AS_PATH required, NEXT_HOP optional (embedded in MP_REACH_NLRI)
+  - IPv4 NLRI announcements: ORIGIN, AS_PATH, and NEXT_HOP all required
+  - Mixed announcements: properly validated based on presence of IPv4 NLRI
+
+### Changed
+
+* **`Attributes` struct**: Added `attr_mask: [u64; 4]` field for O(1) attribute presence checks using bit masking
+* **`parse_attributes()`**: Moved mandatory attribute validation to `Attributes::check_mandatory_attributes()` method
+* **Performance**: Replaced `[bool; 256]` with `[u64; 4]` bitmask for attribute tracking (8x memory reduction, better cache locality)
+
 ## v0.16.0 - 2026-04-07
 
 ### Breaking changes

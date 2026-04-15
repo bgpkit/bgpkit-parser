@@ -186,26 +186,27 @@ impl Attributes {
 
         // ORIGIN and AS_PATH are universally mandatory for all announcements.
         if !self.has_attr(AttrType::ORIGIN) {
-            self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: AttrType::ORIGIN,
-            });
+            self.validation_warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::ORIGIN,
+                });
         }
         if !self.has_attr(AttrType::AS_PATH) {
-            self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: AttrType::AS_PATH,
-            });
+            self.validation_warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::AS_PATH,
+                });
         }
 
         // NEXT_HOP is required if this is an IPv4 announcement (has standard NLRI)
         // or if we haven't seen MP_REACH_NLRI,
         // which implies standard NLRI is expected, since is_announcement.
         let has_mp_reach = self.has_attr(AttrType::MP_REACHABLE_NLRI);
-        if has_standard_nlri || !has_mp_reach {
-            if !self.has_attr(AttrType::NEXT_HOP) {
-                self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+        if (has_standard_nlri || !has_mp_reach) && !self.has_attr(AttrType::NEXT_HOP) {
+            self.validation_warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
                     attr_type: AttrType::NEXT_HOP,
                 });
-            }
         }
     }
 
@@ -469,9 +470,12 @@ mod serde_impl {
         where
             D: Deserializer<'de>,
         {
+            let inner = <Vec<Attribute>>::deserialize(deserializer)?;
+            let attr_mask = compute_mask(&inner);
             Ok(Attributes {
-                inner: <Vec<Attribute>>::deserialize(deserializer)?,
+                inner,
                 validation_warnings: Vec::new(),
+                attr_mask,
             })
         }
     }
