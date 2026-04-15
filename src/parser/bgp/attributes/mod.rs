@@ -385,55 +385,11 @@ pub fn parse_attributes(
         };
     }
 
-    // Check for missing well-known mandatory attributes.
-    //
-    // RFC 4271 (BGP-4) and RFC 4760 (MP-BGP) define which attributes are mandatory.
-    // The rules shift from "universally mandatory" to "conditionally mandatory" in MP-BGP:
-    //
-    // 1. Pure Withdrawals: If an UPDATE only withdraws routes (standard or MP),
-    //    NO path attributes are required.
-    // 2. Announcements: If an UPDATE announces any reachable prefix,
-    //    ORIGIN and AS_PATH are strictly required.
-    // 3. NEXT_HOP (Attribute 3):
-    //    - Required if the base IPv4 NLRI field is populated.
-    //    - NOT required (and should be omitted) if the base IPv4 NLRI field is empty.
-    //    - MP_REACH_NLRI (IPv6, VPNv4, etc.) is self-sufficient as it bundles its
-    //      own next-hop inside the attribute.
-    //
-    // Inference: Since we parse attributes before reaching the trailing IPv4 NLRI field,
-    // we infer the requirement: if it's an announcement and NO MP_REACH_NLRI is present,
-    // it MUST be a standard IPv4 announcement, thus requiring Attribute 3.
-    let has_mp_reach = has_attr(&seen_attributes, u8::from(AttrType::MP_REACHABLE_NLRI));
-    let has_mp_unreach = has_attr(&seen_attributes, u8::from(AttrType::MP_UNREACHABLE_NLRI));
-
-    // A "pure withdrawal" is defined as having no attributes (standard IPv4 withdrawal)
-    // or exactly one attribute that is MP_UNREACH_NLRI.
-    let is_pure_withdrawal = attributes.is_empty() || (attributes.len() == 1 && has_mp_unreach);
-
-    if !is_pure_withdrawal {
-        // ORIGIN and AS_PATH are universally mandatory for all announcements.
-        if !has_attr(&seen_attributes, u8::from(AttrType::ORIGIN)) {
-            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: AttrType::ORIGIN,
-            });
-        }
-        if !has_attr(&seen_attributes, u8::from(AttrType::AS_PATH)) {
-            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: AttrType::AS_PATH,
-            });
-        }
-
-        // NEXT_HOP is required if this is an IPv4 announcement (no MP_REACH_NLRI seen).
-        if !has_mp_reach && !has_attr(&seen_attributes, u8::from(AttrType::NEXT_HOP)) {
-            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: AttrType::NEXT_HOP,
-            });
-        }
-    }
-
-    let mut result = Attributes::from(attributes);
-    result.validation_warnings = validation_warnings;
-    Ok(result)
+    Ok(Attributes {
+        inner: attributes,
+        validation_warnings,
+        attr_mask: seen_attributes,
+    })
 }
 
 impl Attribute {
@@ -574,7 +530,9 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as an announcement with standard NLRI
+        attributes.check_mandatory_attributes(true, true);
 
         // Should have warnings for missing mandatory attributes
         assert!(attributes.has_validation_warnings());
@@ -613,9 +571,11 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as an announcement but NO standard NLRI (MP only)
+        attributes.check_mandatory_attributes(true, false);
 
-        // Should NOT have NEXT_HOP warning because MP_REACH_NLRI is present
+        // Should NOT have NEXT_HOP warning because MP_REACH_NLRI is present and has_standard_nlri is false
         let warnings = attributes.validation_warnings();
         let has_next_hop_warning = warnings.iter().any(|w| {
             matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type: AttrType::NEXT_HOP })
@@ -633,7 +593,9 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        // Manually trigger mandatory check as a withdrawal
+        attributes.check_mandatory_attributes(false, false);
 
         // Should have NO warnings
         assert!(!attributes.has_validation_warnings());
@@ -643,7 +605,8 @@ mod tests {
             0x80, 0x0F, 0x03, 
             0x00, 0x01, 0x01, // AFI=1, SAFI=1
         ]);
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let mut attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        attributes.check_mandatory_attributes(false, false);
         assert!(!attributes.has_validation_warnings());
     }
 

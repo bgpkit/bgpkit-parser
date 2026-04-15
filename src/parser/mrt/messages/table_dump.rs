@@ -99,8 +99,11 @@ pub fn parse_table_dump_message(
     let attr_data_slice = data.split_to(attribute_length);
 
     // for TABLE_DUMP type, the AS number length is always 2-byte.
-    let attributes =
+    let mut attributes =
         parse_attributes(attr_data_slice, &AsnLength::Bits16, false, None, None, None)?;
+
+    // validate mandatory attributes (TABLE_DUMP is always an announcement)
+    attributes.check_mandatory_attributes(true, afi == Afi::Ipv4);
 
     Ok(TableDumpMessage {
         view_number,

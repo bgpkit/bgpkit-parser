@@ -468,11 +468,20 @@ pub fn parse_bgp_update_message(
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = parse_attributes(attr_data_slice, asn_len, add_path, None, None, None)?;
+    let mut attributes = parse_attributes(attr_data_slice, asn_len, add_path, None, None, None)?;
 
     // parse announced prefixes nlri.
     // the remaining bytes are announced prefixes.
     let announced_prefixes = read_nlri(input, &afi, add_path)?;
+
+    // validate mandatory attributes
+    let is_announcement = !announced_prefixes.is_empty()
+        || attributes.has_attr(AttrType::MP_REACHABLE_NLRI)
+        || (!attributes.inner.is_empty()
+            && !(attributes.inner.len() == 1
+                && attributes.has_attr(AttrType::MP_UNREACHABLE_NLRI)));
+    let has_standard_nlri = !announced_prefixes.is_empty();
+    attributes.check_mandatory_attributes(is_announcement, has_standard_nlri);
 
     Ok(BgpUpdateMessage {
         withdrawn_prefixes,

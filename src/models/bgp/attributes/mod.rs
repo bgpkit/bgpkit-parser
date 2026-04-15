@@ -134,18 +134,30 @@ pub fn get_deprecated_attr_type(attr_type: u8) -> Option<&'static str> {
 }
 
 /// Convenience wrapper for a list of attributes
-#[derive(Debug, PartialEq, Clone, Default, Eq)]
+#[derive(PartialEq, Clone, Default, Eq)]
 pub struct Attributes {
     // Black box type to allow for later changes/optimizations. The most common attributes could be
     // added as fields to allow for easier lookup.
     pub(crate) inner: Vec<Attribute>,
     /// RFC 7606 validation warnings collected during parsing
     pub(crate) validation_warnings: Vec<BgpValidationWarning>,
+    /// Bitmask of seen attributes to allow O(1) checks. Fits in 4 u64s.
+    pub(crate) attr_mask: [u64; 4],
+}
+
+impl std::fmt::Debug for Attributes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Attributes")
+            .field("inner", &self.inner)
+            .field("validation_warnings", &self.validation_warnings)
+            .finish()
+    }
 }
 
 impl Attributes {
     pub fn has_attr(&self, ty: AttrType) -> bool {
-        self.inner.iter().any(|x| x.value.attr_type() == ty)
+        let attr = u8::from(ty);
+        (self.attr_mask[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
     }
 
     pub fn get_attr(&self, ty: AttrType) -> Option<Attribute> {
@@ -156,7 +168,44 @@ impl Attributes {
     }
 
     pub fn add_attr(&mut self, attr: Attribute) {
+        let ty = u8::from(attr.value.attr_type());
+        self.attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
         self.inner.push(attr);
+    }
+
+    /// Check for missing well-known mandatory attributes.
+    ///
+    /// RFC 4271 (BGP-4) and RFC 4760 (MP-BGP) define which attributes are mandatory.
+    /// - Pure Withdrawals: NO path attributes are required.
+    /// - Announcements: ORIGIN and AS_PATH are strictly required.
+    /// - NEXT_HOP is required if standard IPv4 NLRI is present or if no MP_REACH_NLRI is present.
+    pub fn check_mandatory_attributes(&mut self, is_announcement: bool, has_standard_nlri: bool) {
+        if !is_announcement {
+            return;
+        }
+
+        // ORIGIN and AS_PATH are universally mandatory for all announcements.
+        if !self.has_attr(AttrType::ORIGIN) {
+            self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::ORIGIN,
+            });
+        }
+        if !self.has_attr(AttrType::AS_PATH) {
+            self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::AS_PATH,
+            });
+        }
+
+        // NEXT_HOP is required if this is an IPv4 announcement (has standard NLRI)
+        // or if we haven't seen MP_REACH_NLRI (which implies standard NLRI is expected).
+        let has_mp_reach = self.has_attr(AttrType::MP_REACHABLE_NLRI);
+        if has_standard_nlri || !has_mp_reach {
+            if !self.has_attr(AttrType::NEXT_HOP) {
+                self.validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::NEXT_HOP,
+                });
+            }
+        }
     }
 
     /// Add a validation warning to the attributes
@@ -324,27 +373,43 @@ impl Iterator for MetaCommunitiesIter<'_> {
     }
 }
 
+fn compute_mask(inner: &[Attribute]) -> [u64; 4] {
+    let mut attr_mask = [0; 4];
+    for attr in inner {
+        let ty = u8::from(attr.value.attr_type());
+        attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
+    }
+    attr_mask
+}
+
 impl FromIterator<Attribute> for Attributes {
     fn from_iter<T: IntoIterator<Item = Attribute>>(iter: T) -> Self {
+        let inner: Vec<Attribute> = iter.into_iter().collect();
+        let attr_mask = compute_mask(&inner);
         Attributes {
-            inner: iter.into_iter().collect(),
+            inner,
             validation_warnings: Vec::new(),
+            attr_mask,
         }
     }
 }
 
 impl From<Vec<Attribute>> for Attributes {
     fn from(value: Vec<Attribute>) -> Self {
+        let attr_mask = compute_mask(&value);
         Attributes {
             inner: value,
             validation_warnings: Vec::new(),
+            attr_mask,
         }
     }
 }
 
 impl Extend<Attribute> for Attributes {
     fn extend<T: IntoIterator<Item = Attribute>>(&mut self, iter: T) {
-        self.inner.extend(iter)
+        for attr in iter {
+            self.add_attr(attr);
+        }
     }
 }
 
@@ -356,9 +421,12 @@ impl Extend<AttributeValue> for Attributes {
 
 impl FromIterator<AttributeValue> for Attributes {
     fn from_iter<T: IntoIterator<Item = AttributeValue>>(iter: T) -> Self {
+        let inner: Vec<Attribute> = iter.into_iter().map(Attribute::from).collect();
+        let attr_mask = compute_mask(&inner);
         Attributes {
-            inner: iter.into_iter().map(Attribute::from).collect(),
+            inner,
             validation_warnings: Vec::new(),
+            attr_mask,
         }
     }
 }
