@@ -391,75 +391,66 @@ pub fn parse_attributes(
 ///
 /// This should be called after NLRI parsing to properly determine which attributes
 /// are mandatory based on the message content per RFC 4271 and RFC 4760.
-///
-/// ## RFC 4271 (BGP-4) Section 6.3 - Well-known Mandatory Attributes
-///
-/// > "ORIGIN (Type Code 1):
-/// >  [...] well-known mandatory attribute [...]"
-///
-/// > "AS_PATH (Type Code 2):
-/// >  [...] well-known mandatory attribute [...]"
-///
-/// > "NEXT_HOP (Type Code 3):
-/// >  [...] well-known mandatory attribute [...] defines the IP address of
-/// >  the border router that SHOULD be used as the next hop [...]"
-///
-/// ## RFC 4760 Section 3 - Multiprotocol Reachable NLRI (MP_REACH_NLRI)
-///
-/// > "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
-/// >  ORIGIN and the AS_PATH attributes (both in EBGP and in IBGP exchanges).
-/// >  Moreover, in IBGP exchanges such a message MUST also carry the LOCAL_PREF
-/// >  attribute."
-///
-/// > "An UPDATE message that carries no NLRI, other than the one encoded in
-/// >  the MP_REACH_NLRI attribute, SHOULD NOT carry the NEXT_HOP attribute.
-/// >  If such a message contains the NEXT_HOP attribute, the BGP speaker
-/// >  that receives the message SHOULD ignore this attribute."
-///
-/// ## RFC 4760 Section 4 - Multiprotocol Unreachable NLRI (MP_UNREACH_NLRI)
-///
-/// > "An UPDATE message that contains the MP_UNREACH_NLRI is not required
-/// >  to carry any other path attributes."
-///
-/// ## Validation Rules Applied
-///
-/// - **ORIGIN and AS_PATH**: required for any announcement
-///   (either IPv4 NLRI or MP_REACH_NLRI present) - per RFC 4271 and RFC 4760 Section 3
-/// - **NEXT_HOP**: required only if IPv4 NLRI is present (RFC 4271)
-///   Not required if only MP_REACH_NLRI is present (RFC 4760 Section 3)
-/// - **Withdrawals only** (MP_UNREACH_NLRI without announcements): no mandatory attributes
-///   per RFC 4760 Section 4
 pub fn validate_mandatory_attributes(
     seen_attributes: &[bool; 256],
     has_ipv4_nlri: bool,
     has_mp_reach_nlri: bool,
     _has_mp_unreach_nlri: bool,
 ) -> Vec<BgpValidationWarning> {
-    // Check if any announcements exist
+    // RFC 4760 Section 4:
+    // "An UPDATE message that contains the MP_UNREACH_NLRI is not required
+    //  to carry any other path attributes."
+    //
+    // RFC 4760 Section 3:
+    // "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
+    //  ORIGIN and the AS_PATH attributes..."
+    //
+    // Therefore: if no announcements (withdrawals only), no mandatory attributes required.
     let has_announcements = has_ipv4_nlri || has_mp_reach_nlri;
-
-    // If no announcements (withdrawals only), no mandatory attributes required
     if !has_announcements {
         return vec![];
     }
 
     let mut warnings = Vec::new();
 
-    // ORIGIN and AS_PATH are required for any announcement
+    // RFC 4271 Section 6.3:
+    // "ORIGIN (Type Code 1):
+    //  [...] well-known mandatory attribute [...]"
+    //
+    // RFC 4760 Section 3:
+    // "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
+    //  ORIGIN and the AS_PATH attributes..."
     if !seen_attributes[u8::from(AttrType::ORIGIN) as usize] {
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::ORIGIN,
         });
     }
 
+    // RFC 4271 Section 6.3:
+    // "AS_PATH (Type Code 2):
+    //  [...] well-known mandatory attribute [...]"
+    //
+    // RFC 4760 Section 3:
+    // "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
+    //  ORIGIN and the AS_PATH attributes..."
     if !seen_attributes[u8::from(AttrType::AS_PATH) as usize] {
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::AS_PATH,
         });
     }
 
-    // NEXT_HOP is required only if IPv4 NLRI is present (RFC 4271)
-    // If only MP_REACH_NLRI is present, next hop is embedded in the attribute (RFC 4760)
+    // RFC 4271 Section 6.3:
+    // "NEXT_HOP (Type Code 3):
+    //  [...] well-known mandatory attribute [...] defines the IP address of
+    //  the border router that SHOULD be used as the next hop [...]"
+    //
+    // RFC 4760 Section 3:
+    // "An UPDATE message that carries no NLRI, other than the one encoded in
+    //  the MP_REACH_NLRI attribute, SHOULD NOT carry the NEXT_HOP attribute.
+    //  If such a message contains the NEXT_HOP attribute, the BGP speaker
+    //  that receives the message SHOULD ignore this attribute."
+    //
+    // Therefore: NEXT_HOP is required only if IPv4 NLRI is present.
     if has_ipv4_nlri && !seen_attributes[u8::from(AttrType::NEXT_HOP) as usize] {
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::NEXT_HOP,
