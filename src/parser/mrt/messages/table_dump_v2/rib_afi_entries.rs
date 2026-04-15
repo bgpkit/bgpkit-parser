@@ -140,7 +140,7 @@ pub fn parse_rib_entry(
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = parse_attributes(
+    let (attributes, _seen_attributes) = parse_attributes(
         attr_data_slice,
         &AsnLength::Bits32,
         is_add_path,

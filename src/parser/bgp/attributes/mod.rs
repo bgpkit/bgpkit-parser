@@ -172,6 +172,10 @@ fn validate_attribute_length(
 ///
 /// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
 /// the slice is the total byte length of the attributes section of the message.
+///
+/// Returns the parsed attributes and a boolean array tracking which attribute types were seen.
+/// Mandatory attribute validation should be performed after NLRI parsing using
+/// `validate_mandatory_attributes()` with proper context.
 pub fn parse_attributes(
     mut data: Bytes,
     asn_len: &AsnLength,
@@ -179,7 +183,7 @@ pub fn parse_attributes(
     afi: Option<Afi>,
     safi: Option<Safi>,
     prefixes: Option<&[NetworkPrefix]>,
-) -> Result<Attributes, ParserError> {
+) -> Result<(Attributes, [bool; 256]), ParserError> {
     // Estimate capacity from data size: each attribute is at least 3 bytes
     // (flag + type + length). Cap at 256 to avoid over-allocation for corrupted data.
     let estimated_attrs = (data.remaining() / 3).min(256);
@@ -378,33 +382,60 @@ pub fn parse_attributes(
         };
     }
 
-    // Check for missing well-known mandatory attributes
-    let mandatory_attributes = [
-        AttrType::ORIGIN,
-        AttrType::AS_PATH,
-        AttrType::NEXT_HOP,
-        // LOCAL_PREFERENCE is only mandatory for IBGP, so we don't check it here
-    ];
-
-    // RFC 4760 Section 3: When MP_REACH_NLRI is present, the NEXT_HOP attribute
-    // should not be present (the next hop is carried within MP_REACH_NLRI itself).
-    let mp_reach_nlri_present = seen_attributes[u8::from(AttrType::MP_REACHABLE_NLRI) as usize];
-
-    for &mandatory_attr in &mandatory_attributes {
-        if !seen_attributes[u8::from(mandatory_attr) as usize] {
-            // Skip NEXT_HOP warning if MP_REACH_NLRI is present (RFC 4760)
-            if mandatory_attr == AttrType::NEXT_HOP && mp_reach_nlri_present {
-                continue;
-            }
-            validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
-                attr_type: mandatory_attr,
-            });
-        }
-    }
-
     let mut result = Attributes::from(attributes);
     result.validation_warnings = validation_warnings;
-    Ok(result)
+    Ok((result, seen_attributes))
+}
+
+/// Validate mandatory attributes based on NLRI context.
+///
+/// This should be called after NLRI parsing to properly determine which attributes
+/// are mandatory based on the message content per RFC 4271 and RFC 4760.
+///
+/// Rules:
+/// - ORIGIN and AS_PATH: required if any reachable prefixes are announced
+///   (either IPv4 NLRI or MP_REACH_NLRI present)
+/// - NEXT_HOP: required only if IPv4 NLRI is present (RFC 4271)
+///   Not required if only MP_REACH_NLRI is present (RFC 4760 Section 3)
+/// - MP_UNREACH_NLRI only (withdrawals): no attributes required (RFC 4760 Section 4)
+pub fn validate_mandatory_attributes(
+    seen_attributes: &[bool; 256],
+    has_ipv4_nlri: bool,
+    has_mp_reach_nlri: bool,
+    _has_mp_unreach_nlri: bool,
+) -> Vec<BgpValidationWarning> {
+    let mut warnings = Vec::new();
+
+    // Check if any announcements exist
+    let has_announcements = has_ipv4_nlri || has_mp_reach_nlri;
+
+    // If no announcements (withdrawals only), no mandatory attributes required
+    if !has_announcements {
+        return warnings;
+    }
+
+    // ORIGIN and AS_PATH are required for any announcement
+    if !seen_attributes[u8::from(AttrType::ORIGIN) as usize] {
+        warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+            attr_type: AttrType::ORIGIN,
+        });
+    }
+
+    if !seen_attributes[u8::from(AttrType::AS_PATH) as usize] {
+        warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+            attr_type: AttrType::AS_PATH,
+        });
+    }
+
+    // NEXT_HOP is required only if IPv4 NLRI is present (RFC 4271)
+    // If only MP_REACH_NLRI is present, next hop is embedded in the attribute (RFC 4760)
+    if has_ipv4_nlri && !seen_attributes[u8::from(AttrType::NEXT_HOP) as usize] {
+        warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
+            attr_type: AttrType::NEXT_HOP,
+        });
+    }
+
+    warnings
 }
 
 impl Attribute {
@@ -497,9 +528,9 @@ mod tests {
         let afi = None;
         let safi = None;
         let prefixes = None;
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
-        assert!(attributes.is_ok());
-        let attributes = attributes.unwrap();
+        let result = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
+        assert!(result.is_ok());
+        let (attributes, _seen_attributes) = result.unwrap();
         assert_eq!(attributes.inner.len(), 1);
         assert_eq!(
             attributes.inner[0].value.attr_type(),
@@ -517,12 +548,13 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, _seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // Should have validation warning for incorrect flags
         assert!(attributes.has_validation_warnings());
         let warnings = attributes.validation_warnings();
-        // Will have attribute flags error + missing mandatory attributes
+        // Will have attribute flags error (mandatory warnings moved to post-NLRI validation)
         assert!(!warnings.is_empty());
 
         match &warnings[0] {
@@ -534,8 +566,9 @@ mod tests {
     }
 
     #[test]
-    fn test_rfc7606_missing_mandatory_attribute() {
-        // Empty attributes - should have warnings for missing mandatory attributes
+    fn test_mandatory_attributes_validation() {
+        // Test that validate_mandatory_attributes correctly requires
+        // ORIGIN, AS_PATH, and NEXT_HOP based on NLRI context
         let data = Bytes::from(vec![]);
         let asn_len = AsnLength::Bits16;
         let add_path = false;
@@ -543,20 +576,38 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (_attributes, seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
-        // Should have warnings for missing mandatory attributes
-        assert!(attributes.has_validation_warnings());
-        let warnings = attributes.validation_warnings();
+        // Empty attributes with no announcements should have no mandatory warnings
+        let warnings = validate_mandatory_attributes(&seen_attributes, false, false, false);
+        assert!(warnings.is_empty());
+
+        // Empty attributes with IPv4 NLRI should warn about all three
+        let warnings = validate_mandatory_attributes(&seen_attributes, true, false, false);
         assert_eq!(warnings.len(), 3); // ORIGIN, AS_PATH, NEXT_HOP
-
-        for warning in warnings {
+        for warning in &warnings {
             match warning {
                 BgpValidationWarning::MissingWellKnownAttribute { attr_type } => {
                     assert!(matches!(
                         attr_type,
                         AttrType::ORIGIN | AttrType::AS_PATH | AttrType::NEXT_HOP
                     ));
+                }
+                _ => panic!("Expected MissingWellKnownAttribute warning"),
+            }
+        }
+
+        // Empty attributes with MP_REACH_NLRI should only warn about ORIGIN and AS_PATH
+        let warnings = validate_mandatory_attributes(&seen_attributes, false, true, false);
+        assert_eq!(warnings.len(), 2); // ORIGIN, AS_PATH (no NEXT_HOP per RFC 4760)
+        for warning in &warnings {
+            match warning {
+                BgpValidationWarning::MissingWellKnownAttribute { attr_type } => {
+                    assert!(
+                        matches!(attr_type, AttrType::ORIGIN | AttrType::AS_PATH),
+                        "Should only warn about ORIGIN or AS_PATH for MP_REACH_NLRI only"
+                    );
                 }
                 _ => panic!("Expected MissingWellKnownAttribute warning"),
             }
@@ -576,7 +627,8 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, _seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // Should have warning for duplicate attribute
         assert!(attributes.has_validation_warnings());
@@ -609,7 +661,8 @@ mod tests {
         data.extend_from_slice(&[0x40, 0xFF, 0x01, 0x00]); // development
         let data = Bytes::from(data);
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, _seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         assert!(attributes.has_attr(AttrType::DEVELOPMENT));
         assert!(!attributes.has_validation_warnings());
@@ -619,7 +672,8 @@ mod tests {
         data.extend_from_slice(&[0x40, 0x00, 0x01, 0x01]); // reserved
         let data = Bytes::from(data);
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, _seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // There is a validation warning about the reserved attribute
         assert!(attributes.validation_warnings.iter().any(|vw| {
@@ -637,7 +691,8 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, _seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // Should have warning for incorrect attribute length
         assert!(attributes.has_validation_warnings());
@@ -667,7 +722,7 @@ mod tests {
         let result = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes);
         assert!(result.is_ok());
 
-        let attributes = result.unwrap();
+        let (attributes, _seen_attributes) = result.unwrap();
         assert!(attributes.has_validation_warnings());
 
         // Should have multiple warnings but parsing should continue
@@ -676,10 +731,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rfc4760_mp_reach_nlri_no_next_hop_warning() {
+    fn test_rfc4760_mp_reach_nlri_no_next_hop_validation() {
         // RFC 4760 Section 3: When MP_REACH_NLRI is present, the NEXT_HOP attribute
         // should not be present (the next hop is carried within MP_REACH_NLRI itself).
-        // Therefore, no MissingWellKnownAttribute warning for NEXT_HOP should be generated.
+        // Test validate_mandatory_attributes with MP_REACH_NLRI context.
         let data = Bytes::from(vec![
             // ORIGIN attribute (type 1) - required
             0x40, 0x01, 0x01, 0x00, // flags (transitive), type 1, length 1, value IGP
@@ -696,7 +751,7 @@ mod tests {
             0x18, // Prefix length: 24 bits
             0xC0, 0x00,
             0x02, // NLRI: 192.0.2.0/24
-                  // Note: No NEXT_HOP attribute (type 3) - this is valid per RFC 4760
+                  // Note: No NEXT_HOP attribute (type 3)
         ]);
         let asn_len = AsnLength::Bits16;
         let add_path = false;
@@ -704,21 +759,32 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // MP_REACH_NLRI should be present
         assert!(attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
         // NEXT_HOP should not be present
         assert!(!attributes.has_attr(AttrType::NEXT_HOP));
 
-        // No MissingWellKnownAttribute warning for NEXT_HOP should be generated
-        let has_next_hop_warning = attributes
-            .validation_warnings()
-            .iter()
-            .any(|w| matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP));
+        // Test with MP_REACH_NLRI only (no IPv4 NLRI) - should not warn about NEXT_HOP
+        let warnings = validate_mandatory_attributes(&seen_attributes, false, true, false);
         assert!(
-            !has_next_hop_warning,
-            "Should not warn about missing NEXT_HOP when MP_REACH_NLRI is present (RFC 4760)"
+            !warnings.iter().any(|w| matches!(
+                w,
+                BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP
+            )),
+            "Should not warn about missing NEXT_HOP when only MP_REACH_NLRI is present (RFC 4760)"
+        );
+
+        // Test with both IPv4 NLRI and MP_REACH_NLRI - should warn about missing NEXT_HOP
+        let warnings = validate_mandatory_attributes(&seen_attributes, true, true, false);
+        assert!(
+            warnings.iter().any(|w| matches!(
+                w,
+                BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP
+            )),
+            "Should warn about missing NEXT_HOP when IPv4 NLRI is present"
         );
     }
 
@@ -731,7 +797,7 @@ mod tests {
             0x40, 0x01, 0x01, 0x00, // flags (transitive), type 1, length 1, value IGP
             // AS_PATH attribute (type 2) - required
             0x40, 0x02, 0x00, // flags (transitive), type 2, length 0 (empty AS_PATH)
-            // NEXT_HOP attribute (type 3) - present but will be ignored per RFC 4760
+            // NEXT_HOP attribute (type 3) - present
             0x40, 0x03, 0x04, // flags (transitive), type 3, length 4
             0xC0, 0x00, 0x02, 0x01, // Next hop: 192.0.2.1
             // MP_REACH_NLRI attribute (type 14) with IPv6 unicast
@@ -752,19 +818,20 @@ mod tests {
         let safi = None;
         let prefixes = None;
 
-        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+        let (attributes, seen_attributes) =
+            parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
         // Both NEXT_HOP and MP_REACH_NLRI should be present
         assert!(attributes.has_attr(AttrType::NEXT_HOP));
         assert!(attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
 
-        // No MissingWellKnownAttribute warning for NEXT_HOP
-        let has_next_hop_warning = attributes
-            .validation_warnings()
-            .iter()
-            .any(|w| matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP));
+        // Validate with no IPv4 NLRI - should have no warnings (NEXT_HOP is optional here)
+        let warnings = validate_mandatory_attributes(&seen_attributes, false, true, false);
         assert!(
-            !has_next_hop_warning,
+            !warnings.iter().any(|w| matches!(
+                w,
+                BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP
+            )),
             "Should not warn about NEXT_HOP when MP_REACH_NLRI is present"
         );
     }

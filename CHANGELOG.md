@@ -4,9 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking changes
+
+* **`parse_attributes()` signature change**: The function now returns a tuple `(Attributes, [bool; 256])` where the second element tracks which attribute types were seen during parsing. This enables proper mandatory attribute validation after NLRI parsing. Callers need to update to handle the tuple return.
+
 ### Bug fixes
 
-* **RFC 4760 NEXT_HOP validation**: Suppress `MissingWellKnownAttribute { NEXT_HOP }` warning when `MP_REACH_NLRI` is present. Per RFC 4760 Section 3, UPDATE messages carrying no NLRI other than what's encoded in `MP_REACH_NLRI` should not carry a separate `NEXT_HOP` attribute (the next hop is embedded within `MP_REACH_NLRI`). This eliminates false positive warnings for valid MP-BGP messages. Note: may produce false negatives for rare edge cases where an UPDATE contains both regular NLRI and `MP_REACH_NLRI` but lacks `NEXT_HOP`.
+* **RFC 4760 mandatory attribute validation**: Moved mandatory attribute validation from `parse_attributes()` to after NLRI parsing in `parse_bgp_update_message()`. This allows proper context-aware validation per RFC 4271 and RFC 4760:
+  - `ORIGIN` and `AS_PATH`: required for any announcement (IPv4 NLRI or `MP_REACH_NLRI`)
+  - `NEXT_HOP`: required only when IPv4 NLRI is present (RFC 4271)
+  - No mandatory attributes required for withdrawal-only messages (RFC 4760 Section 4)
+  - `MP_REACH_NLRI` carries its own next hop, so no separate `NEXT_HOP` attribute needed (RFC 4760 Section 3)
+  
+  This eliminates false positive warnings for valid MP-BGP messages and properly handles the "conditionally mandatory" nature of BGP attributes.
 
 ## v0.16.0 - 2026-04-07
 

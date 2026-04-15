@@ -10,7 +10,7 @@ use crate::models::capabilities::{
     MultiprotocolExtensionsCapability, RouteRefreshCapability,
 };
 use crate::models::error::BgpError;
-use crate::parser::bgp::attributes::parse_attributes;
+use crate::parser::bgp::attributes::{parse_attributes, validate_mandatory_attributes};
 use crate::parser::{encode_nlri_prefixes, parse_nlri_list, ReadUtils};
 use log::warn;
 use zerocopy::big_endian::{U16, U32};
@@ -468,11 +468,30 @@ pub fn parse_bgp_update_message(
 
     input.has_n_remaining(attribute_length)?;
     let attr_data_slice = input.split_to(attribute_length);
-    let attributes = parse_attributes(attr_data_slice, asn_len, add_path, None, None, None)?;
+    let (mut attributes, seen_attributes) =
+        parse_attributes(attr_data_slice, asn_len, add_path, None, None, None)?;
 
     // parse announced prefixes nlri.
     // the remaining bytes are announced prefixes.
     let announced_prefixes = read_nlri(input, &afi, add_path)?;
+
+    // Determine NLRI context for mandatory attribute validation
+    let has_ipv4_nlri = !announced_prefixes.is_empty();
+    let has_mp_reach_nlri = seen_attributes[u8::from(AttrType::MP_REACHABLE_NLRI) as usize];
+    let has_mp_unreach_nlri = seen_attributes[u8::from(AttrType::MP_UNREACHABLE_NLRI) as usize];
+
+    // Validate mandatory attributes based on NLRI context (RFC 4271, RFC 4760)
+    let mandatory_warnings = validate_mandatory_attributes(
+        &seen_attributes,
+        has_ipv4_nlri,
+        has_mp_reach_nlri,
+        has_mp_unreach_nlri,
+    );
+
+    // Add mandatory validation warnings to attributes
+    for warning in mandatory_warnings {
+        attributes.add_validation_warning(warning);
+    }
 
     Ok(BgpUpdateMessage {
         withdrawn_prefixes,
