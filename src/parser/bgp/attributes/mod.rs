@@ -417,11 +417,11 @@ pub fn validate_mandatory_attributes(
     // "ORIGIN (Type Code 1):
     //  [...] well-known mandatory attribute [...]"
     //
-    // RFC 4760 Section 3 clarifies this applies to MP_REACH_NLRI announcements:
+    // RFC 4760 Section 3:
     // "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
     //  ORIGIN and the AS_PATH attributes..."
     //
-    // Therefore: ORIGIN is required for ANY announcement (IPv4 NLRI or MP_REACH_NLRI).
+    // This confirms ORIGIN is required for MP_REACH_NLRI announcements as well.
     if !seen_attributes[u8::from(AttrType::ORIGIN) as usize] {
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::ORIGIN,
@@ -432,11 +432,11 @@ pub fn validate_mandatory_attributes(
     // "AS_PATH (Type Code 2):
     //  [...] well-known mandatory attribute [...]"
     //
-    // RFC 4760 Section 3 clarifies this applies to MP_REACH_NLRI announcements:
+    // RFC 4760 Section 3:
     // "An UPDATE message that carries the MP_REACH_NLRI MUST also carry the
     //  ORIGIN and the AS_PATH attributes..."
     //
-    // Therefore: AS_PATH is required for ANY announcement (IPv4 NLRI or MP_REACH_NLRI).
+    // This confirms AS_PATH is required for MP_REACH_NLRI announcements as well.
     if !seen_attributes[u8::from(AttrType::AS_PATH) as usize] {
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::AS_PATH,
