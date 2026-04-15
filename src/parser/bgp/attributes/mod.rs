@@ -385,17 +385,33 @@ pub fn parse_attributes(
         };
     }
 
-    // Check for missing well-known mandatory attributes
+    // Check for missing well-known mandatory attributes.
+    //
+    // RFC 4271 (BGP-4) and RFC 4760 (MP-BGP) define which attributes are mandatory.
+    // The rules shift from "universally mandatory" to "conditionally mandatory" in MP-BGP:
+    //
+    // 1. Pure Withdrawals: If an UPDATE only withdraws routes (standard or MP),
+    //    NO path attributes are required.
+    // 2. Announcements: If an UPDATE announces any reachable prefix,
+    //    ORIGIN and AS_PATH are strictly required.
+    // 3. NEXT_HOP (Attribute 3):
+    //    - Required if the base IPv4 NLRI field is populated.
+    //    - NOT required (and should be omitted) if the base IPv4 NLRI field is empty.
+    //    - MP_REACH_NLRI (IPv6, VPNv4, etc.) is self-sufficient as it bundles its
+    //      own next-hop inside the attribute.
+    //
+    // Inference: Since we parse attributes before reaching the trailing IPv4 NLRI field,
+    // we infer the requirement: if it's an announcement and NO MP_REACH_NLRI is present,
+    // it MUST be a standard IPv4 announcement, thus requiring Attribute 3.
     let has_mp_reach = has_attr(&seen_attributes, u8::from(AttrType::MP_REACHABLE_NLRI));
     let has_mp_unreach = has_attr(&seen_attributes, u8::from(AttrType::MP_UNREACHABLE_NLRI));
 
-    // Pure withdrawals (no attributes or just MP_UNREACH_NLRI) require no mandatory path attributes.
-    // Announcements (not pure withdrawals) require ORIGIN and AS_PATH.
-    // NEXT_HOP is only required if it's an announcement and NO MP_REACH_NLRI is present.
+    // A "pure withdrawal" is defined as having no attributes (standard IPv4 withdrawal)
+    // or exactly one attribute that is MP_UNREACH_NLRI.
     let is_pure_withdrawal = attributes.is_empty() || (attributes.len() == 1 && has_mp_unreach);
 
     if !is_pure_withdrawal {
-        // ORIGIN and AS_PATH are universally mandatory for announcements
+        // ORIGIN and AS_PATH are universally mandatory for all announcements.
         if !has_attr(&seen_attributes, u8::from(AttrType::ORIGIN)) {
             validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
                 attr_type: AttrType::ORIGIN,
@@ -407,7 +423,7 @@ pub fn parse_attributes(
             });
         }
 
-        // NEXT_HOP is required if there is no MP_REACH_NLRI (standard IPv4 announcement)
+        // NEXT_HOP is required if this is an IPv4 announcement (no MP_REACH_NLRI seen).
         if !has_mp_reach && !has_attr(&seen_attributes, u8::from(AttrType::NEXT_HOP)) {
             validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
                 attr_type: AttrType::NEXT_HOP,
