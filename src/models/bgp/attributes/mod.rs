@@ -197,7 +197,8 @@ impl Attributes {
         }
 
         // NEXT_HOP is required if this is an IPv4 announcement (has standard NLRI)
-        // or if we haven't seen MP_REACH_NLRI (which implies standard NLRI is expected).
+        // or if we haven't seen MP_REACH_NLRI,
+        // which implies standard NLRI is expected, since is_announcement.
         let has_mp_reach = self.has_attr(AttrType::MP_REACHABLE_NLRI);
         if has_standard_nlri || !has_mp_reach {
             if !self.has_attr(AttrType::NEXT_HOP) {
