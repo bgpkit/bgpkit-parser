@@ -443,19 +443,17 @@ pub fn validate_mandatory_attributes(
         });
     }
 
-    // RFC 4271 Section 6.3:
-    // "NEXT_HOP (Type Code 3):
-    //  [...] well-known mandatory attribute [...] defines the IP address of
-    //  the border router that SHOULD be used as the next hop [...]"
-    //
     // RFC 4760 Section 3:
     // "An UPDATE message that carries no NLRI, other than the one encoded in
-    //  the MP_REACH_NLRI attribute, SHOULD NOT carry the NEXT_HOP attribute.
-    //  If such a message contains the NEXT_HOP attribute, the BGP speaker
-    //  that receives the message SHOULD ignore this attribute."
+    //  the MP_REACH_NLRI attribute, SHOULD NOT carry the NEXT_HOP attribute."
     //
-    // Therefore: NEXT_HOP is required only if IPv4 NLRI is present.
+    // This means NEXT_HOP is only needed when there is regular IPv4 NLRI.
+    // MP_REACH_NLRI carries its own next-hop internally, so no separate NEXT_HOP
+    // attribute is required for multiprotocol routes.
     if has_ipv4_nlri && !seen_attributes[u8::from(AttrType::NEXT_HOP) as usize] {
+        // RFC 4271 Section 6.3:
+        // "NEXT_HOP (Type Code 3):
+        //  [...] well-known mandatory attribute [...]"
         warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
             attr_type: AttrType::NEXT_HOP,
         });
