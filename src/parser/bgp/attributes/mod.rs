@@ -386,8 +386,16 @@ pub fn parse_attributes(
         // LOCAL_PREFERENCE is only mandatory for IBGP, so we don't check it here
     ];
 
+    // RFC 4760 Section 3: When MP_REACH_NLRI is present, the NEXT_HOP attribute
+    // should not be present (the next hop is carried within MP_REACH_NLRI itself).
+    let mp_reach_nlri_present = seen_attributes[u8::from(AttrType::MP_REACHABLE_NLRI) as usize];
+
     for &mandatory_attr in &mandatory_attributes {
         if !seen_attributes[u8::from(mandatory_attr) as usize] {
+            // Skip NEXT_HOP warning if MP_REACH_NLRI is present (RFC 4760)
+            if mandatory_attr == AttrType::NEXT_HOP && mp_reach_nlri_present {
+                continue;
+            }
             validation_warnings.push(BgpValidationWarning::MissingWellKnownAttribute {
                 attr_type: mandatory_attr,
             });
@@ -665,5 +673,99 @@ mod tests {
         // Should have multiple warnings but parsing should continue
         let warnings = attributes.validation_warnings();
         assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn test_rfc4760_mp_reach_nlri_no_next_hop_warning() {
+        // RFC 4760 Section 3: When MP_REACH_NLRI is present, the NEXT_HOP attribute
+        // should not be present (the next hop is carried within MP_REACH_NLRI itself).
+        // Therefore, no MissingWellKnownAttribute warning for NEXT_HOP should be generated.
+        let data = Bytes::from(vec![
+            // ORIGIN attribute (type 1) - required
+            0x40, 0x01, 0x01, 0x00, // flags (transitive), type 1, length 1, value IGP
+            // AS_PATH attribute (type 2) - required
+            0x40, 0x02, 0x00, // flags (transitive), type 2, length 0 (empty AS_PATH)
+            // MP_REACH_NLRI attribute (type 14) with IPv4 unicast
+            0x80, 0x0E, // flags (optional), type 14
+            0x0D, // length: 13 bytes (AFI(2)+SAFI(1)+NH-len(1)+NH(4)+Reserved(1)+Prefix-len(1)+Prefix(3))
+            0x00, 0x01, // AFI: IPv4
+            0x01, // SAFI: Unicast
+            0x04, // Next hop length: 4 bytes
+            0xC0, 0x00, 0x02, 0x01, // Next hop: 192.0.2.1
+            0x00, // Reserved
+            0x18, // Prefix length: 24 bits
+            0xC0, 0x00,
+            0x02, // NLRI: 192.0.2.0/24
+                  // Note: No NEXT_HOP attribute (type 3) - this is valid per RFC 4760
+        ]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // MP_REACH_NLRI should be present
+        assert!(attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
+        // NEXT_HOP should not be present
+        assert!(!attributes.has_attr(AttrType::NEXT_HOP));
+
+        // No MissingWellKnownAttribute warning for NEXT_HOP should be generated
+        let has_next_hop_warning = attributes
+            .validation_warnings()
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP));
+        assert!(
+            !has_next_hop_warning,
+            "Should not warn about missing NEXT_HOP when MP_REACH_NLRI is present (RFC 4760)"
+        );
+    }
+
+    #[test]
+    fn test_rfc4760_mp_reach_nlri_with_next_hop_present() {
+        // RFC 4760 Section 3: If NEXT_HOP is present when MP_REACH_NLRI is present,
+        // it should be ignored (no warning should be generated for having it)
+        let data = Bytes::from(vec![
+            // ORIGIN attribute (type 1) - required
+            0x40, 0x01, 0x01, 0x00, // flags (transitive), type 1, length 1, value IGP
+            // AS_PATH attribute (type 2) - required
+            0x40, 0x02, 0x00, // flags (transitive), type 2, length 0 (empty AS_PATH)
+            // NEXT_HOP attribute (type 3) - present but will be ignored per RFC 4760
+            0x40, 0x03, 0x04, // flags (transitive), type 3, length 4
+            0xC0, 0x00, 0x02, 0x01, // Next hop: 192.0.2.1
+            // MP_REACH_NLRI attribute (type 14) with IPv6 unicast
+            0x80, 0x0E, // flags (optional), type 14
+            0x1E, // length: 30 bytes (AFI(2)+SAFI(1)+NH-len(1)+NH(16)+Reserved(1)+Prefix-len(1)+Prefix(8))
+            0x00, 0x02, // AFI: IPv6
+            0x01, // SAFI: Unicast
+            0x10, // Next hop length: 16 bytes
+            // IPv6 next hop: 2001:db8::1
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, // Reserved
+            0x40, // Prefix length: 64 bits
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, // NLRI: 2001:db8::/64
+        ]);
+        let asn_len = AsnLength::Bits16;
+        let add_path = false;
+        let afi = None;
+        let safi = None;
+        let prefixes = None;
+
+        let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
+
+        // Both NEXT_HOP and MP_REACH_NLRI should be present
+        assert!(attributes.has_attr(AttrType::NEXT_HOP));
+        assert!(attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
+
+        // No MissingWellKnownAttribute warning for NEXT_HOP
+        let has_next_hop_warning = attributes
+            .validation_warnings()
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MissingWellKnownAttribute { attr_type } if *attr_type == AttrType::NEXT_HOP));
+        assert!(
+            !has_next_hop_warning,
+            "Should not warn about NEXT_HOP when MP_REACH_NLRI is present"
+        );
     }
 }

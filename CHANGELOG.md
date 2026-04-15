@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Bug fixes
+
+* **RFC 4760 NEXT_HOP validation**: Suppress `MissingWellKnownAttribute { NEXT_HOP }` warning when `MP_REACH_NLRI` is present. Per RFC 4760 Section 3, UPDATE messages carrying no NLRI other than what's encoded in `MP_REACH_NLRI` should not carry a separate `NEXT_HOP` attribute (the next hop is embedded within `MP_REACH_NLRI`). This eliminates false positive warnings for valid MP-BGP messages. Note: may produce false negatives for rare edge cases where an UPDATE contains both regular NLRI and `MP_REACH_NLRI` but lacks `NEXT_HOP`.
+
 ## v0.16.0 - 2026-04-07
 
 ### Breaking changes
