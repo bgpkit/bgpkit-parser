@@ -475,11 +475,8 @@ pub fn parse_bgp_update_message(
     let announced_prefixes = read_nlri(input, &afi, add_path)?;
 
     // validate mandatory attributes
-    let is_announcement = !announced_prefixes.is_empty()
-        || attributes.has_attr(AttrType::MP_REACHABLE_NLRI)
-        || (!attributes.inner.is_empty()
-            && !(attributes.inner.len() == 1
-                && attributes.has_attr(AttrType::MP_UNREACHABLE_NLRI)));
+    let is_announcement =
+        !announced_prefixes.is_empty() || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
     let has_standard_nlri = !announced_prefixes.is_empty();
     attributes.check_mandatory_attributes(is_announcement, has_standard_nlri);
 
