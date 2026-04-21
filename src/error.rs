@@ -20,6 +20,20 @@ pub enum ParserError {
     TruncatedMsg(String),
     Unsupported(String),
     FilterError(String),
+    /// NLRI length field is inconsistent with content
+    /// (total_bits < minimum required, or underflow in prefix calculation)
+    InvalidLabeledNlriLength,
+    /// Input ended before completing NLRI structure
+    TruncatedLabeledNlri,
+    /// Input ended in the middle of prefix data
+    TruncatedPrefix,
+    /// Exceeded configured max_labels without finding Bottom-of-Stack bit
+    MaxLabelStackDepthExceeded,
+    /// Exceeded peer-advertised max labels (Multiple Labels Capability)
+    /// Per RFC 8277 §2.1, this should be treated as a withdrawal
+    PeerMaxLabelsExceeded,
+    /// Invalid prefix in NLRI
+    InvalidPrefix,
 }
 
 impl Error for ParserError {}
@@ -52,6 +66,20 @@ impl Display for ParserError {
             #[cfg(feature = "oneio")]
             ParserError::OneIoError(e) => write!(f, "Error: {e}"),
             ParserError::FilterError(e) => write!(f, "Error: {e}"),
+            ParserError::InvalidLabeledNlriLength => {
+                write!(f, "Error: invalid labeled NLRI length field")
+            }
+            ParserError::TruncatedLabeledNlri => write!(f, "Error: truncated labeled NLRI"),
+            ParserError::TruncatedPrefix => write!(f, "Error: truncated prefix in NLRI"),
+            ParserError::MaxLabelStackDepthExceeded => write!(
+                f,
+                "Error: max label stack depth exceeded without finding BoS bit"
+            ),
+            ParserError::PeerMaxLabelsExceeded => write!(
+                f,
+                "Error: received more labels than peer advertised maximum"
+            ),
+            ParserError::InvalidPrefix => write!(f, "Error: invalid prefix in NLRI"),
         }
     }
 }

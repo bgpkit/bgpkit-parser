@@ -612,6 +612,7 @@ mod tests {
             safi: Safi::Unicast,
             next_hop: None,
             prefixes: vec![],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         })]);
@@ -648,6 +649,7 @@ mod tests {
             safi: Safi::Unicast,
             next_hop: None,
             prefixes: vec![],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         })]);
@@ -664,6 +666,7 @@ mod tests {
             safi: Safi::Unicast,
             next_hop: None,
             prefixes: vec![prefix],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         })]);
@@ -680,6 +683,7 @@ mod tests {
             safi: Safi::Unicast,
             next_hop: None,
             prefixes: vec![prefix],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         })]);
@@ -697,6 +701,7 @@ mod tests {
                 safi: Safi::Unicast,
                 next_hop: None,
                 prefixes: vec![],
+                labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
             }),

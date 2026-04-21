@@ -11,7 +11,11 @@ pub struct Nlri {
     pub safi: Safi,
     pub next_hop: Option<NextHopAddress>,
     /// Traditional IP prefixes for unicast/multicast
+    /// Also used for SAFI 4 withdrawals (RFC 8277 withdrawals carry no label semantics)
     pub prefixes: Vec<NetworkPrefix>,
+    /// MPLS-labeled IP prefixes (SAFI 4 announcements only) - RFC 3107/8277
+    /// Withdrawals are routed to `prefixes`, not here
+    pub labeled_prefixes: Option<Vec<LabeledNetworkPrefix>>,
     /// Link-State NLRI data - RFC 7752
     pub link_state_nlris: Option<Vec<crate::models::bgp::linkstate::LinkStateNlri>>,
     /// Flow-Spec NLRI data - RFC 8955/8956
@@ -37,6 +41,11 @@ impl Nlri {
     /// Returns true if this NLRI refers to Flow-Spec information.
     pub const fn is_flowspec(&self) -> bool {
         matches!(self.safi, Safi::FlowSpec | Safi::FlowSpecL3Vpn)
+    }
+
+    /// Returns true if this NLRI refers to MPLS-labeled prefixes (SAFI 4).
+    pub const fn is_mpls_labeled(&self) -> bool {
+        matches!(self.safi, Safi::MplsLabel)
     }
 
     /// Returns true if this NLRI refers to reachable prefixes
@@ -66,6 +75,7 @@ impl Nlri {
             safi,
             next_hop,
             prefixes: vec![prefix],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         }
@@ -82,6 +92,7 @@ impl Nlri {
             safi,
             next_hop: None,
             prefixes: vec![prefix],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         }
@@ -98,6 +109,7 @@ impl Nlri {
             safi,
             next_hop,
             prefixes: Vec::new(),
+            labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
         }
@@ -112,6 +124,7 @@ impl Nlri {
             safi,
             next_hop: None,
             prefixes: Vec::new(),
+            labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
         }
@@ -130,6 +143,7 @@ impl Nlri {
             safi,
             next_hop,
             prefixes: Vec::new(),
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
         }
@@ -146,22 +160,66 @@ impl Nlri {
             safi,
             next_hop: None,
             prefixes: Vec::new(),
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
         }
     }
+
+    /// Create a new MPLS-labeled reachable NLRI (SAFI 4) - RFC 3107/8277
+    pub fn new_labeled_reachable(
+        afi: Afi,
+        next_hop: Option<IpAddr>,
+        labeled_prefixes: Vec<LabeledNetworkPrefix>,
+    ) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        Nlri {
+            afi,
+            safi: Safi::MplsLabel,
+            next_hop,
+            prefixes: Vec::new(),
+            labeled_prefixes: Some(labeled_prefixes),
+            link_state_nlris: None,
+            flowspec_nlris: None,
+        }
+    }
+
+    /// Create a new MPLS-labeled unreachable NLRI (SAFI 4) - RFC 3107/8277
+    /// Note: Withdrawals use standard prefixes (no label semantics per RFC 8277 §2.4)
+    pub fn new_labeled_unreachable(afi: Afi, prefixes: Vec<NetworkPrefix>) -> Nlri {
+        Nlri {
+            afi,
+            safi: Safi::MplsLabel,
+            next_hop: None,
+            prefixes,
+            labeled_prefixes: None,
+            link_state_nlris: None,
+            flowspec_nlris: None,
+        }
+    }
 }
 
+/// Iterator over all prefixes in the NLRI.
+///
+/// **Note**: This iterator intentionally flattens both traditional prefixes and
+/// labeled prefixes into `IpNet`, discarding MPLS labels and path IDs. This preserves
+/// backward compatibility for users expecting only `IpNet`, but means label information
+/// is not accessible through iteration. To access labels, use `Nlri::labeled_prefixes` directly.
 impl IntoIterator for Nlri {
     type Item = IpNet;
     type IntoIter = std::vec::IntoIter<IpNet>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.prefixes
-            .into_iter()
-            .map(|x| x.prefix)
-            .collect::<Vec<_>>()
-            .into_iter()
+        let mut result: Vec<IpNet> = self.prefixes.into_iter().map(|x| x.prefix).collect();
+
+        // Include labeled prefixes (extract the inner prefix field)
+        if let Some(labeled) = self.labeled_prefixes {
+            for labeled_prefix in labeled {
+                result.push(labeled_prefix.prefix);
+            }
+        }
+
+        result.into_iter()
     }
 }
 
@@ -170,11 +228,16 @@ impl<'a> IntoIterator for &'a Nlri {
     type IntoIter = std::vec::IntoIter<&'a IpNet>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.prefixes
-            .iter()
-            .map(|x| &x.prefix)
-            .collect::<Vec<_>>()
-            .into_iter()
+        let mut result: Vec<&'a IpNet> = self.prefixes.iter().map(|x| &x.prefix).collect();
+
+        // Include labeled prefixes (extract the inner prefix field)
+        if let Some(ref labeled) = self.labeled_prefixes {
+            for labeled_prefix in labeled {
+                result.push(&labeled_prefix.prefix);
+            }
+        }
+
+        result.into_iter()
     }
 }
 

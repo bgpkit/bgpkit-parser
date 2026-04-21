@@ -80,6 +80,19 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                         // this should not happen at this stage
                         None
                     }
+                    // Labeled NLRI parsing errors - treat as malformed and skip
+                    ParserError::InvalidLabeledNlriLength
+                    | ParserError::TruncatedLabeledNlri
+                    | ParserError::TruncatedPrefix
+                    | ParserError::MaxLabelStackDepthExceeded
+                    | ParserError::PeerMaxLabelsExceeded
+                    | ParserError::InvalidPrefix => {
+                        if self.parser.options.show_warnings {
+                            warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
+                        }
+                        // skip this record and try next
+                        self.next()
+                    }
                 }
             }
         }

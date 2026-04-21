@@ -63,8 +63,8 @@ pub fn parse_nlri(
         next_hop = parse_mp_next_hop(next_hop_bytes)?;
     }
 
-    // Handle Link-State NLRI differently from traditional IP prefixes
-    let (prefixes, link_state_nlris) =
+    // Handle different NLRI types based on AFI/SAFI
+    let (prefixes, labeled_prefixes, link_state_nlris) =
         if afi == Afi::LinkState && (safi == Safi::LinkState || safi == Safi::LinkStateVpn) {
             // Parse Link-State NLRI
             if reachable {
@@ -75,7 +75,30 @@ pub fn parse_nlri(
             }
             let ls_nlri = parse_link_state_nlri(input, afi, safi, next_hop, reachable)?;
             let link_state_list = ls_nlri.link_state_nlris;
-            (Vec::new(), link_state_list)
+            (Vec::new(), None, link_state_list)
+        } else if safi == Safi::MplsLabel {
+            // Parse MPLS-labeled NLRI (RFC 3107/8277)
+            // For now, use conservative defaults since session state isn't available here
+            // TODO: Pass session capability state through the parser context
+            let config = LabeledNlriConfig {
+                add_path: additional_paths,
+                mode: LabeledNlriMode::SingleLabel, // Conservative default
+                max_labels: 16,
+                peer_max_labels: None,
+            };
+
+            if reachable {
+                // Parse labeled NLRI (announcements)
+                if input.read_u8()? != 0 {
+                    warn!("NLRI reserved byte not 0 (parsing MPLS-labeled NLRI)");
+                }
+                let labeled = parse_labeled_nlri(&mut input, afi, &config)?;
+                (Vec::new(), Some(labeled), None)
+            } else {
+                // Parse labeled withdrawal (withdrawals use plain prefixes per RFC 8277 §2.4)
+                let prefixes = parse_labeled_withdrawal_nlri(&mut input, afi, &config)?;
+                (prefixes, None, None)
+            }
         } else {
             // Parse traditional IP prefixes
             let prefixes = match prefixes {
@@ -103,7 +126,7 @@ pub fn parse_nlri(
                     parse_nlri_list(input, additional_paths, &afi)?
                 }
             };
-            (prefixes, None)
+            (prefixes, None, None)
         };
 
     let nlri = Nlri {
@@ -111,6 +134,7 @@ pub fn parse_nlri(
         safi,
         next_hop,
         prefixes,
+        labeled_prefixes,
         link_state_nlris,
         flowspec_nlris: None,
     };
@@ -329,6 +353,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         };
@@ -359,6 +384,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: Some(123),
             }],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         };
@@ -417,6 +443,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         };
@@ -449,6 +476,7 @@ mod tests {
                 prefix: IpNet::from_str("192.0.1.0/24").unwrap(),
                 path_id: None,
             }],
+            labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
         };

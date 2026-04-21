@@ -42,6 +42,9 @@ pub enum Safi {
     Unicast = 1,
     Multicast = 2,
     UnicastMulticast = 3,
+    /// MPLS-labeled address - RFC 3107/8277
+    /// SAFI 4 for labeled unicast prefixes (not VPN)
+    MplsLabel = 4,
     /// BGP Link-State - RFC 7752
     LinkState = 71,
     /// BGP Link-State VPN - RFC 7752

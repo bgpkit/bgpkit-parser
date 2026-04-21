@@ -4,12 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### New features
+
+* **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4):
+  - New `MplsLabel` type with label value, TC, S-bit, and TTL
+  - `LabeledNetworkPrefix` combining prefix with label stack (`SmallVec<[MplsLabel; 2]>`)
+  - `LabeledNlriConfig` for configurable parsing modes (SingleLabel vs MultiLabel)
+  - `Safi::MplsLabel = 4` added to SAFI enum
+  - NLRI attribute updated with `labeled_prefixes` field for MPLS announcements
+  - Error variants for labeled NLRI parsing failures
+
 ### Performance improvements
 
 * **AS Path memory optimization**: Reduced allocations for common cases using `smallvec`:
   - `AsPath::segments`: Uses `SmallVec<[AsPathSegment; 1]>` — 99.99% of routes have exactly 1 segment (zero-allocation coverage)
   - `AsPathSegment` variants: Uses `SmallVec<[Asn; 6]>` — 90.85% of segments have ≤6 ASNs (zero-allocation coverage)
   - Based on RIB analysis of 200K records from route-views2 (3.29M segments analyzed)
+
+### Breaking changes
+
+* **`Nlri` struct**: Added `labeled_prefixes: Option<Vec<LabeledNetworkPrefix>>` field for MPLS labeled prefixes (SAFI 4)
 
 ### Fixed
 
