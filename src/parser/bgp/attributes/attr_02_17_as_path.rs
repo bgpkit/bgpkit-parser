@@ -2,6 +2,7 @@ use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use smallvec::SmallVec;
 
 const AS_PATH_AS_SET: u8 = 1;
 const AS_PATH_AS_SEQUENCE: u8 = 2;
@@ -11,7 +12,7 @@ const AS_PATH_CONFED_SET: u8 = 4;
 
 pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
-        segments: Vec::with_capacity(5),
+        segments: SmallVec::with_capacity(5),
     };
     while input.remaining() > 0 {
         let segment = parse_as_path_segment(&mut input, asn_len)?;
@@ -41,7 +42,7 @@ fn parse_as_path_segment(
         )));
     }
 
-    let path = input.read_asns(asn_len, count)?;
+    let path: SmallVec<[Asn; 6]> = input.read_asns(asn_len, count)?.into();
     match segment_type {
         AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
         AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),

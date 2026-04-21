@@ -8,8 +8,11 @@ use serde::{Deserialize, Serialize};
 pub use client::*;
 pub use server::*;
 
+// Large enum variant is intentional for RisLiveMessage as the largest variant
+// is the most commonly used one (RisMessage), and boxing would add indirection overhead.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
+#[allow(clippy::large_enum_variant)]
 pub enum RisLiveMessage {
     #[serde(rename = "ris_message")]
     RisMessage(RisMessage),

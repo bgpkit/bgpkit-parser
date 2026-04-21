@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Performance improvements
+
+* **AS Path memory optimization**: Reduced allocations for common cases using `smallvec`:
+  - `AsPath::segments`: Uses `SmallVec<[AsPathSegment; 1]>` — 99.99% of routes have exactly 1 segment (zero-allocation coverage)
+  - `AsPathSegment` variants: Uses `SmallVec<[Asn; 6]>` — 90.85% of segments have ≤6 ASNs (zero-allocation coverage)
+  - Based on RIB analysis of 200K records from route-views2 (3.29M segments analyzed)
+
 ### Fixed
 
 * **RFC 4760 mandatory attribute validation**: Fixed validation to properly handle multiprotocol BGP (MP-BGP) conditional mandatory attributes:

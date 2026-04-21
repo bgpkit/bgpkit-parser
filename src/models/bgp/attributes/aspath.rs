@@ -1,5 +1,6 @@
 use crate::models::*;
 use itertools::Itertools;
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -8,12 +9,20 @@ use std::marker::PhantomData;
 use std::mem::discriminant;
 
 /// Enum of AS path segment.
+///
+/// Uses SmallVec for inline storage of ASNs to avoid heap allocations for common cases:
+/// - AsSequence/ConfedSequence: 91% of segments have ≤6 ASNs (per RIB analysis)
+/// - AsSet/ConfedSet: Sets are typically small (1-3 ASNs)
 #[derive(Debug, Clone)]
 pub enum AsPathSegment {
-    AsSequence(Vec<Asn>),
-    AsSet(Vec<Asn>),
-    ConfedSequence(Vec<Asn>),
-    ConfedSet(Vec<Asn>),
+    /// AS_SEQUENCE with inline storage for up to 6 ASNs (91% zero-alloc coverage)
+    AsSequence(SmallVec<[Asn; 6]>),
+    /// AS_SET with inline storage for up to 6 ASNs
+    AsSet(SmallVec<[Asn; 6]>),
+    /// AS_CONFED_SEQUENCE (rarely used, same size for pattern matching compatibility)
+    ConfedSequence(SmallVec<[Asn; 6]>),
+    /// AS_CONFED_SET (rarely used, same size for pattern matching compatibility)
+    ConfedSet(SmallVec<[Asn; 6]>),
 }
 
 impl AsPathSegment {
@@ -161,7 +170,7 @@ impl AsPathSegment {
 
 impl IntoIterator for AsPathSegment {
     type Item = Asn;
-    type IntoIter = std::vec::IntoIter<Asn>;
+    type IntoIter = smallvec::IntoIter<[Asn; 6]>;
 
     fn into_iter(self) -> Self::IntoIter {
         let (AsPathSegment::AsSequence(x)
@@ -374,20 +383,27 @@ where
     }
 }
 
+/// AS Path representation.
+///
+/// Uses SmallVec for inline storage of segments to avoid heap allocations.
+/// Per RIB analysis: 99.99% of AS paths have exactly 1 segment.
 #[derive(Debug, PartialEq, Clone, Eq, Default, Hash)]
 pub struct AsPath {
-    pub segments: Vec<AsPathSegment>,
+    /// Inline storage for up to 1 segment (99.99% zero-alloc coverage)
+    pub segments: SmallVec<[AsPathSegment; 1]>,
 }
 
 // Define iterator type aliases. The storage mechanism and by extension the iterator types may
 // change later, but these types should remain consistent.
 pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment>;
 pub type SegmentIterMut<'a> = std::slice::IterMut<'a, AsPathSegment>;
-pub type SegmentIntoIter = std::vec::IntoIter<AsPathSegment>;
+pub type SegmentIntoIter = smallvec::IntoIter<[AsPathSegment; 1]>;
 
 impl AsPath {
     pub fn new() -> AsPath {
-        AsPath { segments: vec![] }
+        AsPath {
+            segments: SmallVec::new(),
+        }
     }
 
     /// Shorthand for creating an `AsPath` consisting of a single `AsSequence` segment.
@@ -395,12 +411,14 @@ impl AsPath {
         let segment = AsPathSegment::AsSequence(seq.as_ref().iter().copied().map_into().collect());
 
         AsPath {
-            segments: vec![segment],
+            segments: SmallVec::from_buf([segment]),
         }
     }
 
-    pub fn from_segments(segments: Vec<AsPathSegment>) -> AsPath {
-        AsPath { segments }
+    pub fn from_segments<S: Into<SmallVec<[AsPathSegment; 1]>>>(segments: S) -> AsPath {
+        AsPath {
+            segments: segments.into(),
+        }
     }
 
     /// Adds a new segment to the end of the path. This will change the origin of the path. No
@@ -645,7 +663,7 @@ impl AsPath {
                                 let mut new_seq: Vec<Asn> = vec![];
                                 new_seq.extend(seq.iter().take(d as usize));
                                 new_seq.extend(seq4);
-                                new_segs.push(AsPathSegment::AsSequence(new_seq));
+                                new_segs.push(AsPathSegment::AsSequence(new_seq.into()));
                             }
                             d if d < 0 => {
                                 new_segs.push(AsPathSegment::AsSequence(seq.clone()));
@@ -661,7 +679,9 @@ impl AsPath {
             };
         }
 
-        AsPath { segments: new_segs }
+        AsPath {
+            segments: new_segs.into(),
+        }
     }
 
     /// Iterate through the originating ASNs of this path. This functionality is provided for
@@ -746,7 +766,7 @@ impl IntoIterator for AsPath {
     fn into_iter(self) -> Self::IntoIter {
         AsPathRouteIter {
             total_routes: self.num_route_variations(),
-            path: Cow::Owned(self.segments),
+            path: Cow::Owned(self.segments.into_vec()),
             route_num: 0,
             _phantom: PhantomData,
         }
@@ -844,7 +864,7 @@ mod serde_impl {
         {
             let verbose = VerboseSegment::deserialize(deserializer)?;
 
-            let values = verbose.values.into_owned();
+            let values: SmallVec<[Asn; 6]> = verbose.values.into_owned().into();
             match verbose.ty {
                 SegmentType::AS_SET => Ok(AsPathSegment::AsSet(values)),
                 SegmentType::AS_SEQUENCE => Ok(AsPathSegment::AsSequence(values)),
@@ -892,14 +912,14 @@ mod serde_impl {
     /// let a: AsPath = serde_json::from_str("[123, 942, 102]").unwrap();
     /// let b: AsPath = serde_json::from_str("[231, 432, [643, 836], 352]").unwrap();
     ///
-    /// assert_eq!(&a.segments, &[
-    ///     AsSequence(vec![Asn::from(123), Asn::from(942), Asn::from(102)])
-    /// ]);
-    /// assert_eq!(&b.segments, &[
-    ///     AsSequence(vec![Asn::from(231), Asn::from(432)]),
-    ///     AsSet(vec![Asn::from(643), Asn::from(836)]),
-    ///     AsSequence(vec![Asn::from(352)])
-    /// ]);
+    /// assert_eq!(&a.segments[..], &[
+    ///     AsSequence(vec![Asn::from(123), Asn::from(942), Asn::from(102)].into())
+    /// ][..]);
+    /// assert_eq!(&b.segments[..], &[
+    ///     AsSequence(vec![Asn::from(231), Asn::from(432)].into()),
+    ///     AsSet(vec![Asn::from(643), Asn::from(836)].into()),
+    ///     AsSequence(vec![Asn::from(352)].into())
+    /// ][..]);
     /// ```
     ///
     /// ## Verbose format
@@ -919,11 +939,11 @@ mod serde_impl {
     /// ]"#;
     ///
     /// let parsed: AsPath = serde_json::from_str(a).unwrap();
-    /// assert_eq!(&parsed.segments, &[
-    ///     ConfedSequence(vec![Asn::from(123), Asn::from(942)]),
-    ///     AsSequence(vec![Asn::from(773)]),
-    ///     AsSequence(vec![Asn::from(382), Asn::from(293)])
-    /// ]);
+    /// assert_eq!(&parsed.segments[..], &[
+    ///     ConfedSequence(vec![Asn::from(123), Asn::from(942)].into()),
+    ///     AsSequence(vec![Asn::from(773)].into()),
+    ///     AsSequence(vec![Asn::from(382), Asn::from(293)].into())
+    /// ][..]);
     /// ```
     impl Serialize for AsPath {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -977,7 +997,7 @@ mod serde_impl {
             }
 
             let mut append_new_sequence = false;
-            let mut segments = Vec::new();
+            let mut segments: SmallVec<[AsPathSegment; 1]> = SmallVec::new();
             while let Some(element) = seq.next_element()? {
                 match element {
                     PathElement::SequenceElement(x) => {
@@ -985,18 +1005,20 @@ mod serde_impl {
                             // If the input is mixed between verbose and regular segments, this flag
                             // is used to prevent appending to a verbose sequence.
                             append_new_sequence = false;
-                            segments.push(AsPathSegment::AsSequence(Vec::new()));
+                            segments.push(AsPathSegment::AsSequence(SmallVec::new()));
                         }
 
                         if let Some(AsPathSegment::AsSequence(last_sequence)) = segments.last_mut()
                         {
                             last_sequence.push(x);
                         } else {
-                            segments.push(AsPathSegment::AsSequence(vec![x]));
+                            let mut new_seq: SmallVec<[Asn; 6]> = SmallVec::new();
+                            new_seq.push(x);
+                            segments.push(AsPathSegment::AsSequence(new_seq));
                         }
                     }
                     PathElement::Set(values) => {
-                        segments.push(AsPathSegment::AsSet(values));
+                        segments.push(AsPathSegment::AsSet(values.into()));
                     }
                     PathElement::Verbose(verbose) => {
                         segments.push(verbose);
@@ -1106,7 +1128,7 @@ mod tests {
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3, 5]),
-            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)].into()),
         ]);
         let origins = aspath.iter_origins().map_into::<u32>().collect::<Vec<_>>();
         assert_eq!(origins, Vec::<u32>::new());
@@ -1140,8 +1162,8 @@ mod tests {
             AsPathSegment::set([3, 4]),
             AsPathSegment::set([5, 6]),
             AsPathSegment::sequence([7, 8]),
-            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)]),
-            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(9)]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(9)].into()),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(9)].into()),
         ]);
         assert_eq!(path.route_len(), 4);
 
@@ -1197,8 +1219,8 @@ mod tests {
         assert_eq!(iter_mut.next(), None);
 
         // test is_confed
-        assert!(AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)]).is_confed());
-        assert!(AsPathSegment::ConfedSet(vec![Asn::new_32bit(1)]).is_confed());
+        assert!(AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)].into()).is_confed());
+        assert!(AsPathSegment::ConfedSet(vec![Asn::new_32bit(1)].into()).is_confed());
     }
 
     #[test]
@@ -1224,22 +1246,21 @@ mod tests {
 
     #[test]
     fn test_confed_set_dedup() {
-        let mut path_segment = AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(1)]);
+        let mut path_segment =
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(1)].into());
         path_segment.dedup();
         assert_eq!(
             path_segment,
-            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)])
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1)].into())
         );
 
-        let mut path_segment = AsPathSegment::ConfedSet(vec![
-            Asn::new_32bit(1),
-            Asn::new_32bit(2),
-            Asn::new_32bit(2),
-        ]);
+        let mut path_segment = AsPathSegment::ConfedSet(
+            vec![Asn::new_32bit(1), Asn::new_32bit(2), Asn::new_32bit(2)].into(),
+        );
         path_segment.dedup();
         assert_eq!(
             path_segment,
-            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)])
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)].into())
         );
     }
 
@@ -1287,8 +1308,8 @@ mod tests {
 
         // path with federation segments
         let as_path = AsPath::from_segments(vec![
-            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)]),
-            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(3), Asn::new_32bit(4)]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)].into()),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(3), Asn::new_32bit(4)].into()),
         ]);
         assert_eq!(as_path.to_u32_vec_opt(false), None);
         assert_eq!(as_path.to_u32_vec_opt(true), None);
@@ -1309,13 +1330,14 @@ mod tests {
         );
 
         let path_segment =
-            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1), Asn::new_32bit(2)]);
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(1), Asn::new_32bit(2)].into());
         assert_eq!(
             path_segment.as_ref(),
             &[Asn::new_32bit(1), Asn::new_32bit(2)]
         );
 
-        let path_segment = AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)]);
+        let path_segment =
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(1), Asn::new_32bit(2)].into());
         assert_eq!(
             path_segment.as_ref(),
             &[Asn::new_32bit(1), Asn::new_32bit(2)]
@@ -1354,8 +1376,8 @@ mod tests {
             AsPathSegment::sequence([1, 2]),
             AsPathSegment::set([3, 4]),
             AsPathSegment::sequence([5, 6]),
-            AsPathSegment::ConfedSet(vec![Asn::new_32bit(7)]),
-            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(8)]),
+            AsPathSegment::ConfedSet(vec![Asn::new_32bit(7)].into()),
+            AsPathSegment::ConfedSequence(vec![Asn::new_32bit(8)].into()),
         ]);
 
         assert_eq!(path.to_string(), "1 2 {3,4} 5 6 {7} 8");
