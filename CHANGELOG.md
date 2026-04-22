@@ -6,12 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
-* **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4):
+* **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4).
+  Note: RFC 8277 obsoletes RFC 3107; both are supported for compatibility:
   - New `MplsLabel` type with label value, TC, S-bit, and TTL
   - `LabeledNetworkPrefix` combining prefix with label stack (`SmallVec<[MplsLabel; 2]>`)
-  - `LabeledNlriConfig` for configurable parsing modes (SingleLabel vs MultiLabel)
+  - `LabeledNlriConfig` for configurable parsing modes; default is MultiLabel (handles both single and stacked labels)
   - `Safi::MplsLabel = 4` added to SAFI enum
-  - NLRI attribute updated with `labeled_prefixes` field for MPLS announcements
+  - `Nlri` struct (inner type of `MpReachNlri`/`MpUnreachNlri`) updated with `labeled_prefixes` field for MPLS announcements
   - Error variants for labeled NLRI parsing failures
 
 ### Performance improvements
@@ -23,7 +24,10 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
-* **`Nlri` struct**: Added `labeled_prefixes: Option<Vec<LabeledNetworkPrefix>>` field for MPLS labeled prefixes (SAFI 4)
+* **`Nlri` struct**: Added `labeled_prefixes: Option<Vec<LabeledNetworkPrefix>>` field.
+  This field is `None` for all non-MPLS routes (SAFI ≠ 4) and is populated only when
+  `safi == Safi::MplsLabel`. If you pattern-match or destructure `Nlri`, add `..` or
+  handle the new field. No behavior change for existing IPv4/IPv6 unicast parsing.
 
 ### Fixed
 

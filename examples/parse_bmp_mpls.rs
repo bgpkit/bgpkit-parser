@@ -62,8 +62,6 @@ fn create_bmp_mpls_message() -> Vec<u8> {
     )));
     attributes.add_attr(Attribute::from(AttributeValue::MpReachNlri(nlri)));
 
-    // Debug: print attributes before encoding
-
     // Create the BGP UPDATE message
     let bgp_update = BgpUpdateMessage {
         withdrawn_prefixes: vec![],
@@ -217,12 +215,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
 
-                                    // Interpret the label stack
+                                    // Example interpretation (label semantics are deployment-specific):
+                                    // In typical MPLS VPN deployments, the outer label is for transport
+                                    // (traffic engineering, LDP, or SR) and the inner label identifies
+                                    // the VPN or service. However, these semantics are not enforced by
+                                    // the protocol - they're determined by network configuration.
                                     if labeled.labels.len() >= 2 {
-                                        println!("\n       Interpretation:");
-                                        println!("         - Outer label ({}): Traffic engineering / transport label", 
+                                        println!("\n       Typical usage example:");
+                                        println!("         - Outer label ({}): Often used for transport / traffic engineering", 
                                                  labeled.labels[0].value());
-                                        println!("         - Inner label ({}): VPN identifier / service label", 
+                                        println!("         - Inner label ({}): Often identifies VPN / service", 
                                                  labeled.labels[1].value());
                                     }
                                 }
