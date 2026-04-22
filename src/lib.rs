@@ -750,6 +750,7 @@ BGPKIT Parser implements comprehensive BGP, MRT, BMP, and related protocol stand
 - [RFC 5065](https://datatracker.ietf.org/doc/html/rfc5065): Autonomous System Confederations for BGP
 - [RFC 5492](https://datatracker.ietf.org/doc/html/rfc5492): Capabilities Advertisement with BGP-4
 - [RFC 7606](https://datatracker.ietf.org/doc/html/rfc7606): Revised Error Handling for BGP UPDATE Messages
+- [RFC 8277](https://datatracker.ietf.org/doc/html/rfc8277): Using BGP to Bind MPLS Labels to Address Prefixes (obsoletes RFC 3107)
 - [RFC 8654](https://datatracker.ietf.org/doc/html/rfc8654): Extended Message Support for BGP
 - [RFC 8950](https://datatracker.ietf.org/doc/html/rfc8950): Advertising IPv4 NLRI with an IPv6 Next Hop
 - [RFC 9072](https://datatracker.ietf.org/doc/html/rfc9072): Extended Optional Parameters Length for BGP OPEN Message
