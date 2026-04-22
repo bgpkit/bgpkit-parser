@@ -159,13 +159,13 @@ impl std::error::Error for MplsLabelError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LabeledNlriMode {
-    /// RFC 8277 §2.2: Single-label encoding (no Multiple Labels Capability negotiated)
-    ///
-    /// This is the conservative default - it ensures we don't misparse by expecting
-    /// BoS delimiters that aren't there.
-    #[default]
+    /// RFC 8277 §2.2: Single-label encoding (no Multiple Labels Capability negotiated).
+    /// In this mode, exactly one label is expected and the S-bit is ignored.
+    /// Note: Using this mode with multi-label data will result in parse errors.
     SingleLabel,
-    /// RFC 8277 §2.3: Multi-label encoding (Multiple Labels Capability negotiated)
+    /// RFC 8277 §2.3: Multi-label encoding (Multiple Labels Capability negotiated).
+    /// This is the default as it correctly handles both single-label and multi-label prefixes.
+    #[default]
     MultiLabel,
 }
 

@@ -430,8 +430,24 @@ impl Attribute {
             }
             AttributeValue::OriginatorId(v) => encode_originator_id(&IpAddr::from(*v)),
             AttributeValue::Clusters(v) => encode_clusters(v),
-            AttributeValue::MpReachNlri(v) => encode_nlri(v, true),
-            AttributeValue::MpUnreachNlri(v) => encode_nlri(v, false),
+            AttributeValue::MpReachNlri(v) => {
+                // Infer ADD-PATH from presence of path_id in any labeled prefix
+                let add_path = v
+                    .labeled_prefixes
+                    .as_ref()
+                    .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()));
+                encode_nlri(v, true, add_path).unwrap_or_else(|e| {
+                    log::warn!("Failed to encode MP_REACH_NLRI: {}", e);
+                    Bytes::new()
+                })
+            }
+            AttributeValue::MpUnreachNlri(v) => {
+                // Withdrawals don't use ADD-PATH encoding per RFC 8277
+                encode_nlri(v, false, false).unwrap_or_else(|e| {
+                    log::warn!("Failed to encode MP_UNREACH_NLRI: {}", e);
+                    Bytes::new()
+                })
+            }
             AttributeValue::LinkState(v) => encode_link_state_attribute(v),
             AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),

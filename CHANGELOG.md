@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 * **`Attributes::check_mandatory_attributes()`**: New method to validate mandatory attributes with proper NLRI context awareness. Must be called after NLRI parsing to correctly determine requirements.
 * **`Attributes::attr_mask`**: Internal `[u64; 4]` bitmask field for O(1) attribute presence tracking (32 bytes vs 256 bytes for `[bool; 256]`)
 * **Integration tests**: Added `tests/test_bgp_update_validation.rs` with comprehensive scenario coverage for all validation cases
+* **Example `examples/parse_bmp_mpls.rs`**: Demonstrates extracting MPLS-labeled NLRI from BMP Route Monitoring messages, showing how to access label stack information via `MpReachNlri` attribute
 
 ### Changed
 

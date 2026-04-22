@@ -78,11 +78,11 @@ pub fn parse_nlri(
             (Vec::new(), None, link_state_list)
         } else if safi == Safi::MplsLabel {
             // Parse MPLS-labeled NLRI (RFC 3107/8277)
-            // For now, use conservative defaults since session state isn't available here
-            // TODO: Pass session capability state through the parser context
+            // Use MultiLabel mode as default since it handles both single and multiple labels
+            // SingleLabel mode would fail on multi-label data due to prefix_bits validation
             let config = LabeledNlriConfig {
                 add_path: additional_paths,
-                mode: LabeledNlriMode::SingleLabel, // Conservative default
+                mode: LabeledNlriMode::MultiLabel, // Handles both single and multiple labels
                 max_labels: 16,
                 peer_max_labels: None,
             };
@@ -145,8 +145,14 @@ pub fn parse_nlri(
     }
 }
 
-/// Encode a NLRI attribute.
-pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
+/// Encode NLRI attribute to wire format.
+///
+/// # Arguments
+/// * `nlri` - The NLRI to encode
+/// * `reachable` - Whether this is MP_REACH_NLRI (true) or MP_UNREACH_NLRI (false)
+/// * `add_path` - Whether ADD-PATH capability was negotiated (RFC 7911). If true,
+///   path_id will be encoded; if false, prefixes with path_id will cause an error.
+pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Result<Bytes, ParserError> {
     let mut bytes = BytesMut::new();
 
     // encode address family
@@ -185,13 +191,35 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
         bytes.put_slice(&next_hop_bytes);
     }
 
-    // write reserved byte for reachable NRLI
-    if reachable {
-        bytes.put_u8(0);
-    }
+    // Handle MPLS-labeled NLRI encoding (SAFI 4 per RFC 3107/8277)
+    if nlri.safi == Safi::MplsLabel {
+        // RFC 8277: Write reserved byte for reachable NLRI
+        if reachable {
+            bytes.put_u8(0);
+        }
+        if let Some(labeled_prefixes) = &nlri.labeled_prefixes {
+            // Choose mode based on label count: SingleLabel for 1 label, MultiLabel for multiple
+            for labeled in labeled_prefixes {
+                let mode = if labeled.labels.len() <= 1 {
+                    crate::models::LabeledNlriMode::SingleLabel
+                } else {
+                    crate::models::LabeledNlriMode::MultiLabel
+                };
 
-    // Handle Link-State NLRI encoding
-    if nlri.afi == Afi::LinkState {
+                let encoded = crate::models::encode_labeled_prefix(
+                    labeled, mode, add_path, None, // peer_max_labels
+                )
+                .map_err(|e| {
+                    ParserError::ParseError(format!("Failed to encode labeled prefix: {:?}", e))
+                })?;
+                bytes.extend_from_slice(&encoded);
+            }
+        }
+    } else if nlri.afi == Afi::LinkState {
+        // RFC 7752: Write reserved byte for reachable Link-State NLRI
+        if reachable {
+            bytes.put_u8(0);
+        }
         if let Some(link_state_nlris) = &nlri.link_state_nlris {
             // Encode Link-State NLRI entries
             for ls_nlri in link_state_nlris {
@@ -202,13 +230,17 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool) -> Bytes {
             }
         }
     } else {
+        // For traditional IP NLRI, write reserved byte for reachable NLRI per RFC 4760
+        if reachable {
+            bytes.put_u8(0);
+        }
         // NLRI for traditional IP prefixes
         for prefix in &nlri.prefixes {
             bytes.extend(prefix.encode());
         }
     }
 
-    bytes.freeze()
+    Ok(bytes.freeze())
 }
 
 #[cfg(test)]
@@ -357,7 +389,7 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, true);
+        let bytes = encode_nlri(&nlri, true, false).unwrap();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -388,7 +420,7 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, true);
+        let bytes = encode_nlri(&nlri, true, true).unwrap();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -447,7 +479,7 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, false);
+        let bytes = encode_nlri(&nlri, false, false).unwrap();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -480,7 +512,7 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri_with_next_hop, false);
+        let bytes = encode_nlri(&nlri_with_next_hop, false, false).unwrap();
         // The encoded bytes should include the next_hop
         assert_eq!(
             bytes,
