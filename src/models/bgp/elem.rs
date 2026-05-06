@@ -156,6 +156,29 @@ pub struct BgpElem {
     pub deprecated: Option<Vec<AttrRaw>>,
 }
 
+/// Lightweight per-prefix route element.
+///
+/// This struct is intended for fast scans that only need route identity,
+/// peer metadata, timestamp, and AS path. Use [`BgpElem`] when you need the
+/// full set of BGP attributes.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpRouteElem {
+    /// The timestamp of the item in floating-point format.
+    pub timestamp: f64,
+    /// The element type of an item.
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
+    pub elem_type: ElemType,
+    /// The IP address of the peer associated with the item.
+    pub peer_ip: IpAddr,
+    /// The peer ASN of the item.
+    pub peer_asn: Asn,
+    /// The network prefix of the item.
+    pub prefix: NetworkPrefix,
+    /// The optional path representation of the item.
+    pub as_path: Option<AsPath>,
+}
+
 impl Eq for BgpElem {}
 
 impl PartialOrd<Self> for BgpElem {

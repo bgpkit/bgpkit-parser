@@ -22,7 +22,8 @@ use crate::models::*;
 
 use crate::error::{BgpValidationWarning, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
-use crate::parser::bgp::attributes::attr_02_17_as_path::{encode_as_path, parse_as_path};
+use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
+pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
 use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
 use crate::parser::bgp::attributes::attr_05_local_pref::{encode_local_pref, parse_local_pref};
@@ -34,7 +35,8 @@ use crate::parser::bgp::attributes::attr_09_originator::{
     encode_originator_id, parse_originator_id,
 };
 use crate::parser::bgp::attributes::attr_10_13_cluster::{encode_clusters, parse_clusters};
-use crate::parser::bgp::attributes::attr_14_15_nlri::{encode_nlri, parse_nlri};
+use crate::parser::bgp::attributes::attr_14_15_nlri::encode_nlri;
+pub(crate) use crate::parser::bgp::attributes::attr_14_15_nlri::parse_nlri;
 use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
     encode_extended_communities, encode_ipv6_extended_communities, parse_extended_community,
     parse_ipv6_extended_community,
@@ -128,6 +130,123 @@ fn is_well_known_mandatory(attr_type: AttrType) -> bool {
     )
 }
 
+pub(crate) struct AttributeValidationState {
+    warnings: Vec<BgpValidationWarning>,
+    attr_mask: [u64; 4],
+}
+
+impl AttributeValidationState {
+    pub(crate) fn new() -> Self {
+        Self {
+            warnings: Vec::new(),
+            attr_mask: [0; 4],
+        }
+    }
+
+    fn has_raw_attr(&self, attr: u8) -> bool {
+        (self.attr_mask[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
+    }
+
+    pub(crate) fn has_attr(&self, attr_type: AttrType) -> bool {
+        self.has_raw_attr(u8::from(attr_type))
+    }
+
+    fn set_attr(&mut self, attr: u8) {
+        self.attr_mask[(attr / 64) as usize] |= 1u64 << (attr % 64);
+    }
+
+    pub(crate) fn observe_header(
+        &mut self,
+        raw_attr_type: u8,
+        attr_type: AttrType,
+        flags: AttrFlags,
+        length: usize,
+    ) -> bool {
+        if self.has_raw_attr(raw_attr_type) {
+            self.warnings
+                .push(BgpValidationWarning::DuplicateAttribute { attr_type });
+        }
+        self.set_attr(raw_attr_type);
+
+        validate_attribute_flags(attr_type, flags, &mut self.warnings);
+        validate_attribute_length(attr_type, length, &mut self.warnings);
+
+        flags.contains(AttrFlags::PARTIAL)
+    }
+
+    pub(crate) fn observe_parse_error(
+        &mut self,
+        attr_type: AttrType,
+        partial: bool,
+        error: &ParserError,
+    ) {
+        if partial {
+            self.warnings
+                .push(BgpValidationWarning::PartialAttributeError {
+                    attr_type,
+                    reason: error.to_string(),
+                });
+            debug!("PARTIAL attribute error: {}", error);
+        } else if is_well_known_mandatory(attr_type) {
+            self.warnings
+                .push(BgpValidationWarning::MalformedAttributeList {
+                    reason: format!(
+                        "Well-known mandatory attribute {} parsing failed: {}",
+                        u8::from(attr_type),
+                        error
+                    ),
+                });
+            debug!(
+                "Well-known mandatory attribute parsing failed, treating as withdraw: {}",
+                error
+            );
+        } else {
+            self.warnings
+                .push(BgpValidationWarning::OptionalAttributeError {
+                    attr_type,
+                    reason: error.to_string(),
+                });
+            debug!("Optional attribute error, discarding: {}", error);
+        }
+    }
+
+    pub(crate) fn check_mandatory_attributes(
+        &mut self,
+        is_announcement: bool,
+        has_standard_nlri: bool,
+    ) {
+        if !is_announcement {
+            return;
+        }
+
+        if !self.has_attr(AttrType::ORIGIN) {
+            self.warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::ORIGIN,
+                });
+        }
+
+        if !self.has_attr(AttrType::AS_PATH) {
+            self.warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::AS_PATH,
+                });
+        }
+
+        let has_mp_reach = self.has_attr(AttrType::MP_REACHABLE_NLRI);
+        if (has_standard_nlri || !has_mp_reach) && !self.has_attr(AttrType::NEXT_HOP) {
+            self.warnings
+                .push(BgpValidationWarning::MissingWellKnownAttribute {
+                    attr_type: AttrType::NEXT_HOP,
+                });
+        }
+    }
+
+    pub(crate) fn finish(self) -> (Vec<BgpValidationWarning>, [u64; 4]) {
+        (self.warnings, self.attr_mask)
+    }
+}
+
 /// Validate attribute length constraints
 fn validate_attribute_length(
     attr_type: AttrType,
@@ -184,16 +303,7 @@ pub fn parse_attributes(
     // (flag + type + length). Cap at 256 to avoid over-allocation for corrupted data.
     let estimated_attrs = (data.remaining() / 3).min(256);
     let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs.max(8));
-    let mut validation_warnings: Vec<BgpValidationWarning> = Vec::new();
-
-    // Bitmask for seen attributes (256 bits total, using 4x u64). Fits in registers/cache easily.
-    let mut seen_attributes: [u64; 4] = [0; 4];
-    let has_attr = |seen: &[u64; 4], attr: u8| -> bool {
-        (seen[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
-    };
-    let set_attr = |seen: &mut [u64; 4], attr: u8| {
-        seen[(attr / 64) as usize] |= 1u64 << (attr % 64);
-    };
+    let mut validation = AttributeValidationState::new();
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -207,21 +317,6 @@ pub fn parse_attributes(
             true => data.read_u16()? as usize,
         };
 
-        let mut partial = false;
-        if flag.contains(AttrFlags::PARTIAL) {
-            /*
-                https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-
-            > The third high-order bit (bit 2) of the Attribute Flags octet
-            > is the Partial bit.  It defines whether the information
-            > contained in the optional transitive attribute is partial (if
-            > set to 1) or complete (if set to 0).  For well-known attributes
-            > and for optional non-transitive attributes, the Partial bit
-            > MUST be set to 0.
-            */
-            partial = true;
-        }
-
         debug!(
             "reading attribute: type -- {:?}, length -- {}",
             &attr_type, attr_length
@@ -229,18 +324,7 @@ pub fn parse_attributes(
 
         let parsed_attr_type = AttrType::from(attr_type);
 
-        // RFC 7606: Check for duplicate attributes
-        if has_attr(&seen_attributes, attr_type) {
-            validation_warnings.push(BgpValidationWarning::DuplicateAttribute {
-                attr_type: parsed_attr_type,
-            });
-            // Continue processing - don't skip duplicate for now
-        }
-        set_attr(&mut seen_attributes, attr_type);
-
-        // Validate attribute flags and length
-        validate_attribute_flags(parsed_attr_type, flag, &mut validation_warnings);
-        validate_attribute_length(parsed_attr_type, attr_length, &mut validation_warnings);
+        let partial = validation.observe_header(attr_type, parsed_attr_type, flag, attr_length);
 
         let attr_type = match parsed_attr_type {
             attr_type @ AttrType::Unknown(unknown_type) => {
@@ -349,46 +433,17 @@ pub fn parse_attributes(
                 attributes.push(Attribute { value, flag });
             }
             Err(e) => {
-                // RFC 7606 error handling
-                if partial {
-                    // Partial attribute with errors - log warning but continue
-                    validation_warnings.push(BgpValidationWarning::PartialAttributeError {
-                        attr_type,
-                        reason: e.to_string(),
-                    });
-                    debug!("PARTIAL attribute error: {}", e);
-                } else if is_well_known_mandatory(attr_type) {
-                    // For well-known mandatory attributes, use "treat-as-withdraw" approach
-                    // Don't break parsing, but log warning
-                    validation_warnings.push(BgpValidationWarning::MalformedAttributeList {
-                        reason: format!(
-                            "Well-known mandatory attribute {} parsing failed: {}",
-                            u8::from(attr_type),
-                            e
-                        ),
-                    });
-                    debug!(
-                        "Well-known mandatory attribute parsing failed, treating as withdraw: {}",
-                        e
-                    );
-                } else {
-                    // For optional attributes, use "attribute discard" approach
-                    validation_warnings.push(BgpValidationWarning::OptionalAttributeError {
-                        attr_type,
-                        reason: e.to_string(),
-                    });
-                    debug!("Optional attribute error, discarding: {}", e);
-                }
-                // Continue parsing in all cases - never break the session
+                validation.observe_parse_error(attr_type, partial, &e);
                 continue;
             }
         };
     }
 
+    let (validation_warnings, attr_mask) = validation.finish();
     Ok(Attributes {
         inner: attributes,
         validation_warnings,
-        attr_mask: seen_attributes,
+        attr_mask,
     })
 }
 

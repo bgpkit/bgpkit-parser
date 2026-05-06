@@ -636,6 +636,58 @@ impl Filterable for BgpElem {
     }
 }
 
+impl Filterable for BgpRouteElem {
+    fn match_filter(&self, filter: &Filter) -> bool {
+        match filter {
+            Filter::Negated(inner) => !self.match_filter(inner),
+            Filter::OriginAsn(v) => {
+                let asn: Asn = (*v).into();
+                self.as_path
+                    .as_ref()
+                    .map(|path| path.iter_origins().any(|origin| origin == asn))
+                    .unwrap_or(false)
+            }
+            Filter::OriginAsns(v) => self
+                .as_path
+                .as_ref()
+                .map(|path| {
+                    path.iter_origins().any(|origin| {
+                        v.iter().any(|asn| {
+                            let asn_obj: Asn = (*asn).into();
+                            origin == asn_obj
+                        })
+                    })
+                })
+                .unwrap_or(false),
+            Filter::Prefix(v, t) => prefix_match(v, &self.prefix.prefix, t),
+            Filter::Prefixes(v, t) => v
+                .iter()
+                .any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
+            Filter::PeerIp(v) => self.peer_ip == *v,
+            Filter::PeerIps(v) => v.contains(&self.peer_ip),
+            Filter::PeerAsn(v) => self.peer_asn.eq(v),
+            Filter::PeerAsns(v) => v.iter().any(|asn| self.peer_asn.eq(asn)),
+            Filter::Type(v) => self.elem_type.eq(v),
+            Filter::TsStart(v) => self.timestamp >= *v,
+            Filter::TsEnd(v) => self.timestamp <= *v,
+            Filter::AsPath(v) => self
+                .as_path
+                .as_ref()
+                .map(|path| v.is_match(path.to_string().as_str()))
+                .unwrap_or(false),
+            Filter::Community(_) => false,
+            Filter::IpVersion(version) => match version {
+                IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
+                IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
+            },
+        }
+    }
+
+    fn match_filters(&self, filters: &[Filter]) -> bool {
+        filters.iter().all(|f| self.match_filter(f))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

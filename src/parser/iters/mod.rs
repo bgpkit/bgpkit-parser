@@ -13,12 +13,14 @@ Rust's iterator syntax.
 pub mod default;
 pub mod fallible;
 mod raw;
+mod route;
 mod update;
 
 // Re-export all iterator types for convenience
 pub use default::{ElemIterator, RecordIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
+pub use route::{FallibleRouteIterator, RouteIterator};
 pub use update::{
     Bgp4MpUpdate, FallibleUpdateIterator, MrtUpdate, TableDumpV2Entry, UpdateIterator,
 };
@@ -96,6 +98,16 @@ impl<R> BgpkitParser<R> {
         UpdateIterator::new(self)
     }
 
+    /// Creates an iterator over lightweight route elements from MRT data.
+    ///
+    /// This iterator yields [`BgpRouteElem`](crate::models::BgpRouteElem)
+    /// values and only parses route identity, peer metadata, timestamp, and
+    /// AS path. Use [`into_elem_iter`](Self::into_elem_iter) when you need
+    /// the full [`BgpElem`](crate::models::BgpElem) attribute set.
+    pub fn into_route_iter(self) -> RouteIterator<R> {
+        RouteIterator::new(self)
+    }
+
     /// Creates a fallible iterator over MRT records that returns parsing errors.
     ///
     /// # Example
@@ -170,6 +182,11 @@ impl<R> BgpkitParser<R> {
     /// ```
     pub fn into_fallible_update_iter(self) -> FallibleUpdateIterator<R> {
         FallibleUpdateIterator::new(self)
+    }
+
+    /// Creates a fallible iterator over lightweight route elements.
+    pub fn into_fallible_route_iter(self) -> FallibleRouteIterator<R> {
+        FallibleRouteIterator::new(self)
     }
 
     /// Creates an Elementor pre-initialized with PeerIndexTable and an iterator over raw records.

@@ -839,6 +839,7 @@ pub mod parser;
 pub mod wasm;
 
 pub use models::BgpElem;
+pub use models::BgpRouteElem;
 pub use models::MrtRecord;
 #[cfg(feature = "parser")]
 pub use parser::*;
