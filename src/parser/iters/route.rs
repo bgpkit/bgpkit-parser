@@ -705,6 +705,40 @@ mod tests {
         }
     }
 
+    fn table_dump_record() -> MrtRecord {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        attributes.add_attr(
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([64500, 64501]),
+                is_as4: false,
+            }
+            .into(),
+        );
+        attributes
+            .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
+
+        MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP,
+                entry_subtype: 1,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpMessage(TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("203.0.113.0/24").unwrap(),
+                status: 1,
+                originated_time: 1_699_999_998,
+                peer_ip: IpAddr::from_str("192.0.2.20").unwrap(),
+                peer_asn: Asn::new_16bit(64496),
+                attributes,
+            }),
+        }
+    }
+
     fn table_dump_v2_records_bytes() -> Vec<u8> {
         let peer = Peer::new(
             "192.0.2.10".parse().unwrap(),
@@ -762,6 +796,29 @@ mod tests {
         bytes
     }
 
+    fn assert_filtered_route_projection(bytes: Vec<u8>, filters: &[(&str, &str)]) {
+        let elem_parser = filters.iter().fold(
+            BgpkitParser::from_reader(Cursor::new(bytes.clone())),
+            |parser, (filter_type, filter_value)| {
+                parser.add_filter(filter_type, filter_value).unwrap()
+            },
+        );
+        let route_parser = filters.iter().fold(
+            BgpkitParser::from_reader(Cursor::new(bytes)),
+            |parser, (filter_type, filter_value)| {
+                parser.add_filter(filter_type, filter_value).unwrap()
+            },
+        );
+
+        let elem_projection = elem_parser
+            .into_elem_iter()
+            .map(route_projection)
+            .collect::<Vec<_>>();
+        let routes = route_parser.into_route_iter().collect::<Vec<_>>();
+
+        assert_eq!(routes, elem_projection, "filters: {filters:?}");
+    }
+
     #[test]
     fn route_iterator_matches_elem_projection_for_update() {
         let bytes = update_record().encode().to_vec();
@@ -778,6 +835,32 @@ mod tests {
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
         assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
         assert!(routes[1].as_path.is_none());
+    }
+
+    #[test]
+    fn route_iterator_filters_match_elem_projection_for_update() {
+        let bytes = update_record().encode().to_vec();
+        let cases: &[&[(&str, &str)]] = &[
+            &[("peer_ip", "192.0.2.1")],
+            &[("peer_ip", "192.0.2.99")],
+            &[("peer_asn", "64496")],
+            &[("type", "a")],
+            &[("type", "w")],
+            &[("type", "!w")],
+            &[("prefix", "203.0.113.0/24")],
+            &[("prefix", "198.51.100.0/24")],
+            &[("prefix_super", "203.0.113.128/25")],
+            &[("origin_asn", "64501")],
+            &[("origin_asns", "64496,64501")],
+            &[("as_path", "64500 64501$")],
+            &[("ip_version", "4")],
+            &[("ts_start", "1700000000"), ("ts_end", "1700000000")],
+            &[("peer_ip", "192.0.2.1"), ("type", "a")],
+        ];
+
+        for filters in cases {
+            assert_filtered_route_projection(bytes.clone(), filters);
+        }
     }
 
     #[test]
@@ -819,6 +902,23 @@ mod tests {
     }
 
     #[test]
+    fn route_iterator_matches_elem_projection_for_table_dump() {
+        let bytes = table_dump_record().encode().to_vec();
+        let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
+            .into_elem_iter()
+            .map(route_projection)
+            .collect::<Vec<_>>();
+        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
+            .into_route_iter()
+            .collect::<Vec<_>>();
+
+        assert_eq!(routes, elem_projection);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].timestamp, 1_699_999_998.0);
+        assert_eq!(routes[0].peer_asn, Asn::new_16bit(64496));
+    }
+
+    #[test]
     fn route_iterator_matches_elem_projection_for_table_dump_v2() {
         let bytes = table_dump_v2_records_bytes();
         let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
@@ -836,5 +936,55 @@ mod tests {
             routes[0].as_path.as_ref().unwrap().to_u32_vec_opt(false),
             Some(vec![64500, 64501])
         );
+    }
+
+    #[test]
+    fn route_iterator_filters_match_elem_projection_for_table_dump_v2() {
+        let bytes = table_dump_v2_records_bytes();
+        let cases: &[&[(&str, &str)]] = &[
+            &[("peer_ip", "192.0.2.10")],
+            &[("peer_asn", "64496")],
+            &[("type", "a")],
+            &[("type", "w")],
+            &[("prefix", "203.0.113.0/24")],
+            &[("prefix_sub", "203.0.112.0/23")],
+            &[("origin_asn", "64501")],
+            &[("as_path", "64500 64501$")],
+            &[("ts_start", "1699999999"), ("ts_end", "1699999999")],
+            &[("peer_asn", "64496"), ("origin_asn", "64501")],
+        ];
+
+        for filters in cases {
+            assert_filtered_route_projection(bytes.clone(), filters);
+        }
+    }
+
+    #[test]
+    fn fallible_route_iterator_yields_routes() {
+        let bytes = update_record().encode().to_vec();
+        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
+            .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
+        assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
+    }
+
+    #[test]
+    fn fallible_route_iterator_returns_parse_errors() {
+        let invalid_data = vec![
+            0x00, 0x00, 0x00, 0x00, // timestamp
+            0xFF, 0xFF, // invalid type
+            0x00, 0x00, // subtype
+            0x00, 0x00, 0x00, 0x04, // length
+            0x00, 0x00, 0x00, 0x00, // dummy data
+        ];
+
+        let mut iter =
+            BgpkitParser::from_reader(Cursor::new(invalid_data)).into_fallible_route_iter();
+
+        assert!(iter.next().unwrap().is_err());
     }
 }

@@ -108,8 +108,9 @@ the filter type string. For multiple prefixes, use `"prefixes_super"`, `"prefixe
 
 ### Note
 
-Currently, only [BgpElem] implements the filtering capability. Support for [MrtRecord] will come in
-later releases.
+[BgpElem] and [BgpRouteElem] implement the filtering capability. Route-level filtering only has
+access to route identity, peer metadata, timestamp, and AS path, so `community` filters do not match
+[BgpRouteElem] values. Support for [MrtRecord] will come in later releases.
 
 */
 use crate::models::*;
@@ -525,6 +526,20 @@ pub trait Filterable {
     fn match_filters(&self, filters: &[Filter]) -> bool;
 }
 
+trait RouteFilterView {
+    fn timestamp(&self) -> f64;
+    fn elem_type(&self) -> ElemType;
+    fn peer_ip(&self) -> IpAddr;
+    fn peer_asn(&self) -> Asn;
+    fn prefix(&self) -> &NetworkPrefix;
+    fn as_path(&self) -> Option<&AsPath>;
+    fn matches_origin_asn(&self, asn: Asn) -> bool;
+
+    fn matches_community(&self, _regex: &ComparableRegex) -> bool {
+        false
+    }
+}
+
 const fn same_family(prefix_1: &IpNet, prefix_2: &IpNet) -> bool {
     matches!(
         (prefix_1, prefix_2),
@@ -577,58 +592,110 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
     }
 }
 
+fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
+    match filter {
+        Filter::Negated(inner) => !match_route_view_filter(view, inner),
+        Filter::OriginAsn(v) => view.matches_origin_asn((*v).into()),
+        Filter::OriginAsns(v) => v.iter().any(|asn| view.matches_origin_asn((*asn).into())),
+        Filter::Prefix(v, t) => prefix_match(v, &view.prefix().prefix, t),
+        Filter::Prefixes(v, t) => v
+            .iter()
+            .any(|prefix| prefix_match(prefix, &view.prefix().prefix, t)),
+        Filter::PeerIp(v) => view.peer_ip() == *v,
+        Filter::PeerIps(v) => v.contains(&view.peer_ip()),
+        Filter::PeerAsn(v) => view.peer_asn().eq(v),
+        Filter::PeerAsns(v) => v.iter().any(|asn| view.peer_asn().eq(asn)),
+        Filter::Type(v) => view.elem_type().eq(v),
+        Filter::TsStart(v) => view.timestamp() >= *v,
+        Filter::TsEnd(v) => view.timestamp() <= *v,
+        Filter::AsPath(v) => view
+            .as_path()
+            .map(|path| v.is_match(path.to_string().as_str()))
+            .unwrap_or(false),
+        Filter::Community(r) => view.matches_community(r),
+        Filter::IpVersion(version) => match version {
+            IpVersion::Ipv4 => view.prefix().prefix.addr().is_ipv4(),
+            IpVersion::Ipv6 => view.prefix().prefix.addr().is_ipv6(),
+        },
+    }
+}
+
+impl RouteFilterView for BgpElem {
+    fn timestamp(&self) -> f64 {
+        self.timestamp
+    }
+
+    fn elem_type(&self) -> ElemType {
+        self.elem_type
+    }
+
+    fn peer_ip(&self) -> IpAddr {
+        self.peer_ip
+    }
+
+    fn peer_asn(&self) -> Asn {
+        self.peer_asn
+    }
+
+    fn prefix(&self) -> &NetworkPrefix {
+        &self.prefix
+    }
+
+    fn as_path(&self) -> Option<&AsPath> {
+        self.as_path.as_ref()
+    }
+
+    fn matches_origin_asn(&self, asn: Asn) -> bool {
+        self.origin_asns
+            .as_ref()
+            .map(|origins| origins.contains(&asn))
+            .unwrap_or(false)
+    }
+
+    fn matches_community(&self, regex: &ComparableRegex) -> bool {
+        self.communities
+            .as_ref()
+            .map(|communities| communities.iter().any(|c| regex.is_match(c.to_string())))
+            .unwrap_or(false)
+    }
+}
+
+impl RouteFilterView for BgpRouteElem {
+    fn timestamp(&self) -> f64 {
+        self.timestamp
+    }
+
+    fn elem_type(&self) -> ElemType {
+        self.elem_type
+    }
+
+    fn peer_ip(&self) -> IpAddr {
+        self.peer_ip
+    }
+
+    fn peer_asn(&self) -> Asn {
+        self.peer_asn
+    }
+
+    fn prefix(&self) -> &NetworkPrefix {
+        &self.prefix
+    }
+
+    fn as_path(&self) -> Option<&AsPath> {
+        self.as_path.as_ref()
+    }
+
+    fn matches_origin_asn(&self, asn: Asn) -> bool {
+        self.as_path
+            .as_ref()
+            .map(|path| path.iter_origins().any(|origin| origin == asn))
+            .unwrap_or(false)
+    }
+}
+
 impl Filterable for BgpElem {
     fn match_filter(&self, filter: &Filter) -> bool {
-        match filter {
-            Filter::Negated(inner) => !self.match_filter(inner),
-            Filter::OriginAsn(v) => {
-                let asn: Asn = (*v).into();
-                if let Some(origins) = &self.origin_asns {
-                    origins.contains(&asn)
-                } else {
-                    false
-                }
-            }
-            Filter::OriginAsns(v) => {
-                if let Some(origins) = &self.origin_asns {
-                    v.iter().any(|asn| {
-                        let asn_obj: Asn = (*asn).into();
-                        origins.contains(&asn_obj)
-                    })
-                } else {
-                    false
-                }
-            }
-            Filter::Prefix(v, t) => prefix_match(v, &self.prefix.prefix, t),
-            Filter::Prefixes(v, t) => v
-                .iter()
-                .any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
-            Filter::PeerIp(v) => self.peer_ip == *v,
-            Filter::PeerIps(v) => v.contains(&self.peer_ip),
-            Filter::PeerAsn(v) => self.peer_asn.eq(v),
-            Filter::PeerAsns(v) => v.iter().any(|asn| self.peer_asn.eq(asn)),
-            Filter::Type(v) => self.elem_type.eq(v),
-            Filter::TsStart(v) => self.timestamp >= *v,
-            Filter::TsEnd(v) => self.timestamp <= *v,
-            Filter::AsPath(v) => {
-                if let Some(path) = &self.as_path {
-                    v.is_match(path.to_string().as_str())
-                } else {
-                    false
-                }
-            }
-            Filter::Community(r) => {
-                if let Some(communities) = &self.communities {
-                    communities.iter().any(|c| r.is_match(c.to_string()))
-                } else {
-                    false
-                }
-            }
-            Filter::IpVersion(version) => match version {
-                IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
-                IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
-            },
-        }
+        match_route_view_filter(self, filter)
     }
 
     fn match_filters(&self, filters: &[Filter]) -> bool {
@@ -638,49 +705,7 @@ impl Filterable for BgpElem {
 
 impl Filterable for BgpRouteElem {
     fn match_filter(&self, filter: &Filter) -> bool {
-        match filter {
-            Filter::Negated(inner) => !self.match_filter(inner),
-            Filter::OriginAsn(v) => {
-                let asn: Asn = (*v).into();
-                self.as_path
-                    .as_ref()
-                    .map(|path| path.iter_origins().any(|origin| origin == asn))
-                    .unwrap_or(false)
-            }
-            Filter::OriginAsns(v) => self
-                .as_path
-                .as_ref()
-                .map(|path| {
-                    path.iter_origins().any(|origin| {
-                        v.iter().any(|asn| {
-                            let asn_obj: Asn = (*asn).into();
-                            origin == asn_obj
-                        })
-                    })
-                })
-                .unwrap_or(false),
-            Filter::Prefix(v, t) => prefix_match(v, &self.prefix.prefix, t),
-            Filter::Prefixes(v, t) => v
-                .iter()
-                .any(|prefix| prefix_match(prefix, &self.prefix.prefix, t)),
-            Filter::PeerIp(v) => self.peer_ip == *v,
-            Filter::PeerIps(v) => v.contains(&self.peer_ip),
-            Filter::PeerAsn(v) => self.peer_asn.eq(v),
-            Filter::PeerAsns(v) => v.iter().any(|asn| self.peer_asn.eq(asn)),
-            Filter::Type(v) => self.elem_type.eq(v),
-            Filter::TsStart(v) => self.timestamp >= *v,
-            Filter::TsEnd(v) => self.timestamp <= *v,
-            Filter::AsPath(v) => self
-                .as_path
-                .as_ref()
-                .map(|path| v.is_match(path.to_string().as_str()))
-                .unwrap_or(false),
-            Filter::Community(_) => false,
-            Filter::IpVersion(version) => match version {
-                IpVersion::Ipv4 => self.prefix.prefix.addr().is_ipv4(),
-                IpVersion::Ipv6 => self.prefix.prefix.addr().is_ipv6(),
-            },
-        }
+        match_route_view_filter(self, filter)
     }
 
     fn match_filters(&self, filters: &[Filter]) -> bool {
@@ -694,6 +719,44 @@ mod tests {
     use crate::BgpkitParser;
     use anyhow::Result;
     use std::str::FromStr;
+
+    fn filter_test_elem() -> BgpElem {
+        BgpElem {
+            timestamp: 1637437798_f64,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: Asn::new_32bit(12345),
+            peer_bgp_id: None,
+            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
+            next_hop: None,
+            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
+            origin_asns: Some(vec![Asn::new_32bit(52888)]),
+            origin: None,
+            local_pref: None,
+            med: None,
+            communities: Some(vec![MetaCommunity::Large(LargeCommunity::new(
+                12345,
+                [678910, 111213],
+            ))]),
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: None,
+            unknown: None,
+            elem_type: ElemType::ANNOUNCE,
+            deprecated: None,
+        }
+    }
+
+    fn route_projection(elem: &BgpElem) -> BgpRouteElem {
+        BgpRouteElem {
+            timestamp: elem.timestamp,
+            elem_type: elem.elem_type,
+            peer_ip: elem.peer_ip,
+            peer_asn: elem.peer_asn,
+            prefix: elem.prefix,
+            as_path: elem.as_path.clone(),
+        }
+    }
 
     #[test]
     fn test_filters_on_mrt_file() {
@@ -1038,34 +1101,11 @@ mod tests {
 
     #[test]
     fn test_filterable_match_filter() {
-        let elem = BgpElem {
-            timestamp: 1637437798_f64,
-            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
-            peer_asn: Asn::new_32bit(12345),
-            peer_bgp_id: None,
-            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
-            next_hop: None,
-            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
-            origin_asns: Some(vec![Asn::new_16bit(12345)]),
-            origin: None,
-            local_pref: None,
-            med: None,
-            communities: Some(vec![MetaCommunity::Large(LargeCommunity::new(
-                12345,
-                [678910, 111213],
-            ))]),
-            atomic: false,
-            aggr_asn: None,
-            aggr_ip: None,
-            only_to_customer: None,
-            unknown: None,
-            elem_type: ElemType::ANNOUNCE,
-            deprecated: None,
-        };
+        let elem = filter_test_elem();
 
         let mut filters = vec![];
 
-        let filter = Filter::new("origin_asn", "12345").unwrap();
+        let filter = Filter::new("origin_asn", "52888").unwrap();
         filters.push(filter.clone());
         assert!(elem.match_filter(&filter));
 
@@ -1112,6 +1152,155 @@ mod tests {
         assert!(elem.match_filter(&filter));
 
         assert!(elem.match_filters(&filters));
+    }
+
+    #[test]
+    fn test_route_filterable_matches_elem_for_route_level_filters() {
+        let elem = filter_test_elem();
+        let route = route_projection(&elem);
+
+        let cases = vec![
+            (
+                "origin_asn matches",
+                Filter::new("origin_asn", "52888").unwrap(),
+                true,
+            ),
+            (
+                "origin_asn misses",
+                Filter::new("origin_asn", "64496").unwrap(),
+                false,
+            ),
+            (
+                "origin_asns matches",
+                Filter::new("origin_asns", "64496,52888").unwrap(),
+                true,
+            ),
+            (
+                "origin_asns misses",
+                Filter::new("origin_asns", "64496,64497").unwrap(),
+                false,
+            ),
+            (
+                "prefix exact matches",
+                Filter::new("prefix", "192.168.1.0/24").unwrap(),
+                true,
+            ),
+            (
+                "prefix exact misses",
+                Filter::new("prefix", "192.168.2.0/24").unwrap(),
+                false,
+            ),
+            (
+                "prefix_super matches",
+                Filter::new("prefix_super", "192.168.1.128/25").unwrap(),
+                true,
+            ),
+            (
+                "prefix_sub matches",
+                Filter::new("prefix_sub", "192.168.0.0/23").unwrap(),
+                true,
+            ),
+            (
+                "prefix_super_sub matches",
+                Filter::new("prefix_super_sub", "192.168.1.128/25").unwrap(),
+                true,
+            ),
+            (
+                "prefixes matches",
+                Filter::new("prefixes", "10.0.0.0/8,192.168.1.0/24").unwrap(),
+                true,
+            ),
+            (
+                "peer_ip matches",
+                Filter::new("peer_ip", "192.168.1.1").unwrap(),
+                true,
+            ),
+            (
+                "peer_ips matches",
+                Filter::new("peer_ips", "192.168.1.2,192.168.1.1").unwrap(),
+                true,
+            ),
+            (
+                "peer_asn matches",
+                Filter::new("peer_asn", "12345").unwrap(),
+                true,
+            ),
+            (
+                "peer_asns matches",
+                Filter::new("peer_asns", "12346,12345").unwrap(),
+                true,
+            ),
+            ("type matches", Filter::new("type", "a").unwrap(), true),
+            ("type misses", Filter::new("type", "w").unwrap(), false),
+            (
+                "ts_start matches",
+                Filter::new("ts_start", "1637437797").unwrap(),
+                true,
+            ),
+            (
+                "ts_end matches",
+                Filter::new("ts_end", "1637437799").unwrap(),
+                true,
+            ),
+            (
+                "as_path matches",
+                Filter::new("as_path", r"174 1916 52888$").unwrap(),
+                true,
+            ),
+            (
+                "as_path misses",
+                Filter::new("as_path", r"64496$").unwrap(),
+                false,
+            ),
+            (
+                "ip_version matches",
+                Filter::new("ip_version", "4").unwrap(),
+                true,
+            ),
+            (
+                "ip_version misses",
+                Filter::new("ip_version", "6").unwrap(),
+                false,
+            ),
+            (
+                "negated origin_asn matches",
+                Filter::new("origin_asn", "!64496").unwrap(),
+                true,
+            ),
+            (
+                "negated origin_asn misses",
+                Filter::new("origin_asn", "!52888").unwrap(),
+                false,
+            ),
+        ];
+
+        for (name, filter, expected) in cases {
+            assert_eq!(elem.match_filter(&filter), expected, "{name} BgpElem");
+            assert_eq!(route.match_filter(&filter), expected, "{name} BgpRouteElem");
+            assert_eq!(
+                elem.match_filter(&filter),
+                route.match_filter(&filter),
+                "{name} parity"
+            );
+        }
+
+        let filters = vec![
+            Filter::new("origin_asn", "52888").unwrap(),
+            Filter::new("peer_asn", "!64496").unwrap(),
+            Filter::new("prefix_super", "192.168.1.128/25").unwrap(),
+        ];
+        assert!(elem.match_filters(&filters));
+        assert_eq!(elem.match_filters(&filters), route.match_filters(&filters));
+    }
+
+    #[test]
+    fn test_route_filterable_does_not_match_community_filters() {
+        let elem = filter_test_elem();
+        let route = route_projection(&elem);
+        let filter = Filter::new("community", r"12345:678910:111213$").unwrap();
+
+        assert!(elem.match_filter(&filter));
+        assert!(!route.match_filter(&filter));
     }
 
     #[test]
