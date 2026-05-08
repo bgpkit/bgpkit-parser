@@ -3,6 +3,7 @@ use crate::models::*;
 use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
+use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
 use crate::parser::mrt::parse_table_dump_v2_message;
 use crate::parser::{chunk_mrt_record, parse_nlri_list, BgpkitParser, Filterable, ReadUtils};
 use bytes::{Buf, Bytes};
@@ -436,7 +437,7 @@ fn parse_table_dump_v2_routes(
             };
 
             for _ in 0..entry_count {
-                if data.remaining() < 8 {
+                if data.remaining() < rib_entry_min_len(is_add_path) {
                     warn!("early break due to truncated msg while parsing RIB AFI entries");
                     break;
                 }
@@ -1488,6 +1489,42 @@ mod tests {
         )
         .unwrap();
         assert!(routes.is_empty());
+
+        let peer = Peer::new(
+            "192.0.2.10".parse().unwrap(),
+            "192.0.2.11".parse().unwrap(),
+            Asn::new_32bit(64496),
+        );
+        let mut peer_table = PeerIndexTable::default();
+        let peer_index = peer_table.add_peer(peer);
+
+        let first_entry = RibEntry {
+            peer_index,
+            originated_time: 1_699_999_999,
+            path_id: Some(1234),
+            attributes: route_attributes([64500, 64501]),
+        };
+        let mut add_path_truncated = BytesMut::new();
+        add_path_truncated.put_u32(1);
+        add_path_truncated.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
+        add_path_truncated.put_u16(2);
+        add_path_truncated.extend(first_entry.encode());
+        add_path_truncated.put_u16(peer_index);
+        add_path_truncated.put_u32(1_699_999_998);
+        add_path_truncated.put_u32(5678);
+
+        let mut peer_table = Some(peer_table);
+        let routes = parse_table_dump_v2_routes(
+            TableDumpV2Type::RibIpv4UnicastAddPath as u16,
+            add_path_truncated.freeze(),
+            &mut peer_table,
+        )
+        .unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("203.0.113.0/24").unwrap()
+        );
     }
 
     fn table_dump_v2_rib_without_peer_table_record() -> MrtRecord {

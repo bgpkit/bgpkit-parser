@@ -47,6 +47,10 @@ fn is_add_path_rib_type(rib_type: TableDumpV2Type) -> bool {
     )
 }
 
+pub(crate) const fn rib_entry_min_len(is_add_path: bool) -> usize {
+    2 /*peer_index*/ + 4 /*time*/ + 2 /*attr_len*/ + if is_add_path { 4 } else { 0 }
+}
+
 /// RIB AFI-specific entries
 ///
 /// https://tools.ietf.org/html/rfc6396#section-4.3
@@ -65,8 +69,7 @@ pub fn parse_rib_afi_entries(
 
     let entry_count = data.read_u16()?;
     // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs
-    let min_entry_size =
-        2 /*peer_index*/ + 4 /*time*/ + 2 /*attr_len*/ + if is_add_path { 4 } else { 0 };
+    let min_entry_size = rib_entry_min_len(is_add_path);
     let max_possible = data.remaining() / min_entry_size;
     let reserve = (entry_count as usize).min(max_possible).saturating_mul(2);
     let mut rib_entries = Vec::with_capacity(reserve);
