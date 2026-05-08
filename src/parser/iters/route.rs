@@ -449,7 +449,23 @@ fn parse_table_dump_v2_routes(
                     None
                 };
                 let attribute_length = data.read_u16()? as usize;
-                data.has_n_remaining(attribute_length)?;
+                if data.remaining() < attribute_length {
+                    // Preserve routes parsed from earlier entries in this RIB record.
+                    // Once a variable-length attribute payload is truncated, the next
+                    // entry boundary is not recoverable, so stop this record instead of
+                    // treating the whole record as failed. This mirrors
+                    // parse_rib_afi_entries() in the full TableDumpV2 parser.
+                    //
+                    // TODO: expose partial-success diagnostics through a structured
+                    // warning channel or partial-result API. Current iterators can only
+                    // return parsed routes or an error, not both for the same record.
+                    warn!(
+                        "early break due to truncated attribute payload while parsing RIB AFI entries: expected {} bytes, have {} bytes available",
+                        attribute_length,
+                        data.remaining()
+                    );
+                    break;
+                }
                 let attrs = parse_route_attributes(
                     data.split_to(attribute_length),
                     &AsnLength::Bits32,
@@ -897,6 +913,61 @@ mod tests {
         let mut bytes = pit_record.encode().to_vec();
         bytes.extend_from_slice(&rib_record.encode());
         bytes
+    }
+
+    fn table_dump_v2_truncated_attribute_payload() -> (Vec<u8>, Bytes, PeerIndexTable) {
+        let peer = Peer::new(
+            "192.0.2.10".parse().unwrap(),
+            "192.0.2.11".parse().unwrap(),
+            Asn::new_32bit(64496),
+        );
+        let mut peer_table = PeerIndexTable::default();
+        let peer_index = peer_table.add_peer(peer);
+
+        let pit_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: TableDumpV2Type::PeerIndexTable as u16,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(
+                peer_table.clone(),
+            )),
+        };
+
+        let first_entry = RibEntry {
+            peer_index,
+            originated_time: 1_699_999_999,
+            path_id: None,
+            attributes: route_attributes([64500, 64501]),
+        };
+
+        let mut rib_body = BytesMut::new();
+        rib_body.put_u32(1);
+        rib_body.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
+        rib_body.put_u16(2);
+        rib_body.extend(first_entry.encode());
+        rib_body.put_u16(peer_index);
+        rib_body.put_u32(1_699_999_998);
+        rib_body.put_u16(32);
+        rib_body.put_u8(0);
+
+        let rib_body = rib_body.freeze();
+        let rib_header = CommonHeader {
+            timestamp: 1_700_000_001,
+            microsecond_timestamp: None,
+            entry_type: EntryType::TABLE_DUMP_V2,
+            entry_subtype: TableDumpV2Type::RibIpv4Unicast as u16,
+            length: rib_body.len() as u32,
+        };
+
+        let mut bytes = pit_record.encode().to_vec();
+        bytes.extend_from_slice(&rib_header.encode());
+        bytes.extend_from_slice(&rib_body);
+
+        (bytes, rib_body, peer_table)
     }
 
     fn assert_filtered_route_projection(bytes: Vec<u8>, filters: &[(&str, &str)]) {
@@ -1525,6 +1596,49 @@ mod tests {
             routes[0].prefix,
             NetworkPrefix::from_str("203.0.113.0/24").unwrap()
         );
+    }
+
+    #[test]
+    fn route_parser_preserves_table_dump_v2_routes_before_truncated_attribute_payload() {
+        let (_bytes, rib_body, peer_table) = table_dump_v2_truncated_attribute_payload();
+        let mut peer_table = Some(peer_table);
+
+        let routes = parse_table_dump_v2_routes(
+            TableDumpV2Type::RibIpv4Unicast as u16,
+            rib_body,
+            &mut peer_table,
+        )
+        .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("203.0.113.0/24").unwrap()
+        );
+        assert_eq!(
+            routes[0].as_path.as_ref().unwrap().to_u32_vec_opt(false),
+            Some(vec![64500, 64501])
+        );
+    }
+
+    #[test]
+    fn route_iterators_preserve_table_dump_v2_routes_before_truncated_attribute_payload() {
+        let (bytes, _rib_body, _peer_table) = table_dump_v2_truncated_attribute_payload();
+
+        let routes = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
+            .into_route_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("203.0.113.0/24").unwrap()
+        );
+
+        let fallible_routes = BgpkitParser::from_reader(Cursor::new(bytes))
+            .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(fallible_routes, routes);
     }
 
     fn table_dump_v2_rib_without_peer_table_record() -> MrtRecord {
