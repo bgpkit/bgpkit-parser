@@ -538,6 +538,10 @@ trait RouteFilterView {
     fn matches_community(&self, _regex: &ComparableRegex) -> bool {
         false
     }
+
+    fn supports_community_filter(&self) -> bool {
+        false
+    }
 }
 
 const fn same_family(prefix_1: &IpNet, prefix_2: &IpNet) -> bool {
@@ -594,6 +598,12 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
 
 fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
     match filter {
+        Filter::Negated(inner)
+            if matches!(inner.as_ref(), Filter::Community(_))
+                && !view.supports_community_filter() =>
+        {
+            false
+        }
         Filter::Negated(inner) => !match_route_view_filter(view, inner),
         Filter::OriginAsn(v) => view.matches_origin_asn((*v).into()),
         Filter::OriginAsns(v) => v.iter().any(|asn| view.matches_origin_asn((*asn).into())),
@@ -612,7 +622,7 @@ fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> boo
             .as_path()
             .map(|path| v.is_match(path.to_string().as_str()))
             .unwrap_or(false),
-        Filter::Community(r) => view.matches_community(r),
+        Filter::Community(r) => view.supports_community_filter() && view.matches_community(r),
         Filter::IpVersion(version) => match version {
             IpVersion::Ipv4 => view.prefix().prefix.addr().is_ipv4(),
             IpVersion::Ipv6 => view.prefix().prefix.addr().is_ipv6(),
@@ -657,6 +667,10 @@ impl RouteFilterView for BgpElem {
             .as_ref()
             .map(|communities| communities.iter().any(|c| regex.is_match(c.to_string())))
             .unwrap_or(false)
+    }
+
+    fn supports_community_filter(&self) -> bool {
+        true
     }
 }
 
@@ -756,6 +770,19 @@ mod tests {
             prefix: elem.prefix,
             as_path: elem.as_path.clone(),
         }
+    }
+
+    #[test]
+    fn test_route_community_filters_fail_closed() {
+        let elem = filter_test_elem();
+        let route = route_projection(&elem);
+        let community = Filter::new("community", r"12345:.*").unwrap();
+        let negated_community = Filter::new("community", r"!12345:.*").unwrap();
+
+        assert!(elem.match_filter(&community));
+        assert!(!elem.match_filter(&negated_community));
+        assert!(!route.match_filter(&community));
+        assert!(!route.match_filter(&negated_community));
     }
 
     #[test]

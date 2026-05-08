@@ -1,6 +1,8 @@
 use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
 use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
+use crate::parser::bgp::messages::read_and_validate_bgp_marker;
+use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::parse_table_dump_v2_message;
 use crate::parser::{chunk_mrt_record, parse_nlri_list, BgpkitParser, Filterable, ReadUtils};
 use bytes::{Buf, Bytes};
@@ -8,6 +10,7 @@ use ipnet::IpNet;
 use log::{error, warn};
 use std::io::Read;
 use std::net::IpAddr;
+use std::path::Path;
 
 #[derive(Default)]
 struct RouteAttributes {
@@ -22,6 +25,18 @@ struct RouteAttributeContext<'a> {
     prefixes: Option<&'a [NetworkPrefix]>,
     is_announcement: Option<bool>,
     has_standard_nlri: bool,
+}
+
+fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
+    write_mrt_core_dump_to_path(enabled, bytes, "mrt_core_dump");
+}
+
+fn write_mrt_core_dump_to_path<P: AsRef<Path>>(enabled: bool, bytes: Option<Vec<u8>>, path: P) {
+    if enabled {
+        if let Some(bytes) = bytes {
+            std::fs::write(path, bytes).expect("Unable to write to mrt_core_dump");
+        }
+    }
 }
 
 fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<AsPath> {
@@ -222,7 +237,7 @@ fn parse_bgp_message_routes(
 ) -> Result<Vec<BgpRouteElem>, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
-    data.advance(16);
+    read_and_validate_bgp_marker(&mut data)?;
     let length = data.read_u16()?;
     if !(19..=65_535).contains(&length) {
         return Err(ParserError::ParseError(format!(
@@ -278,19 +293,6 @@ fn bgp4mp_asn_len_and_add_path(msg_type: Bgp4MpType) -> Option<(AsnLength, bool)
     }
 }
 
-fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize {
-    let ip_size = match afi {
-        Afi::Ipv4 => 4 * 2,
-        Afi::Ipv6 => 16 * 2,
-        Afi::LinkState => 4 * 2,
-    };
-    let asn_size = match asn_len {
-        AsnLength::Bits16 => 2 * 2,
-        AsnLength::Bits32 => 2 * 4,
-    };
-    total_size - asn_size - 2 - 2 - ip_size
-}
-
 fn parse_bgp4mp_routes(
     sub_type: u16,
     mut data: Bytes,
@@ -309,7 +311,7 @@ fn parse_bgp4mp_routes(
     let peer_ip = data.read_address(&afi)?;
     let _local_ip = data.read_address(&afi)?;
 
-    let should_read = total_should_read(&afi, &asn_len, total_size);
+    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size);
     if should_read != data.remaining() {
         return Err(ParserError::TruncatedMsg(format!(
             "truncated bgp4mp message: should read {} bytes, have {} bytes available",
@@ -538,19 +540,13 @@ impl<R: Read> Iterator for RouteIterator<R> {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: {}", err_str);
                         }
-                        if let Some(bytes) = e.bytes {
-                            std::fs::write("mrt_core_dump", bytes)
-                                .expect("Unable to write to mrt_core_dump");
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
                         if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
+                            write_mrt_core_dump(true, e.bytes);
                             return None;
                         }
                         continue;
@@ -558,12 +554,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     ParserError::EofExpected => return None,
                     ParserError::IoError(err) | ParserError::EofError(err) => {
                         error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         return None;
                     }
                     #[cfg(feature = "oneio")]
@@ -767,8 +758,17 @@ mod tests {
     }
 
     fn raw_bgp_message(length: u16, msg_type: BgpMessageType, payload: &[u8]) -> Bytes {
+        raw_bgp_message_with_marker([0xff; 16], length, msg_type, payload)
+    }
+
+    fn raw_bgp_message_with_marker(
+        marker: [u8; 16],
+        length: u16,
+        msg_type: BgpMessageType,
+        payload: &[u8],
+    ) -> Bytes {
         let mut bytes = BytesMut::new();
-        bytes.put_slice(&[0xff; 16]);
+        bytes.put_slice(&marker);
         bytes.put_u16(length);
         bytes.put_u8(msg_type as u8);
         bytes.put_slice(payload);
@@ -1421,6 +1421,29 @@ mod tests {
         )
         .unwrap();
         assert!(routes.is_empty());
+
+        let routes = parse_bgp_message_routes(
+            raw_bgp_message_with_marker([0x00; 16], 19, BgpMessageType::KEEPALIVE, &[]),
+            false,
+            &AsnLength::Bits16,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_16bit(64496),
+        )
+        .unwrap();
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn route_core_dump_write_respects_enabled_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mrt_core_dump");
+
+        write_mrt_core_dump_to_path(false, Some(vec![1, 2, 3]), &path);
+        assert!(!path.exists());
+
+        write_mrt_core_dump_to_path(true, Some(vec![1, 2, 3]), &path);
+        assert_eq!(std::fs::read(&path).unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
