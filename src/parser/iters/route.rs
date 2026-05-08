@@ -654,7 +654,9 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::{BufMut, BytesMut};
     use std::io::Cursor;
+    use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     fn route_projection(elem: BgpElem) -> BgpRouteElem {
@@ -705,6 +707,74 @@ mod tests {
         }
     }
 
+    fn route_attributes(as_path: impl AsRef<[u32]>) -> Attributes {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        attributes.add_attr(
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence(as_path),
+                is_as4: false,
+            }
+            .into(),
+        );
+        attributes
+            .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
+        attributes
+    }
+
+    fn bgp4mp_record(msg_type: Bgp4MpType, bgp_message: BgpMessage) -> MrtRecord {
+        let asn = if matches!(
+            msg_type,
+            Bgp4MpType::Message
+                | Bgp4MpType::MessageLocal
+                | Bgp4MpType::MessageAddpath
+                | Bgp4MpType::MessageLocalAddpath
+        ) {
+            Asn::new_16bit(64496)
+        } else {
+            Asn::new_32bit(64496)
+        };
+
+        MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::BGP4MP,
+                entry_subtype: msg_type as u16,
+                length: 0,
+            },
+            message: MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
+                msg_type,
+                peer_asn: asn,
+                local_asn: Asn::new_32bit(64497),
+                interface_index: 0,
+                peer_ip: IpAddr::from_str("192.0.2.1").unwrap(),
+                local_ip: IpAddr::from_str("192.0.2.2").unwrap(),
+                bgp_message,
+            })),
+        }
+    }
+
+    fn open_message() -> BgpMessage {
+        BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(64496),
+            hold_time: 180,
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![],
+        })
+    }
+
+    fn raw_bgp_message(length: u16, msg_type: BgpMessageType, payload: &[u8]) -> Bytes {
+        let mut bytes = BytesMut::new();
+        bytes.put_slice(&[0xff; 16]);
+        bytes.put_u16(length);
+        bytes.put_u8(msg_type as u8);
+        bytes.put_slice(payload);
+        bytes.freeze()
+    }
+
     fn table_dump_record() -> MrtRecord {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
@@ -733,6 +803,38 @@ mod tests {
                 status: 1,
                 originated_time: 1_699_999_998,
                 peer_ip: IpAddr::from_str("192.0.2.20").unwrap(),
+                peer_asn: Asn::new_16bit(64496),
+                attributes,
+            }),
+        }
+    }
+
+    fn table_dump_ipv6_record() -> MrtRecord {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        attributes.add_attr(
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([64500, 64501]),
+                is_as4: false,
+            }
+            .into(),
+        );
+
+        MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP,
+                entry_subtype: 2,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpMessage(TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("2001:db8::/32").unwrap(),
+                status: 1,
+                originated_time: 1_699_999_998,
+                peer_ip: IpAddr::from_str("2001:db8::20").unwrap(),
                 peer_asn: Asn::new_16bit(64496),
                 attributes,
             }),
@@ -819,9 +921,7 @@ mod tests {
         assert_eq!(routes, elem_projection, "filters: {filters:?}");
     }
 
-    #[test]
-    fn route_iterator_matches_elem_projection_for_update() {
-        let bytes = update_record().encode().to_vec();
+    fn assert_route_projection(bytes: Vec<u8>) -> Vec<BgpRouteElem> {
         let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
             .into_elem_iter()
             .map(route_projection)
@@ -831,10 +931,112 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(routes, elem_projection);
+        routes
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_update() {
+        let bytes = update_record().encode().to_vec();
+        let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
         assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
         assert!(routes[1].as_path.is_none());
+    }
+
+    #[test]
+    fn route_iterator_uses_microsecond_timestamps() {
+        let timestamp = record_timestamp(&CommonHeader {
+            timestamp: 1_700_000_000,
+            microsecond_timestamp: Some(123_456),
+            entry_type: EntryType::BGP4MP_ET,
+            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            length: 0,
+        });
+
+        assert_eq!(timestamp, 1_700_000_000.123_456);
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_mp_update() {
+        let mut attributes = route_attributes([64500, 64501]);
+        attributes.add_attr(
+            AttributeValue::MpReachNlri(Nlri::new_reachable(
+                NetworkPrefix::from_str("2001:db8::/32").unwrap(),
+                Some(IpAddr::from_str("2001:db8::1").unwrap()),
+            ))
+            .into(),
+        );
+        attributes.add_attr(
+            AttributeValue::MpUnreachNlri(Nlri::new_unreachable(
+                NetworkPrefix::from_str("2001:db8:1::/48").unwrap(),
+            ))
+            .into(),
+        );
+
+        let bytes = bgp4mp_record(
+            Bgp4MpType::MessageAs4,
+            BgpMessage::Update(BgpUpdateMessage {
+                withdrawn_prefixes: vec![],
+                attributes,
+                announced_prefixes: vec![],
+            }),
+        )
+        .encode()
+        .to_vec();
+
+        let routes = assert_route_projection(bytes);
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("2001:db8::/32").unwrap()
+        );
+        assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
+        assert_eq!(
+            routes[1].prefix,
+            NetworkPrefix::from_str("2001:db8:1::/48").unwrap()
+        );
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_non_update_bgp4mp_messages() {
+        let records = [
+            bgp4mp_record(Bgp4MpType::Message, open_message()),
+            bgp4mp_record(
+                Bgp4MpType::MessageAs4,
+                BgpMessage::Notification(BgpNotificationMessage {
+                    error: BgpError::Unknown(1, 0),
+                    data: vec![],
+                }),
+            ),
+            bgp4mp_record(Bgp4MpType::MessageAddpath, BgpMessage::KeepAlive),
+            bgp4mp_record(Bgp4MpType::MessageAs4Addpath, BgpMessage::KeepAlive),
+        ];
+        let mut bytes = Vec::new();
+        for record in records {
+            bytes.extend_from_slice(&record.encode());
+        }
+
+        assert!(assert_route_projection(bytes).is_empty());
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_bgp4mp_16bit_update() {
+        let bytes = bgp4mp_record(
+            Bgp4MpType::Message,
+            BgpMessage::Update(BgpUpdateMessage {
+                withdrawn_prefixes: vec![],
+                attributes: route_attributes([64500, 64501]),
+                announced_prefixes: vec![NetworkPrefix::from_str("203.0.113.0/24").unwrap()],
+            }),
+        )
+        .encode()
+        .to_vec();
+
+        let routes = assert_route_projection(bytes);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].peer_asn, Asn::new_16bit(64496));
     }
 
     #[test]
@@ -902,39 +1104,257 @@ mod tests {
     }
 
     #[test]
+    fn selective_attribute_parser_handles_as_path_without_as4_path() {
+        let attrs = parse_route_attributes(
+            route_attributes([64500, 64501]).encode(AsnLength::Bits16),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(true),
+                has_standard_nlri: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            attrs.as_path.unwrap().to_u32_vec_opt(false).unwrap(),
+            vec![64500, 64501]
+        );
+    }
+
+    #[test]
+    fn selective_attribute_parser_handles_as4_path_without_as_path() {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(
+            AttributeValue::AsPath {
+                path: AsPath::from_sequence([65536, 64497]),
+                is_as4: true,
+            }
+            .into(),
+        );
+
+        let attrs = parse_route_attributes(
+            attributes.encode(AsnLength::Bits16),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(false),
+                has_standard_nlri: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            attrs.as_path.unwrap().to_u32_vec_opt(false).unwrap(),
+            vec![65536, 64497]
+        );
+    }
+
+    #[test]
+    fn selective_attribute_parser_handles_no_as_path() {
+        let attrs = parse_route_attributes(
+            Bytes::new(),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(false),
+                has_standard_nlri: false,
+            },
+        )
+        .unwrap();
+
+        assert!(attrs.as_path.is_none());
+    }
+
+    #[test]
+    fn selective_attribute_parser_handles_extended_and_truncated_attributes() {
+        let mut extended_as_path = BytesMut::new();
+        extended_as_path.put_u8((AttrFlags::TRANSITIVE | AttrFlags::EXTENDED).bits());
+        extended_as_path.put_u8(u8::from(AttrType::AS_PATH));
+        extended_as_path.put_u16(4);
+        extended_as_path.put_u8(2);
+        extended_as_path.put_u8(1);
+        extended_as_path.put_u16(64500);
+
+        let attrs = parse_route_attributes(
+            extended_as_path.freeze(),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(false),
+                has_standard_nlri: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            attrs.as_path.unwrap().to_u32_vec_opt(false).unwrap(),
+            vec![64500]
+        );
+
+        let attrs = parse_route_attributes(
+            Bytes::from_static(&[0x40, 2, 5, 0]),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(false),
+                has_standard_nlri: false,
+            },
+        )
+        .unwrap();
+        assert!(attrs.as_path.is_none());
+    }
+
+    #[test]
+    fn selective_attribute_parser_discards_malformed_as_path() {
+        let attrs = parse_route_attributes(
+            Bytes::from_static(&[0x40, 2, 1, 0]),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(false),
+                has_standard_nlri: false,
+            },
+        )
+        .unwrap();
+
+        assert!(attrs.as_path.is_none());
+    }
+
+    #[test]
     fn route_iterator_matches_elem_projection_for_table_dump() {
         let bytes = table_dump_record().encode().to_vec();
-        let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
-            .into_elem_iter()
-            .map(route_projection)
-            .collect::<Vec<_>>();
-        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
-            .into_route_iter()
-            .collect::<Vec<_>>();
-
-        assert_eq!(routes, elem_projection);
+        let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].timestamp, 1_699_999_998.0);
         assert_eq!(routes[0].peer_asn, Asn::new_16bit(64496));
     }
 
     #[test]
+    fn route_iterator_matches_elem_projection_for_table_dump_ipv6() {
+        let bytes = table_dump_ipv6_record().encode().to_vec();
+        let routes = assert_route_projection(bytes);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("2001:db8::/32").unwrap()
+        );
+        assert_eq!(
+            routes[0].peer_ip,
+            IpAddr::from(Ipv6Addr::from_str("2001:db8::20").unwrap())
+        );
+    }
+
+    #[test]
     fn route_iterator_matches_elem_projection_for_table_dump_v2() {
         let bytes = table_dump_v2_records_bytes();
-        let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
-            .into_elem_iter()
-            .map(route_projection)
-            .collect::<Vec<_>>();
-        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
-            .into_route_iter()
-            .collect::<Vec<_>>();
-
-        assert_eq!(routes, elem_projection);
+        let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
         assert_eq!(
             routes[0].as_path.as_ref().unwrap().to_u32_vec_opt(false),
             Some(vec![64500, 64501])
+        );
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_table_dump_v2_ipv6_addpath() {
+        let peer = Peer::new(
+            "192.0.2.11".parse().unwrap(),
+            "2001:db8::10".parse().unwrap(),
+            Asn::new_32bit(64496),
+        );
+        let mut peer_table = PeerIndexTable::default();
+        let peer_index = peer_table.add_peer(peer);
+
+        let pit_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: TableDumpV2Type::PeerIndexTable as u16,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(peer_table)),
+        };
+        let rib_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_001,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: TableDumpV2Type::RibIpv6UnicastAddPath as u16,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv6UnicastAddPath,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("2001:db8::/32").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index,
+                    originated_time: 1_699_999_999,
+                    path_id: Some(1234),
+                    attributes: route_attributes([64500, 64501]),
+                }],
+            })),
+        };
+
+        let mut bytes = pit_record.encode().to_vec();
+        bytes.extend_from_slice(&rib_record.encode());
+        let routes = assert_route_projection(bytes);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("2001:db8::/32").unwrap()
+        );
+    }
+
+    #[test]
+    fn route_iterator_matches_elem_projection_for_bgp4mp_ipv6_peer_update() {
+        let record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_000,
+                microsecond_timestamp: None,
+                entry_type: EntryType::BGP4MP,
+                entry_subtype: Bgp4MpType::MessageAs4 as u16,
+                length: 0,
+            },
+            message: MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
+                msg_type: Bgp4MpType::MessageAs4,
+                peer_asn: Asn::new_32bit(64496),
+                local_asn: Asn::new_32bit(64497),
+                interface_index: 0,
+                peer_ip: IpAddr::from_str("2001:db8::1").unwrap(),
+                local_ip: IpAddr::from_str("2001:db8::2").unwrap(),
+                bgp_message: BgpMessage::Update(BgpUpdateMessage {
+                    withdrawn_prefixes: vec![],
+                    attributes: route_attributes([64500, 64501]),
+                    announced_prefixes: vec![NetworkPrefix::from_str("203.0.113.0/24").unwrap()],
+                }),
+            })),
+        };
+
+        let routes = assert_route_projection(record.encode().to_vec());
+        assert_eq!(routes.len(), 1);
+        assert_eq!(
+            routes[0].peer_ip,
+            IpAddr::from(Ipv6Addr::from_str("2001:db8::1").unwrap())
         );
     }
 
@@ -957,6 +1377,155 @@ mod tests {
         for filters in cases {
             assert_filtered_route_projection(bytes.clone(), filters);
         }
+    }
+
+    #[test]
+    fn route_parser_reports_bgp_message_shape_errors() {
+        assert!(parse_bgp_message_routes(
+            raw_bgp_message(18, BgpMessageType::KEEPALIVE, &[]),
+            false,
+            &AsnLength::Bits16,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_16bit(64496)
+        )
+        .is_err());
+        assert!(parse_bgp_message_routes(
+            raw_bgp_message(4097, BgpMessageType::OPEN, &[]),
+            false,
+            &AsnLength::Bits16,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_16bit(64496)
+        )
+        .is_err());
+
+        let routes = parse_bgp_message_routes(
+            raw_bgp_message(30, BgpMessageType::KEEPALIVE, &[]),
+            false,
+            &AsnLength::Bits16,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_16bit(64496),
+        )
+        .unwrap();
+        assert!(routes.is_empty());
+
+        let routes = parse_bgp_message_routes(
+            raw_bgp_message(19, BgpMessageType::KEEPALIVE, &[0]),
+            false,
+            &AsnLength::Bits16,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_16bit(64496),
+        )
+        .unwrap();
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn route_parser_handles_table_dump_v2_error_edges() {
+        let rib = RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 1,
+            prefix: NetworkPrefix::from_str("203.0.113.0/24").unwrap(),
+            rib_entries: vec![RibEntry {
+                peer_index: 99,
+                originated_time: 1_699_999_999,
+                path_id: None,
+                attributes: route_attributes([64500, 64501]),
+            }],
+        };
+        let mut no_peer_table = None;
+        assert!(parse_table_dump_v2_routes(
+            TableDumpV2Type::RibIpv4Unicast as u16,
+            rib.encode(),
+            &mut no_peer_table,
+        )
+        .is_err());
+
+        let mut empty_peer_table = Some(PeerIndexTable::default());
+        let routes = parse_table_dump_v2_routes(
+            TableDumpV2Type::RibIpv4Unicast as u16,
+            rib.encode(),
+            &mut empty_peer_table,
+        )
+        .unwrap();
+        assert!(routes.is_empty());
+
+        let mut truncated = BytesMut::new();
+        truncated.put_u32(1);
+        truncated.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
+        truncated.put_u16(1);
+        let mut empty_peer_table = Some(PeerIndexTable::default());
+        let routes = parse_table_dump_v2_routes(
+            TableDumpV2Type::RibIpv4Unicast as u16,
+            truncated.freeze(),
+            &mut empty_peer_table,
+        )
+        .unwrap();
+        assert!(routes.is_empty());
+    }
+
+    fn table_dump_v2_rib_without_peer_table_record() -> MrtRecord {
+        MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1_700_000_001,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: TableDumpV2Type::RibIpv4Unicast as u16,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv4Unicast,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("203.0.113.0/24").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index: 0,
+                    originated_time: 1_699_999_999,
+                    path_id: None,
+                    attributes: route_attributes([64500, 64501]),
+                }],
+            })),
+        }
+    }
+
+    #[test]
+    fn route_iterator_skips_route_parse_errors() {
+        let routes = BgpkitParser::from_reader(Cursor::new(
+            table_dump_v2_rib_without_peer_table_record()
+                .encode()
+                .to_vec(),
+        ))
+        .into_route_iter()
+        .collect::<Vec<_>>();
+
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn fallible_route_iterator_applies_filters_to_cached_routes() {
+        let routes = BgpkitParser::from_reader(Cursor::new(update_record().encode().to_vec()))
+            .add_filter("type", "w")
+            .unwrap()
+            .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
+    }
+
+    #[test]
+    fn fallible_route_iterator_returns_route_parse_errors() {
+        let mut iter = BgpkitParser::from_reader(Cursor::new(
+            table_dump_v2_rib_without_peer_table_record()
+                .encode()
+                .to_vec(),
+        ))
+        .into_fallible_route_iter();
+
+        assert!(iter.next().unwrap().is_err());
     }
 
     #[test]
