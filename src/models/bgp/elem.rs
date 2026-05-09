@@ -161,7 +161,8 @@ pub struct BgpElem {
 ///
 /// This struct is intended for fast scans that only need route identity,
 /// peer metadata, timestamp, and AS path. Use [`BgpElem`] when you need the
-/// full set of BGP attributes.
+/// full set of BGP attributes. Because route elements do not carry
+/// communities, community filters do not match [`BgpRouteElem`] values.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BgpRouteElem {
@@ -185,13 +186,30 @@ pub struct BgpRouteElem {
 
 impl Eq for BgpElem {}
 
+impl Eq for BgpRouteElem {}
+
 impl PartialOrd<Self> for BgpElem {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+impl PartialOrd<Self> for BgpRouteElem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Ord for BgpElem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.timestamp
+            .partial_cmp(&other.timestamp)
+            .unwrap()
+            .then_with(|| self.peer_ip.cmp(&other.peer_ip))
+    }
+}
+
+impl Ord for BgpRouteElem {
     fn cmp(&self, other: &Self) -> Ordering {
         self.timestamp
             .partial_cmp(&other.timestamp)
@@ -302,6 +320,25 @@ impl Display for BgpElem {
             self.atomic,
             OptionToStr(&self.aggr_asn),
             OptionToStr(&self.aggr_ip),
+        )
+    }
+}
+
+impl Display for BgpRouteElem {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let t = match self.elem_type {
+            ElemType::ANNOUNCE => "A",
+            ElemType::WITHDRAW => "W",
+        };
+        write!(
+            f,
+            "{}|{}|{}|{}|{}|{}",
+            t,
+            &self.timestamp,
+            &self.peer_ip,
+            &self.peer_asn,
+            &self.prefix,
+            OptionToStr(&self.as_path),
         )
     }
 }
@@ -452,6 +489,37 @@ mod tests {
     }
 
     #[test]
+    fn test_route_elem_sorting() {
+        let elem1 = BgpRouteElem {
+            timestamp: 1.1,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: 0.into(),
+            prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
+            as_path: None,
+        };
+        let elem2 = BgpRouteElem {
+            timestamp: 1.2,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: 0.into(),
+            prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
+            as_path: None,
+        };
+        let elem3 = BgpRouteElem {
+            timestamp: 1.2,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: IpAddr::from_str("192.168.1.2").unwrap(),
+            peer_asn: 0.into(),
+            prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
+            as_path: None,
+        };
+
+        assert!(elem1 < elem2);
+        assert!(elem2 < elem3);
+    }
+
+    #[test]
     fn test_psv() {
         assert_eq!(
             BgpElem::get_psv_header().as_str(),
@@ -461,6 +529,23 @@ mod tests {
         assert_eq!(
             elem.to_psv().as_str(),
             "A|0|0.0.0.0|0|0.0.0.0/0||||0.0.0.0||||false|||"
+        );
+    }
+
+    #[test]
+    fn test_route_elem_display() {
+        let elem = BgpRouteElem {
+            timestamp: 1.1,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: 64496.into(),
+            prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
+            as_path: Some(Arc::new(AsPath::from_sequence([64496, 64497]))),
+        };
+
+        assert_eq!(
+            elem.to_string().as_str(),
+            "A|1.1|192.168.1.1|64496|8.8.8.0/24|64496 64497"
         );
     }
 
