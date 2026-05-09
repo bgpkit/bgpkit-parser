@@ -523,7 +523,9 @@ impl Filter {
 
 pub trait Filterable {
     fn match_filter(&self, filter: &Filter) -> bool;
-    fn match_filters(&self, filters: &[Filter]) -> bool;
+    fn match_filters(&self, filters: &[Filter]) -> bool {
+        filters.iter().all(|f| self.match_filter(f))
+    }
 }
 
 trait RouteFilterView {
@@ -711,19 +713,11 @@ impl Filterable for BgpElem {
     fn match_filter(&self, filter: &Filter) -> bool {
         match_route_view_filter(self, filter)
     }
-
-    fn match_filters(&self, filters: &[Filter]) -> bool {
-        filters.iter().all(|f| self.match_filter(f))
-    }
 }
 
 impl Filterable for BgpRouteElem {
     fn match_filter(&self, filter: &Filter) -> bool {
         match_route_view_filter(self, filter)
-    }
-
-    fn match_filters(&self, filters: &[Filter]) -> bool {
-        filters.iter().all(|f| self.match_filter(f))
     }
 }
 

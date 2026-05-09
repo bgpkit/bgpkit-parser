@@ -2,6 +2,7 @@ use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
 use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
+use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
 use crate::parser::mrt::parse_table_dump_v2_message;
@@ -11,7 +12,6 @@ use ipnet::IpNet;
 use log::{error, warn};
 use std::io::Read;
 use std::net::IpAddr;
-use std::path::Path;
 
 #[derive(Default)]
 struct RouteAttributes {
@@ -26,18 +26,6 @@ struct RouteAttributeContext<'a> {
     prefixes: Option<&'a [NetworkPrefix]>,
     is_announcement: Option<bool>,
     has_standard_nlri: bool,
-}
-
-fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
-    write_mrt_core_dump_to_path(enabled, bytes, "mrt_core_dump");
-}
-
-fn write_mrt_core_dump_to_path<P: AsRef<Path>>(enabled: bool, bytes: Option<Vec<u8>>, path: P) {
-    if enabled {
-        if let Some(bytes) = bytes {
-            std::fs::write(path, bytes).expect("Unable to write to mrt_core_dump");
-        }
-    }
 }
 
 fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<AsPath> {
@@ -81,7 +69,6 @@ fn parse_route_attributes(
             break;
         }
 
-        data.has_n_remaining(attr_length)?;
         let attr_data = data.split_to(attr_length);
         let result = match attr_type {
             AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(|path| {
@@ -662,6 +649,7 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::iters::write_mrt_core_dump_to_path;
     use bytes::{BufMut, BytesMut};
     use std::io::Cursor;
     use std::net::{Ipv4Addr, Ipv6Addr};

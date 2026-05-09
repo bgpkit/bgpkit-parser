@@ -31,6 +31,23 @@ use crate::parser::BgpkitParser;
 use crate::Elementor;
 use crate::RawMrtRecord;
 use std::io::Read;
+use std::path::Path;
+
+pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
+    write_mrt_core_dump_to_path(enabled, bytes, "mrt_core_dump");
+}
+
+pub(crate) fn write_mrt_core_dump_to_path<P: AsRef<Path>>(
+    enabled: bool,
+    bytes: Option<Vec<u8>>,
+    path: P,
+) {
+    if enabled {
+        if let Some(bytes) = bytes {
+            std::fs::write(path, bytes).expect("Unable to write to mrt_core_dump");
+        }
+    }
+}
 
 /// Use [ElemIterator] as the default iterator to return [BgpElem]s instead of [MrtRecord]s.
 impl<R: Read> IntoIterator for BgpkitParser<R> {
