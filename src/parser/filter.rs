@@ -698,7 +698,7 @@ impl RouteFilterView for BgpRouteElem {
     }
 
     fn as_path(&self) -> Option<&AsPath> {
-        self.as_path.as_ref()
+        self.as_path.as_deref()
     }
 
     fn matches_origin_asn(&self, asn: Asn) -> bool {
@@ -727,6 +727,7 @@ mod tests {
     use crate::BgpkitParser;
     use anyhow::Result;
     use std::str::FromStr;
+    use std::sync::Arc;
 
     fn filter_test_elem() -> BgpElem {
         BgpElem {
@@ -762,7 +763,7 @@ mod tests {
             peer_ip: elem.peer_ip,
             peer_asn: elem.peer_asn,
             prefix: elem.prefix,
-            as_path: elem.as_path.clone(),
+            as_path: elem.as_path.clone().map(Arc::new),
         }
     }
 

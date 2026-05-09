@@ -97,6 +97,7 @@ wasm = [
 serde = [
     "dep:serde",
     "ipnet/serde",
+    "serde/rc",
 ]
 native-tls = [
     "oneio/native-tls",

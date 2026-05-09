@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 
 // TODO(jmeggitt): BgpElem can be converted to an enum. Apply this change during performance PR.
 
@@ -176,7 +177,10 @@ pub struct BgpRouteElem {
     /// The network prefix of the item.
     pub prefix: NetworkPrefix,
     /// The optional path representation of the item.
-    pub as_path: Option<AsPath>,
+    ///
+    /// Route-level parsing shares the same AS path across all announced
+    /// prefixes from a single message.
+    pub as_path: Option<Arc<AsPath>>,
 }
 
 impl Eq for BgpElem {}

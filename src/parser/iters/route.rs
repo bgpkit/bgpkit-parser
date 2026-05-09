@@ -5,17 +5,17 @@ use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
-use crate::parser::mrt::parse_table_dump_v2_message;
 use crate::parser::{chunk_mrt_record, parse_nlri_list, BgpkitParser, Filterable, ReadUtils};
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;
 use log::{error, warn};
 use std::io::Read;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 #[derive(Default)]
 struct RouteAttributes {
-    as_path: Option<AsPath>,
+    as_path: Option<Arc<AsPath>>,
     announced: Vec<NetworkPrefix>,
     withdrawn: Vec<NetworkPrefix>,
 }
@@ -28,12 +28,13 @@ struct RouteAttributeContext<'a> {
     has_standard_nlri: bool,
 }
 
-fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<AsPath> {
-    match (as_path, as4_path) {
+fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<Arc<AsPath>> {
+    let path = match (as_path, as4_path) {
         (None, None) => None,
         (Some(path), None) | (None, Some(path)) => Some(path),
         (Some(path), Some(as4_path)) => Some(AsPath::merge_aspath_as4path(&path, &as4_path)),
-    }
+    };
+    path.map(Arc::new)
 }
 
 fn parse_route_attributes(
@@ -130,42 +131,181 @@ fn record_timestamp(common_header: &CommonHeader) -> f64 {
     }
 }
 
-fn append_update_routes(
-    routes: &mut Vec<BgpRouteElem>,
+struct RouteUpdateIter {
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
-    top_announced: Vec<NetworkPrefix>,
-    top_withdrawn: Vec<NetworkPrefix>,
-    attrs: RouteAttributes,
-) {
-    let as_path = attrs.as_path;
-    routes.extend(
-        top_announced
-            .into_iter()
-            .chain(attrs.announced)
-            .map(|prefix| BgpRouteElem {
-                timestamp,
+    as_path: Option<Arc<AsPath>>,
+    announced:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    withdrawn:
+        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
+    in_withdrawn_phase: bool,
+}
+
+impl RouteUpdateIter {
+    fn next_route(&mut self) -> Option<BgpRouteElem> {
+        if !self.in_withdrawn_phase {
+            if let Some(prefix) = self.announced.next() {
+                return Some(BgpRouteElem {
+                    timestamp: self.timestamp,
+                    elem_type: ElemType::ANNOUNCE,
+                    peer_ip: self.peer_ip,
+                    peer_asn: self.peer_asn,
+                    prefix,
+                    as_path: self.as_path.clone(),
+                });
+            }
+            self.in_withdrawn_phase = true;
+        }
+
+        self.withdrawn.next().map(|prefix| BgpRouteElem {
+            timestamp: self.timestamp,
+            elem_type: ElemType::WITHDRAW,
+            peer_ip: self.peer_ip,
+            peer_asn: self.peer_asn,
+            prefix,
+            as_path: None,
+        })
+    }
+}
+
+#[derive(Clone, Default)]
+struct RoutePeerTable {
+    peers: Arc<[Peer]>,
+}
+
+impl RoutePeerTable {
+    fn get_peer_by_id(&self, peer_index: u16) -> Option<Peer> {
+        self.peers.get(peer_index as usize).copied()
+    }
+}
+
+fn parse_route_peer_table(mut data: Bytes) -> Result<RoutePeerTable, ParserError> {
+    let _collector_bgp_id = data.read_u32()?;
+    let view_name_length = data.read_u16()? as usize;
+    data.has_n_remaining(view_name_length)?;
+    data.advance(view_name_length);
+
+    let peer_count = data.read_u16()? as usize;
+    let mut peers = Vec::with_capacity(peer_count);
+    for _ in 0..peer_count {
+        let peer_type = PeerType::from_bits_retain(data.read_u8()?);
+        let afi = if peer_type.contains(PeerType::ADDRESS_FAMILY_IPV6) {
+            Afi::Ipv6
+        } else {
+            Afi::Ipv4
+        };
+        let asn_len = if peer_type.contains(PeerType::AS_SIZE_32BIT) {
+            AsnLength::Bits32
+        } else {
+            AsnLength::Bits16
+        };
+
+        let peer_bgp_id = data.read_ipv4_address()?;
+        let peer_ip = data.read_address(&afi)?;
+        let peer_asn = data.read_asn(asn_len)?;
+        peers.push(Peer {
+            peer_type,
+            peer_bgp_id,
+            peer_ip,
+            peer_asn,
+        });
+    }
+
+    Ok(RoutePeerTable {
+        peers: Arc::from(peers),
+    })
+}
+
+#[derive(Default)]
+enum RouteRecordIter {
+    #[default]
+    Empty,
+    One(Option<BgpRouteElem>),
+    Update(RouteUpdateIter),
+    RibAfi(RouteRibAfiIter),
+}
+
+impl RouteRecordIter {
+    fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
+        match self {
+            RouteRecordIter::Empty => Ok(None),
+            RouteRecordIter::One(route) => Ok(route.take()),
+            RouteRecordIter::Update(iter) => Ok(iter.next_route()),
+            RouteRecordIter::RibAfi(iter) => iter.next_route(),
+        }
+    }
+}
+
+struct RouteRibAfiIter {
+    data: Bytes,
+    peer_table: RoutePeerTable,
+    afi: Afi,
+    safi: Safi,
+    is_add_path: bool,
+    prefix: NetworkPrefix,
+    remaining_entries: u16,
+}
+
+impl RouteRibAfiIter {
+    fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
+        while self.remaining_entries > 0 {
+            if self.data.remaining() < rib_entry_min_len(self.is_add_path) {
+                warn!("early break due to truncated msg while parsing RIB AFI entries");
+                self.remaining_entries = 0;
+                return Ok(None);
+            }
+
+            self.remaining_entries -= 1;
+            let peer_index = self.data.read_u16()?;
+            let originated_time = self.data.read_u32()? as f64;
+            let _path_id = if self.is_add_path {
+                Some(self.data.read_u32()?)
+            } else {
+                None
+            };
+            let attribute_length = self.data.read_u16()? as usize;
+            if self.data.remaining() < attribute_length {
+                warn!(
+                    "early break due to truncated attribute payload while parsing RIB AFI entries: expected {} bytes, have {} bytes available",
+                    attribute_length,
+                    self.data.remaining()
+                );
+                self.remaining_entries = 0;
+                return Ok(None);
+            }
+
+            let prefixes = [self.prefix];
+            let attrs = parse_route_attributes(
+                self.data.split_to(attribute_length),
+                &AsnLength::Bits32,
+                self.is_add_path,
+                RouteAttributeContext {
+                    afi: Some(self.afi),
+                    safi: Some(self.safi),
+                    prefixes: Some(&prefixes),
+                    is_announcement: Some(true),
+                    has_standard_nlri: self.afi == Afi::Ipv4,
+                },
+            )?;
+            let Some(peer) = self.peer_table.get_peer_by_id(peer_index) else {
+                error!("peer ID {} not found in peer_index table", peer_index);
+                continue;
+            };
+
+            return Ok(Some(BgpRouteElem {
+                timestamp: originated_time,
                 elem_type: ElemType::ANNOUNCE,
-                peer_ip,
-                peer_asn,
-                prefix,
-                as_path: as_path.clone(),
-            }),
-    );
-    routes.extend(
-        top_withdrawn
-            .into_iter()
-            .chain(attrs.withdrawn)
-            .map(|prefix| BgpRouteElem {
-                timestamp,
-                elem_type: ElemType::WITHDRAW,
-                peer_ip,
-                peer_asn,
-                prefix,
-                as_path: None,
-            }),
-    );
+                peer_ip: peer.peer_ip,
+                peer_asn: peer.peer_asn,
+                prefix: self.prefix,
+                as_path: attrs.as_path,
+            }));
+        }
+
+        Ok(None)
+    }
 }
 
 fn parse_bgp_update_routes(
@@ -175,7 +315,7 @@ fn parse_bgp_update_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+) -> Result<RouteUpdateIter, ParserError> {
     let withdrawn_len = input.read_u16()? as usize;
     input.has_n_remaining(withdrawn_len)?;
     let withdrawn_prefixes = parse_nlri_list(input.split_to(withdrawn_len), add_path, &Afi::Ipv4)?;
@@ -197,22 +337,15 @@ fn parse_bgp_update_routes(
         },
     )?;
 
-    let mut routes = Vec::with_capacity(
-        announced_prefixes.len()
-            + withdrawn_prefixes.len()
-            + attributes.announced.len()
-            + attributes.withdrawn.len(),
-    );
-    append_update_routes(
-        &mut routes,
+    Ok(RouteUpdateIter {
         timestamp,
         peer_ip,
         peer_asn,
-        announced_prefixes,
-        withdrawn_prefixes,
-        attributes,
-    );
-    Ok(routes)
+        as_path: attributes.as_path,
+        announced: announced_prefixes.into_iter().chain(attributes.announced),
+        withdrawn: withdrawn_prefixes.into_iter().chain(attributes.withdrawn),
+        in_withdrawn_phase: false,
+    })
 }
 
 fn parse_bgp_message_routes(
@@ -222,7 +355,7 @@ fn parse_bgp_message_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+) -> Result<RouteRecordIter, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
     read_and_validate_bgp_marker(&mut data)?;
@@ -258,11 +391,11 @@ fn parse_bgp_message_routes(
     let msg_data = data.split_to(bgp_msg_length);
 
     match msg_type {
-        BgpMessageType::UPDATE => {
-            parse_bgp_update_routes(msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn)
-        }
+        BgpMessageType::UPDATE => Ok(RouteRecordIter::Update(parse_bgp_update_routes(
+            msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn,
+        )?)),
         BgpMessageType::OPEN | BgpMessageType::NOTIFICATION | BgpMessageType::KEEPALIVE => {
-            Ok(Vec::new())
+            Ok(RouteRecordIter::Empty)
         }
     }
 }
@@ -285,10 +418,10 @@ fn parse_bgp4mp_routes(
     sub_type: u16,
     mut data: Bytes,
     timestamp: f64,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+) -> Result<RouteRecordIter, ParserError> {
     let msg_type = Bgp4MpType::try_from(sub_type)?;
     let Some((asn_len, add_path)) = bgp4mp_asn_len_and_add_path(msg_type) else {
-        return Ok(Vec::new());
+        return Ok(RouteRecordIter::Empty);
     };
 
     let total_size = data.len();
@@ -341,10 +474,7 @@ fn is_add_path_rib_type(rib_type: TableDumpV2Type) -> bool {
     )
 }
 
-fn parse_table_dump_routes(
-    sub_type: u16,
-    mut data: Bytes,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+fn parse_table_dump_routes(sub_type: u16, mut data: Bytes) -> Result<RouteRecordIter, ParserError> {
     let afi = match sub_type {
         1 => Afi::Ipv4,
         2 => Afi::Ipv6,
@@ -381,32 +511,28 @@ fn parse_table_dump_routes(
         },
     )?;
 
-    Ok(vec![BgpRouteElem {
+    Ok(RouteRecordIter::One(Some(BgpRouteElem {
         timestamp: originated_time,
         elem_type: ElemType::ANNOUNCE,
         peer_ip,
         peer_asn,
         prefix: NetworkPrefix::new(prefix, None),
         as_path: attrs.as_path,
-    }])
+    })))
 }
 
 fn parse_table_dump_v2_routes(
     sub_type: u16,
     mut data: Bytes,
-    peer_table: &mut Option<PeerIndexTable>,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+    peer_table: &mut Option<RoutePeerTable>,
+) -> Result<RouteRecordIter, ParserError> {
     let v2_type = TableDumpV2Type::try_from(sub_type)?;
     match v2_type {
         TableDumpV2Type::PeerIndexTable => {
-            if let TableDumpV2Message::PeerIndexTable(table) =
-                parse_table_dump_v2_message(sub_type, data)?
-            {
-                *peer_table = Some(table);
-            }
-            Ok(Vec::new())
+            *peer_table = Some(parse_route_peer_table(data)?);
+            Ok(RouteRecordIter::Empty)
         }
-        TableDumpV2Type::GeoPeerTable => Ok(Vec::new()),
+        TableDumpV2Type::GeoPeerTable => Ok(RouteRecordIter::Empty),
         TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => Err(
             ParserError::Unsupported("TableDumpV2 RibGeneric is not currently supported".into()),
         ),
@@ -416,77 +542,29 @@ fn parse_table_dump_v2_routes(
             let _sequence_number = data.read_u32()?;
             let prefix = data.read_nlri_prefix(&afi, false)?;
             let entry_count = data.read_u16()?;
-            let mut routes = Vec::with_capacity(entry_count as usize);
-            let Some(peer_table) = peer_table.as_ref() else {
+            let Some(peer_table) = peer_table.clone() else {
                 return Err(ParserError::ParseError(
                     "peer table not set for TableDumpV2 RIB entries".to_string(),
                 ));
             };
 
-            for _ in 0..entry_count {
-                if data.remaining() < rib_entry_min_len(is_add_path) {
-                    warn!("early break due to truncated msg while parsing RIB AFI entries");
-                    break;
-                }
-                let peer_index = data.read_u16()?;
-                let originated_time = data.read_u32()? as f64;
-                let _path_id = if is_add_path {
-                    Some(data.read_u32()?)
-                } else {
-                    None
-                };
-                let attribute_length = data.read_u16()? as usize;
-                if data.remaining() < attribute_length {
-                    // Preserve routes parsed from earlier entries in this RIB record.
-                    // Once a variable-length attribute payload is truncated, the next
-                    // entry boundary is not recoverable, so stop this record instead of
-                    // treating the whole record as failed. This mirrors
-                    // parse_rib_afi_entries() in the full TableDumpV2 parser.
-                    //
-                    // TODO: expose partial-success diagnostics through a structured
-                    // warning channel or partial-result API. Current iterators can only
-                    // return parsed routes or an error, not both for the same record.
-                    warn!(
-                        "early break due to truncated attribute payload while parsing RIB AFI entries: expected {} bytes, have {} bytes available",
-                        attribute_length,
-                        data.remaining()
-                    );
-                    break;
-                }
-                let attrs = parse_route_attributes(
-                    data.split_to(attribute_length),
-                    &AsnLength::Bits32,
-                    is_add_path,
-                    RouteAttributeContext {
-                        afi: Some(afi),
-                        safi: Some(safi),
-                        prefixes: Some(&[prefix]),
-                        is_announcement: Some(true),
-                        has_standard_nlri: afi == Afi::Ipv4,
-                    },
-                )?;
-                let Some(peer) = peer_table.get_peer_by_id(&peer_index) else {
-                    error!("peer ID {} not found in peer_index table", peer_index);
-                    continue;
-                };
-                routes.push(BgpRouteElem {
-                    timestamp: originated_time,
-                    elem_type: ElemType::ANNOUNCE,
-                    peer_ip: peer.peer_ip,
-                    peer_asn: peer.peer_asn,
-                    prefix,
-                    as_path: attrs.as_path,
-                });
-            }
-            Ok(routes)
+            Ok(RouteRecordIter::RibAfi(RouteRibAfiIter {
+                data,
+                peer_table,
+                afi,
+                safi,
+                is_add_path,
+                prefix,
+                remaining_entries: entry_count,
+            }))
         }
     }
 }
 
-fn parse_raw_record_routes(
+fn parse_raw_record_route_iter(
     raw_record: crate::RawMrtRecord,
-    peer_table: &mut Option<PeerIndexTable>,
-) -> Result<Vec<BgpRouteElem>, ParserError> {
+    peer_table: &mut Option<RoutePeerTable>,
+) -> Result<RouteRecordIter, ParserError> {
     let timestamp = record_timestamp(&raw_record.common_header);
     match raw_record.common_header.entry_type {
         EntryType::TABLE_DUMP => parse_table_dump_routes(
@@ -511,15 +589,15 @@ fn parse_raw_record_routes(
 
 pub struct RouteIterator<R> {
     parser: BgpkitParser<R>,
-    cache_routes: Vec<BgpRouteElem>,
-    peer_table: Option<PeerIndexTable>,
+    pending_routes: RouteRecordIter,
+    peer_table: Option<RoutePeerTable>,
 }
 
 impl<R> RouteIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         Self {
             parser,
-            cache_routes: Vec::new(),
+            pending_routes: RouteRecordIter::Empty,
             peer_table: None,
         }
     }
@@ -530,11 +608,22 @@ impl<R: Read> Iterator for RouteIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(route) = self.cache_routes.pop() {
-                if route.match_filters(&self.parser.filters) {
-                    return Some(route);
+            match self.pending_routes.next_route() {
+                Ok(Some(route)) => {
+                    if route.match_filters(&self.parser.filters) {
+                        return Some(route);
+                    }
+                    continue;
                 }
-                continue;
+                Ok(None) => {}
+                Err(err) => {
+                    error!("parser error: {}", err);
+                    self.pending_routes = RouteRecordIter::Empty;
+                    if self.parser.core_dump {
+                        return None;
+                    }
+                    continue;
+                }
             }
 
             let raw_record = match chunk_mrt_record(&mut self.parser.reader) {
@@ -578,13 +667,9 @@ impl<R: Read> Iterator for RouteIterator<R> {
                 },
             };
 
-            match parse_raw_record_routes(raw_record, &mut self.peer_table) {
-                Ok(mut routes) => {
-                    if routes.is_empty() {
-                        continue;
-                    }
-                    routes.reverse();
-                    self.cache_routes = routes;
+            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+                Ok(routes) => {
+                    self.pending_routes = routes;
                 }
                 Err(err) => {
                     error!("parser error: {}", err);
@@ -600,15 +685,15 @@ impl<R: Read> Iterator for RouteIterator<R> {
 
 pub struct FallibleRouteIterator<R> {
     parser: BgpkitParser<R>,
-    cache_routes: Vec<BgpRouteElem>,
-    peer_table: Option<PeerIndexTable>,
+    pending_routes: RouteRecordIter,
+    peer_table: Option<RoutePeerTable>,
 }
 
 impl<R> FallibleRouteIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         Self {
             parser,
-            cache_routes: Vec::new(),
+            pending_routes: RouteRecordIter::Empty,
             peer_table: None,
         }
     }
@@ -619,11 +704,18 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(route) = self.cache_routes.pop() {
-                if route.match_filters(&self.parser.filters) {
-                    return Some(Ok(route));
+            match self.pending_routes.next_route() {
+                Ok(Some(route)) => {
+                    if route.match_filters(&self.parser.filters) {
+                        return Some(Ok(route));
+                    }
+                    continue;
                 }
-                continue;
+                Ok(None) => {}
+                Err(error) => {
+                    self.pending_routes = RouteRecordIter::Empty;
+                    return Some(Err(ParserErrorWithBytes { error, bytes: None }));
+                }
             }
 
             let raw_record = match chunk_mrt_record(&mut self.parser.reader) {
@@ -632,13 +724,9 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                 Err(e) => return Some(Err(e)),
             };
 
-            match parse_raw_record_routes(raw_record, &mut self.peer_table) {
-                Ok(mut routes) => {
-                    if routes.is_empty() {
-                        continue;
-                    }
-                    routes.reverse();
-                    self.cache_routes = routes;
+            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+                Ok(routes) => {
+                    self.pending_routes = routes;
                 }
                 Err(error) => return Some(Err(ParserErrorWithBytes { error, bytes: None })),
             }
@@ -662,7 +750,30 @@ mod tests {
             peer_ip: elem.peer_ip,
             peer_asn: elem.peer_asn,
             prefix: elem.prefix,
-            as_path: elem.as_path,
+            as_path: elem.as_path.map(Arc::new),
+        }
+    }
+
+    fn collect_route_record_iter(
+        mut iter: RouteRecordIter,
+    ) -> Result<Vec<BgpRouteElem>, ParserError> {
+        let mut routes = Vec::new();
+        while let Some(route) = iter.next_route()? {
+            routes.push(route);
+        }
+        Ok(routes)
+    }
+
+    fn route_peer_table_from_peer_index(peer_table: PeerIndexTable) -> RoutePeerTable {
+        let mut peer_ids = peer_table.id_peer_map.keys().copied().collect::<Vec<_>>();
+        peer_ids.sort_unstable();
+        let peers = peer_ids
+            .into_iter()
+            .map(|peer_id| peer_table.id_peer_map[&peer_id])
+            .collect::<Vec<_>>();
+
+        RoutePeerTable {
+            peers: Arc::from(peers),
         }
     }
 
@@ -1002,6 +1113,33 @@ mod tests {
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
         assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
         assert!(routes[1].as_path.is_none());
+    }
+
+    #[test]
+    fn route_iterator_shares_as_path_for_update_announcements() {
+        let bytes = bgp4mp_record(
+            Bgp4MpType::MessageAs4,
+            BgpMessage::Update(BgpUpdateMessage {
+                withdrawn_prefixes: vec![],
+                attributes: route_attributes([64500, 64501]),
+                announced_prefixes: vec![
+                    NetworkPrefix::from_str("203.0.113.0/24").unwrap(),
+                    NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                ],
+            }),
+        )
+        .encode()
+        .to_vec();
+
+        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
+            .into_route_iter()
+            .collect::<Vec<_>>();
+
+        assert_eq!(routes.len(), 2);
+        assert!(Arc::ptr_eq(
+            routes[0].as_path.as_ref().unwrap(),
+            routes[1].as_path.as_ref().unwrap()
+        ));
     }
 
     #[test]
@@ -1460,35 +1598,44 @@ mod tests {
         )
         .is_err());
 
-        let routes = parse_bgp_message_routes(
-            raw_bgp_message(30, BgpMessageType::KEEPALIVE, &[]),
-            false,
-            &AsnLength::Bits16,
-            1_700_000_000.0,
-            "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496),
+        let routes = collect_route_record_iter(
+            parse_bgp_message_routes(
+                raw_bgp_message(30, BgpMessageType::KEEPALIVE, &[]),
+                false,
+                &AsnLength::Bits16,
+                1_700_000_000.0,
+                "192.0.2.1".parse().unwrap(),
+                Asn::new_16bit(64496),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(routes.is_empty());
 
-        let routes = parse_bgp_message_routes(
-            raw_bgp_message(19, BgpMessageType::KEEPALIVE, &[0]),
-            false,
-            &AsnLength::Bits16,
-            1_700_000_000.0,
-            "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496),
+        let routes = collect_route_record_iter(
+            parse_bgp_message_routes(
+                raw_bgp_message(19, BgpMessageType::KEEPALIVE, &[0]),
+                false,
+                &AsnLength::Bits16,
+                1_700_000_000.0,
+                "192.0.2.1".parse().unwrap(),
+                Asn::new_16bit(64496),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(routes.is_empty());
 
-        let routes = parse_bgp_message_routes(
-            raw_bgp_message_with_marker([0x00; 16], 19, BgpMessageType::KEEPALIVE, &[]),
-            false,
-            &AsnLength::Bits16,
-            1_700_000_000.0,
-            "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496),
+        let routes = collect_route_record_iter(
+            parse_bgp_message_routes(
+                raw_bgp_message_with_marker([0x00; 16], 19, BgpMessageType::KEEPALIVE, &[]),
+                false,
+                &AsnLength::Bits16,
+                1_700_000_000.0,
+                "192.0.2.1".parse().unwrap(),
+                Asn::new_16bit(64496),
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(routes.is_empty());
@@ -1527,11 +1674,14 @@ mod tests {
         )
         .is_err());
 
-        let mut empty_peer_table = Some(PeerIndexTable::default());
-        let routes = parse_table_dump_v2_routes(
-            TableDumpV2Type::RibIpv4Unicast as u16,
-            rib.encode(),
-            &mut empty_peer_table,
+        let mut empty_peer_table = Some(RoutePeerTable::default());
+        let routes = collect_route_record_iter(
+            parse_table_dump_v2_routes(
+                TableDumpV2Type::RibIpv4Unicast as u16,
+                rib.encode(),
+                &mut empty_peer_table,
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(routes.is_empty());
@@ -1540,11 +1690,14 @@ mod tests {
         truncated.put_u32(1);
         truncated.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
         truncated.put_u16(1);
-        let mut empty_peer_table = Some(PeerIndexTable::default());
-        let routes = parse_table_dump_v2_routes(
-            TableDumpV2Type::RibIpv4Unicast as u16,
-            truncated.freeze(),
-            &mut empty_peer_table,
+        let mut empty_peer_table = Some(RoutePeerTable::default());
+        let routes = collect_route_record_iter(
+            parse_table_dump_v2_routes(
+                TableDumpV2Type::RibIpv4Unicast as u16,
+                truncated.freeze(),
+                &mut empty_peer_table,
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(routes.is_empty());
@@ -1572,11 +1725,14 @@ mod tests {
         add_path_truncated.put_u32(1_699_999_998);
         add_path_truncated.put_u32(5678);
 
-        let mut peer_table = Some(peer_table);
-        let routes = parse_table_dump_v2_routes(
-            TableDumpV2Type::RibIpv4UnicastAddPath as u16,
-            add_path_truncated.freeze(),
-            &mut peer_table,
+        let mut peer_table = Some(route_peer_table_from_peer_index(peer_table));
+        let routes = collect_route_record_iter(
+            parse_table_dump_v2_routes(
+                TableDumpV2Type::RibIpv4UnicastAddPath as u16,
+                add_path_truncated.freeze(),
+                &mut peer_table,
+            )
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(routes.len(), 1);
@@ -1589,12 +1745,15 @@ mod tests {
     #[test]
     fn route_parser_preserves_table_dump_v2_routes_before_truncated_attribute_payload() {
         let (_bytes, rib_body, peer_table) = table_dump_v2_truncated_attribute_payload();
-        let mut peer_table = Some(peer_table);
+        let mut peer_table = Some(route_peer_table_from_peer_index(peer_table));
 
-        let routes = parse_table_dump_v2_routes(
-            TableDumpV2Type::RibIpv4Unicast as u16,
-            rib_body,
-            &mut peer_table,
+        let routes = collect_route_record_iter(
+            parse_table_dump_v2_routes(
+                TableDumpV2Type::RibIpv4Unicast as u16,
+                rib_body,
+                &mut peer_table,
+            )
+            .unwrap(),
         )
         .unwrap();
 
