@@ -39,7 +39,58 @@ pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4MpEnum, ParserErr
     Ok(msg)
 }
 
-fn total_should_read(afi: &Afi, asn_len: &AsnLength, total_size: usize) -> usize {
+/// Return the embedded BGP message length in a BGP4MP message body.
+///
+/// The BGP4MP envelope is defined by RFC 6396 Section 4.4.2 for 16-bit ASNs
+/// and Section 4.4.3 for AS4 variants:
+/// <https://www.rfc-editor.org/rfc/rfc6396#section-4.4.2>
+/// <https://www.rfc-editor.org/rfc/rfc6396#section-4.4.3>
+///
+/// RFC 8050 Section 3 defines the ADDPATH BGP4MP subtypes that reuse the same
+/// envelope before the encapsulated BGP message:
+/// <https://www.rfc-editor.org/rfc/rfc8050#section-3>
+///
+/// `total_size` is the MRT message body length. Subtracting the peer/local ASNs,
+/// interface index, AFI, and peer/local IP addresses leaves the encapsulated BGP
+/// message length.
+/*
+4.4.2.  BGP4MP_MESSAGE Subtype:
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |         Peer AS Number        |        Local AS Number        |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |        Interface Index        |        Address Family         |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      Peer IP Address (variable)               |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      Local IP Address (variable)              |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                    BGP Message... (variable)
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+4.4.3.  BGP4MP_MESSAGE_AS4 Subtype
+  0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                         Peer AS Number                        |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                         Local AS Number                       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |        Interface Index        |        Address Family         |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      Peer IP Address (variable)               |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      Local IP Address (variable)              |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                    BGP Message... (variable)
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
+pub(crate) fn bgp4mp_message_payload_len(
+    afi: &Afi,
+    asn_len: &AsnLength,
+    total_size: usize,
+) -> usize {
     let ip_size = match afi {
         Afi::Ipv4 => 4 * 2,
         Afi::Ipv6 => 16 * 2,
@@ -81,7 +132,7 @@ pub fn parse_bgp4mp_message(
     let peer_ip = data.read_address(&afi)?;
     let local_ip = data.read_address(&afi)?;
 
-    let should_read = total_should_read(&afi, &asn_len, total_size);
+    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size);
     if should_read != data.remaining() {
         return Err(ParserError::TruncatedMsg(format!(
             "truncated bgp4mp message: should read {} bytes, have {} bytes available",

@@ -29,6 +29,18 @@ struct RawBgpOpenHeader {
 
 const _: () = assert!(size_of::<RawBgpOpenHeader>() == 10);
 
+pub(crate) fn read_and_validate_bgp_marker(data: &mut Bytes) -> Result<(), ParserError> {
+    data.has_n_remaining(16)?;
+
+    let mut marker = [0u8; 16];
+    data.copy_to_slice(&mut marker);
+    if marker != [0xFF; 16] {
+        warn!("BGP message marker is not all 0xFF bytes (invalid per RFC 4271)");
+    }
+
+    Ok(())
+}
+
 /// BGP message
 ///
 /// Format:
@@ -54,15 +66,7 @@ pub fn parse_bgp_message(
 ) -> Result<BgpMessage, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
-
-    // Read and validate BGP marker (RFC 4271: 16 bytes of 0xFF)
-    let mut marker = [0u8; 16];
-    data.copy_to_slice(&mut marker);
-    if marker != [0xFF; 16] {
-        // Log warning for invalid marker but continue processing
-        // Some implementations may use non-standard markers in MRT dumps
-        warn!("BGP message marker is not all 0xFF bytes (invalid per RFC 4271)");
-    }
+    read_and_validate_bgp_marker(data)?;
 
     /*
     This 2-octet unsigned integer indicates the total length of the

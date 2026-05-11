@@ -6,6 +6,7 @@ use crate::error::ParserError;
 use crate::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table;
 use crate::messages::table_dump_v2::peer_index_table::parse_peer_index_table;
 use crate::messages::table_dump_v2::rib_afi_entries::parse_rib_afi_entries;
+pub(crate) use crate::messages::table_dump_v2::rib_afi_entries::rib_entry_min_len;
 use crate::models::*;
 #[cfg(test)]
 use bytes::BufMut;

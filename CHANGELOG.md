@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
+* **Minimal route-level parser**: Added `BgpRouteElem` and `into_route_iter()` / `into_fallible_route_iter()` for fast scans when only prefix, AS path, peer metadata, and timestamp are needed.
+  - `BgpRouteElem` struct with `Option<Arc<AsPath>>` — shares the same parsed AS path across all announced prefixes from a single BGP UPDATE via `Arc`
+  - `RouteIterator` and `FallibleRouteIterator` for MRT records (BGP4MP, TableDump v1/v2, IPv4/IPv6, add-path)
+  - Filter support shared via `RouteFilterView` trait: `origin_asn`, `prefix`, `peer_ip`, `peer_asn`, `type`, `ts_start`/`ts_end`, `as_path`, `ip_version` all match identically to `BgpElem`
+  - Community filters fail-closed (return no match) since communities are not parsed at the route level
+  - Trait parity with `BgpElem`: `Display` (PSV-style), `Eq`, `PartialOrd`, `Ord` all implemented
+  - Performance: ~10-15% faster on updates files, ~50-70% faster on RIB dumps
+  - Added `examples/route_level_parsing.rs` demonstrating performance comparison
+
 * **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4).
   Note: RFC 8277 obsoletes RFC 3107; both are supported for compatibility:
   - New `MplsLabel` type with label value, TC, S-bit, and TTL
@@ -16,6 +25,8 @@ All notable changes to this project will be documented in this file.
   - Error variants for labeled NLRI parsing failures
 
 ### Performance improvements
+
+* **Route-level parsing**: Selective attribute parsing skips communities, MED, next-hop, local-pref, and other attributes not needed for route identity. Combined with `Arc<AsPath>` sharing across prefixes from the same message, this yields ~10-15% faster updates parsing and ~50-70% faster RIB dump parsing.
 
 * **AS Path memory optimization**: Reduced allocations for common cases using `smallvec`:
   - `AsPath::segments`: Uses `SmallVec<[AsPathSegment; 1]>` — 99.99% of routes have exactly 1 segment (zero-allocation coverage)
@@ -39,8 +50,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+* **`AttributeValidationState`**: Extracted reusable validation struct from `parse_attributes()` so that both full attribute parsing and route-level parsing share identical RFC 7606 / RFC 4271 validation logic.
+
+* **`RouteFilterView` trait**: New internal trait that enables sharing filter matching logic between `BgpElem` and `BgpRouteElem`. Community filters return `false` for route elements since communities are not parsed.
+
 * **`Attributes::check_mandatory_attributes()`**: New method to validate mandatory attributes with proper NLRI context awareness. Must be called after NLRI parsing to correctly determine requirements.
 * **`Attributes::attr_mask`**: Internal `[u64; 4]` bitmask field for O(1) attribute presence tracking (32 bytes vs 256 bytes for `[bool; 256]`)
+* **`serde` feature**: Enabled `serde/rc` for `Arc<AsPath>` serialization support in `BgpRouteElem` when the `serde` feature is active.
+
 * **Integration tests**: Added `tests/test_bgp_update_validation.rs` with comprehensive scenario coverage for all validation cases
 * **Example `examples/parse_bmp_mpls.rs`**: Demonstrates extracting MPLS-labeled NLRI from BMP Route Monitoring messages, showing how to access label stack information via `MpReachNlri` attribute
 
