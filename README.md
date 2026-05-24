@@ -771,6 +771,9 @@ BGPKIT Parser implements comprehensive BGP, MRT, BMP, and related protocol stand
 - [RFC 7854](https://datatracker.ietf.org/doc/html/rfc7854): BGP Monitoring Protocol (BMP)
 - [RFC 8671](https://datatracker.ietf.org/doc/html/rfc8671): Support for Adj-RIB-Out in BMP
 - [RFC 9069](https://datatracker.ietf.org/doc/html/rfc9069): Support for Local RIB in BMP
+- [RFC 9515](https://datatracker.ietf.org/doc/html/rfc9515): Revision to Registration Procedures for Multiple BMP Registries
+- [RFC 9736](https://datatracker.ietf.org/doc/html/rfc9736): The BGP Monitoring Protocol (BMP) Peer Up Message Namespace
+- [RFC 9972](https://datatracker.ietf.org/doc/html/rfc9972): Advanced BGP Monitoring Protocol (BMP) Statistics Types
 
 ### BGP Communities
 

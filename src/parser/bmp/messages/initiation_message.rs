@@ -1,8 +1,7 @@
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
-use num_enum::{IntoPrimitive, TryFromPrimitive};
-use std::convert::TryFrom;
+use num_enum::{FromPrimitive, IntoPrimitive};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -18,18 +17,27 @@ pub struct InitiationTlv {
     pub info: String,
 }
 
-///Type-Length-Value Type
+/// BMP Initiation Information TLV Type
 ///
-/// <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs>
-#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+/// <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-information-tlvs>
+///
+/// Per RFC 9736, the "BMP Initiation and Peer Up Information TLVs" registry was renamed
+/// to "BMP Initiation Information TLVs", and types 3, 4, and 65535 are reserved in this
+/// namespace. The VrTableName and AdminLabel variants are retained for backward compatibility
+/// with pre-RFC 9736 implementations.
+#[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum InitiationTlvType {
     String = 0,
     SysDescr = 1,
     SysName = 2,
+    /// Reserved per RFC 9736, retained for backward compatibility.
     VrTableName = 3,
+    /// Reserved per RFC 9736, retained for backward compatibility.
     AdminLabel = 4,
+    #[num_enum(catch_all)]
+    Unknown(u16) = 65535,
 }
 
 /// Parse BMP initiation message
@@ -39,7 +47,7 @@ pub fn parse_initiation_message(data: &mut Bytes) -> Result<InitiationMessage, P
     let mut tlvs = vec![];
 
     while data.remaining() > 4 {
-        let info_type: InitiationTlvType = InitiationTlvType::try_from(data.read_u16()?)?;
+        let info_type = InitiationTlvType::from(data.read_u16()?);
         let info_len = data.read_u16()?;
         if data.remaining() < info_len as usize {
             // not enough bytes to read
@@ -80,6 +88,29 @@ mod tests {
             }
             Err(_) => panic!("Failed to parse initiation message"),
         }
+    }
+
+    #[test]
+    fn test_parse_unknown_initiation_tlv() {
+        let mut buffer = BytesMut::new();
+        // Known TLV (SysDescr)
+        buffer.put_u16(1); // InitiationTlvType::SysDescr
+        buffer.put_u16(4);
+        buffer.put_slice(b"Test");
+        // Unknown TLV (unassigned type 255)
+        buffer.put_u16(255);
+        buffer.put_u16(3);
+        buffer.put_slice(b"Foo");
+
+        let mut bytes = buffer.freeze();
+        let result = parse_initiation_message(&mut bytes).unwrap();
+
+        assert_eq!(result.tlvs.len(), 2);
+        assert_eq!(result.tlvs[0].info_type, InitiationTlvType::SysDescr);
+        assert_eq!(result.tlvs[0].info, "Test");
+        assert_eq!(result.tlvs[1].info_type, InitiationTlvType::Unknown(255));
+        assert_eq!(result.tlvs[1].info_len, 3);
+        assert_eq!(result.tlvs[1].info, "Foo");
     }
 
     #[test]

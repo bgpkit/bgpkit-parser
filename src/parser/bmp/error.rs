@@ -1,7 +1,5 @@
 use crate::bmp::messages::headers::BmpPeerType;
-use crate::bmp::messages::initiation_message::InitiationTlvType;
 use crate::bmp::messages::peer_down_notification::PeerDownReason;
-use crate::bmp::messages::peer_up_notification::PeerUpTlvType;
 use crate::bmp::messages::route_mirroring::RouteMirroringInfo;
 use crate::bmp::messages::termination_message::{TerminationReason, TerminationTlvType};
 use crate::bmp::messages::BmpMsgType;
@@ -73,18 +71,6 @@ impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
 impl From<TryFromPrimitiveError<BmpPeerType>> for ParserBmpError {
     fn from(_: TryFromPrimitiveError<BmpPeerType>) -> Self {
         ParserBmpError::CorruptedBmpMessage
-    }
-}
-
-impl From<TryFromPrimitiveError<InitiationTlvType>> for ParserBmpError {
-    fn from(_: TryFromPrimitiveError<InitiationTlvType>) -> Self {
-        ParserBmpError::UnknownTlvType
-    }
-}
-
-impl From<TryFromPrimitiveError<PeerUpTlvType>> for ParserBmpError {
-    fn from(_: TryFromPrimitiveError<PeerUpTlvType>) -> Self {
-        ParserBmpError::UnknownTlvType
     }
 }
 
@@ -167,19 +153,11 @@ mod tests {
             ParserBmpError::CorruptedBmpMessage
         );
         assert_eq!(
-            ParserBmpError::from(TryFromPrimitiveError::<InitiationTlvType>::new(0)),
-            ParserBmpError::UnknownTlvType
-        );
-        assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<RouteMirroringInfo>::new(0)),
             ParserBmpError::CorruptedBmpMessage
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<TerminationTlvType>::new(0)),
-            ParserBmpError::UnknownTlvType
-        );
-        assert_eq!(
-            ParserBmpError::from(TryFromPrimitiveError::<PeerUpTlvType>::new(0)),
             ParserBmpError::UnknownTlvType
         );
         assert_eq!(
