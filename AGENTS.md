@@ -33,6 +33,11 @@ Always run clippy with `--all-features`:
 cargo clippy --all-features
 ```
 
+The pre-push hook uses the stricter form below; run it before pushing if you want to match the exact CI check:
+```
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
 ### Formatting
 `cargo fmt` does not accept `--all-features` (formatting is feature-independent):
 ```
@@ -42,6 +47,30 @@ To check formatting without modifying files:
 ```
 cargo fmt -- --check
 ```
+
+### Documentation
+`README.md` is **auto-generated** from `src/lib.rs` doc comments via [`cargo-readme`](https://github.com/livioribeiro/cargo-readme).
+
+- Edit documentation in **`src/lib.rs`** (inside the top-level `//!` doc comment block), not in `README.md` directly.
+- After editing `src/lib.rs`, regenerate `README.md`:
+  ```
+  cargo readme > README.md
+  ```
+- The pre-push hook runs a `cargo readme` diff check; if `README.md` is out of sync with `src/lib.rs`, the push will be rejected.
+- If you do not have `cargo-readme` installed:
+  ```
+  cargo install cargo-readme
+  ```
+
+## Pre-push Checks
+
+The repository has a `.git/hooks/pre-push` script that runs automatically on every push. It performs three checks in order:
+
+1. **Formatting**: `cargo fmt --check`
+2. **README sync**: `cargo readme > TMP_README.md && diff -b TMP_README.md README.md`
+3. **Clippy**: `cargo clippy --all-targets --all-features -- -D warnings`
+
+If any check fails, the push is aborted. Fix the issue, commit, and push again.
 
 ## Notes
 
