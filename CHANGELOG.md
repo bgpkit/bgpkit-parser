@@ -58,6 +58,10 @@ All notable changes to this project will be documented in this file.
 * **`Attributes::attr_mask`**: Internal `[u64; 4]` bitmask field for O(1) attribute presence tracking (32 bytes vs 256 bytes for `[bool; 256]`)
 * **`serde` feature**: Enabled `serde/rc` for `Arc<AsPath>` serialization support in `BgpRouteElem` when the `serde` feature is active.
 
+* **BMP RFC 9515, 9736, 9972 support**:
+  - RFC 9972: Added 26 new `StatType` variants for advanced Adj-RIB-In/Adj-RIB-Out monitoring statistics (types 18–43)
+  - RFC 9736: Separated Peer Up TLV namespace from Initiation TLVs; both enums now use `FromPrimitive` with catch-all `Unknown(u16)` for forward compatibility with unassigned types
+  - RFC 9515: Documentation-only update (registration procedures changed to "First Come First Served")
 * **Integration tests**: Added `tests/test_bgp_update_validation.rs` with comprehensive scenario coverage for all validation cases
 * **Example `examples/parse_bmp_mpls.rs`**: Demonstrates extracting MPLS-labeled NLRI from BMP Route Monitoring messages, showing how to access label stack information via `MpReachNlri` attribute
 

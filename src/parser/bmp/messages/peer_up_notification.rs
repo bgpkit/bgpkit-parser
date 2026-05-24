@@ -6,7 +6,7 @@ use crate::parser::bmp::messages::BmpPeerType;
 use crate::parser::ReadUtils;
 use bytes::{Buf, Bytes};
 use log::warn;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
+use num_enum::{FromPrimitive, IntoPrimitive};
 use std::net::IpAddr;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -20,18 +20,27 @@ pub struct PeerUpNotification {
     pub tlvs: Vec<PeerUpNotificationTlv>,
 }
 
-///Type-Length-Value Type
+/// BMP Peer Up Message TLV Type
 ///
-/// <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#initiation-peer-up-tlvs>
-#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
+/// <https://www.iana.org/assignments/bmp-parameters/bmp-parameters.xhtml#peer-up-message-tlvs>
+///
+/// RFC 9736 created an independent namespace for Peer Up Information TLVs, separate from
+/// the Initiation message namespace. Per the new registry, types 1, 2, and 65535 are reserved.
+/// The SysDescr and SysName variants are retained for backward compatibility with pre-RFC 9736
+/// implementations.
+#[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
 pub enum PeerUpTlvType {
     String = 0,
+    /// Reserved per RFC 9736, retained for backward compatibility.
     SysDescr = 1,
+    /// Reserved per RFC 9736, retained for backward compatibility.
     SysName = 2,
     VrTableName = 3,
     AdminLabel = 4,
+    #[num_enum(catch_all)]
+    Unknown(u16) = 65535,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -104,7 +113,7 @@ pub fn parse_peer_up_notification(
     let mut has_vr_table_name = false;
 
     while data.remaining() >= 4 {
-        let info_type = PeerUpTlvType::try_from(data.read_u16()?)?;
+        let info_type = PeerUpTlvType::from(data.read_u16()?);
         let info_len = data.read_u16()?;
         let info_value = data.read_n_bytes_to_string(info_len as usize)?;
 
@@ -819,6 +828,59 @@ mod tests {
 
         assert!(result.is_ok(), "Parsing should succeed");
         // In production, a warning would be logged about oversized VrTableName
+    }
+
+    #[test]
+    fn test_parse_peer_up_unknown_tlv() {
+        let mut data = BytesMut::new();
+
+        // Local address setup
+        data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8,
+            0x01, 0x01, // 192.168.1.1
+            0x00, 0xB3, // local port 179
+            0x00, 0xB3, // remote port 179
+        ]);
+
+        // Add two complete BGP OPEN messages
+        let bgp_open = crate::models::BgpMessage::Open(BgpOpenMessage {
+            version: 4,
+            asn: crate::models::Asn::new_32bit(65001),
+            hold_time: 180,
+            bgp_identifier: Ipv4Addr::new(192, 168, 1, 1),
+            extended_length: false,
+            opt_params: vec![],
+        });
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        data.extend_from_slice(&bgp_bytes);
+        data.extend_from_slice(&bgp_bytes);
+
+        // Add a known TLV (String) and an unknown TLV (type 255)
+        data.extend_from_slice(&[0x00, 0x00]); // String TLV type
+        data.extend_from_slice(&[0x00, 0x04]); // length 4
+        data.extend_from_slice(b"Test");
+
+        data.extend_from_slice(&[0x00, 0xFF]); // Unknown TLV type (255)
+        data.extend_from_slice(&[0x00, 0x03]); // length 3
+        data.extend_from_slice(b"Foo");
+
+        let afi = Afi::Ipv4;
+        let asn_len = AsnLength::Bits32;
+        let result = parse_peer_up_notification(&mut data.freeze(), &afi, &asn_len, None);
+
+        assert!(
+            result.is_ok(),
+            "Should parse unknown TLV types without error"
+        );
+        let peer_notification = result.unwrap();
+        assert_eq!(peer_notification.tlvs.len(), 2);
+        assert_eq!(peer_notification.tlvs[0].info_type, PeerUpTlvType::String);
+        assert_eq!(peer_notification.tlvs[0].info_value, "Test");
+        assert_eq!(
+            peer_notification.tlvs[1].info_type,
+            PeerUpTlvType::Unknown(255)
+        );
+        assert_eq!(peer_notification.tlvs[1].info_value, "Foo");
     }
 
     #[test]
