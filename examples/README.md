@@ -9,6 +9,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [count_elems.rs](count_elems.rs) — Count the total number of BGP elements in a given file.
 - [records_iter.rs](records_iter.rs) — Iterate over raw MRT records and inspect/update messages; includes an example of detecting the Only_To_Customer (OTC) attribute.
 - [update_messages_iter.rs](update_messages_iter.rs) — Iterate over BGP announcements using the intermediate MrtUpdate representation; compares performance with BgpElem iteration and works with both UPDATES files and RIB dumps.
+- [route_level_parsing.rs](route_level_parsing.rs) — Fast scan using `into_route_iter()` when only prefix, AS path, and peer metadata are needed. Skips communities, MED, next-hop for ~10–15% faster updates and ~50–70% faster RIB parsing.
 - [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
 
 ## Filtering and Policy Examples
@@ -34,12 +35,14 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
 - [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty_print the Peer Index Table in JSON.
 - [only_to_customer.rs](only_to_customer.rs) — Find and display paths bearing the Only_To_Customer (OTC, RFC 9234) attribute.
+- [parse_bmp_mpls.rs](parse_bmp_mpls.rs) — Construct and parse a synthetic BMP Route Monitoring message containing MPLS-labeled NLRI (SAFI 4), demonstrating label stack extraction.
 
 ## Error Handling and Robustness
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
 
 ## Debugging and Analysis
 - [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: debug display for MRT records, raw byte export, and the new `Display` implementation.
+- [analyze_rib.rs](analyze_rib.rs) — Deep-dive RIB analysis: count records, analyze BGP UPDATE attributes, and collect statistics across TableDumpV2 and BGP4MP records.
 - [extract_problematic_records.rs](extract_problematic_records.rs) — Find and export MRT records that fail to parse for further analysis with other tools.
 
 ## RPKI RTR Protocol

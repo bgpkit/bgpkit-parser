@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.17.0 - 2026-05-24
 
 ### New features
 
-* **Minimal route-level parser**: Added `BgpRouteElem` and `into_route_iter()` / `into_fallible_route_iter()` for fast scans when only prefix, AS path, peer metadata, and timestamp are needed.
+* **Minimal route-level parser**: Added `BgpRouteElem` and `into_route_iter()` / `into_fallible_route_iter()` for fast scans when only prefix, AS path, peer metadata, and timestamp are needed (thanks @ties for the contribution).
   - `BgpRouteElem` struct with `Option<Arc<AsPath>>` — shares the same parsed AS path across all announced prefixes from a single BGP UPDATE via `Arc`
   - `RouteIterator` and `FallibleRouteIterator` for MRT records (BGP4MP, TableDump v1/v2, IPv4/IPv6, add-path)
   - Filter support shared via `RouteFilterView` trait: `origin_asn`, `prefix`, `peer_ip`, `peer_asn`, `type`, `ts_start`/`ts_end`, `as_path`, `ip_version` all match identically to `BgpElem`
@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
   - Performance: ~10-15% faster on updates files, ~50-70% faster on RIB dumps
   - Added `examples/route_level_parsing.rs` demonstrating performance comparison
 
-* **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4).
+* **RFC 3107/8277 MPLS Labeled NLRI support**: Added parsing and encoding for BGP MPLS Labeled NLRI (SAFI 4) (thanks @ties for the contribution).
   Note: RFC 8277 obsoletes RFC 3107; both are supported for compatibility:
   - New `MplsLabel` type with label value, TC, S-bit, and TTL
   - `LabeledNetworkPrefix` combining prefix with label stack (`SmallVec<[MplsLabel; 2]>`)
@@ -28,7 +28,7 @@ All notable changes to this project will be documented in this file.
 
 * **Route-level parsing**: Selective attribute parsing skips communities, MED, next-hop, local-pref, and other attributes not needed for route identity. Combined with `Arc<AsPath>` sharing across prefixes from the same message, this yields ~10-15% faster updates parsing and ~50-70% faster RIB dump parsing.
 
-* **AS Path memory optimization**: Reduced allocations for common cases using `smallvec`:
+* **AS Path memory optimization**: Reduced allocations for common cases using `smallvec` (thanks @ties for the contribution):
   - `AsPath::segments`: Uses `SmallVec<[AsPathSegment; 1]>` — 99.99% of routes have exactly 1 segment (zero-allocation coverage)
   - `AsPathSegment` variants: Uses `SmallVec<[Asn; 6]>` — 90.85% of segments have ≤6 ASNs (zero-allocation coverage)
   - Based on RIB analysis of 200K records from route-views2 (3.29M segments analyzed)
@@ -42,7 +42,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-* **RFC 4760 mandatory attribute validation**: Fixed validation to properly handle multiprotocol BGP (MP-BGP) conditional mandatory attributes:
+* **RFC 4760 mandatory attribute validation**: Fixed validation to properly handle multiprotocol BGP (MP-BGP) conditional mandatory attributes (thanks @ties for the contribution):
   - Pure withdrawals (no announcements): no mandatory attributes required
   - MP_REACH_NLRI only: ORIGIN and AS_PATH required, NEXT_HOP not required (embedded in MP_REACH_NLRI)
   - IPv4 NLRI: ORIGIN, AS_PATH, and NEXT_HOP all required

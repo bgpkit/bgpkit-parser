@@ -78,6 +78,14 @@ If any check fails, the push is aborted. Fix the issue, commit, and push again.
 - Examples under `examples/` may require specific features (see `[[example]]` entries in `Cargo.toml`).
 - Benchmarks use Criterion (`[[bench]]` entries).
 
+## Changelog Conventions
+
+When documenting changes in `CHANGELOG.md`:
+
+- **Contributor attribution**: For features or significant fixes contributed by external contributors, append `(thanks @<github-handle> for the contribution)` in plain text at the end of the bullet point. This ensures the attribution flows into the automated GitHub release notes.
+  - Example: `* **Route-level parser**: Added ... (thanks @ties for the contribution)`
+  - Do not use markdown links like `[@ties](https://github.com/ties)` — the automated release tool copies CHANGELOG verbatim, and plain text is preferred for consistency.
+
 ## Finding Missing Implementations
 
 When looking for incomplete or missing BGP attribute implementations, check `src/parser/bgp/attributes/README.md`. This file contains:
