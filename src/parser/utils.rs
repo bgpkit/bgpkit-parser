@@ -270,6 +270,10 @@ pub(crate) fn try_parse_prefix(
     Ok((NetworkPrefix::new(prefix, path_id), pos))
 }
 
+pub(crate) fn looks_like_zero_path_id_add_path(data: &[u8]) -> bool {
+    data.starts_with(&[0, 0, 0, 0])
+}
+
 pub fn parse_nlri_list(
     mut input: Bytes,
     add_path: bool,
@@ -282,9 +286,9 @@ pub fn parse_nlri_list(
     while input.remaining() > 0 {
         let data = input.as_ref();
 
-        // Check heuristic: if not add_path and first byte is 0, likely Add-Path format
-        if !is_add_path && !data.is_empty() && data[0] == 0 {
-            debug!("NLRI: first byte is 0, treating as Add-Path format");
+        // Check heuristic: a zero path_id can indicate Add-Path format.
+        if !is_add_path && looks_like_zero_path_id_add_path(data) {
+            debug!("NLRI: first 4 bytes are 0, treating as Add-Path format");
             is_add_path = true;
             use_heuristic = true;
         }
@@ -432,6 +436,7 @@ impl ComparableRegex {
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use std::str::FromStr;
 
     #[test]
     fn test_read_u8() {
@@ -815,11 +820,11 @@ mod tests {
         ];
         assert_eq!(parse_nlri_list(input, true, &Afi::Ipv4).unwrap(), expected);
 
-        // Test the auto-detection of add_path when first byte is 0
-        let input = Bytes::from_static(&[0x00, 0x00, 0x00, 0x01, 0x18, 0xC0, 0xA8, 0x01]);
+        // Test the auto-detection of Add-Path when the path ID is 0.
+        let input = Bytes::from_static(&[0x00, 0x00, 0x00, 0x00, 0x18, 0xC0, 0xA8, 0x01]);
         let expected = vec![NetworkPrefix::new(
             IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap()),
-            Some(1),
+            Some(0),
         )];
         assert_eq!(parse_nlri_list(input, false, &Afi::Ipv4).unwrap(), expected);
     }
@@ -874,35 +879,20 @@ mod tests {
 
     #[test]
     fn test_parse_nlri_list_non_addpath_with_zero_prefix() {
-        // Edge case: Non-Add-Path NLRI where the first prefix byte happens to be 0
-        // This could trigger a false positive in the heuristic
-        // Example: /0 default route would start with byte 0
-
-        // Non-Add-Path NLRI for 0.0.0.0/0 (default route)
-        // Format: [prefix_len, prefix_bytes...]
+        // Regression: a non-Add-Path /0 followed by another prefix must not be
+        // misdetected as a zero-path-ID Add-Path prefix.
         let input = Bytes::from(vec![
             0x00, // prefix_len = 0 (default route)
-                 // No prefix bytes needed for /0
+            0x20, // prefix_len = 32 bits
+            0x01, 0x02, 0x03, 0x04,
         ]);
 
-        // This might trigger the heuristic (first byte is 0)
-        // The optimized code should handle the retry correctly
-        let result = parse_nlri_list(input, false, &Afi::Ipv4);
+        let prefixes = parse_nlri_list(input, false, &Afi::Ipv4).unwrap();
 
-        // Should either parse successfully or return an error
-        // The key point is it shouldn't panic
-        match result {
-            Ok(prefixes) => {
-                // If parsed, should be the default route
-                if !prefixes.is_empty() {
-                    assert_eq!(prefixes[0].prefix.prefix_len(), 0);
-                }
-            }
-            Err(_) => {
-                // Error is acceptable - the heuristic might fail on this edge case
-                // The important thing is we don't panic
-            }
-        }
+        assert_eq!(prefixes.len(), 2);
+        assert_eq!(prefixes[0], NetworkPrefix::from_str("0.0.0.0/0").unwrap());
+        assert_eq!(prefixes[1], NetworkPrefix::from_str("1.2.3.4/32").unwrap());
+        assert!(prefixes.iter().all(|prefix| prefix.path_id.is_none()));
     }
 
     #[test]

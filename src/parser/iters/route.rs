@@ -6,7 +6,8 @@ use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
 use crate::parser::{
-    chunk_mrt_record, try_parse_prefix, BgpkitParser, Filter, Filterable, ReadUtils,
+    chunk_mrt_record, looks_like_zero_path_id_add_path, try_parse_prefix, BgpkitParser, Filter,
+    Filterable, ReadUtils,
 };
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;
@@ -76,12 +77,27 @@ fn parse_route_nlri_bytes(
         None => input.read_safi()?,
     };
 
-    if afi == Afi::LinkState
-        || safi == Safi::LinkState
-        || safi == Safi::LinkStateVpn
-        || safi == Safi::MplsLabel
-    {
+    if afi == Afi::LinkState || safi == Safi::LinkState || safi == Safi::LinkStateVpn {
         return Ok(None);
+    }
+
+    if safi == Safi::MplsLabel {
+        if reachable {
+            return Ok(None);
+        }
+
+        let config = LabeledNlriConfig {
+            add_path,
+            mode: LabeledNlriMode::MultiLabel,
+            max_labels: 16,
+            peer_max_labels: None,
+        };
+        let prefixes = parse_labeled_withdrawal_nlri(&mut input, afi, &config)?;
+        return Ok(Some(RouteNlriBytes {
+            data: encode_nlri_prefixes_without_alloc_api(&prefixes),
+            afi,
+            add_path,
+        }));
     }
 
     if reachable {
@@ -238,8 +254,8 @@ impl Iterator for NlriPrefixIter {
         }
 
         let data = self.input.as_ref();
-        if !self.is_add_path && !data.is_empty() && data[0] == 0 {
-            debug!("NLRI: first byte is 0, treating as Add-Path format");
+        if !self.is_add_path && looks_like_zero_path_id_add_path(data) {
+            debug!("NLRI: first 4 bytes are 0, treating as Add-Path format");
             self.is_add_path = true;
             self.use_heuristic = true;
         }
@@ -1428,6 +1444,88 @@ mod tests {
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
         assert_eq!(routes[1].elem_type, ElemType::WITHDRAW);
         assert!(routes[1].as_path.is_none());
+    }
+
+    #[test]
+    fn route_iterator_does_not_treat_default_route_as_add_path() {
+        let mut update = BytesMut::new();
+        update.put_u16(0);
+        update.put_u16(0);
+        update.put_u8(0);
+        update.put_u8(32);
+        update.extend_from_slice(&[1, 2, 3, 4]);
+
+        let batch = parse_bgp_update_routes(
+            update.freeze(),
+            false,
+            &AsnLength::Bits32,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_32bit(64496),
+            Arc::from([]),
+        )
+        .unwrap();
+        let routes = batch
+            .all_routes()
+            .map(|route| route.map(BgpRouteElem::into_owned))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(routes.len(), 2);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("0.0.0.0/0").unwrap()
+        );
+        assert_eq!(
+            routes[1].prefix,
+            NetworkPrefix::from_str("1.2.3.4/32").unwrap()
+        );
+        assert!(routes.iter().all(|route| route.prefix.path_id.is_none()));
+    }
+
+    #[test]
+    fn route_iterator_emits_mpls_labeled_mp_unreach_withdrawals() {
+        let mut mp_unreach = BytesMut::new();
+        mp_unreach.put_u16(Afi::Ipv4 as u16);
+        mp_unreach.put_u8(Safi::MplsLabel as u8);
+        mp_unreach.put_u8(48);
+        mp_unreach.extend_from_slice(&[0, 0, 0]);
+        mp_unreach.extend_from_slice(&[203, 0, 113]);
+
+        let mut attr = BytesMut::new();
+        attr.put_u8(AttrFlags::OPTIONAL.bits());
+        attr.put_u8(u8::from(AttrType::MP_UNREACHABLE_NLRI));
+        attr.put_u8(mp_unreach.len() as u8);
+        attr.extend_from_slice(&mp_unreach);
+
+        let mut update = BytesMut::new();
+        update.put_u16(0);
+        update.put_u16(attr.len() as u16);
+        update.extend_from_slice(&attr);
+
+        let batch = parse_bgp_update_routes(
+            update.freeze(),
+            false,
+            &AsnLength::Bits32,
+            1_700_000_000.0,
+            "192.0.2.1".parse().unwrap(),
+            Asn::new_32bit(64496),
+            Arc::from([]),
+        )
+        .unwrap();
+        let routes = batch
+            .all_routes()
+            .map(|route| route.map(BgpRouteElem::into_owned))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
+        assert_eq!(
+            routes[0].prefix,
+            NetworkPrefix::from_str("203.0.113.0/24").unwrap()
+        );
+        assert!(routes[0].as_path.is_none());
     }
 
     #[test]

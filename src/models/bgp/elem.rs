@@ -163,6 +163,10 @@ pub struct BgpElem {
 /// peer metadata, timestamp, and AS path. Use [`BgpElem`] when you need the
 /// full set of BGP attributes. Because route elements do not carry
 /// communities, community filters do not match [`BgpRouteElem`] values.
+///
+/// With the `serde` feature enabled, this borrowed type only supports
+/// `Serialize`; use [`BgpRouteElemOwned`] when you need to `Deserialize`
+/// route elements.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BgpRouteElem<'a> {
