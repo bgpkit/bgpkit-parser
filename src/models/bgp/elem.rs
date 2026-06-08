@@ -157,15 +157,15 @@ pub struct BgpElem {
     pub deprecated: Option<Vec<AttrRaw>>,
 }
 
-/// Lightweight per-prefix route element.
+/// Lightweight borrowed per-prefix route element.
 ///
 /// This struct is intended for fast scans that only need route identity,
 /// peer metadata, timestamp, and AS path. Use [`BgpElem`] when you need the
 /// full set of BGP attributes. Because route elements do not carry
 /// communities, community filters do not match [`BgpRouteElem`] values.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BgpRouteElem {
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct BgpRouteElem<'a> {
     /// The timestamp of the item in floating-point format.
     pub timestamp: f64,
     /// The element type of an item.
@@ -177,16 +177,47 @@ pub struct BgpRouteElem {
     pub peer_asn: Asn,
     /// The network prefix of the item.
     pub prefix: NetworkPrefix,
-    /// The optional path representation of the item.
+    /// The optional borrowed path representation of the item.
     ///
-    /// Route-level parsing shares the same AS path across all announced
-    /// prefixes from a single message.
+    /// Route-level parsing keeps the AS path on the containing route batch
+    /// and borrows it for each announced prefix.
+    pub as_path: Option<&'a AsPath>,
+}
+
+/// Owned lightweight per-prefix route element.
+///
+/// Convert [`BgpRouteElem`] into this type when route rows must outlive the
+/// route batch they came from.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpRouteElemOwned {
+    pub timestamp: f64,
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
+    pub elem_type: ElemType,
+    pub peer_ip: IpAddr,
+    pub peer_asn: Asn,
+    pub prefix: NetworkPrefix,
     pub as_path: Option<Arc<AsPath>>,
+}
+
+impl BgpRouteElem<'_> {
+    pub fn into_owned(self) -> BgpRouteElemOwned {
+        BgpRouteElemOwned {
+            timestamp: self.timestamp,
+            elem_type: self.elem_type,
+            peer_ip: self.peer_ip,
+            peer_asn: self.peer_asn,
+            prefix: self.prefix,
+            as_path: self.as_path.map(|path| Arc::new(path.clone())),
+        }
+    }
 }
 
 impl Eq for BgpElem {}
 
-impl Eq for BgpRouteElem {}
+impl Eq for BgpRouteElem<'_> {}
+
+impl Eq for BgpRouteElemOwned {}
 
 impl PartialOrd<Self> for BgpElem {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -194,7 +225,7 @@ impl PartialOrd<Self> for BgpElem {
     }
 }
 
-impl PartialOrd<Self> for BgpRouteElem {
+impl PartialOrd<Self> for BgpRouteElem<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -209,7 +240,7 @@ impl Ord for BgpElem {
     }
 }
 
-impl Ord for BgpRouteElem {
+impl Ord for BgpRouteElem<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.timestamp
             .partial_cmp(&other.timestamp)
@@ -324,7 +355,7 @@ impl Display for BgpElem {
     }
 }
 
-impl Display for BgpRouteElem {
+impl Display for BgpRouteElem<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let t = match self.elem_type {
             ElemType::ANNOUNCE => "A",
@@ -534,13 +565,14 @@ mod tests {
 
     #[test]
     fn test_route_elem_display() {
+        let as_path = AsPath::from_sequence([64496, 64497]);
         let elem = BgpRouteElem {
             timestamp: 1.1,
             elem_type: ElemType::ANNOUNCE,
             peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
             peer_asn: 64496.into(),
             prefix: NetworkPrefix::from_str("8.8.8.0/24").unwrap(),
-            as_path: Some(Arc::new(AsPath::from_sequence([64496, 64497]))),
+            as_path: Some(&as_path),
         };
 
         assert_eq!(

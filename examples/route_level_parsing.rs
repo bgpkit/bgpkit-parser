@@ -29,21 +29,26 @@ fn main() {
     let parser = BgpkitParser::new(url).unwrap();
 
     let mut route_count = 0;
-    for route in parser.into_route_iter().take(1000) {
-        if route_count < 3 {
-            // Show first few routes
-            log::info!(
-                "Route {}: {} via AS{} (peer: {})",
-                route_count + 1,
-                route.prefix,
-                route.peer_asn,
-                route.peer_ip
-            );
-            if let Some(ref path) = route.as_path {
-                log::info!("  AS Path: {}", path);
+    'routes: for batch in parser.into_route_iter() {
+        for route in batch.routes() {
+            let route = route.unwrap();
+            if route_count < 3 {
+                log::info!(
+                    "Route {}: {} via AS{} (peer: {})",
+                    route_count + 1,
+                    route.prefix,
+                    route.peer_asn,
+                    route.peer_ip
+                );
+                if let Some(path) = route.as_path {
+                    log::info!("  AS Path: {}", path);
+                }
+            }
+            route_count += 1;
+            if route_count >= 1000 {
+                break 'routes;
             }
         }
-        route_count += 1;
     }
     let route_time = start.elapsed();
     log::info!(
@@ -89,15 +94,23 @@ fn main() {
     let filter = bgpkit_parser::Filter::new("peer_asn", "49788").unwrap();
 
     let mut filtered_count = 0;
-    for route in parser.into_route_iter().take(1000) {
-        if route.match_filter(&filter) {
-            filtered_count += 1;
-            if filtered_count <= 3 {
-                log::info!(
-                    "Matched filter (peer_asn=49788): {} from AS{}",
-                    route.prefix,
-                    route.peer_asn
-                );
+    let mut seen = 0;
+    'routes: for batch in parser.into_route_iter() {
+        for route in batch.all_routes() {
+            let route = route.unwrap();
+            if route.match_filter(&filter) {
+                filtered_count += 1;
+                if filtered_count <= 3 {
+                    log::info!(
+                        "Matched filter (peer_asn=49788): {} from AS{}",
+                        route.prefix,
+                        route.peer_asn
+                    );
+                }
+            }
+            seen += 1;
+            if seen >= 1000 {
+                break 'routes;
             }
         }
     }
@@ -114,15 +127,23 @@ fn main() {
     let as_path_filter = bgpkit_parser::Filter::new("as_path", "1299").unwrap();
 
     let mut as_path_matches = 0;
-    for route in parser.into_route_iter().take(1000) {
-        if route.match_filter(&as_path_filter) {
-            as_path_matches += 1;
-            if as_path_matches <= 3 {
-                log::info!(
-                    "AS Path contains 1299: {} - path: {:?}",
-                    route.prefix,
-                    route.as_path.as_ref().map(|p| p.to_string())
-                );
+    let mut seen = 0;
+    'routes: for batch in parser.into_route_iter() {
+        for route in batch.all_routes() {
+            let route = route.unwrap();
+            if route.match_filter(&as_path_filter) {
+                as_path_matches += 1;
+                if as_path_matches <= 3 {
+                    log::info!(
+                        "AS Path contains 1299: {} - path: {:?}",
+                        route.prefix,
+                        route.as_path.map(|p| p.to_string())
+                    );
+                }
+            }
+            seen += 1;
+            if seen >= 1000 {
+                break 'routes;
             }
         }
     }

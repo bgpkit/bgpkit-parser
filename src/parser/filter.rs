@@ -676,7 +676,7 @@ impl RouteFilterView for BgpElem {
     }
 }
 
-impl RouteFilterView for BgpRouteElem {
+impl RouteFilterView for BgpRouteElem<'_> {
     fn timestamp(&self) -> f64 {
         self.timestamp
     }
@@ -698,7 +698,7 @@ impl RouteFilterView for BgpRouteElem {
     }
 
     fn as_path(&self) -> Option<&AsPath> {
-        self.as_path.as_deref()
+        self.as_path
     }
 
     fn matches_origin_asn(&self, asn: Asn) -> bool {
@@ -715,7 +715,7 @@ impl Filterable for BgpElem {
     }
 }
 
-impl Filterable for BgpRouteElem {
+impl Filterable for BgpRouteElem<'_> {
     fn match_filter(&self, filter: &Filter) -> bool {
         match_route_view_filter(self, filter)
     }
@@ -727,7 +727,6 @@ mod tests {
     use crate::BgpkitParser;
     use anyhow::Result;
     use std::str::FromStr;
-    use std::sync::Arc;
 
     fn filter_test_elem() -> BgpElem {
         BgpElem {
@@ -756,14 +755,14 @@ mod tests {
         }
     }
 
-    fn route_projection(elem: &BgpElem) -> BgpRouteElem {
+    fn route_projection(elem: &BgpElem) -> BgpRouteElem<'_> {
         BgpRouteElem {
             timestamp: elem.timestamp,
             elem_type: elem.elem_type,
             peer_ip: elem.peer_ip,
             peer_asn: elem.peer_asn,
             prefix: elem.prefix,
-            as_path: elem.as_path.clone().map(Arc::new),
+            as_path: elem.as_path.as_ref(),
         }
     }
 

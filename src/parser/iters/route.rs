@@ -1,23 +1,23 @@
 use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
-use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
+use crate::parser::bgp::attributes::{parse_as_path, AttributeValidationState};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
-use crate::parser::{chunk_mrt_record, parse_nlri_list, BgpkitParser, Filterable, ReadUtils};
+use crate::parser::{chunk_mrt_record, try_parse_prefix, BgpkitParser, Filter, Filterable, ReadUtils};
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;
-use log::{error, warn};
+use log::{debug, error, warn};
 use std::io::Read;
 use std::net::IpAddr;
 use std::sync::Arc;
 
 #[derive(Default)]
 struct RouteAttributes {
-    as_path: Option<Arc<AsPath>>,
-    announced: Vec<NetworkPrefix>,
-    withdrawn: Vec<NetworkPrefix>,
+    as_path: Option<AsPath>,
+    announced: Vec<RouteNlriBytes>,
+    withdrawn: Vec<RouteNlriBytes>,
 }
 
 struct RouteAttributeContext<'a> {
@@ -28,13 +28,89 @@ struct RouteAttributeContext<'a> {
     has_standard_nlri: bool,
 }
 
-fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<Arc<AsPath>> {
-    let path = match (as_path, as4_path) {
+#[derive(Clone)]
+struct RouteNlriBytes {
+    data: Bytes,
+    afi: Afi,
+    add_path: bool,
+}
+
+fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<AsPath> {
+    match (as_path, as4_path) {
         (None, None) => None,
         (Some(path), None) | (None, Some(path)) => Some(path),
         (Some(path), Some(as4_path)) => Some(AsPath::merge_aspath_as4path(&path, &as4_path)),
+    }
+}
+
+fn parse_route_nlri_bytes(
+    mut input: Bytes,
+    afi: &Option<Afi>,
+    safi: &Option<Safi>,
+    prefixes: &Option<&[NetworkPrefix]>,
+    reachable: bool,
+    add_path: bool,
+) -> Result<Option<RouteNlriBytes>, ParserError> {
+    let first_byte_zero = input.first().map(|b| *b == 0).unwrap_or(false);
+
+    let afi = match afi {
+        Some(afi) => {
+            if first_byte_zero {
+                input.read_afi()?
+            } else {
+                *afi
+            }
+        }
+        None => input.read_afi()?,
     };
-    path.map(Arc::new)
+    let safi = match safi {
+        Some(safi) => {
+            if first_byte_zero {
+                input.read_safi()?
+            } else {
+                *safi
+            }
+        }
+        None => input.read_safi()?,
+    };
+
+    if afi == Afi::LinkState
+        || safi == Safi::LinkState
+        || safi == Safi::LinkStateVpn
+        || safi == Safi::MplsLabel
+    {
+        return Ok(None);
+    }
+
+    if reachable {
+        let next_hop_length = input.read_u8()? as usize;
+        input.has_n_remaining(next_hop_length)?;
+        input.advance(next_hop_length);
+    }
+
+    if let Some(prefixes) = prefixes {
+        if !first_byte_zero {
+            return Ok(Some(RouteNlriBytes {
+                data: encode_nlri_prefixes_without_alloc_api(prefixes),
+                afi,
+                add_path,
+            }));
+        }
+    }
+
+    if reachable && input.read_u8()? != 0 {
+        warn!("NLRI reserved byte not 0 (parsing route-level NLRI prefixes)");
+    }
+
+    Ok(Some(RouteNlriBytes {
+        data: input,
+        afi,
+        add_path,
+    }))
+}
+
+fn encode_nlri_prefixes_without_alloc_api(prefixes: &[NetworkPrefix]) -> Bytes {
+    crate::parser::encode_nlri_prefixes(prefixes)
 }
 
 fn parse_route_attributes(
@@ -78,7 +154,7 @@ fn parse_route_attributes(
             AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32).map(|path| {
                 as4_path = Some(path);
             }),
-            AttrType::MP_REACHABLE_NLRI => parse_nlri(
+            AttrType::MP_REACHABLE_NLRI => parse_route_nlri_bytes(
                 attr_data,
                 &ctx.afi,
                 &ctx.safi,
@@ -86,12 +162,12 @@ fn parse_route_attributes(
                 true,
                 add_path,
             )
-            .map(|attr| {
-                if let AttributeValue::MpReachNlri(nlri) = attr {
-                    announced = nlri.prefixes;
+            .map(|nlri| {
+                if let Some(nlri) = nlri {
+                    announced.push(nlri);
                 }
             }),
-            AttrType::MP_UNREACHABLE_NLRI => parse_nlri(
+            AttrType::MP_UNREACHABLE_NLRI => parse_route_nlri_bytes(
                 attr_data,
                 &ctx.afi,
                 &ctx.safi,
@@ -99,9 +175,9 @@ fn parse_route_attributes(
                 false,
                 add_path,
             )
-            .map(|attr| {
-                if let AttributeValue::MpUnreachNlri(nlri) = attr {
-                    withdrawn = nlri.prefixes;
+            .map(|nlri| {
+                if let Some(nlri) = nlri {
+                    withdrawn.push(nlri);
                 }
             }),
             _ => Ok(()),
@@ -131,42 +207,198 @@ fn record_timestamp(common_header: &CommonHeader) -> f64 {
     }
 }
 
-struct RouteUpdateIter {
+struct NlriPrefixIter {
+    input: Bytes,
+    afi: Afi,
+    add_path: bool,
+    is_add_path: bool,
+    use_heuristic: bool,
+}
+
+impl NlriPrefixIter {
+    fn new(input: Bytes, afi: Afi, add_path: bool) -> Self {
+        Self {
+            input,
+            afi,
+            add_path,
+            is_add_path: add_path,
+            use_heuristic: false,
+        }
+    }
+}
+
+impl Iterator for NlriPrefixIter {
+    type Item = Result<NetworkPrefix, ParserError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.input.remaining() == 0 {
+            return None;
+        }
+
+        let data = self.input.as_ref();
+        if !self.is_add_path && !data.is_empty() && data[0] == 0 {
+            debug!("NLRI: first byte is 0, treating as Add-Path format");
+            self.is_add_path = true;
+            self.use_heuristic = true;
+        }
+
+        let (prefix, consumed) = match try_parse_prefix(data, &self.afi, self.is_add_path) {
+            Ok(result) => result,
+            Err(_) if self.use_heuristic => {
+                debug!(
+                    "NLRI: Add-Path heuristic failed, retrying with add_path={}",
+                    self.add_path
+                );
+                self.is_add_path = self.add_path;
+                self.use_heuristic = false;
+                match try_parse_prefix(data, &self.afi, self.add_path) {
+                    Ok(result) => result,
+                    Err(err) => return Some(Err(err)),
+                }
+            }
+            Err(err) => return Some(Err(err)),
+        };
+
+        self.input.advance(consumed);
+        Some(Ok(prefix))
+    }
+}
+
+#[derive(Clone)]
+enum RoutePrefixSource {
+    One(Option<NetworkPrefix>),
+    Nlri(RouteNlriBytes),
+}
+
+impl RoutePrefixSource {
+    fn iter(&self) -> RoutePrefixSourceIter {
+        match self {
+            RoutePrefixSource::One(prefix) => RoutePrefixSourceIter::One(*prefix),
+            RoutePrefixSource::Nlri(nlri) => RoutePrefixSourceIter::Nlri(NlriPrefixIter::new(
+                nlri.data.clone(),
+                nlri.afi,
+                nlri.add_path,
+            )),
+        }
+    }
+}
+
+enum RoutePrefixSourceIter {
+    One(Option<NetworkPrefix>),
+    Nlri(NlriPrefixIter),
+}
+
+impl Iterator for RoutePrefixSourceIter {
+    type Item = Result<NetworkPrefix, ParserError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RoutePrefixSourceIter::One(prefix) => prefix.take().map(Ok),
+            RoutePrefixSourceIter::Nlri(iter) => iter.next(),
+        }
+    }
+}
+
+struct RouteBatchPart {
+    elem_type: ElemType,
+    source: RoutePrefixSource,
+    has_as_path: bool,
+}
+
+/// A route-level MRT/BGP batch with shared parsed state.
+///
+/// A batch corresponds to one MRT route-bearing record or BGP UPDATE message.
+/// Prefixes are parsed lazily from shared `Bytes` slices when iterating routes.
+#[derive(Clone)]
+pub struct RouteBatch {
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
-    as_path: Option<Arc<AsPath>>,
-    announced:
-        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
-    withdrawn:
-        std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
-    in_withdrawn_phase: bool,
+    as_path: Option<AsPath>,
+    parts: Arc<[RouteBatchPart]>,
+    filters: Arc<[Filter]>,
 }
 
-impl RouteUpdateIter {
-    fn next_route(&mut self) -> Option<BgpRouteElem> {
-        if !self.in_withdrawn_phase {
-            if let Some(prefix) = self.announced.next() {
-                return Some(BgpRouteElem {
-                    timestamp: self.timestamp,
-                    elem_type: ElemType::ANNOUNCE,
-                    peer_ip: self.peer_ip,
-                    peer_asn: self.peer_asn,
-                    prefix,
-                    as_path: self.as_path.clone(),
-                });
-            }
-            self.in_withdrawn_phase = true;
+impl RouteBatch {
+    fn new(
+        timestamp: f64,
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        as_path: Option<AsPath>,
+        parts: Vec<RouteBatchPart>,
+        filters: Arc<[Filter]>,
+    ) -> Self {
+        Self {
+            timestamp,
+            peer_ip,
+            peer_asn,
+            as_path,
+            parts: Arc::from(parts),
+            filters,
         }
+    }
 
-        self.withdrawn.next().map(|prefix| BgpRouteElem {
-            timestamp: self.timestamp,
-            elem_type: ElemType::WITHDRAW,
-            peer_ip: self.peer_ip,
-            peer_asn: self.peer_asn,
-            prefix,
-            as_path: None,
-        })
+    pub fn routes(&self) -> RouteBatchIter<'_> {
+        RouteBatchIter::new(self, true)
+    }
+
+    pub fn all_routes(&self) -> RouteBatchIter<'_> {
+        RouteBatchIter::new(self, false)
+    }
+}
+
+pub struct RouteBatchIter<'a> {
+    batch: &'a RouteBatch,
+    part_index: usize,
+    current: Option<RoutePrefixSourceIter>,
+    filtered: bool,
+}
+
+impl<'a> RouteBatchIter<'a> {
+    fn new(batch: &'a RouteBatch, filtered: bool) -> Self {
+        Self {
+            batch,
+            part_index: 0,
+            current: None,
+            filtered,
+        }
+    }
+}
+
+impl<'a> Iterator for RouteBatchIter<'a> {
+    type Item = Result<BgpRouteElem<'a>, ParserError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.current.is_none() {
+                let part = self.batch.parts.get(self.part_index)?;
+                self.part_index += 1;
+                self.current = Some(part.source.iter());
+            }
+
+            let part = &self.batch.parts[self.part_index - 1];
+            let prefix = match self.current.as_mut().and_then(Iterator::next) {
+                Some(Ok(prefix)) => prefix,
+                Some(Err(err)) => return Some(Err(err)),
+                None => {
+                    self.current = None;
+                    continue;
+                }
+            };
+
+            let route = BgpRouteElem {
+                timestamp: self.batch.timestamp,
+                elem_type: part.elem_type,
+                peer_ip: self.batch.peer_ip,
+                peer_asn: self.batch.peer_asn,
+                prefix,
+                as_path: part.has_as_path.then_some(()).and(self.batch.as_path.as_ref()),
+            };
+
+            if !self.filtered || route.match_filters(&self.batch.filters) {
+                return Some(Ok(route));
+            }
+        }
     }
 }
 
@@ -222,18 +454,22 @@ fn parse_route_peer_table(mut data: Bytes) -> Result<RoutePeerTable, ParserError
 enum RouteRecordIter {
     #[default]
     Empty,
-    One(Option<BgpRouteElem>),
-    Update(RouteUpdateIter),
+    One(RouteBatch),
     RibAfi(RouteRibAfiIter),
 }
 
 impl RouteRecordIter {
-    fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
-        match self {
+    fn next_batch(&mut self, filters: Arc<[Filter]>) -> Result<Option<RouteBatch>, ParserError> {
+        match std::mem::take(self) {
             RouteRecordIter::Empty => Ok(None),
-            RouteRecordIter::One(route) => Ok(route.take()),
-            RouteRecordIter::Update(iter) => Ok(iter.next_route()),
-            RouteRecordIter::RibAfi(iter) => iter.next_route(),
+            RouteRecordIter::One(batch) => Ok(Some(batch)),
+            RouteRecordIter::RibAfi(mut iter) => {
+                let batch = iter.next_batch(filters)?;
+                if iter.remaining_entries > 0 {
+                    *self = RouteRecordIter::RibAfi(iter);
+                }
+                Ok(batch)
+            }
         }
     }
 }
@@ -249,7 +485,7 @@ struct RouteRibAfiIter {
 }
 
 impl RouteRibAfiIter {
-    fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
+    fn next_batch(&mut self, filters: Arc<[Filter]>) -> Result<Option<RouteBatch>, ParserError> {
         while self.remaining_entries > 0 {
             if self.data.remaining() < rib_entry_min_len(self.is_add_path) {
                 warn!("early break due to truncated msg while parsing RIB AFI entries");
@@ -294,14 +530,18 @@ impl RouteRibAfiIter {
                 continue;
             };
 
-            return Ok(Some(BgpRouteElem {
-                timestamp: originated_time,
-                elem_type: ElemType::ANNOUNCE,
-                peer_ip: peer.peer_ip,
-                peer_asn: peer.peer_asn,
-                prefix: self.prefix,
-                as_path: attrs.as_path,
-            }));
+            return Ok(Some(RouteBatch::new(
+                originated_time,
+                peer.peer_ip,
+                peer.peer_asn,
+                attrs.as_path,
+                vec![RouteBatchPart {
+                    elem_type: ElemType::ANNOUNCE,
+                    source: RoutePrefixSource::One(Some(self.prefix)),
+                    has_as_path: true,
+                }],
+                filters,
+            )));
         }
 
         Ok(None)
@@ -315,15 +555,17 @@ fn parse_bgp_update_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
-) -> Result<RouteUpdateIter, ParserError> {
+    filters: Arc<[Filter]>,
+) -> Result<RouteBatch, ParserError> {
     let withdrawn_len = input.read_u16()? as usize;
     input.has_n_remaining(withdrawn_len)?;
-    let withdrawn_prefixes = parse_nlri_list(input.split_to(withdrawn_len), add_path, &Afi::Ipv4)?;
+    let withdrawn_prefixes = input.split_to(withdrawn_len);
 
     let attribute_length = input.read_u16()? as usize;
     input.has_n_remaining(attribute_length)?;
     let attribute_bytes = input.split_to(attribute_length);
-    let announced_prefixes = parse_nlri_list(input, add_path, &Afi::Ipv4)?;
+    let announced_prefixes = input;
+    let has_standard_nlri = !announced_prefixes.is_empty();
     let attributes = parse_route_attributes(
         attribute_bytes,
         asn_len,
@@ -333,19 +575,52 @@ fn parse_bgp_update_routes(
             safi: None,
             prefixes: None,
             is_announcement: None,
-            has_standard_nlri: !announced_prefixes.is_empty(),
+            has_standard_nlri,
         },
     )?;
 
-    Ok(RouteUpdateIter {
+    let mut parts = Vec::new();
+    if !announced_prefixes.is_empty() {
+        parts.push(RouteBatchPart {
+            elem_type: ElemType::ANNOUNCE,
+            source: RoutePrefixSource::Nlri(RouteNlriBytes {
+                data: announced_prefixes,
+                afi: Afi::Ipv4,
+                add_path,
+            }),
+            has_as_path: true,
+        });
+    }
+    parts.extend(attributes.announced.into_iter().map(|nlri| RouteBatchPart {
+        elem_type: ElemType::ANNOUNCE,
+        source: RoutePrefixSource::Nlri(nlri),
+        has_as_path: true,
+    }));
+    if !withdrawn_prefixes.is_empty() {
+        parts.push(RouteBatchPart {
+            elem_type: ElemType::WITHDRAW,
+            source: RoutePrefixSource::Nlri(RouteNlriBytes {
+                data: withdrawn_prefixes,
+                afi: Afi::Ipv4,
+                add_path,
+            }),
+            has_as_path: false,
+        });
+    }
+    parts.extend(attributes.withdrawn.into_iter().map(|nlri| RouteBatchPart {
+        elem_type: ElemType::WITHDRAW,
+        source: RoutePrefixSource::Nlri(nlri),
+        has_as_path: false,
+    }));
+
+    Ok(RouteBatch::new(
         timestamp,
         peer_ip,
         peer_asn,
-        as_path: attributes.as_path,
-        announced: announced_prefixes.into_iter().chain(attributes.announced),
-        withdrawn: withdrawn_prefixes.into_iter().chain(attributes.withdrawn),
-        in_withdrawn_phase: false,
-    })
+        attributes.as_path,
+        parts,
+        filters,
+    ))
 }
 
 fn parse_bgp_message_routes(
@@ -355,6 +630,7 @@ fn parse_bgp_message_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
+    filters: Arc<[Filter]>,
 ) -> Result<RouteRecordIter, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
@@ -391,8 +667,8 @@ fn parse_bgp_message_routes(
     let msg_data = data.split_to(bgp_msg_length);
 
     match msg_type {
-        BgpMessageType::UPDATE => Ok(RouteRecordIter::Update(parse_bgp_update_routes(
-            msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn,
+        BgpMessageType::UPDATE => Ok(RouteRecordIter::One(parse_bgp_update_routes(
+            msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn, filters,
         )?)),
         BgpMessageType::OPEN | BgpMessageType::NOTIFICATION | BgpMessageType::KEEPALIVE => {
             Ok(RouteRecordIter::Empty)
@@ -418,6 +694,7 @@ fn parse_bgp4mp_routes(
     sub_type: u16,
     mut data: Bytes,
     timestamp: f64,
+    filters: Arc<[Filter]>,
 ) -> Result<RouteRecordIter, ParserError> {
     let msg_type = Bgp4MpType::try_from(sub_type)?;
     let Some((asn_len, add_path)) = bgp4mp_asn_len_and_add_path(msg_type) else {
@@ -441,7 +718,7 @@ fn parse_bgp4mp_routes(
         )));
     }
 
-    parse_bgp_message_routes(data, add_path, &asn_len, timestamp, peer_ip, peer_asn)
+    parse_bgp_message_routes(data, add_path, &asn_len, timestamp, peer_ip, peer_asn, filters)
 }
 
 fn table_dump_v2_afi_safi(rib_type: TableDumpV2Type) -> Result<(Afi, Safi), ParserError> {
@@ -474,7 +751,11 @@ fn is_add_path_rib_type(rib_type: TableDumpV2Type) -> bool {
     )
 }
 
-fn parse_table_dump_routes(sub_type: u16, mut data: Bytes) -> Result<RouteRecordIter, ParserError> {
+fn parse_table_dump_routes(
+    sub_type: u16,
+    mut data: Bytes,
+    filters: Arc<[Filter]>,
+) -> Result<RouteRecordIter, ParserError> {
     let afi = match sub_type {
         1 => Afi::Ipv4,
         2 => Afi::Ipv6,
@@ -511,20 +792,25 @@ fn parse_table_dump_routes(sub_type: u16, mut data: Bytes) -> Result<RouteRecord
         },
     )?;
 
-    Ok(RouteRecordIter::One(Some(BgpRouteElem {
-        timestamp: originated_time,
-        elem_type: ElemType::ANNOUNCE,
+    Ok(RouteRecordIter::One(RouteBatch::new(
+        originated_time,
         peer_ip,
         peer_asn,
-        prefix: NetworkPrefix::new(prefix, None),
-        as_path: attrs.as_path,
-    })))
+        attrs.as_path,
+        vec![RouteBatchPart {
+            elem_type: ElemType::ANNOUNCE,
+            source: RoutePrefixSource::One(Some(NetworkPrefix::new(prefix, None))),
+            has_as_path: true,
+        }],
+        filters,
+    )))
 }
 
 fn parse_table_dump_v2_routes(
     sub_type: u16,
     mut data: Bytes,
     peer_table: &mut Option<RoutePeerTable>,
+    _filters: Arc<[Filter]>,
 ) -> Result<RouteRecordIter, ParserError> {
     let v2_type = TableDumpV2Type::try_from(sub_type)?;
     match v2_type {
@@ -564,22 +850,26 @@ fn parse_table_dump_v2_routes(
 fn parse_raw_record_route_iter(
     raw_record: crate::RawMrtRecord,
     peer_table: &mut Option<RoutePeerTable>,
+    filters: Arc<[Filter]>,
 ) -> Result<RouteRecordIter, ParserError> {
     let timestamp = record_timestamp(&raw_record.common_header);
     match raw_record.common_header.entry_type {
         EntryType::TABLE_DUMP => parse_table_dump_routes(
             raw_record.common_header.entry_subtype,
             raw_record.message_bytes,
+            filters,
         ),
         EntryType::TABLE_DUMP_V2 => parse_table_dump_v2_routes(
             raw_record.common_header.entry_subtype,
             raw_record.message_bytes,
             peer_table,
+            filters,
         ),
         EntryType::BGP4MP | EntryType::BGP4MP_ET => parse_bgp4mp_routes(
             raw_record.common_header.entry_subtype,
             raw_record.message_bytes,
             timestamp,
+            filters,
         ),
         v => Err(ParserError::Unsupported(format!(
             "unsupported MRT type: {v:?}"
@@ -591,30 +881,28 @@ pub struct RouteIterator<R> {
     parser: BgpkitParser<R>,
     pending_routes: RouteRecordIter,
     peer_table: Option<RoutePeerTable>,
+    filters: Arc<[Filter]>,
 }
 
 impl<R> RouteIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let filters = Arc::from(parser.filters.clone());
         Self {
             parser,
             pending_routes: RouteRecordIter::Empty,
             peer_table: None,
+            filters,
         }
     }
 }
 
 impl<R: Read> Iterator for RouteIterator<R> {
-    type Item = BgpRouteElem;
+    type Item = RouteBatch;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.pending_routes.next_route() {
-                Ok(Some(route)) => {
-                    if route.match_filters(&self.parser.filters) {
-                        return Some(route);
-                    }
-                    continue;
-                }
+            match self.pending_routes.next_batch(Arc::clone(&self.filters)) {
+                Ok(Some(batch)) => return Some(batch),
                 Ok(None) => {}
                 Err(err) => {
                     error!("parser error: {}", err);
@@ -667,7 +955,11 @@ impl<R: Read> Iterator for RouteIterator<R> {
                 },
             };
 
-            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+            match parse_raw_record_route_iter(
+                raw_record,
+                &mut self.peer_table,
+                Arc::clone(&self.filters),
+            ) {
                 Ok(routes) => {
                     self.pending_routes = routes;
                 }
@@ -687,30 +979,28 @@ pub struct FallibleRouteIterator<R> {
     parser: BgpkitParser<R>,
     pending_routes: RouteRecordIter,
     peer_table: Option<RoutePeerTable>,
+    filters: Arc<[Filter]>,
 }
 
 impl<R> FallibleRouteIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let filters = Arc::from(parser.filters.clone());
         Self {
             parser,
             pending_routes: RouteRecordIter::Empty,
             peer_table: None,
+            filters,
         }
     }
 }
 
 impl<R: Read> Iterator for FallibleRouteIterator<R> {
-    type Item = Result<BgpRouteElem, ParserErrorWithBytes>;
+    type Item = Result<RouteBatch, ParserErrorWithBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.pending_routes.next_route() {
-                Ok(Some(route)) => {
-                    if route.match_filters(&self.parser.filters) {
-                        return Some(Ok(route));
-                    }
-                    continue;
-                }
+            match self.pending_routes.next_batch(Arc::clone(&self.filters)) {
+                Ok(Some(batch)) => return Some(Ok(batch)),
                 Ok(None) => {}
                 Err(error) => {
                     self.pending_routes = RouteRecordIter::Empty;
@@ -724,7 +1014,11 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                 Err(e) => return Some(Err(e)),
             };
 
-            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+            match parse_raw_record_route_iter(
+                raw_record,
+                &mut self.peer_table,
+                Arc::clone(&self.filters),
+            ) {
                 Ok(routes) => {
                     self.pending_routes = routes;
                 }
@@ -743,8 +1037,8 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
-    fn route_projection(elem: BgpElem) -> BgpRouteElem {
-        BgpRouteElem {
+    fn route_projection(elem: BgpElem) -> BgpRouteElemOwned {
+        BgpRouteElemOwned {
             timestamp: elem.timestamp,
             elem_type: elem.elem_type,
             peer_ip: elem.peer_ip,
@@ -756,12 +1050,28 @@ mod tests {
 
     fn collect_route_record_iter(
         mut iter: RouteRecordIter,
-    ) -> Result<Vec<BgpRouteElem>, ParserError> {
+    ) -> Result<Vec<BgpRouteElemOwned>, ParserError> {
         let mut routes = Vec::new();
-        while let Some(route) = iter.next_route()? {
-            routes.push(route);
+        let filters: Arc<[Filter]> = Arc::from([]);
+        while let Some(batch) = iter.next_batch(Arc::clone(&filters))? {
+            for route in batch.all_routes() {
+                routes.push(route?.into_owned());
+            }
         }
         Ok(routes)
+    }
+
+    fn collect_route_batches<R: Read>(parser: BgpkitParser<R>) -> Vec<BgpRouteElemOwned> {
+        parser
+            .into_route_iter()
+            .flat_map(|batch| {
+                batch
+                    .routes()
+                    .map(|route| route.map(BgpRouteElem::into_owned))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     }
 
     fn route_peer_table_from_peer_index(peer_table: PeerIndexTable) -> RoutePeerTable {
@@ -1087,19 +1397,17 @@ mod tests {
             .into_elem_iter()
             .map(route_projection)
             .collect::<Vec<_>>();
-        let routes = route_parser.into_route_iter().collect::<Vec<_>>();
+        let routes = collect_route_batches(route_parser);
 
         assert_eq!(routes, elem_projection, "filters: {filters:?}");
     }
 
-    fn assert_route_projection(bytes: Vec<u8>) -> Vec<BgpRouteElem> {
+    fn assert_route_projection(bytes: Vec<u8>) -> Vec<BgpRouteElemOwned> {
         let elem_projection = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
             .into_elem_iter()
             .map(route_projection)
             .collect::<Vec<_>>();
-        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
-            .into_route_iter()
-            .collect::<Vec<_>>();
+        let routes = collect_route_batches(BgpkitParser::from_reader(Cursor::new(bytes)));
 
         assert_eq!(routes, elem_projection);
         routes
@@ -1131,14 +1439,19 @@ mod tests {
         .encode()
         .to_vec();
 
-        let routes = BgpkitParser::from_reader(Cursor::new(bytes))
+        let batch = BgpkitParser::from_reader(Cursor::new(bytes))
             .into_route_iter()
-            .collect::<Vec<_>>();
+            .next()
+            .unwrap();
+        let routes = batch
+            .all_routes()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         assert_eq!(routes.len(), 2);
-        assert!(Arc::ptr_eq(
-            routes[0].as_path.as_ref().unwrap(),
-            routes[1].as_path.as_ref().unwrap()
+        assert!(std::ptr::eq(
+            routes[0].as_path.unwrap(),
+            routes[1].as_path.unwrap()
         ));
     }
 
@@ -1585,7 +1898,8 @@ mod tests {
             &AsnLength::Bits16,
             1_700_000_000.0,
             "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496)
+            Asn::new_16bit(64496),
+            Arc::from([]),
         )
         .is_err());
         assert!(parse_bgp_message_routes(
@@ -1594,7 +1908,8 @@ mod tests {
             &AsnLength::Bits16,
             1_700_000_000.0,
             "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496)
+            Asn::new_16bit(64496),
+            Arc::from([]),
         )
         .is_err());
 
@@ -1606,6 +1921,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1620,6 +1936,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1634,6 +1951,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1671,6 +1989,7 @@ mod tests {
             TableDumpV2Type::RibIpv4Unicast as u16,
             rib.encode(),
             &mut no_peer_table,
+            Arc::from([]),
         )
         .is_err());
 
@@ -1680,6 +1999,7 @@ mod tests {
                 TableDumpV2Type::RibIpv4Unicast as u16,
                 rib.encode(),
                 &mut empty_peer_table,
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1696,6 +2016,7 @@ mod tests {
                 TableDumpV2Type::RibIpv4Unicast as u16,
                 truncated.freeze(),
                 &mut empty_peer_table,
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1731,6 +2052,7 @@ mod tests {
                 TableDumpV2Type::RibIpv4UnicastAddPath as u16,
                 add_path_truncated.freeze(),
                 &mut peer_table,
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1752,6 +2074,7 @@ mod tests {
                 TableDumpV2Type::RibIpv4Unicast as u16,
                 rib_body,
                 &mut peer_table,
+                Arc::from([]),
             )
             .unwrap(),
         )
@@ -1772,9 +2095,7 @@ mod tests {
     fn route_iterators_preserve_table_dump_v2_routes_before_truncated_attribute_payload() {
         let (bytes, _rib_body, _peer_table) = table_dump_v2_truncated_attribute_payload();
 
-        let routes = BgpkitParser::from_reader(Cursor::new(bytes.clone()))
-            .into_route_iter()
-            .collect::<Vec<_>>();
+        let routes = collect_route_batches(BgpkitParser::from_reader(Cursor::new(bytes.clone())));
         assert_eq!(routes.len(), 1);
         assert_eq!(
             routes[0].prefix,
@@ -1783,6 +2104,15 @@ mod tests {
 
         let fallible_routes = BgpkitParser::from_reader(Cursor::new(bytes))
             .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .into_iter()
+            .flat_map(|batch| {
+                batch
+                    .routes()
+                    .map(|route| route.map(BgpRouteElem::into_owned))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(fallible_routes, routes);
@@ -1813,13 +2143,11 @@ mod tests {
 
     #[test]
     fn route_iterator_skips_route_parse_errors() {
-        let routes = BgpkitParser::from_reader(Cursor::new(
+        let routes = collect_route_batches(BgpkitParser::from_reader(Cursor::new(
             table_dump_v2_rib_without_peer_table_record()
                 .encode()
                 .to_vec(),
-        ))
-        .into_route_iter()
-        .collect::<Vec<_>>();
+        )));
 
         assert!(routes.is_empty());
     }
@@ -1830,6 +2158,15 @@ mod tests {
             .add_filter("type", "w")
             .unwrap()
             .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .into_iter()
+            .flat_map(|batch| {
+                batch
+                    .routes()
+                    .map(|route| route.map(BgpRouteElem::into_owned))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
@@ -1854,6 +2191,15 @@ mod tests {
         let bytes = update_record().encode().to_vec();
         let routes = BgpkitParser::from_reader(Cursor::new(bytes))
             .into_fallible_route_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .into_iter()
+            .flat_map(|batch| {
+                batch
+                    .routes()
+                    .map(|route| route.map(BgpRouteElem::into_owned))
+                    .collect::<Vec<_>>()
+            })
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 

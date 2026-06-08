@@ -20,7 +20,7 @@ mod update;
 pub use default::{ElemIterator, RecordIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
-pub use route::{FallibleRouteIterator, RouteIterator};
+pub use route::{FallibleRouteIterator, RouteBatch, RouteBatchIter, RouteIterator};
 pub use update::{
     Bgp4MpUpdate, FallibleUpdateIterator, MrtUpdate, TableDumpV2Entry, UpdateIterator,
 };
@@ -115,13 +115,13 @@ impl<R> BgpkitParser<R> {
         UpdateIterator::new(self)
     }
 
-    /// Creates an iterator over lightweight route elements from MRT data.
+    /// Creates an iterator over lightweight route batches from MRT data.
     ///
-    /// This iterator yields [`BgpRouteElem`](crate::models::BgpRouteElem)
-    /// values and only parses route identity, peer metadata, timestamp, and
-    /// AS path. Use [`into_elem_iter`](Self::into_elem_iter) when you need
-    /// the full [`BgpElem`] attribute set. Filters that only depend on route
-    /// fields are supported; `community` filters do not match route elements.
+    /// This iterator yields [`RouteBatch`] values. Each batch owns shared
+    /// route state such as AS path and raw prefix bytes; call
+    /// [`RouteBatch::routes`] to iterate filtered [`BgpRouteElem`](crate::models::BgpRouteElem)
+    /// rows. Use [`into_elem_iter`](Self::into_elem_iter) when you need the
+    /// full [`BgpElem`] attribute set.
     pub fn into_route_iter(self) -> RouteIterator<R> {
         RouteIterator::new(self)
     }

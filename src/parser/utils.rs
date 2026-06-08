@@ -179,7 +179,7 @@ pub trait ReadUtils: Buf {
 
 /// Parse NLRI prefix from byte slice without consuming bytes.
 /// Returns (prefix, bytes_consumed) on success.
-fn try_parse_prefix(
+pub(crate) fn try_parse_prefix(
     data: &[u8],
     afi: &Afi,
     add_path: bool,
