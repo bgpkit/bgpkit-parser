@@ -5,7 +5,9 @@ use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
-use crate::parser::{chunk_mrt_record, try_parse_prefix, BgpkitParser, Filter, Filterable, ReadUtils};
+use crate::parser::{
+    chunk_mrt_record, try_parse_prefix, BgpkitParser, Filter, Filterable, ReadUtils,
+};
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;
 use log::{debug, error, warn};
@@ -392,7 +394,10 @@ impl<'a> Iterator for RouteBatchIter<'a> {
                 peer_ip: self.batch.peer_ip,
                 peer_asn: self.batch.peer_asn,
                 prefix,
-                as_path: part.has_as_path.then_some(()).and(self.batch.as_path.as_ref()),
+                as_path: part
+                    .has_as_path
+                    .then_some(())
+                    .and(self.batch.as_path.as_ref()),
             };
 
             if !self.filtered || route.match_filters(&self.batch.filters) {
@@ -718,7 +723,9 @@ fn parse_bgp4mp_routes(
         )));
     }
 
-    parse_bgp_message_routes(data, add_path, &asn_len, timestamp, peer_ip, peer_asn, filters)
+    parse_bgp_message_routes(
+        data, add_path, &asn_len, timestamp, peer_ip, peer_asn, filters,
+    )
 }
 
 fn table_dump_v2_afi_safi(rib_type: TableDumpV2Type) -> Result<(Afi, Safi), ParserError> {
@@ -1443,10 +1450,7 @@ mod tests {
             .into_route_iter()
             .next()
             .unwrap();
-        let routes = batch
-            .all_routes()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let routes = batch.all_routes().collect::<Result<Vec<_>, _>>().unwrap();
 
         assert_eq!(routes.len(), 2);
         assert!(std::ptr::eq(
