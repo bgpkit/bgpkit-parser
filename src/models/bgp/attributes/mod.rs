@@ -5,6 +5,7 @@ mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
+use bytes::Bytes;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
@@ -75,7 +76,6 @@ pub enum AttrType {
     ORIGINATOR_ID = 9,
     CLUSTER_LIST = 10,
     /// <https://tools.ietf.org/html/rfc4760>
-    CLUSTER_ID = 13,
     MP_REACHABLE_NLRI = 14,
     MP_UNREACHABLE_NLRI = 15,
     /// <https://datatracker.ietf.org/doc/html/rfc4360>
@@ -95,6 +95,7 @@ pub enum AttrType {
     SFP_ATTRIBUTE = 37,
     BFD_DISCRIMINATOR = 38,
     BGP_PREFIX_SID = 40,
+    BIER = 41,
     ATTR_SET = 128,
     /// <https://datatracker.ietf.org/doc/html/rfc2042>
     DEVELOPMENT = 255,
@@ -168,7 +169,7 @@ impl Attributes {
     }
 
     pub fn add_attr(&mut self, attr: Attribute) {
-        let ty = u8::from(attr.value.attr_type());
+        let ty = attr.value.attr_code();
         self.attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
         self.inner.push(attr);
     }
@@ -378,7 +379,7 @@ impl Iterator for MetaCommunitiesIter<'_> {
 fn compute_mask(inner: &[Attribute]) -> [u64; 4] {
     let mut attr_mask = [0; 4];
     for attr in inner {
-        let ty = u8::from(attr.value.attr_type());
+        let ty = attr.value.attr_code();
         attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
     }
     attr_mask
@@ -522,7 +523,7 @@ impl From<AttributeValue> for Attribute {
 pub struct AigpTlv {
     pub tlv_type: u8,
     pub length: u16,
-    pub value: Vec<u8>,
+    pub value: Bytes,
 }
 
 /// AIGP (Accumulated IGP Metric) Attribute - RFC 7311
@@ -558,6 +559,60 @@ impl Aigp {
                 }
             })
     }
+}
+
+/// Raw TLV with 1-octet type and 1-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv8 {
+    pub tlv_type: u8,
+    pub value: Bytes,
+}
+
+/// Raw TLV with 1-octet type and 2-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv8Ext {
+    pub tlv_type: u8,
+    pub value: Bytes,
+}
+
+/// Raw TLV with 2-octet type and 2-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv16 {
+    pub tlv_type: u16,
+    pub value: Bytes,
+}
+
+/// BFD Discriminator Attribute - RFC 9026
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BfdDiscriminatorAttribute {
+    pub mode: u8,
+    pub discriminator: u32,
+    pub tlvs: Vec<RawTlv8>,
+}
+
+/// BGP Prefix-SID Attribute - RFC 8669
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpPrefixSidAttribute {
+    pub tlvs: Vec<RawTlv8Ext>,
+}
+
+/// BIER Attribute - RFC 9793
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BierAttribute {
+    pub tlvs: Vec<RawTlv16>,
+}
+
+/// SFP Attribute - RFC 9015
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SfpAttribute {
+    pub tlvs: Vec<RawTlv8Ext>,
 }
 
 /// ATTR_SET Attribute - RFC 6368
@@ -607,7 +662,16 @@ pub enum AttributeValue {
     LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
     /// BGP Tunnel Encapsulation attribute - RFC 9012
     TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
+    /// BFD Discriminator attribute - RFC 9026
+    BfdDiscriminator(BfdDiscriminatorAttribute),
+    /// BGP Prefix-SID attribute - RFC 8669
+    BgpPrefixSid(BgpPrefixSidAttribute),
+    /// BIER attribute - RFC 9793
+    Bier(BierAttribute),
+    /// SFP attribute - RFC 9015
+    Sfp(SfpAttribute),
     Development(Vec<u8>),
+    Raw(AttrRaw),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
     /// AIGP (Accumulated IGP Metric) attribute - RFC 7311
@@ -645,7 +709,7 @@ pub enum AttributeCategory {
 }
 
 impl AttributeValue {
-    pub const fn attr_type(&self) -> AttrType {
+    pub fn attr_type(&self) -> AttrType {
         match self {
             AttributeValue::Origin(_) => AttrType::ORIGIN,
             AttributeValue::AsPath { is_as4: false, .. } => AttrType::AS_PATH,
@@ -669,10 +733,25 @@ impl AttributeValue {
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
             AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
             AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
+            AttributeValue::BfdDiscriminator(_) => AttrType::BFD_DISCRIMINATOR,
+            AttributeValue::BgpPrefixSid(_) => AttrType::BGP_PREFIX_SID,
+            AttributeValue::Bier(_) => AttrType::BIER,
+            AttributeValue::Sfp(_) => AttrType::SFP_ATTRIBUTE,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
-            AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
+            AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
+                x.attr_type()
+            }
             AttributeValue::Aigp(_) => AttrType::AIGP,
             AttributeValue::AttrSet(_) => AttrType::ATTR_SET,
+        }
+    }
+
+    pub fn attr_code(&self) -> u8 {
+        match self {
+            AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
+                x.code
+            }
+            _ => self.attr_type().into(),
         }
     }
 
@@ -699,6 +778,10 @@ impl AttributeValue {
             AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::LinkState(_) => Some(OptionalNonTransitive),
             AttributeValue::Aigp(_) => Some(OptionalNonTransitive),
+            AttributeValue::BfdDiscriminator(_) => Some(OptionalTransitive),
+            AttributeValue::BgpPrefixSid(_) => Some(OptionalTransitive),
+            AttributeValue::Bier(_) => Some(OptionalTransitive),
+            AttributeValue::Sfp(_) => Some(OptionalTransitive),
             AttributeValue::AttrSet(_) => Some(OptionalTransitive),
             _ => None,
         }
@@ -722,8 +805,19 @@ impl AttributeValue {
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttrRaw {
-    pub attr_type: AttrType,
-    pub bytes: Vec<u8>,
+    pub code: u8,
+    pub bytes: Bytes,
+}
+
+impl AttrRaw {
+    /// Map the raw wire code back to an `AttrType`.
+    ///
+    /// For `Raw` variants (known-but-unparsed codes like `PMSI_TUNNEL`),
+    /// this returns the concrete `AttrType` variant (e.g. `AttrType::PMSI_TUNNEL`).
+    /// For `Deprecated` and `Unknown` variants, this returns `AttrType::Unknown(code)`.
+    pub fn attr_type(&self) -> AttrType {
+        AttrType::from(self.code)
+    }
 }
 
 #[cfg(test)]
@@ -983,6 +1077,35 @@ mod tests {
         };
         assert_eq!(
             aggregator_attr.attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+    }
+
+    #[test]
+    fn test_new_attribute_attr_categories() {
+        // BFD Discriminator (RFC 9026): Optional Transitive
+        assert_eq!(
+            AttributeValue::BfdDiscriminator(BfdDiscriminatorAttribute {
+                mode: 1,
+                discriminator: 0,
+                tlvs: vec![],
+            })
+            .attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // BGP Prefix-SID (RFC 8669): Optional Transitive
+        assert_eq!(
+            AttributeValue::BgpPrefixSid(BgpPrefixSidAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // BIER (RFC 9793): Optional Transitive
+        assert_eq!(
+            AttributeValue::Bier(BierAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // SFP (RFC 9015): Optional Transitive
+        assert_eq!(
+            AttributeValue::Sfp(SfpAttribute { tlvs: vec![] }).attr_category(),
             Some(AttributeCategory::OptionalTransitive)
         );
     }

@@ -8,6 +8,7 @@ use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::ParserError;
 use crate::ParserError::ParseError;
+use bytes::Bytes;
 use itertools::Itertools;
 use log::{error, warn};
 use std::collections::HashMap;
@@ -136,7 +137,7 @@ fn get_relevant_attributes(
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),
 
-            AttributeValue::Unknown(t) => {
+            AttributeValue::Unknown(t) | AttributeValue::Raw(t) => {
                 unknown.push(t);
             }
             AttributeValue::Deprecated(t) => {
@@ -149,6 +150,10 @@ fn get_relevant_attributes(
             | AttributeValue::LinkState(_)
             | AttributeValue::TunnelEncapsulation(_)
             | AttributeValue::Aigp(_)
+            | AttributeValue::BfdDiscriminator(_)
+            | AttributeValue::BgpPrefixSid(_)
+            | AttributeValue::Bier(_)
+            | AttributeValue::Sfp(_)
             | AttributeValue::AttrSet(_) => {}
         };
     }
@@ -905,12 +910,12 @@ mod tests {
             aggr_ip: Some(Ipv4Addr::from_str("10.2.0.0").unwrap()),
             only_to_customer: Some(Asn::new_32bit(65000)),
             unknown: Some(vec![AttrRaw {
-                attr_type: AttrType::RESERVED,
-                bytes: vec![],
+                code: AttrType::RESERVED.into(),
+                bytes: Bytes::new(),
             }]),
             deprecated: Some(vec![AttrRaw {
-                attr_type: AttrType::RESERVED,
-                bytes: vec![],
+                code: AttrType::RESERVED.into(),
+                bytes: Bytes::new(),
             }]),
         };
 
@@ -959,12 +964,12 @@ mod tests {
             )),
             AttributeValue::OnlyToCustomer(Asn::new_32bit(65000)),
             AttributeValue::Unknown(AttrRaw {
-                attr_type: AttrType::RESERVED,
-                bytes: vec![],
+                code: AttrType::RESERVED.into(),
+                bytes: Bytes::new(),
             }),
             AttributeValue::Deprecated(AttrRaw {
-                attr_type: AttrType::RESERVED,
-                bytes: vec![],
+                code: AttrType::RESERVED.into(),
+                bytes: Bytes::new(),
             }),
         ]
         .into_iter()

@@ -791,6 +791,18 @@ Full support for standard, extended, and large communities:
 - [RFC 6810](https://datatracker.ietf.org/doc/html/rfc6810): The Resource Public Key Infrastructure (RPKI) to Router Protocol
 - [RFC 8210](https://datatracker.ietf.org/doc/html/rfc8210): The Resource Public Key Infrastructure (RPKI) to Router Protocol, Version 1
 
+### BGP Path Attributes
+
+Typed parsing for these RFC-defined BGP path attributes:
+
+- [RFC 7311](https://datatracker.ietf.org/doc/html/rfc7311): Accumulated IGP Metric (AIGP) Attribute
+- [RFC 9015](https://datatracker.ietf.org/doc/html/rfc9015): BGP SFP Attribute
+- [RFC 9026](https://datatracker.ietf.org/doc/html/rfc9026): BFD Discriminator Attribute
+- [RFC 8669](https://datatracker.ietf.org/doc/html/rfc8669): BGP Prefix-SID Attribute
+- [RFC 9793](https://datatracker.ietf.org/doc/html/rfc9793): BGP Extensions for BIER
+
+Additional known attribute type codes are raw-retained (`AttributeValue::Raw`) and re-encoded faithfully. Deprecated and unassigned codes are also preserved.
+
 ### Advanced Features
 
 **FlowSpec**:

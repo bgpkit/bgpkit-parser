@@ -44,7 +44,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 #######################
 # Parser dependencies #
 #######################
-bytes = { version = "1.7", optional = true }
+bytes = { version = "1.7" }
 zerocopy = { version = "0.8", features = ["derive"], optional = true }
 hex = { version = "0.4.3", optional = true } # bmp/openbmp parsing
 oneio = { version = "0.23", default-features = false, features = ["http", "gz", "bz"], optional = true }
@@ -67,7 +67,6 @@ default = ["parser", "rustls"]
 local = ["parser", "oneio"]
 
 parser = [
-    "bytes",
     "chrono",
     "regex",
     "zerocopy",
@@ -96,6 +95,7 @@ wasm = [
 ]
 serde = [
     "dep:serde",
+    "bytes/serde",
     "ipnet/serde",
     "serde/rc",
 ]
