@@ -151,6 +151,10 @@ fn get_relevant_attributes(
             | AttributeValue::LinkState(_)
             | AttributeValue::TunnelEncapsulation(_)
             | AttributeValue::Aigp(_)
+            | AttributeValue::BfdDiscriminator(_)
+            | AttributeValue::BgpPrefixSid(_)
+            | AttributeValue::Bier(_)
+            | AttributeValue::Sfp(_)
             | AttributeValue::AttrSet(_) => {}
         };
     }

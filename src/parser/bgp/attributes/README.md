@@ -19,6 +19,10 @@
 | Large Community          | [RFC8092][rfc8092] | 32    | Yes       |
 | Only To Customer         | [RFC9234][rfc9234] | 35    | Yes       |
 | AIGP                     | [RFC7311][rfc7311] | 26    | Yes       |
+| BFD Discriminator        | [RFC9026][rfc9026] | 38    | Yes       |
+| BGP Prefix-SID           | [RFC8669][rfc8669] | 40    | Yes       |
+| SFP Attribute            | [RFC9015][rfc9015] | 37    | Yes       |
+| BIER                     | [RFC9793][rfc9793] | 41    | Yes       |
 
 ## Known Limitations
 
@@ -30,10 +34,6 @@
 | IPv6_EXT_COMMUNITIES            | [RFC5701][rfc5701]            | 25        | ✅ Implemented            | Listed in main table above       |
 | PE_DISTINGUISHER_LABELS         | [RFC6514][rfc6514]            | 27        | Raw-retained              | Structured parser not implemented |
 | BGPSEC_PATH                     | [RFC8205][rfc8205]            | 33        | Raw-retained              | Structured parser not implemented |
-| SFP_ATTRIBUTE                   | [RFC9015][rfc9015]            | 37        | Raw-retained              | Structured parser not implemented |
-| BFD_DISCRIMINATOR               | [RFC9026][rfc9026]            | 38        | Raw-retained              | Structured parser not implemented |
-| BGP_PREFIX_SID                  | [RFC8669][rfc8669]            | 40        | Raw-retained              | Structured parser not implemented |
-| BIER                            | [RFC9793][rfc9793]            | 41        | Raw-retained              | Structured parser not implemented |
 
 **Legend:**
 - **Raw-retained**: Attribute value bytes are preserved as `AttributeValue::Raw(AttrRaw)` and can be re-encoded, but no structured parser exists yet.

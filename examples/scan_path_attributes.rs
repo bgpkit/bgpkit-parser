@@ -1,0 +1,131 @@
+/// Scan MRT archives for interesting BGP path attributes.
+///
+/// Iterates over recent RouteViews and RIPE RIS update files, scanning for
+/// raw-retained, deprecated, and recently implemented attributes.
+///
+/// Usage:
+/// ```bash
+/// cargo run --example scan_path_attributes --features cli
+/// ```
+use bgpkit_parser::BgpkitParser;
+use std::collections::HashMap;
+
+/// Scan a single MRT file, sampling up to `max_elems` elements.
+fn scan_file(url: &str, max_elems: u64) -> Result<(HashMap<String, u64>, u64), String> {
+    let parser = BgpkitParser::new(url).map_err(|e| format!("parser error: {e}"))?;
+    let mut counts: HashMap<String, u64> = HashMap::new();
+    let mut processed = 0u64;
+
+    for elem in parser.into_elem_iter() {
+        // Check unknown attributes (includes unassigned + raw-retained known codes)
+        if let Some(ref unknown) = elem.unknown {
+            for raw in unknown {
+                let key = format!("unknown(code={}, type={:?})", raw.code, raw.attr_type());
+                *counts.entry(key).or_default() += 1;
+            }
+        }
+
+        // Check deprecated attributes
+        if let Some(ref deprecated) = elem.deprecated {
+            for raw in deprecated {
+                let key = format!("deprecated(code={})", raw.code);
+                *counts.entry(key).or_default() += 1;
+            }
+        }
+
+        processed += 1;
+        if processed >= max_elems {
+            break;
+        }
+    }
+    Ok((counts, processed))
+}
+
+fn main() {
+    println!("=== BGP Path Attribute Scanner ===");
+    println!("Looks for unsupported/raw/deprecated attributes in public archive files.\n");
+
+    // RouteViews collectors
+    let collectors = [
+        "route-views4",
+        "route-views6",
+        "route-views2",
+        "route-views3",
+        "route-views.linx",
+        "route-views.eqix",
+        "route-views.amsix",
+    ];
+
+    let mut urls: Vec<String> = Vec::new();
+
+    // RouteViews archive URLs — June 2026, sampling a few hours
+    for collector in &collectors {
+        for day in [1, 2] {
+            for hour in [0, 12] {
+                let url = format!(
+                    "http://archive.routeviews.org/{}/bgpdata/2026.06/UPDATES/updates.202606{:02}.{:04}00.bz2",
+                    collector, day, hour
+                );
+                urls.push(url);
+            }
+        }
+    }
+
+    // RIPE RIS update files
+    for rrc in 0..=6 {
+        for day in [1, 2] {
+            let url = format!(
+                "https://data.ris.ripe.net/rrc{:02}/2026.06/updates.202606{:02}.0000.gz",
+                rrc, day
+            );
+            urls.push(url);
+        }
+    }
+
+    println!(
+        "Candidates: {} files (sampling 50K elements each)",
+        urls.len()
+    );
+    println!();
+
+    let mut found_files: Vec<(String, HashMap<String, u64>)> = Vec::new();
+
+    for url in &urls {
+        print!("  {:65}", url);
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+
+        match scan_file(url, 50_000) {
+            Ok((counts, processed)) => {
+                if counts.is_empty() {
+                    println!("  ({}K elems, nothing)", processed / 1000);
+                } else {
+                    println!("  ({}K elems, {} hits)", processed / 1000, counts.len());
+                    found_files.push((url.clone(), counts));
+                }
+            }
+            Err(e) => {
+                eprintln!("  error: {}", e);
+            }
+        }
+    }
+
+    println!();
+    if found_files.is_empty() {
+        println!("No interesting attributes found in the scanned window.");
+        println!(
+            "This is expected: deprecated and specialized attributes are rare in public data."
+        );
+    } else {
+        println!("=== Files with interesting attributes ===");
+        println!();
+        for (url, counts) in &found_files {
+            println!("File: {}", url);
+            let mut entries: Vec<_> = counts.iter().collect();
+            entries.sort_by_key(|(k, _)| String::clone(k));
+            for (key, count) in &entries {
+                println!("  {}: {}", key, count);
+            }
+            println!();
+        }
+    }
+}

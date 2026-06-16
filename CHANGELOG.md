@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking changes
+
+* **`AttrRaw` fields changed**: `attr_type: AttrType` replaced with `code: u8`. Use `.attr_type()` to get the `AttrType` back. `bytes` changed from `Vec<u8>` to `Bytes`.
+* **`AttrType::CLUSTER_ID` removed**: Code 13 is the deprecated `RCID_PATH / CLUSTER_ID` per IANA registry and is now retained as `AttributeValue::Deprecated`.
+* **`AttributeValue` gains new variants**: `Raw(AttrRaw)`, `BfdDiscriminator(...)`, `BgpPrefixSid(...)`, `Bier(...)`, `Sfp(...)`. Downstream exhaustive matches must handle these.
+* **`AigpTlv.value` changed**: From `Vec<u8>` to `Bytes`.
+* **No more silent attribute loss**: Known-but-unsupported attributes that were previously dropped are now retained as `AttributeValue::Raw(AttrRaw)`. If your code expected these to be absent, it may now see them.
+
+### New features
+
+* **Raw attribute retention**: Known BGP path attributes without semantic parsing are no longer silently dropped. They are retained as `AttributeValue::Raw(AttrRaw)` with their original wire code and bytes, enabling faithful re-encoding.
+* **Deprecated code point handling**: Removed `AttrType::CLUSTER_ID = 13` (deprecated per IANA); code 13 is now retained as `Deprecated(AttrRaw)`. Added `is_deprecated_attr_type()` helper.
+* **`AttrType::BIER` added**: Code 41 (RFC 9793) added to the enum.
+* **Typed parser failure fallback**: If a typed attribute parser fails, the original bytes are retained as `AttributeValue::Raw` instead of being dropped. A validation warning is still recorded.
+* **Serialization**: Added `serde` feature to `bytes` dependency so `AttrRaw` (with `Bytes`) can be serialized.
+
+### New attribute parsers
+
+* **RFC 7311 — AIGP (code 26)**: Parses AIGP TLVs, preserves unknown TLVs, supports round-trip encoding. Exposes `accumulated_metric()` helper.
+* **RFC 9015 — SFP attribute (code 37)**: Parses SFP TLVs with 1-octet type and 2-octet length. Preserves unknown TLVs.
+* **RFC 9026 — BFD Discriminator (code 38)**: Parses mode, discriminator, and optional 1-octet TLVs. Preserves unknown optional TLVs.
+* **RFC 8669 — BGP Prefix-SID (code 40)**: Parses Prefix-SID TLVs with 1-octet type and 2-octet length. Preserves unknown TLVs.
+* **RFC 9793 — BIER (code 41)**: Parses BIER TLVs with 2-octet type and 2-octet length. Preserves unknown TLVs.
+
+### Added
+
+* `AttributeValue::Raw(AttrRaw)` — for known but undecoded attributes.
+* `AttrRaw { code: u8, bytes: Bytes }` — stores wire code and raw value bytes.
+* `AttributeValue::attr_code()` — returns the raw wire attribute type code as `u8`.
+* `AttrRaw::attr_type()` — convenience conversion to `AttrType`.
+* Model structs: `BfdDiscriminatorAttribute`, `BgpPrefixSidAttribute`, `BierAttribute`, `SfpAttribute`.
+* Raw TLV helper types: `RawTlv8`, `RawTlv8Ext`, `RawTlv16`.
+* `examples/raw_attributes.rs` — demonstrates inspecting raw/deprecated/unknown attributes.
+
+### Fixed
+
+* Code 13 (`RCID_PATH / CLUSTER_ID`) no longer maps to an active `AttrType` variant; correctly handled as deprecated.
+* Known but unsupported attributes (codes 0, 22, 24, 27, 33, 128) are now retained as `Raw` instead of dropped.
+* Malformed typed attributes retain their original bytes as `Raw` after recording a validation warning.
+
 ## v0.17.0 - 2026-05-24
 
 ### New features

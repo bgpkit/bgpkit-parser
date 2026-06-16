@@ -14,6 +14,10 @@ mod attr_26_aigp;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
 mod attr_35_otc;
+mod attr_37_sfp;
+mod attr_38_bfd_discriminator;
+mod attr_40_bgp_prefix_sid;
+mod attr_41_bier;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::{debug, warn};
@@ -55,6 +59,14 @@ use crate::parser::bgp::attributes::attr_32_large_communities::{
 use crate::parser::bgp::attributes::attr_35_otc::{
     encode_only_to_customer, parse_only_to_customer,
 };
+use crate::parser::bgp::attributes::attr_37_sfp::{encode_sfp, parse_sfp};
+use crate::parser::bgp::attributes::attr_38_bfd_discriminator::{
+    encode_bfd_discriminator, parse_bfd_discriminator,
+};
+use crate::parser::bgp::attributes::attr_40_bgp_prefix_sid::{
+    encode_bgp_prefix_sid, parse_bgp_prefix_sid,
+};
+use crate::parser::bgp::attributes::attr_41_bier::{encode_bier, parse_bier};
 use crate::parser::ReadUtils;
 
 /// Validate attribute flags according to RFC 4271 and RFC 7606
@@ -132,10 +144,6 @@ fn is_raw_retained_attr(attr_type: AttrType) -> bool {
             | AttrType::TRAFFIC_ENGINEERING
             | AttrType::PE_DISTINGUISHER_LABELS
             | AttrType::BGPSEC_PATH
-            | AttrType::SFP_ATTRIBUTE
-            | AttrType::BFD_DISCRIMINATOR
-            | AttrType::BGP_PREFIX_SID
-            | AttrType::BIER
             | AttrType::ATTR_SET
     )
 }
@@ -454,6 +462,10 @@ pub fn parse_attributes(
             AttrType::AIGP => parse_aigp(attr_data),
             AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
+            AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
+            AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
+            AttrType::BGP_PREFIX_SID => parse_bgp_prefix_sid(attr_data),
+            AttrType::BIER => parse_bier(attr_data),
             _ => Err(ParserError::Unsupported(format!(
                 "unsupported attribute type: {attr_type:?}"
             ))),
@@ -544,6 +556,10 @@ impl Attribute {
             }
             AttributeValue::LinkState(v) => encode_link_state_attribute(v),
             AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v),
+            AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v),
+            AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v),
+            AttributeValue::Bier(v) => encode_bier(v),
+            AttributeValue::Sfp(v) => encode_sfp(v),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
             AttributeValue::Raw(v) => v.bytes.clone(),
             AttributeValue::Deprecated(v) => v.bytes.clone(),
@@ -857,6 +873,98 @@ mod tests {
             attributes.encode(AsnLength::Bits16),
             Bytes::from_static(&[0x40, 0x03, 0x03, 0x01, 0x02, 0x03])
         );
+    }
+
+    #[test]
+    fn test_all_raw_retained_attribute_codes_parse_and_round_trip() {
+        let raw_codes = [0, 22, 24, 27, 33, 128];
+
+        for code in raw_codes {
+            let wire = vec![0xc0, code, 0x02, 0xaa, 0xbb];
+            let attributes = parse_attributes(
+                Bytes::from(wire.clone()),
+                &AsnLength::Bits16,
+                false,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(attributes.inner.len(), 1, "code {code}");
+            match &attributes.inner[0].value {
+                AttributeValue::Raw(raw) => {
+                    assert_eq!(raw.code, code);
+                    assert_eq!(raw.bytes, Bytes::from_static(&[0xaa, 0xbb]));
+                }
+                value => panic!("expected Raw for code {code}, got {value:?}"),
+            }
+            assert!(attributes.has_attr(AttrType::from(code)), "code {code}");
+            assert_eq!(attributes.encode(AsnLength::Bits16), Bytes::from(wire));
+        }
+    }
+
+    #[test]
+    fn test_unassigned_attribute_code_retained_as_unknown() {
+        let wire = vec![0xc0, 0x7f, 0x02, 0xaa, 0xbb];
+        let attributes = parse_attributes(
+            Bytes::from(wire.clone()),
+            &AsnLength::Bits16,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(attributes.inner.len(), 1);
+        match &attributes.inner[0].value {
+            AttributeValue::Unknown(raw) => {
+                assert_eq!(raw.code, 0x7f);
+                assert_eq!(raw.attr_type(), AttrType::Unknown(0x7f));
+                assert_eq!(raw.bytes, Bytes::from_static(&[0xaa, 0xbb]));
+            }
+            value => panic!("expected Unknown, got {value:?}"),
+        }
+        assert!(attributes.has_attr(AttrType::Unknown(0x7f)));
+        assert_eq!(attributes.encode(AsnLength::Bits16), Bytes::from(wire));
+    }
+
+    #[test]
+    fn test_structured_tlv_attributes_parse_and_round_trip() {
+        let cases = [
+            (
+                vec![0xc0, 0x26, 0x05, 0x01, 0x01, 0x02, 0x03, 0x04],
+                "BFD Discriminator",
+            ),
+            (
+                vec![0xc0, 0x28, 0x05, 0x7f, 0x00, 0x02, 0xaa, 0xbb],
+                "BGP Prefix-SID",
+            ),
+            (
+                vec![0xc0, 0x29, 0x06, 0x12, 0x34, 0x00, 0x02, 0xde, 0xad],
+                "BIER",
+            ),
+            (vec![0xc0, 0x25, 0x05, 0x7f, 0x00, 0x02, 0xde, 0xad], "SFP"),
+        ];
+
+        for (wire, name) in cases {
+            let data = Bytes::from(wire.clone());
+            let attributes =
+                parse_attributes(data, &AsnLength::Bits16, false, None, None, None).unwrap();
+            assert_eq!(attributes.inner.len(), 1, "{name}");
+            match (name, &attributes.inner[0].value) {
+                ("BFD Discriminator", AttributeValue::BfdDiscriminator(_))
+                | ("BGP Prefix-SID", AttributeValue::BgpPrefixSid(_))
+                | ("BIER", AttributeValue::Bier(_))
+                | ("SFP", AttributeValue::Sfp(_)) => {}
+                (_, value) => panic!("unexpected value for {name}: {value:?}"),
+            }
+            assert_eq!(
+                attributes.encode(AsnLength::Bits16),
+                Bytes::from(wire),
+                "{name}"
+            );
+        }
     }
 
     #[test]

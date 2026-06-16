@@ -561,6 +561,60 @@ impl Aigp {
     }
 }
 
+/// Raw TLV with 1-octet type and 1-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv8 {
+    pub tlv_type: u8,
+    pub value: Bytes,
+}
+
+/// Raw TLV with 1-octet type and 2-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv8Ext {
+    pub tlv_type: u8,
+    pub value: Bytes,
+}
+
+/// Raw TLV with 2-octet type and 2-octet value length.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawTlv16 {
+    pub tlv_type: u16,
+    pub value: Bytes,
+}
+
+/// BFD Discriminator Attribute - RFC 9026
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BfdDiscriminatorAttribute {
+    pub mode: u8,
+    pub discriminator: u32,
+    pub tlvs: Vec<RawTlv8>,
+}
+
+/// BGP Prefix-SID Attribute - RFC 8669
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpPrefixSidAttribute {
+    pub tlvs: Vec<RawTlv8Ext>,
+}
+
+/// BIER Attribute - RFC 9793
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BierAttribute {
+    pub tlvs: Vec<RawTlv16>,
+}
+
+/// SFP Attribute - RFC 9015
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SfpAttribute {
+    pub tlvs: Vec<RawTlv8Ext>,
+}
+
 /// ATTR_SET Attribute - RFC 6368
 ///
 /// Used in BGP/MPLS IP VPNs to transparently carry customer BGP path attributes
@@ -608,6 +662,14 @@ pub enum AttributeValue {
     LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
     /// BGP Tunnel Encapsulation attribute - RFC 9012
     TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
+    /// BFD Discriminator attribute - RFC 9026
+    BfdDiscriminator(BfdDiscriminatorAttribute),
+    /// BGP Prefix-SID attribute - RFC 8669
+    BgpPrefixSid(BgpPrefixSidAttribute),
+    /// BIER attribute - RFC 9793
+    Bier(BierAttribute),
+    /// SFP attribute - RFC 9015
+    Sfp(SfpAttribute),
     Development(Vec<u8>),
     Raw(AttrRaw),
     Deprecated(AttrRaw),
@@ -671,6 +733,10 @@ impl AttributeValue {
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
             AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
             AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
+            AttributeValue::BfdDiscriminator(_) => AttrType::BFD_DISCRIMINATOR,
+            AttributeValue::BgpPrefixSid(_) => AttrType::BGP_PREFIX_SID,
+            AttributeValue::Bier(_) => AttrType::BIER,
+            AttributeValue::Sfp(_) => AttrType::SFP_ATTRIBUTE,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
                 x.attr_type()
@@ -712,6 +778,10 @@ impl AttributeValue {
             AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::LinkState(_) => Some(OptionalNonTransitive),
             AttributeValue::Aigp(_) => Some(OptionalNonTransitive),
+            AttributeValue::BfdDiscriminator(_) => Some(OptionalTransitive),
+            AttributeValue::BgpPrefixSid(_) => Some(OptionalTransitive),
+            AttributeValue::Bier(_) => Some(OptionalTransitive),
+            AttributeValue::Sfp(_) => Some(OptionalTransitive),
             AttributeValue::AttrSet(_) => Some(OptionalTransitive),
             _ => None,
         }
