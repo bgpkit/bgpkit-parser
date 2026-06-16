@@ -810,6 +810,11 @@ pub struct AttrRaw {
 }
 
 impl AttrRaw {
+    /// Map the raw wire code back to an `AttrType`.
+    ///
+    /// For `Raw` variants (known-but-unparsed codes like `PMSI_TUNNEL`),
+    /// this returns the concrete `AttrType` variant (e.g. `AttrType::PMSI_TUNNEL`).
+    /// For `Deprecated` and `Unknown` variants, this returns `AttrType::Unknown(code)`.
     pub fn attr_type(&self) -> AttrType {
         AttrType::from(self.code)
     }

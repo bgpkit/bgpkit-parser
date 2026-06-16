@@ -560,7 +560,7 @@ impl Attribute {
             AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v),
             AttributeValue::Bier(v) => encode_bier(v),
             AttributeValue::Sfp(v) => encode_sfp(v),
-            AttributeValue::Development(v) => Bytes::from(v.to_owned()),
+            AttributeValue::Development(v) => Bytes::copy_from_slice(v),
             AttributeValue::Raw(v) => v.bytes.clone(),
             AttributeValue::Deprecated(v) => v.bytes.clone(),
             AttributeValue::Unknown(v) => v.bytes.clone(),

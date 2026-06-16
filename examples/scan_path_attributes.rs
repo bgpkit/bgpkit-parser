@@ -1,7 +1,10 @@
 /// Scan MRT archives for interesting BGP path attributes.
 ///
 /// Iterates over recent RouteViews and RIPE RIS update files, scanning for
-/// raw-retained, deprecated, and recently implemented attributes.
+/// deprecated, unknown/unassigned, and raw-retained attributes.
+///
+/// NOTE: The date range (year, month, days) is hardcoded below.
+/// Update it to a recent window before running.
 ///
 /// Usage:
 /// ```bash
@@ -17,7 +20,7 @@ fn scan_file(url: &str, max_elems: u64) -> Result<(HashMap<String, u64>, u64), S
     let mut processed = 0u64;
 
     for elem in parser.into_elem_iter() {
-        // Check unknown attributes (includes unassigned + raw-retained known codes)
+        // Check unknown/unassigned and raw-retained known attributes
         if let Some(ref unknown) = elem.unknown {
             for raw in unknown {
                 let key = format!("unknown(code={}, type={:?})", raw.code, raw.attr_type());
@@ -58,7 +61,8 @@ fn main() {
 
     let mut urls: Vec<String> = Vec::new();
 
-    // RouteViews archive URLs — June 2026, sampling a few hours
+    // NOTE: Update year/month/days below to a recent date window before running.
+    // RouteViews update files — last 2 days, sampling hours 0 and 12
     for collector in &collectors {
         for day in [1, 2] {
             for hour in [0, 12] {

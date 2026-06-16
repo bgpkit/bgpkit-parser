@@ -15,8 +15,9 @@
 //! - **MultiLabel** (§2.3): Used when Multiple Labels Capability (Code 8) is negotiated.
 //!   Multiple labels can be encoded with the BoS bit delimiting the stack.
 
-#[allow(unused_imports)]
-use crate::models::network::{Afi, NetworkPrefix};
+#[cfg(feature = "parser")]
+use crate::models::network::Afi;
+use crate::models::network::NetworkPrefix;
 #[cfg(feature = "parser")]
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;

@@ -137,13 +137,12 @@ fn get_relevant_attributes(
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),
 
-            AttributeValue::Unknown(t) => {
+            AttributeValue::Unknown(t) | AttributeValue::Raw(t) => {
                 unknown.push(t);
             }
             AttributeValue::Deprecated(t) => {
                 deprecated.push(t);
             }
-            AttributeValue::Raw(_) => {}
 
             AttributeValue::OriginatorId(_)
             | AttributeValue::Clusters(_)
