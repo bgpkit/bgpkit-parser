@@ -5,6 +5,7 @@ mod origin;
 
 use crate::models::network::*;
 use bitflags::bitflags;
+use bytes::Bytes;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use std::cmp::Ordering;
 use std::iter::{FromIterator, Map};
@@ -75,7 +76,6 @@ pub enum AttrType {
     ORIGINATOR_ID = 9,
     CLUSTER_LIST = 10,
     /// <https://tools.ietf.org/html/rfc4760>
-    CLUSTER_ID = 13,
     MP_REACHABLE_NLRI = 14,
     MP_UNREACHABLE_NLRI = 15,
     /// <https://datatracker.ietf.org/doc/html/rfc4360>
@@ -95,6 +95,7 @@ pub enum AttrType {
     SFP_ATTRIBUTE = 37,
     BFD_DISCRIMINATOR = 38,
     BGP_PREFIX_SID = 40,
+    BIER = 41,
     ATTR_SET = 128,
     /// <https://datatracker.ietf.org/doc/html/rfc2042>
     DEVELOPMENT = 255,
@@ -168,7 +169,7 @@ impl Attributes {
     }
 
     pub fn add_attr(&mut self, attr: Attribute) {
-        let ty = u8::from(attr.value.attr_type());
+        let ty = attr.value.attr_code();
         self.attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
         self.inner.push(attr);
     }
@@ -378,7 +379,7 @@ impl Iterator for MetaCommunitiesIter<'_> {
 fn compute_mask(inner: &[Attribute]) -> [u64; 4] {
     let mut attr_mask = [0; 4];
     for attr in inner {
-        let ty = u8::from(attr.value.attr_type());
+        let ty = attr.value.attr_code();
         attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
     }
     attr_mask
@@ -522,7 +523,7 @@ impl From<AttributeValue> for Attribute {
 pub struct AigpTlv {
     pub tlv_type: u8,
     pub length: u16,
-    pub value: Vec<u8>,
+    pub value: Bytes,
 }
 
 /// AIGP (Accumulated IGP Metric) Attribute - RFC 7311
@@ -608,6 +609,7 @@ pub enum AttributeValue {
     /// BGP Tunnel Encapsulation attribute - RFC 9012
     TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
     Development(Vec<u8>),
+    Raw(AttrRaw),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
     /// AIGP (Accumulated IGP Metric) attribute - RFC 7311
@@ -645,7 +647,7 @@ pub enum AttributeCategory {
 }
 
 impl AttributeValue {
-    pub const fn attr_type(&self) -> AttrType {
+    pub fn attr_type(&self) -> AttrType {
         match self {
             AttributeValue::Origin(_) => AttrType::ORIGIN,
             AttributeValue::AsPath { is_as4: false, .. } => AttrType::AS_PATH,
@@ -670,9 +672,20 @@ impl AttributeValue {
             AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
             AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
-            AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => x.attr_type,
+            AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
+                x.attr_type()
+            }
             AttributeValue::Aigp(_) => AttrType::AIGP,
             AttributeValue::AttrSet(_) => AttrType::ATTR_SET,
+        }
+    }
+
+    pub fn attr_code(&self) -> u8 {
+        match self {
+            AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
+                x.code
+            }
+            _ => self.attr_type().into(),
         }
     }
 
@@ -722,8 +735,14 @@ impl AttributeValue {
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttrRaw {
-    pub attr_type: AttrType,
-    pub bytes: Vec<u8>,
+    pub code: u8,
+    pub bytes: Bytes,
+}
+
+impl AttrRaw {
+    pub fn attr_type(&self) -> AttrType {
+        AttrType::from(self.code)
+    }
 }
 
 #[cfg(test)]

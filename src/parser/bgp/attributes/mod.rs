@@ -10,6 +10,7 @@ mod attr_10_13_cluster;
 mod attr_14_15_nlri;
 mod attr_16_25_extended_communities;
 mod attr_23_tunnel_encap;
+mod attr_26_aigp;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
 mod attr_35_otc;
@@ -44,6 +45,7 @@ use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
 use crate::parser::bgp::attributes::attr_23_tunnel_encap::{
     encode_tunnel_encapsulation_attribute, parse_tunnel_encapsulation_attribute,
 };
+use crate::parser::bgp::attributes::attr_26_aigp::{encode_aigp, parse_aigp};
 use crate::parser::bgp::attributes::attr_29_linkstate::{
     encode_link_state_attribute, parse_link_state_attribute,
 };
@@ -120,6 +122,22 @@ fn validate_attribute_flags(
             _ => {} // Partial is OK for optional transitive attributes
         }
     }
+}
+
+fn is_raw_retained_attr(attr_type: AttrType) -> bool {
+    matches!(
+        attr_type,
+        AttrType::RESERVED
+            | AttrType::PMSI_TUNNEL
+            | AttrType::TRAFFIC_ENGINEERING
+            | AttrType::PE_DISTINGUISHER_LABELS
+            | AttrType::BGPSEC_PATH
+            | AttrType::SFP_ATTRIBUTE
+            | AttrType::BFD_DISCRIMINATOR
+            | AttrType::BGP_PREFIX_SID
+            | AttrType::BIER
+            | AttrType::ATTR_SET
+    )
 }
 
 /// Check if an attribute type is well-known mandatory
@@ -322,34 +340,9 @@ pub fn parse_attributes(
             &attr_type, attr_length
         );
 
-        let parsed_attr_type = AttrType::from(attr_type);
+        let attr_type = AttrType::from(attr_type);
 
-        let partial = validation.observe_header(attr_type, parsed_attr_type, flag, attr_length);
-
-        let attr_type = match parsed_attr_type {
-            attr_type @ AttrType::Unknown(unknown_type) => {
-                // skip pass the remaining bytes of this attribute
-                let bytes = data.read_n_bytes(attr_length)?;
-                let attr_value = match get_deprecated_attr_type(unknown_type) {
-                    Some(t) => {
-                        debug!("deprecated attribute type: {} - {}", unknown_type, t);
-                        AttributeValue::Deprecated(AttrRaw { attr_type, bytes })
-                    }
-                    None => {
-                        debug!("unknown attribute type: {}", unknown_type);
-                        AttributeValue::Unknown(AttrRaw { attr_type, bytes })
-                    }
-                };
-
-                assert_eq!(attr_type, attr_value.attr_type());
-                attributes.push(Attribute {
-                    value: attr_value,
-                    flag,
-                });
-                continue;
-            }
-            t => t,
-        };
+        let partial = validation.observe_header(attr_type.into(), attr_type, flag, attr_length);
 
         let bytes_left = data.remaining();
 
@@ -365,6 +358,44 @@ pub fn parse_attributes(
         // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
         data.has_n_remaining(attr_length)?;
         let mut attr_data = data.split_to(attr_length);
+        let raw_bytes = attr_data.clone();
+        let raw_code = u8::from(attr_type);
+
+        if let Some(t) = get_deprecated_attr_type(raw_code) {
+            debug!("deprecated attribute type: {} - {}", raw_code, t);
+            attributes.push(Attribute {
+                value: AttributeValue::Deprecated(AttrRaw {
+                    code: raw_code,
+                    bytes: raw_bytes,
+                }),
+                flag,
+            });
+            continue;
+        }
+
+        if matches!(attr_type, AttrType::Unknown(_)) {
+            debug!("unknown attribute type: {}", raw_code);
+            attributes.push(Attribute {
+                value: AttributeValue::Unknown(AttrRaw {
+                    code: raw_code,
+                    bytes: raw_bytes,
+                }),
+                flag,
+            });
+            continue;
+        }
+
+        if is_raw_retained_attr(attr_type) {
+            debug!("raw-retained attribute type: {}", raw_code);
+            attributes.push(Attribute {
+                value: AttributeValue::Raw(AttrRaw {
+                    code: raw_code,
+                    bytes: raw_bytes,
+                }),
+                flag,
+            });
+            continue;
+        }
 
         let attr = match attr_type {
             AttrType::ORIGIN => parse_origin(attr_data),
@@ -420,6 +451,7 @@ pub fn parse_attributes(
                 Ok(AttributeValue::Development(value))
             }
             AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
+            AttrType::AIGP => parse_aigp(attr_data),
             AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
             _ => Err(ParserError::Unsupported(format!(
@@ -434,6 +466,13 @@ pub fn parse_attributes(
             }
             Err(e) => {
                 validation.observe_parse_error(attr_type, partial, &e);
+                attributes.push(Attribute {
+                    value: AttributeValue::Raw(AttrRaw {
+                        code: raw_code,
+                        bytes: raw_bytes,
+                    }),
+                    flag,
+                });
                 continue;
             }
         };
@@ -452,7 +491,7 @@ impl Attribute {
         let mut bytes = BytesMut::new();
 
         let flag = self.flag.bits();
-        let type_code = self.value.attr_type().into();
+        let type_code = self.value.attr_code();
 
         bytes.put_u8(flag);
         bytes.put_u8(type_code);
@@ -506,12 +545,10 @@ impl Attribute {
             AttributeValue::LinkState(v) => encode_link_state_attribute(v),
             AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v),
             AttributeValue::Development(v) => Bytes::from(v.to_owned()),
-            AttributeValue::Deprecated(v) => Bytes::from(v.bytes.to_owned()),
-            AttributeValue::Unknown(v) => Bytes::from(v.bytes.to_owned()),
-            AttributeValue::Aigp(_v) => {
-                // AIGP encoding not yet implemented - return empty bytes
-                Bytes::new()
-            }
+            AttributeValue::Raw(v) => v.bytes.clone(),
+            AttributeValue::Deprecated(v) => v.bytes.clone(),
+            AttributeValue::Unknown(v) => v.bytes.clone(),
+            AttributeValue::Aigp(v) => encode_aigp(v),
             AttributeValue::AttrSet(_v) => {
                 // ATTR_SET encoding not yet implemented - return empty bytes
                 Bytes::new()
@@ -746,10 +783,80 @@ mod tests {
 
         let attributes = parse_attributes(data, &asn_len, add_path, afi, safi, prefixes).unwrap();
 
-        // There is a validation warning about the reserved attribute
-        assert!(attributes.validation_warnings.iter().any(|vw| {
+        assert!(attributes.inner.iter().any(|attr| {
+            matches!(
+                &attr.value,
+                AttributeValue::Raw(raw)
+                    if raw.code == u8::from(AttrType::RESERVED)
+                        && raw.bytes == Bytes::from_static(&[0x01])
+            )
+        }));
+        assert!(!attributes.validation_warnings.iter().any(|vw| {
             matches!(vw, BgpValidationWarning::OptionalAttributeError { attr_type, reason:_ } if *attr_type == AttrType::RESERVED)
         }));
+    }
+
+    #[test]
+    fn test_raw_retention_for_known_unsupported_attribute() {
+        let data = Bytes::from(vec![0x80, 0x16, 0x03, 0xaa, 0xbb, 0xcc]); // PMSI_TUNNEL
+        let attributes =
+            parse_attributes(data, &AsnLength::Bits16, false, None, None, None).unwrap();
+
+        assert_eq!(attributes.inner.len(), 1);
+        match &attributes.inner[0].value {
+            AttributeValue::Raw(raw) => {
+                assert_eq!(raw.code, 22);
+                assert_eq!(raw.attr_type(), AttrType::PMSI_TUNNEL);
+                assert_eq!(raw.bytes, Bytes::from_static(&[0xaa, 0xbb, 0xcc]));
+            }
+            value => panic!("expected Raw, got {value:?}"),
+        }
+        assert_eq!(
+            attributes.encode(AsnLength::Bits16),
+            Bytes::from_static(&[0x80, 0x16, 0x03, 0xaa, 0xbb, 0xcc])
+        );
+    }
+
+    #[test]
+    fn test_deprecated_code_13_retained_as_deprecated() {
+        let data = Bytes::from(vec![0x80, 0x0d, 0x04, 0x01, 0x02, 0x03, 0x04]);
+        let attributes =
+            parse_attributes(data, &AsnLength::Bits16, false, None, None, None).unwrap();
+
+        assert_eq!(attributes.inner.len(), 1);
+        match &attributes.inner[0].value {
+            AttributeValue::Deprecated(raw) => {
+                assert_eq!(raw.code, 13);
+                assert_eq!(raw.attr_type(), AttrType::Unknown(13));
+                assert_eq!(raw.bytes, Bytes::from_static(&[0x01, 0x02, 0x03, 0x04]));
+            }
+            value => panic!("expected Deprecated, got {value:?}"),
+        }
+        assert_eq!(
+            attributes.encode(AsnLength::Bits16),
+            Bytes::from_static(&[0x80, 0x0d, 0x04, 0x01, 0x02, 0x03, 0x04])
+        );
+    }
+
+    #[test]
+    fn test_malformed_typed_attribute_falls_back_to_raw() {
+        let data = Bytes::from(vec![0x40, 0x03, 0x03, 0x01, 0x02, 0x03]); // NEXT_HOP length must be 4
+        let attributes =
+            parse_attributes(data, &AsnLength::Bits16, false, None, None, None).unwrap();
+
+        assert!(attributes.has_validation_warnings());
+        match &attributes.inner[0].value {
+            AttributeValue::Raw(raw) => {
+                assert_eq!(raw.code, 3);
+                assert_eq!(raw.attr_type(), AttrType::NEXT_HOP);
+                assert_eq!(raw.bytes, Bytes::from_static(&[0x01, 0x02, 0x03]));
+            }
+            value => panic!("expected Raw fallback, got {value:?}"),
+        }
+        assert_eq!(
+            attributes.encode(AsnLength::Bits16),
+            Bytes::from_static(&[0x40, 0x03, 0x03, 0x01, 0x02, 0x03])
+        );
     }
 
     #[test]
