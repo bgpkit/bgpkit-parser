@@ -72,6 +72,40 @@ The repository has a `.git/hooks/pre-push` script that runs automatically on eve
 
 If any check fails, the push is aborted. Fix the issue, commit, and push again.
 
+## Code Coverage (Codecov)
+
+CI uploads coverage to Codecov on every push and PR. The `codecov.yml` at the repo root configures ignored paths, thresholds, and PR comment layout.
+
+### Finding uncovered lines in a PR
+
+Use `scripts/coverage-misses.sh` to get exact line numbers for uncovered patch lines via the public Codecov API v2 (no token needed):
+
+```bash
+./scripts/coverage-misses.sh <PR_NUMBER>
+```
+
+Example output:
+
+```
+📄 src/parser/bgp/attributes/attr_26_aigp.rs
+   Coverage: 85.29%  |  Patch misses: 10 lines
+   Uncovered lines: 20, 21, 22, 27, 28, 29, 30, 50, 76, 91
+```
+
+This is more actionable than the Codecov PR comment, which only shows miss counts with links to codecov.io. After running the script, use `read` on the file to inspect the uncovered lines.
+
+### How it works
+
+The script calls:
+1. `GET /compare/impacted_files?pullid=N` — lists files with patch misses
+2. `GET /compare/segments/{file_path}?pullid=N` — returns line-by-line coverage (`head_coverage: 1` = uncovered, `0` = covered, `null` = non-code)
+
+These endpoints are public and documented at https://docs.codecov.com/reference.
+
+### When to check coverage
+
+Before pushing a new feature, run the script on your PR to identify lines that need tests. The pre-push hook does NOT gate on coverage — coverage checks in CI are informational (non-blocking, 10% threshold).
+
 ## Notes
 
 - The `bgpkit-parser` binary requires the `cli` feature (`required-features = ["cli"]`).
