@@ -1082,6 +1082,35 @@ mod tests {
     }
 
     #[test]
+    fn test_new_attribute_attr_categories() {
+        // BFD Discriminator (RFC 9026): Optional Transitive
+        assert_eq!(
+            AttributeValue::BfdDiscriminator(BfdDiscriminatorAttribute {
+                mode: 1,
+                discriminator: 0,
+                tlvs: vec![],
+            })
+            .attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // BGP Prefix-SID (RFC 8669): Optional Transitive
+        assert_eq!(
+            AttributeValue::BgpPrefixSid(BgpPrefixSidAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // BIER (RFC 9793): Optional Transitive
+        assert_eq!(
+            AttributeValue::Bier(BierAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // SFP (RFC 9015): Optional Transitive
+        assert_eq!(
+            AttributeValue::Sfp(SfpAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+    }
+
+    #[test]
     fn test_optional_non_transitive_attrs() {
         let multi_exit_discriminator_attr = AttributeValue::MultiExitDiscriminator(1);
         assert_eq!(

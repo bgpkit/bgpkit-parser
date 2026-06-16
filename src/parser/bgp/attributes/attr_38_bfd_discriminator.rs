@@ -100,4 +100,11 @@ mod tests {
         ]))
         .is_err());
     }
+
+    #[test]
+    fn test_parse_bfd_discriminator_rejects_truncated_optional_tlv_header() {
+        // Valid BFD (5 bytes) + only 1 byte for optional TLV header (need 2)
+        let input = Bytes::from_static(&[0x01, 0x01, 0x02, 0x03, 0x04, 0x01]);
+        assert!(parse_bfd_discriminator(input).is_err());
+    }
 }

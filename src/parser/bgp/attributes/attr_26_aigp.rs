@@ -96,4 +96,33 @@ mod tests {
     fn test_parse_aigp_rejects_short_tlv() {
         assert!(parse_aigp(Bytes::from_static(&[0x01, 0x00])).is_err());
     }
+
+    #[test]
+    fn test_parse_aigp_rejects_invalid_length() {
+        // TLV with length < 3 (type=1, length=2)
+        let input = Bytes::from_static(&[0x01, 0x00, 0x02, 0x00]);
+        assert!(parse_aigp(input).is_err());
+    }
+
+    #[test]
+    fn test_parse_aigp_rejects_truncated_value() {
+        // TLV header claims 8 bytes total (value_len=5), but only 3 bytes after header
+        let input = Bytes::from_static(&[0x01, 0x00, 0x08, 0x00, 0x00, 0x00]);
+        assert!(parse_aigp(input).is_err());
+    }
+
+    #[test]
+    fn test_encode_aigp_corrects_mismatched_length() {
+        // stored length (3) does not match actual value len (0) + 3
+        let aigp = Aigp {
+            tlvs: vec![AigpTlv {
+                tlv_type: 1,
+                length: 3,
+                value: Bytes::new(),
+            }],
+        };
+        let encoded = encode_aigp(&aigp);
+        // corrected length: 0 value bytes + 3 header = 3
+        assert_eq!(encoded, Bytes::from_static(&[0x01, 0x00, 0x03]));
+    }
 }
