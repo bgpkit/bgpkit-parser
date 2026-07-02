@@ -6,21 +6,25 @@ use crate::Elementor;
 use bytes::Bytes;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-/// Parse a RIS Live JSON message using the `data.raw` BGP message bytes.
+/// Parse a RIS Live JSON `ris_message` envelope using the `data.raw` BGP message bytes.
 ///
 /// RIS Live includes `raw` only when subscribing with
 /// `socketOptions.includeRaw=true`. The field is hex-encoded BGP wire data.
 /// Parsing from raw bytes exposes attributes that RIS Live's JSON projection
 /// omits, while still returning the same [`BgpElem`] interface as the JSON
 /// parser.
+///
+/// This function expects the full RIS Live `ris_message` envelope, including
+/// the standard required fields such as `id`, `host`, `timestamp`, `peer`, and
+/// `peer_asn`, plus a present `raw` field.
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     parse_ris_live_message_raw(msg_str)
 }
 
-/// Parse a RIS Live JSON message using the hex-encoded `data.raw` BGP message.
+/// Parse a RIS Live JSON `ris_message` envelope using the hex-encoded `data.raw` BGP message.
 pub fn parse_ris_live_message_raw(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg: RisLiveMessage = serde_json::from_str(msg_str)
-        .map_err(|_| ParserRisliveError::IncorrectJson(msg_str.to_string()))?;
+        .map_err(|e| ParserRisliveError::IncorrectJson(e.to_string()))?;
 
     let ris_msg = match msg {
         RisLiveMessage::RisMessage(ris_msg) => ris_msg,
@@ -44,8 +48,10 @@ fn parse_ris_live_raw_bgp_message(
 ) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let bytes = Bytes::from(raw_bytes);
 
-    let bgp_msg = parse_bgp_message(&mut bytes.clone(), false, &AsnLength::Bits32)
-        .or_else(|_| parse_bgp_message(&mut bytes.clone(), false, &AsnLength::Bits16))
+    let mut bytes_32bit_asn = bytes.clone();
+    let mut bytes_16bit_asn = bytes.clone();
+    let bgp_msg = parse_bgp_message(&mut bytes_32bit_asn, false, &AsnLength::Bits32)
+        .or_else(|_| parse_bgp_message(&mut bytes_16bit_asn, false, &AsnLength::Bits16))
         .map_err(|_| ParserRisliveError::IncorrectRawBytes)?;
 
     let local_ip = match peer_ip.is_ipv4() {
