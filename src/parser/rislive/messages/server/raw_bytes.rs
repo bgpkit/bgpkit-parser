@@ -143,4 +143,65 @@ mod tests {
             println!("{elem}");
         }
     }
+
+    fn ris_message_with_raw(raw: Option<&str>) -> String {
+        let raw_field = raw
+            .map(|raw| format!(r#", "raw": "{raw}""#))
+            .unwrap_or_default();
+        format!(
+            r#"{{
+                "type": "ris_message",
+                "data": {{
+                    "timestamp": 1636245154.8,
+                    "peer": "192.0.2.1",
+                    "peer_asn": "64496",
+                    "id": "00-192-0-2-1-1",
+                    "host": "rrc00",
+                    "type": "UPDATE"{raw_field}
+                }}
+            }}"#
+        )
+    }
+
+    #[test]
+    fn ris_live_message_missing_raw_returns_incorrect_raw_bytes() {
+        let err = parse_raw_bytes(&ris_message_with_raw(None)).unwrap_err();
+        assert!(matches!(err, ParserRisliveError::IncorrectRawBytes));
+    }
+
+    #[test]
+    fn ris_live_message_malformed_hex_returns_incorrect_raw_bytes() {
+        let err = parse_raw_bytes(&ris_message_with_raw(Some("not-hex"))).unwrap_err();
+        assert!(matches!(err, ParserRisliveError::IncorrectRawBytes));
+    }
+
+    #[test]
+    fn ris_live_message_invalid_bgp_raw_returns_incorrect_raw_bytes() {
+        let err = parse_raw_bytes(&ris_message_with_raw(Some("00"))).unwrap_err();
+        assert!(matches!(err, ParserRisliveError::IncorrectRawBytes));
+    }
+
+    #[test]
+    fn non_ris_message_returns_unsupported_message() {
+        let err = parse_raw_bytes(r#"{"type":"pong","data":null}"#).unwrap_err();
+        assert!(matches!(err, ParserRisliveError::UnsupportedMessage));
+    }
+
+    #[test]
+    fn ris_live_message_missing_required_id_or_host_returns_incorrect_json() {
+        let err = parse_raw_bytes(
+            r#"{
+                "type": "ris_message",
+                "data": {
+                    "timestamp": 1636245154.8,
+                    "peer": "192.0.2.1",
+                    "peer_asn": "64496",
+                    "type": "UPDATE",
+                    "raw": "00"
+                }
+            }"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ParserRisliveError::IncorrectJson(_)));
+    }
 }

@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
-* **RIS Live raw message parsing**: Added `parse_ris_live_message_raw()` and `parse_ris_live_message_json()` so users can opt into RIS Live `socketOptions.includeRaw` and parse original BGP wire messages instead of only RIS Live's reduced JSON attribute projection.
+* **RIS Live raw message parsing**: Added `parse_ris_live_message_raw()` and `parse_ris_live_message_json()` so users can opt into RIS Live `socketOptions.includeRaw` and parse original BGP wire messages instead of only RIS Live's reduced JSON attribute projection. Raw parsing now validates the full RIS Live `ris_message` envelope and expects standard `id`/`host` fields.
 * **RIS Live subscription helpers**: Re-exported `RisSubscribe`, `RisSubscribeType`, and `RisLiveClientMessage` from the crate root, making it easier to request `includeRaw` in examples and downstream code.
 * **RIS Live examples**: Updated the synchronous WebSocket example to demonstrate `includeRaw` + raw BGP parsing; kept the async example on JSON-field parsing with comments showing how to opt into raw parsing.
 * **Raw attribute retention**: Known BGP path attributes without semantic parsing are no longer silently dropped. They are retained as `AttributeValue::Raw(AttrRaw)` with their original wire code and bytes, enabling faithful re-encoding.
