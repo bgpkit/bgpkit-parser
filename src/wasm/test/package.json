@@ -6,6 +6,6 @@
     "test": "node test-published.js"
   },
   "dependencies": {
-    "@bgpkit/parser": "0.15.0"
+    "@bgpkit/parser": "0.18.0"
   }
 }

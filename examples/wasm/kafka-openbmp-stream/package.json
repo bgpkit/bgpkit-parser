@@ -8,7 +8,7 @@
     "start:quiet": "node kafka-stream.js 2>/dev/null"
   },
   "dependencies": {
-    "@bgpkit/parser": "^0.15.0",
+    "@bgpkit/parser": "^0.18.0",
     "kafkajs": "^2.2.4"
   },
   "engines": {

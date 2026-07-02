@@ -1,6 +1,6 @@
 {
   "name": "@bgpkit/parser",
-  "version": "0.15.2",
+  "version": "0.18.0",
   "description": "BGP/BMP/MRT message parser compiled to WebAssembly",
   "license": "MIT",
   "repository": {

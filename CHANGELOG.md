@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.18.0 - 2026-07-02
+
 ### Breaking changes
 
 * **`AttrRaw` fields changed**: `attr_type: AttrType` replaced with `code: u8`. Use `.attr_type()` to get the `AttrType` back. `bytes` changed from `Vec<u8>` to `Bytes`.

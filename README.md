@@ -93,13 +93,13 @@ for elem in parser {
 - `origin_asn`: Match origin AS number
 - `peer_asn`: Match peer AS number
 - `peer_ip`: Match peer IP address
-- `elem_type`: Filter by announcement (`a`) or withdrawal (`w`)
+- `type`: Filter by announcement (`a`) or withdrawal (`w`)
 - `as_path`: Match AS path with regex
 
-**Negative filters**: Most filters support negation by prefixing the filter type with `!`. For example:
-- `!origin_asn`: Match elements where origin AS is NOT the specified value
-- `!prefix`: Match elements where prefix is NOT the specified value
-- `!peer_ip`: Match elements where peer IP is NOT the specified value
+**Negative filters**: Most filters support negation by prefixing the filter value with `!`. For example:
+- `origin_asn = !13335`: Match elements where origin AS is NOT 13335
+- `prefix = !211.98.251.0/24`: Match elements where prefix is NOT 211.98.251.0/24
+- `peer_ip = !192.0.2.1`: Match elements where peer IP is NOT 192.0.2.1
 
 **Note**: Timestamp filters (`ts_start`, `ts_end`) do not support negation.
 
@@ -108,7 +108,7 @@ use bgpkit_parser::BgpkitParser;
 
 // Filter out all elements from AS 13335 (get everything EXCEPT AS 13335)
 let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UPDATES/updates.20211001.0000.bz2").unwrap()
-    .add_filter("!origin_asn", "13335").unwrap();
+    .add_filter("origin_asn", "!13335").unwrap();
 
 for elem in parser {
     println!("{}", elem);
