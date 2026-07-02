@@ -1,58 +1,61 @@
 use crate::models::*;
 use crate::parser::bgp::parse_bgp_message;
 use crate::parser::rislive::error::ParserRisliveError;
+use crate::parser::rislive::messages::RisLiveMessage;
 use crate::Elementor;
 use bytes::Bytes;
-use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-// FIXME: This function will panic on any unexpected values
+/// Parse a RIS Live JSON message using the `data.raw` BGP message bytes.
+///
+/// RIS Live includes `raw` only when subscribing with
+/// `socketOptions.includeRaw=true`. The field is hex-encoded BGP wire data.
+/// Parsing from raw bytes exposes attributes that RIS Live's JSON projection
+/// omits, while still returning the same [`BgpElem`] interface as the JSON
+/// parser.
 pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
-    let msg: Value = serde_json::from_str(msg_str)?;
-    let msg_type = match msg.get("type") {
-        None => return Err(ParserRisliveError::IrregularRisLiveFormat),
-        Some(t) => t.as_str().unwrap(),
+    parse_ris_live_message_raw(msg_str)
+}
+
+/// Parse a RIS Live JSON message using the hex-encoded `data.raw` BGP message.
+pub fn parse_ris_live_message_raw(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
+    let msg: RisLiveMessage = serde_json::from_str(msg_str)
+        .map_err(|_| ParserRisliveError::IncorrectJson(msg_str.to_string()))?;
+
+    let ris_msg = match msg {
+        RisLiveMessage::RisMessage(ris_msg) => ris_msg,
+        RisLiveMessage::RisError(_)
+        | RisLiveMessage::RisRrcList(_)
+        | RisLiveMessage::RisSubscribeOk(_)
+        | RisLiveMessage::Pong(_) => return Err(ParserRisliveError::UnsupportedMessage),
     };
 
-    match msg_type {
-        "ris_message" => {}
-        "ris_error" | "ris_rrc_list" | "ris_subscribe_ok" | "pong" => {
-            return Err(ParserRisliveError::UnsupportedMessage)
-        }
-        _ => return Err(ParserRisliveError::IrregularRisLiveFormat),
-    }
+    let raw = ris_msg.raw.ok_or(ParserRisliveError::IncorrectRawBytes)?;
+    let raw_bytes = hex::decode(raw).map_err(|_| ParserRisliveError::IncorrectRawBytes)?;
 
-    let data = msg.get("data").unwrap().as_object().unwrap();
+    parse_ris_live_raw_bgp_message(raw_bytes, ris_msg.timestamp, ris_msg.peer, ris_msg.peer_asn)
+}
 
-    let mut bytes = Bytes::from(hex::decode(data.get("raw").unwrap().as_str().unwrap()).unwrap());
+fn parse_ris_live_raw_bgp_message(
+    raw_bytes: Vec<u8>,
+    timestamp: f64,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+) -> Result<Vec<BgpElem>, ParserRisliveError> {
+    let bytes = Bytes::from(raw_bytes);
 
-    let timestamp = data.get("timestamp").unwrap().as_f64().unwrap();
-    let peer_str = data.get("peer").unwrap().as_str().unwrap().to_owned();
+    let bgp_msg = parse_bgp_message(&mut bytes.clone(), false, &AsnLength::Bits32)
+        .or_else(|_| parse_bgp_message(&mut bytes.clone(), false, &AsnLength::Bits16))
+        .map_err(|_| ParserRisliveError::IncorrectRawBytes)?;
 
-    let peer_ip = peer_str.parse::<IpAddr>().unwrap();
     let local_ip = match peer_ip.is_ipv4() {
         true => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         false => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
     };
 
-    let peer_asn_str = data.get("peer_asn").unwrap().as_str().unwrap().to_owned();
-
-    let peer_asn = peer_asn_str.parse::<Asn>().unwrap();
-
-    let bgp_msg = match parse_bgp_message(&mut bytes, false, &AsnLength::Bits32) {
-        Ok(m) => m,
-        Err(_) => match parse_bgp_message(&mut bytes, false, &AsnLength::Bits16) {
-            Ok(m) => m,
-            Err(_) => return Err(ParserRisliveError::IncorrectRawBytes),
-        },
-    };
-
-    let t_sec = timestamp as u32;
-    let t_msec = get_micro_seconds(timestamp);
-
     let header = CommonHeader {
-        timestamp: t_sec,
-        microsecond_timestamp: Some(t_msec),
+        timestamp: timestamp as u32,
+        microsecond_timestamp: Some(get_micro_seconds(timestamp)),
         entry_type: EntryType::BGP4MP,
         entry_subtype: Bgp4MpType::MessageAs4 as u16,
         length: 0,
@@ -74,10 +77,7 @@ pub fn parse_raw_bytes(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError
 }
 
 fn get_micro_seconds(sec: f64) -> u32 {
-    format!("{sec:.6}").split('.').collect::<Vec<&str>>()[1]
-        .to_owned()
-        .parse::<u32>()
-        .unwrap()
+    ((sec.fract().abs() * 1_000_000.0).round() as u32).min(999_999)
 }
 
 #[cfg(test)]

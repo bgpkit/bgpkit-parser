@@ -245,11 +245,14 @@ and [BMP][bmp-rfc]/[OpenBMP][openbmp-url] messages.
 
 Here is an example of handling RIS-Live message streams. After connecting to the websocket server,
 we need to subscribe to a specific data stream. In this example, we subscribe to the data stream
-from on collector (`rrc21`). We can then loop and read messages from the websocket.
+from one collector (`rrc21`). We can then loop and read messages from the websocket.
+
+RIS Live's JSON fields expose only a subset of BGP attributes. To parse the original BGP wire
+message instead, request `includeRaw` and use `parse_ris_live_message_raw`. The older
+`parse_ris_live_message` function remains available for parsing RIS Live's JSON-projected fields.
 
 ```rust
-use bgpkit_parser::parse_ris_live_message;
-use serde_json::json;
+use bgpkit_parser::{parse_ris_live_message_raw, RisLiveClientMessage, RisSubscribe};
 use tungstenite::{connect, Message};
 
 const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
@@ -263,13 +266,13 @@ fn main() {
         connect(RIS_LIVE_URL)
             .expect("Can't connect to RIS Live websocket server");
 
-    // subscribe to messages from one collector
-    let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
+    // subscribe to messages from one collector and request hex-encoded raw BGP messages
+    let msg = RisSubscribe::new().host("rrc21").include_raw(true).to_json_string();
     socket.send(Message::Text(msg.into())).unwrap();
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
-        if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
+        if let Ok(elems) = parse_ris_live_message_raw(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);
             }

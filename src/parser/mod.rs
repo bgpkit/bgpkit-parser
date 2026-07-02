@@ -29,7 +29,11 @@ pub use iters::*;
 pub use mrt::*;
 
 #[cfg(feature = "rislive")]
-pub use rislive::parse_ris_live_message;
+pub use rislive::messages::{RisLiveClientMessage, RisSubscribe, RisSubscribeType};
+#[cfg(feature = "rislive")]
+pub use rislive::{
+    parse_ris_live_message, parse_ris_live_message_json, parse_ris_live_message_raw,
+};
 
 pub struct BgpkitParser<R> {
     reader: R,
