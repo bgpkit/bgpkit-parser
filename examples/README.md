@@ -24,8 +24,8 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [mrt_filter_archiver.rs](mrt_filter_archiver.rs) — Apply filters while reading updates and archive the filtered stream into a new MRT file; re_parse to verify the output.
 
 ## Real_time Streams (RIS Live, RouteViews Kafka, BMP)
-- [real_time_ris_live_websocket.rs](real_time_ris_live_websocket.rs) — Connect to RIPE RIS Live over WebSocket (tungstenite), subscribe to a collector, parse, and print elements.
-- [real_time_ris_live_websocket_async.rs](real_time_ris_live_websocket_async.rs) — Async tokio+tungstenite version of the RIS Live WebSocket subscriber.
+- [real_time_ris_live_websocket.rs](real_time_ris_live_websocket.rs) — Connect to RIPE RIS Live over WebSocket (tungstenite), request `includeRaw`, parse raw BGP wire messages, and print elements.
+- [real_time_ris_live_websocket_async.rs](real_time_ris_live_websocket_async.rs) — Async tokio+tungstenite version of the RIS Live WebSocket subscriber using RIS Live's JSON-projected fields, with comments showing how to switch to raw parsing.
 - [real_time_routeviews_kafka_openbmp.rs](real_time_routeviews_kafka_openbmp.rs) — Consume RouteViews Kafka topics (OpenBMP format), parse BMP messages, and print derived elements.
 - [real_time_routeviews_kafka_to_mrt.rs](real_time_routeviews_kafka_to_mrt.rs) — Consume RouteViews Kafka BMP messages and archive them into an MRT file for later analysis.
 - [bmp_listener.rs](bmp_listener.rs) — Minimal TCP BMP listener that parses incoming BMP Route Monitoring messages and logs them.

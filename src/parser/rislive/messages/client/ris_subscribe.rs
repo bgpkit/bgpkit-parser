@@ -15,15 +15,17 @@ pub enum RisSubscribeType {
 
 #[derive(Debug, Serialize)]
 pub struct RisSubscribeSocketOptions {
-    /// Include a Base64-encoded version of the original binary BGP message as `raw` for all subscriptions
+    /// Include a hex-encoded version of the original binary BGP message as `raw` for all subscriptions
     ///
     /// *Default: false*
     #[serde(rename = "includeRaw")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub include_raw: Option<bool>,
 
     /// Send a `ris_subscribe_ok` message for all succesful subscriptions
     ///
     /// *Default: false*
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledge: Option<bool>,
 }
 
@@ -202,5 +204,14 @@ mod tests {
         assert_eq!(ris_subscribe.host, Some("rrc00".to_string()));
 
         println!("{}", ris_subscribe.to_json_string());
+    }
+
+    #[test]
+    fn test_include_raw_serializes_socket_option() {
+        let ris_subscribe = RisSubscribe::new().host("rrc00").include_raw(true);
+        assert_eq!(
+            ris_subscribe.to_json_string(),
+            r#"{"data":{"host":"rrc00","socketOptions":{"includeRaw":true}},"type":"ris_subscribe"}"#
+        );
     }
 }

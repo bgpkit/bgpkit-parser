@@ -1,5 +1,4 @@
-use bgpkit_parser::parse_ris_live_message;
-use bgpkit_parser::rislive::messages::{RisLiveClientMessage, RisSubscribe};
+use bgpkit_parser::{parse_ris_live_message, RisLiveClientMessage, RisSubscribe};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -11,7 +10,10 @@ async fn main() {
     // connect to websocket server
     let (ws_stream, _response) = connect_async(RIS_LIVE_URL).await.unwrap();
 
-    // send a subscription message
+    // Send a subscription message.
+    //
+    // This async example keeps the default JSON-field parser. To parse the original BGP wire
+    // message instead, add `.include_raw(true)` here and call `parse_ris_live_message_raw` below.
     let msg = RisSubscribe::new().host("rrc21");
     let (mut write, mut read) = ws_stream.split();
     write

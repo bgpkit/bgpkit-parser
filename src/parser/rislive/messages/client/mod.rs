@@ -24,5 +24,5 @@ use serde_json::json;
 
 pub use ping::Ping;
 pub use request_rrc_list::RequestRrcList;
-pub use ris_subscribe::RisSubscribe;
+pub use ris_subscribe::{RisSubscribe, RisSubscribeSocketOptions, RisSubscribeType};
 pub use ris_unsubscribe::RisUnsubscribe;

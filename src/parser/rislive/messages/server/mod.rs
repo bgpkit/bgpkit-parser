@@ -9,7 +9,7 @@ pub mod ris_rrc_list;
 pub mod ris_subscribe_ok;
 
 pub use pong::Pong;
-pub use raw_bytes::parse_raw_bytes;
+pub use raw_bytes::{parse_raw_bytes, parse_ris_live_message_raw};
 pub use ris_error::RisError;
 pub use ris_message::RisMessage;
 pub use ris_message::RisMessageEnum;

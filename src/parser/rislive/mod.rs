@@ -2,13 +2,14 @@
 Provides parsing functions for [RIS-Live](https://ris-live.ripe.net/manual/) real-time
 BGP message stream JSON data.
 
-The main parsing function, [parse_ris_live_message] converts a JSON-formatted message string into a
-vector of [BgpElem]s.
+The main parsing function, [parse_ris_live_message] converts RIS Live's JSON-projected UPDATE
+fields into a vector of [BgpElem]s. If you subscribe with `includeRaw`, use
+[parse_ris_live_message_raw] to parse the original BGP wire message instead; this preserves BGP
+attributes that RIS Live omits from its JSON fields.
 
 Here is an example parsing stream data from one collector:
 ```no_run
-use bgpkit_parser::parse_ris_live_message;
-use serde_json::json;
+use bgpkit_parser::{parse_ris_live_message_raw, RisLiveClientMessage, RisSubscribe};
 use tungstenite::{connect, Message};
 
 const RIS_LIVE_URL: &str = "ws://ris-live.ripe.net/v1/ws/?client=rust-bgpkit-parser";
@@ -22,13 +23,13 @@ fn main() {
         connect(RIS_LIVE_URL)
             .expect("Can't connect to RIS Live websocket server");
 
-    // subscribe to messages from one collector
-    let msg = json!({"type": "ris_subscribe", "data": {"host": "rrc21"}}).to_string();
+    // subscribe to messages from one collector and request hex-encoded raw BGP messages
+    let msg = RisSubscribe::new().host("rrc21").include_raw(true).to_json_string();
     socket.send(Message::Text(msg.into())).unwrap();
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
-        if let Ok(elems) = parse_ris_live_message(msg.as_str()) {
+        if let Ok(elems) = parse_ris_live_message_raw(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);
             }
@@ -38,6 +39,7 @@ fn main() {
 ```
 */
 use crate::parser::rislive::error::ParserRisliveError;
+pub use crate::parser::rislive::messages::parse_ris_live_message_raw;
 use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
 use crate::models::*;
@@ -73,7 +75,11 @@ fn parse_prefix(prefix_str: &str) -> Result<IpNet, ParserRisliveError> {
     Ok(p)
 }
 
-/// This function parses one message and returns a result of a vector of [BgpElem]s or an error
+/// Parse one RIS Live message using RIS Live's JSON-projected UPDATE fields.
+///
+/// This parser is convenient and does not require `socketOptions.includeRaw`, but RIS Live's JSON
+/// schema exposes only a subset of BGP path attributes. Use [`parse_ris_live_message_raw`] when you
+/// need attributes that are only present in the raw BGP message.
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg_string = msg_str.to_string();
 
@@ -227,6 +233,11 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
         }
         _ => Ok(vec![]),
     }
+}
+
+/// Alias for [`parse_ris_live_message`] to make the JSON-vs-raw choice explicit.
+pub fn parse_ris_live_message_json(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
+    parse_ris_live_message(msg_str)
 }
 
 #[cfg(test)]
