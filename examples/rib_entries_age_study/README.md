@@ -68,7 +68,7 @@ The oldest entries (AS33438 and AS16150) have routes that haven't been updated i
 This is a two-phase project:
 
 ```
-rib_time_diff_study/
+rib_entries_age_study/
 ├── Cargo.toml
 ├── README.md
 ├── src/
@@ -87,7 +87,7 @@ rib_time_diff_study/
 ### Phase 1: Data Collection
 
 ```bash
-cd examples/rib_time_diff_study
+cd examples/rib_entries_age_study
 cargo run --release --bin phase1_collect
 ```
 

@@ -6,7 +6,7 @@
 ///
 /// Run with:
 /// ```bash
-/// cargo run --example raw_attributes --features cli
+/// cargo run --example raw_attributes
 /// ```
 use bgpkit_parser::models::*;
 

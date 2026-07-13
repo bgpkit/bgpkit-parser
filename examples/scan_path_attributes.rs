@@ -3,12 +3,12 @@
 /// Iterates over recent RouteViews and RIPE RIS update files, scanning for
 /// deprecated, unknown/unassigned, and raw-retained attributes.
 ///
-/// NOTE: The date range (year, month, days) is hardcoded below.
-/// Update it to a recent window before running.
+/// The optional argument selects the archive month (`YYYY.MM`); the example
+/// samples days 1 and 2 at fixed intervals from that month.
 ///
 /// Usage:
 /// ```bash
-/// cargo run --example scan_path_attributes --features cli
+/// cargo run --example scan_path_attributes -- 2026.06
 /// ```
 use bgpkit_parser::BgpkitParser;
 use std::collections::HashMap;
@@ -45,7 +45,23 @@ fn scan_file(url: &str, max_elems: u64) -> Result<(HashMap<String, u64>, u64), S
 }
 
 fn main() {
-    println!("=== BGP Path Attribute Scanner ===");
+    let month = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "2026.06".to_string());
+    let month_bytes = month.as_bytes();
+    if month_bytes.len() != 7
+        || month_bytes[4] != b'.'
+        || !month_bytes[..4]
+            .iter()
+            .chain(&month_bytes[5..])
+            .all(|byte| byte.is_ascii_digit())
+    {
+        eprintln!("Usage: scan_path_attributes [YYYY.MM]");
+        std::process::exit(2);
+    }
+
+    let archive_month = month.replace('.', "");
+    println!("=== BGP Path Attribute Scanner ({month}) ===");
     println!("Looks for unsupported/raw/deprecated attributes in public archive files.\n");
 
     // RouteViews collectors
@@ -61,14 +77,13 @@ fn main() {
 
     let mut urls: Vec<String> = Vec::new();
 
-    // NOTE: Update year/month/days below to a recent date window before running.
-    // RouteViews update files — last 2 days, sampling hours 0 and 12
+    // RouteViews update files — days 1 and 2, sampling hours 0 and 12
     for collector in &collectors {
         for day in [1, 2] {
             for hour in [0, 12] {
                 let url = format!(
-                    "http://archive.routeviews.org/{}/bgpdata/2026.06/UPDATES/updates.202606{:02}.{:04}00.bz2",
-                    collector, day, hour
+                    "http://archive.routeviews.org/{}/bgpdata/{}/UPDATES/updates.{}{:02}.{:04}00.bz2",
+                    collector, month, archive_month, day, hour
                 );
                 urls.push(url);
             }
@@ -79,8 +94,8 @@ fn main() {
     for rrc in 0..=6 {
         for day in [1, 2] {
             let url = format!(
-                "https://data.ris.ripe.net/rrc{:02}/2026.06/updates.202606{:02}.0000.gz",
-                rrc, day
+                "https://data.ris.ripe.net/rrc{:02}/{}/updates.{}{:02}.0000.gz",
+                rrc, month, archive_month, day
             );
             urls.push(url);
         }

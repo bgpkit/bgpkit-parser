@@ -1,5 +1,8 @@
 fn main() {
-    for elem in bgpkit_parser::BgpkitParser::new("./updates.bz2").unwrap() {
+    let source = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "./updates.bz2".to_string());
+    for elem in bgpkit_parser::BgpkitParser::new(&source).unwrap() {
         println!("{:?}", elem);
     }
 }

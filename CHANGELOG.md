@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+* **MRT attribute code counter example**: Added `examples/count_attributes.rs`, which reports every parsed BGP path-attribute wire code in a local or remote MRT file, including raw-retained unsupported, deprecated, and unassigned attributes.
+
+### Changed
+
+* **Examples documentation**: Expanded `examples/README.md` to index all maintained Rust, standalone, and WebAssembly examples. Refreshed standalone example instructions, corrected the RIB entry age study path, and made selected archive examples accept input sources or archive months.
+
 ## v0.18.0 - 2026-07-02
 
 ### Breaking changes

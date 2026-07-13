@@ -11,10 +11,12 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [records_iter.rs](records_iter.rs) — Iterate over raw MRT records and inspect/update messages; includes an example of detecting the Only_To_Customer (OTC) attribute.
 - [update_messages_iter.rs](update_messages_iter.rs) — Iterate over BGP announcements using the intermediate MrtUpdate representation; compares performance with BgpElem iteration and works with both UPDATES files and RIB dumps.
 - [route_level_parsing.rs](route_level_parsing.rs) — Fast scan using `into_route_iter()` when only prefix, AS path, and peer metadata are needed. Skips communities, MED, next-hop for ~10–15% faster updates and ~50–70% faster RIB parsing.
+- [parallel_records_to_elem.rs](parallel_records_to_elem.rs) — Compare sequential and multi-threaded raw-record-to-element conversion using a shared immutable `Elementor`.
 - [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
 
 ## Filtering and Policy Examples
 - [filters.rs](filters.rs) — Parse an MRT file and filter by a specific prefix (e.g., 211.98.251.0/24), logging matching announcements.
+- [multiple_filters_or_logic.rs](multiple_filters_or_logic.rs) — Combine multi-value OR filters with negative filters for prefixes, origin ASNs, and peer ASNs.
 - [filter_export_rib.rs](filter_export_rib.rs) — Filter the content of a RIB by origin ASN and re_encode/export to a new RIB file.
 - [find_as_set_messages.rs](find_as_set_messages.rs) — Find announcements containing AS_SET/CONFED_SET segments in AS paths across RIBs retrieved via BGPKIT Broker.
 
@@ -36,7 +38,12 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
 - [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty_print the Peer Index Table in JSON.
 - [only_to_customer.rs](only_to_customer.rs) — Find and display paths bearing the Only_To_Customer (OTC, RFC 9234) attribute.
+- [mrt_debug.rs](mrt_debug.rs) — Print parsed and raw MRT records for debugging, including raw-byte export and re-parsing.
 - [parse_bmp_mpls.rs](parse_bmp_mpls.rs) — Construct and parse a synthetic BMP Route Monitoring message containing MPLS-labeled NLRI (SAFI 4), demonstrating label stack extraction.
+
+## Raw and Unimplemented Attributes
++- [raw_attributes.rs](raw_attributes.rs) — Construct, inspect, encode, and round-trip typed, raw-retained, deprecated, and unknown path attributes.
++- [scan_path_attributes.rs](scan_path_attributes.rs) — Scan selected RouteViews and RIPE RIS archive files from a chosen month for raw-retained, deprecated, and unknown path attributes.
 
 ## Error Handling and Robustness
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
@@ -49,5 +56,8 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 ## RPKI RTR Protocol
 - [rtr_client.rs](rtr_client.rs) — Connect to an RTR server (RFC 6810/8210), fetch ROAs, and validate a route announcement (1.1.1.0/24 -> AS13335). Demonstrates RTR PDU parsing and encoding.
 
-## Local-only and Misc
-- [local_only/src/main.rs](local_only/src/main.rs) — Minimal example that reads a local updates.bz2 file; intended for local experimentation (not network fetching).
+## Standalone and WebAssembly Examples
++- [local_only](local_only/README.md) — Minimal standalone project that parses a local MRT file without remote I/O dependencies.
++- [rib_entries_age_study](rib_entries_age_study/README.md) — Standalone two-phase study of RIB entry ages and their distributions.
++- [WASM MRT parser](wasm/parse-mrt-file/README.md) — Experimental Node.js WebAssembly example that emits BGP elements from a local or remote MRT file.
++- [WASM RouteViews Kafka stream](wasm/kafka-openbmp-stream/README.md) — Experimental Node.js WebAssembly consumer for RouteViews OpenBMP Kafka messages.

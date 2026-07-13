@@ -5,7 +5,10 @@
 //! 2. Display MRT records in a debug-friendly format
 //! 3. Export raw MRT record bytes to files for debugging
 //!
-//! Run with: cargo run --example mrt_debug --features serde
+//! Run with: cargo run --example mrt_debug
+//!
+//! Enable the optional `serde` feature to print JSON; without it, the example
+//! prints Rust debug representations instead.
 
 use bgpkit_parser::BgpkitParser;
 

@@ -16,14 +16,16 @@ const CHUNK_SIZE: usize = 16_384;
 /// The parallel processing achieves significant speedup (typically 4-8x on multi-core systems)
 /// by distributing the CPU-intensive parsing work across multiple threads.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let url = "https://data.ris.ripe.net/rrc00/2026.02/bview.20260208.0800.gz";
+    let url = std::env::args().nth(1).unwrap_or_else(|| {
+        "https://data.ris.ripe.net/rrc00/2026.02/bview.20260208.0800.gz".to_string()
+    });
 
     // =========================================================================
     // Approach 1: Sequential processing using default iterator
     // =========================================================================
     // The simplest approach: use `into_elem_iter()` which handles everything internally.
     // This is convenient but single-threaded.
-    let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
+    let parser = BgpkitParser::new_cached(&url, "/tmp").unwrap();
     let t0 = std::time::Instant::now();
     let cnt = parser.into_elem_iter().count();
 
@@ -35,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // =========================================================================
     // For more control, manually parse records and use `record_to_elems()`.
     // The Elementor is mutable because it needs to consume and store the PeerIndexTable.
-    let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
+    let parser = BgpkitParser::new_cached(&url, "/tmp").unwrap();
     let mut elementor = Elementor::new();
 
     let t0 = std::time::Instant::now();
@@ -64,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - The returned Elementor is immutable (`&self`) and can be shared across threads
     // - `record_to_elems_iter()` returns a lazy iterator, avoiding Vec allocation
     // - `std::thread::scope()` allows borrowing data without requiring 'static lifetime
-    let parser = BgpkitParser::new_cached(url, "/tmp").unwrap();
+    let parser = BgpkitParser::new_cached(&url, "/tmp").unwrap();
 
     // This method:
     // - Peeks at the first record to check for PeerIndexTable
