@@ -57,7 +57,7 @@ mod tests {
 
         let live_msg = RisLiveMessage::RisMessage(msg);
         let msg_str = serde_json::to_string(&live_msg).unwrap();
-        println!("{}", &msg_str);
+        println!("{}", msg_str);
     }
 
     #[test]
@@ -66,14 +66,14 @@ mod tests {
             message: "error!".to_string(),
         });
         let msg_str = serde_json::to_string(&live_msg).unwrap();
-        println!("{}", &msg_str);
+        println!("{}", msg_str);
     }
 
     #[test]
     fn test_serialize_pong() {
         let live_msg = RisLiveMessage::Pong(Some(Pong {}));
         let msg_str = serde_json::to_string(&live_msg).unwrap();
-        println!("{}", &msg_str);
+        println!("{}", msg_str);
     }
 
     #[test]

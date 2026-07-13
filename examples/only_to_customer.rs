@@ -9,9 +9,9 @@ fn main() {
         if let Some(otc) = elem.only_to_customer {
             println!(
                 "OTC found: {} for path {}\n{}\n",
-                &otc,
-                &elem.as_path.as_ref().unwrap(),
-                &elem
+                otc,
+                elem.as_path.as_ref().unwrap(),
+                elem
             );
         }
     }

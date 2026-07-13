@@ -272,7 +272,7 @@ fn main() {
                 OutputLevel::Elems => {
                     for (index, elem) in parser.into_elem_iter().enumerate() {
                         let output_str = format_elem(&elem, output_format, index);
-                        if let Err(e) = writeln!(stdout, "{}", &output_str) {
+                        if let Err(e) = writeln!(stdout, "{}", output_str) {
                             if e.kind() != std::io::ErrorKind::BrokenPipe {
                                 eprintln!("{e}");
                             }
@@ -283,7 +283,7 @@ fn main() {
                 OutputLevel::Records => {
                     for record in parser.into_record_iter() {
                         let output_str = format_record(&record, output_format);
-                        if let Err(e) = writeln!(stdout, "{}", &output_str) {
+                        if let Err(e) = writeln!(stdout, "{}", output_str) {
                             if e.kind() != std::io::ErrorKind::BrokenPipe {
                                 eprintln!("{e}");
                             }

@@ -345,7 +345,7 @@ pub fn parse_attributes(
 
         debug!(
             "reading attribute: type -- {:?}, length -- {}",
-            &attr_type, attr_length
+            attr_type, attr_length
         );
 
         let attr_type = AttrType::from(attr_type);

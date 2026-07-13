@@ -53,7 +53,7 @@ let parser = BgpkitParser::new("http://archive.routeviews.org/bgpdata/2021.10/UP
 // iterating through the parser. the iterator returns `BgpElem` one at a time.
 log::info!("parsing updates file");
 for elem in parser {
-    log::info!("{}", &elem);
+    log::info!("{}", elem);
 }
 log::info!("done");
 ```

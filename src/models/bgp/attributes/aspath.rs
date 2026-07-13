@@ -722,16 +722,11 @@ impl AsPath {
 
         // Iterate over the segments in reverse order
         for seg in self.segments.iter().rev() {
-            if let Some(p) = seg.to_u32_vec_opt(dedup) {
-                // for each segment, we also reverse the order of ASNs so that we will eventually
-                // get a reversed AS path stored in `path`.
-                path.extend(p.iter().rev());
-            } else {
-                // If we encounter a segment that cannot be converted to a u32, we return None.
-                // This is because the path is not a simple sequence of ASNs, and returning partial
-                // AS path would be misleading.
-                return None;
-            }
+            // If a segment cannot be converted to a u32, the path is not a simple sequence of
+            // ASNs, and returning a partial AS path would be misleading.
+            let p = seg.to_u32_vec_opt(dedup)?;
+            // For each segment, reverse the ASN order so `path` is stored reversed.
+            path.extend(p.iter().rev());
         }
 
         match path.is_empty() {

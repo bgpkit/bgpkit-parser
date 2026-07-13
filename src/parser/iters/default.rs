@@ -175,13 +175,9 @@ impl<R: Read> Iterator for ElemIterator<R> {
 
             // popping cached elems. note that the original elems order is preseved by reversing the
             // vector before putting it on to cache_elems.
-            let elem = self.cache_elems.pop();
-            match elem {
-                None => return None,
-                Some(e) => match e.match_filters(&self.record_iter.parser.filters) {
-                    true => return Some(e),
-                    false => continue,
-                },
+            let elem = self.cache_elems.pop()?;
+            if elem.match_filters(&self.record_iter.parser.filters) {
+                return Some(elem);
             }
         }
     }

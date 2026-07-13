@@ -140,7 +140,7 @@ let broker = bgpkit_broker::BgpkitBroker::new()
     .page(1);
 
 for item in broker.into_iter().take(2) {
-    log::info!("downloading updates file: {}", &item.url);
+    log::info!("downloading updates file: {}", item.url);
     let parser = BgpkitParser::new(item.url.as_str()).unwrap();
 
     log::info!("parsing updates file");
