@@ -165,11 +165,12 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
+    let raw_bytes = raw_record.raw_bytes();
     match raw_record.parse() {
         Ok(record) => Ok(record),
         Err(e) => Err(ParserErrorWithBytes {
             error: e,
-            bytes: None,
+            bytes: Some(raw_bytes.to_vec()),
         }),
     }
 }

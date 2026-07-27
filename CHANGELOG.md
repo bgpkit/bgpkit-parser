@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+* **RFC 7606 non-fatal NLRI parsing**: Malformed NLRI fields (withdrawn or announced) no longer cause the entire BGP UPDATE message to be discarded. Instead, the parser returns the UPDATE with partial prefix data and records a `BgpValidationWarning::MalformedNlri` warning containing the raw NLRI bytes, enabling callers to emulate RFC 7606 treat-as-withdrawal semantics. Attribute framing errors (truncated length fields, inconsistent data) remain fatal. ([#303](https://github.com/bgpkit/bgpkit-parser/issues/303))
+* **Raw bytes preserved on MRT body-parse failures**: `parse_mrt_record` now attaches the original MRT record bytes to `ParserErrorWithBytes.bytes` when the message body fails to parse, enabling forensic analysis and record export. Previously `bytes` was always `None` for body-level failures. ([#303](https://github.com/bgpkit/bgpkit-parser/issues/303))
+* **Treat-as-withdrawal example**: Added `examples/treat_as_withdrawal.rs` demonstrating how to scan MRT files for RFC 7606 validation issues, classify them by error-handling category (attribute discard vs. treat-as-withdrawal), and extract raw malformed NLRI bytes.
 * **Extended element filtering**: Added `Filter` variants for nine previously unfilterable `BgpElem` fields: `only_to_customer` (`otc`), `next_hop`, `origin`, `local_pref`, `med`, `atomic`, `aggr_asn`, `aggr_ip`, and `peer_bgp_id`. Each optional field also supports presence filtering via the `*` wildcard — e.g. `otc=*` matches elements that carry an OTC value, `otc=!*` matches elements without one. ([#306](https://github.com/bgpkit/bgpkit-parser/issues/306))
 * **MRT attribute code counter example**: Added `examples/count_attributes.rs`, which reports every parsed BGP path-attribute wire code in a local or remote MRT file, including raw-retained unsupported, deprecated, and unassigned attributes.
 * **RTR PDU fuzzer**: Added `fuzz_rtr` fuzz target for RPKI RTR PDU parsing. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
@@ -22,6 +25,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+* **`BgpValidationWarning` is now `#[non_exhaustive]`**: Exhaustive `match` on this enum must add a `_` arm. This allows new warning variants to be added in future minor releases without breaking downstream matches.
+* **NLRI parse errors are now non-fatal**: `parse_bgp_update_message` previously returned `Err` on any malformed NLRI byte, discarding all attributes and partially-parsed prefixes. It now returns `Ok` with partial data and a `BgpValidationWarning::MalformedNlri`. This is the correct RFC 7606 behavior — callers should check `attributes.validation_warnings()` if they need to distinguish clean updates from partially-recovered ones.
 * **Examples documentation**: Expanded `examples/README.md` to index all maintained Rust, standalone, and WebAssembly examples. Refreshed standalone example instructions, corrected the RIB entry age study path, and made selected archive examples accept input sources or archive months.
 
 ## v0.18.0 - 2026-07-02

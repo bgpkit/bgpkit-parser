@@ -47,6 +47,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 
 ## Error Handling and Robustness
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
+- [treat_as_withdrawal.rs](treat_as_withdrawal.rs) — Scan MRT files for RFC 7606 validation issues (malformed NLRI, bad attributes) and classify them by error-handling category: attribute discard vs. treat-as-withdrawal.
 
 ## Debugging and Analysis
 - [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: debug display for MRT records, raw byte export, and the new `Display` implementation.
