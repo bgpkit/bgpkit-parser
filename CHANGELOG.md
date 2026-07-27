@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+* **Extended element filtering**: Added `Filter` variants for nine previously unfilterable `BgpElem` fields: `only_to_customer` (`otc`), `next_hop`, `origin`, `local_pref`, `med`, `atomic`, `aggr_asn`, `aggr_ip`, and `peer_bgp_id`. Each optional field also supports presence filtering via the `*` wildcard — e.g. `otc=*` matches elements that carry an OTC value, `!otc=*` matches elements without one. ([#306](https://github.com/bgpkit/bgpkit-parser/issues/306))
 * **MRT attribute code counter example**: Added `examples/count_attributes.rs`, which reports every parsed BGP path-attribute wire code in a local or remote MRT file, including raw-retained unsupported, deprecated, and unassigned attributes.
 
 ### Changed

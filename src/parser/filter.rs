@@ -17,6 +17,15 @@ The available filters are:
 - `ts_start` -- start and end unix timestamp
 - `as_path` -- regular expression for AS path string
 - `ip_version` -- IP version (`ipv4` or `ipv6`)
+- `otc` -- only-to-customer ASN (RFC 9234); `*` matches "present", `!*` matches "absent"
+- `next_hop` -- next hop IP address; `*` matches "present", `!*` matches "absent"
+- `origin` -- origin attribute (`igp`, `egp`, `incomplete`); `*`/`!*` for presence
+- `local_pref` -- local preference value; `*`/`!*` for presence
+- `med` -- multi-exit discriminator value; `*`/`!*` for presence
+- `atomic` -- atomic aggregate flag (`true`/`false`)
+- `aggr_asn` -- aggregator ASN; `*`/`!*` for presence
+- `aggr_ip` -- aggregator IP address; `*`/`!*` for presence
+- `peer_bgp_id` -- peer BGP identifier (router ID); `*`/`!*` for presence
 
 ### Negative Filters
 
@@ -118,7 +127,7 @@ use crate::parser::ComparableRegex;
 use crate::ParserError;
 use crate::ParserError::FilterError;
 use ipnet::IpNet;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 /// Filter enum: definition of types of filters
@@ -137,10 +146,24 @@ use std::str::FromStr;
 /// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
 /// - `community` (`ComparableRegex`) -- regular expression for community string
 /// - `ip_version` (`IpVersion`) -- IP version (`ipv4` or `ipv6`)
+/// - `otc` (`OnlyToCustomer(Asn)`) -- only-to-customer (RFC 9234) ASN; `*` for "present", `!*` for "absent"
+/// - `next_hop` (`NextHop(IpAddr)`) -- next hop IP address; `*` for "present", `!*` for "absent"
+/// - `origin` (`Origin(Origin)`) -- origin attribute (`igp`, `egp`, `incomplete`); `*` for "present", `!*` for "absent"
+/// - `local_pref` (`LocalPref(u32)`) -- local preference value; `*` for "present", `!*` for "absent"
+/// - `med` (`Med(u32)`) -- multi-exit discriminator value; `*` for "present", `!*` for "absent"
+/// - `atomic` (`Atomic(bool)`) -- atomic aggregate flag
+/// - `aggr_asn` (`AggrAsn(Asn)`) -- aggregator ASN; `*` for "present", `!*` for "absent"
+/// - `aggr_ip` (`AggrIp(Ipv4Addr)`) -- aggregator IP address; `*` for "present", `!*` for "absent"
+/// - `peer_bgp_id` (`PeerBgpId(Ipv4Addr)`) -- peer BGP identifier (router ID); `*` for "present", `!*` for "absent"
+/// - `present` (`FieldPresent(PresentField)`) -- presence check for optional fields; use `*` as value
 ///
 /// **Negative filters**: Most filters support negation by prefixing the filter value with `!`.
 /// For example, `origin_asn=!13335` matches elements where origin AS is NOT 13335.
 /// This creates a `Negated(Box<Filter>)` variant that inverts the match result.
+///
+/// **Presence filters**: Fields that are `Option<T>` support `*` as a wildcard value to check
+/// whether the field is present (`Some`) or absent (`None`). For example, `otc=*` matches
+/// elements that carry an OTC value, while `!otc=*` matches elements without one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
@@ -157,8 +180,36 @@ pub enum Filter {
     TsEnd(f64),
     AsPath(ComparableRegex),
     Community(ComparableRegex),
+    OnlyToCustomer(Asn),
+    NextHop(IpAddr),
+    Origin(Origin),
+    LocalPref(u32),
+    Med(u32),
+    Atomic(bool),
+    AggrAsn(Asn),
+    AggrIp(Ipv4Addr),
+    PeerBgpId(Ipv4Addr),
+    /// Matches when the specified optional field is present (`Some`). Use `*` as the
+    /// filter value to construct this, or `!*` to negate (absent).
+    FieldPresent(PresentField),
     /// Negated filter - matches when the inner filter does NOT match
     Negated(Box<Filter>),
+}
+
+/// Identifies which optional `BgpElem` field to check for presence.
+///
+/// Constructed by passing `*` as the filter value for any optional field filter type
+/// (e.g. `otc=*`, `next_hop=*`). Negate with `!*` to check for absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresentField {
+    OnlyToCustomer,
+    NextHop,
+    Origin,
+    LocalPref,
+    Med,
+    AggrAsn,
+    AggrIp,
+    PeerBgpId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -362,6 +413,18 @@ impl Filter {
             )));
         }
 
+        // Presence wildcard for optional fields: `field=*` or `field=!*`
+        if actual_value == "*" {
+            if let Some(field) = present_field_for(filter_type) {
+                let present = Filter::FieldPresent(field);
+                return if negated {
+                    Ok(Filter::Negated(Box::new(present)))
+                } else {
+                    Ok(present)
+                };
+            }
+        }
+
         let base_filter = Self::new_base(filter_type, actual_value)?;
 
         if negated {
@@ -516,9 +579,107 @@ impl Filter {
                     "cannot parse IP version from {filter_value}"
                 ))),
             },
+            "otc" => match u32::from_str(filter_value) {
+                Ok(v) => Ok(Filter::OnlyToCustomer(Asn::from(v))),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse OTC ASN from {filter_value}"
+                ))),
+            },
+            "next_hop" => match IpAddr::from_str(filter_value) {
+                Ok(v) => Ok(Filter::NextHop(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse next hop IP from {filter_value}"
+                ))),
+            },
+            "origin" => match filter_value.to_lowercase().as_str() {
+                "igp" => Ok(Filter::Origin(Origin::IGP)),
+                "egp" => Ok(Filter::Origin(Origin::EGP)),
+                "incomplete" => Ok(Filter::Origin(Origin::INCOMPLETE)),
+                _ => Err(FilterError(format!(
+                    "cannot parse origin from {filter_value} (expected: igp, egp, or incomplete)"
+                ))),
+            },
+            "local_pref" => match u32::from_str(filter_value) {
+                Ok(v) => Ok(Filter::LocalPref(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse local_pref from {filter_value}"
+                ))),
+            },
+            "med" => match u32::from_str(filter_value) {
+                Ok(v) => Ok(Filter::Med(v)),
+                Err(_) => Err(FilterError(format!("cannot parse med from {filter_value}"))),
+            },
+            "atomic" => match filter_value {
+                "true" | "t" | "1" => Ok(Filter::Atomic(true)),
+                "false" | "f" | "0" => Ok(Filter::Atomic(false)),
+                _ => Err(FilterError(format!(
+                    "cannot parse atomic from {filter_value} (expected: true or false)"
+                ))),
+            },
+            "aggr_asn" => match u32::from_str(filter_value) {
+                Ok(v) => Ok(Filter::AggrAsn(Asn::from(v))),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse aggregator ASN from {filter_value}"
+                ))),
+            },
+            "aggr_ip" => match Ipv4Addr::from_str(filter_value) {
+                Ok(v) => Ok(Filter::AggrIp(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse aggregator IP from {filter_value}"
+                ))),
+            },
+            "peer_bgp_id" => match Ipv4Addr::from_str(filter_value) {
+                Ok(v) => Ok(Filter::PeerBgpId(v)),
+                Err(_) => Err(FilterError(format!(
+                    "cannot parse peer BGP ID from {filter_value}"
+                ))),
+            },
             _ => Err(FilterError(format!("unknown filter type: {filter_type}"))),
         }
     }
+}
+
+/// Maps a filter type string to its `PresentField` if the field is optional.
+/// Used for the `*` presence wildcard.
+fn present_field_for(filter_type: &str) -> Option<PresentField> {
+    match filter_type {
+        "otc" => Some(PresentField::OnlyToCustomer),
+        "next_hop" => Some(PresentField::NextHop),
+        "origin" => Some(PresentField::Origin),
+        "local_pref" => Some(PresentField::LocalPref),
+        "med" => Some(PresentField::Med),
+        "aggr_asn" => Some(PresentField::AggrAsn),
+        "aggr_ip" => Some(PresentField::AggrIp),
+        "peer_bgp_id" => Some(PresentField::PeerBgpId),
+        _ => None,
+    }
+}
+
+/// Returns true if the filter variant requires full `BgpElem` attributes not available
+/// on `BgpRouteElem`. Used by route-level filtering to fail-closed (non-negated) or
+/// fail-open (negated).
+fn is_elem_only_filter(filter: &Filter) -> bool {
+    matches!(
+        filter,
+        Filter::Community(_)
+            | Filter::OnlyToCustomer(_)
+            | Filter::NextHop(_)
+            | Filter::Origin(_)
+            | Filter::LocalPref(_)
+            | Filter::Med(_)
+            | Filter::Atomic(_)
+            | Filter::AggrAsn(_)
+            | Filter::AggrIp(_)
+            | Filter::PeerBgpId(_)
+            | Filter::FieldPresent(_)
+    )
+}
+
+/// Returns true if this view carries full `BgpElem` attributes (as opposed to the
+/// lightweight `BgpRouteElem`). Used to decide whether elem-only filters should be
+/// evaluated or fail-closed.
+fn is_full_elem_view<T: RouteFilterView>(view: &T) -> bool {
+    view.supports_community_filter()
 }
 
 pub trait Filterable {
@@ -536,6 +697,36 @@ trait RouteFilterView {
     fn prefix(&self) -> &NetworkPrefix;
     fn as_path(&self) -> Option<&AsPath>;
     fn matches_origin_asn(&self, asn: Asn) -> bool;
+
+    // --- BgpElem-only fields (default returns None / false for BgpRouteElem) ---
+
+    fn next_hop(&self) -> Option<IpAddr> {
+        None
+    }
+    fn origin(&self) -> Option<Origin> {
+        None
+    }
+    fn local_pref(&self) -> Option<u32> {
+        None
+    }
+    fn med(&self) -> Option<u32> {
+        None
+    }
+    fn atomic(&self) -> bool {
+        false
+    }
+    fn aggr_asn(&self) -> Option<Asn> {
+        None
+    }
+    fn aggr_ip(&self) -> Option<Ipv4Addr> {
+        None
+    }
+    fn peer_bgp_id(&self) -> Option<Ipv4Addr> {
+        None
+    }
+    fn only_to_customer(&self) -> Option<Asn> {
+        None
+    }
 
     fn matches_community(&self, _regex: &ComparableRegex) -> bool {
         false
@@ -600,9 +791,10 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
 
 fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
     match filter {
+        // Negated elem-only filters on route-level views: fail-closed (return false)
+        // for consistency with the community filter pattern.
         Filter::Negated(inner)
-            if matches!(inner.as_ref(), Filter::Community(_))
-                && !view.supports_community_filter() =>
+            if is_elem_only_filter(inner.as_ref()) && !is_full_elem_view(view) =>
         {
             false
         }
@@ -628,6 +820,25 @@ fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> boo
         Filter::IpVersion(version) => match version {
             IpVersion::Ipv4 => view.prefix().prefix.addr().is_ipv4(),
             IpVersion::Ipv6 => view.prefix().prefix.addr().is_ipv6(),
+        },
+        Filter::OnlyToCustomer(v) => view.only_to_customer() == Some(*v),
+        Filter::NextHop(v) => view.next_hop() == Some(*v),
+        Filter::Origin(v) => view.origin() == Some(*v),
+        Filter::LocalPref(v) => view.local_pref() == Some(*v),
+        Filter::Med(v) => view.med() == Some(*v),
+        Filter::Atomic(v) => view.atomic() == *v,
+        Filter::AggrAsn(v) => view.aggr_asn() == Some(*v),
+        Filter::AggrIp(v) => view.aggr_ip() == Some(*v),
+        Filter::PeerBgpId(v) => view.peer_bgp_id() == Some(*v),
+        Filter::FieldPresent(field) => match field {
+            PresentField::OnlyToCustomer => view.only_to_customer().is_some(),
+            PresentField::NextHop => view.next_hop().is_some(),
+            PresentField::Origin => view.origin().is_some(),
+            PresentField::LocalPref => view.local_pref().is_some(),
+            PresentField::Med => view.med().is_some(),
+            PresentField::AggrAsn => view.aggr_asn().is_some(),
+            PresentField::AggrIp => view.aggr_ip().is_some(),
+            PresentField::PeerBgpId => view.peer_bgp_id().is_some(),
         },
     }
 }
@@ -662,6 +873,34 @@ impl RouteFilterView for BgpElem {
             .as_ref()
             .map(|origins| origins.contains(&asn))
             .unwrap_or(false)
+    }
+
+    fn next_hop(&self) -> Option<IpAddr> {
+        self.next_hop
+    }
+    fn origin(&self) -> Option<Origin> {
+        self.origin
+    }
+    fn local_pref(&self) -> Option<u32> {
+        self.local_pref
+    }
+    fn med(&self) -> Option<u32> {
+        self.med
+    }
+    fn atomic(&self) -> bool {
+        self.atomic
+    }
+    fn aggr_asn(&self) -> Option<Asn> {
+        self.aggr_asn
+    }
+    fn aggr_ip(&self) -> Option<Ipv4Addr> {
+        self.aggr_ip
+    }
+    fn peer_bgp_id(&self) -> Option<Ipv4Addr> {
+        self.peer_bgp_id
+    }
+    fn only_to_customer(&self) -> Option<Asn> {
+        self.only_to_customer
     }
 
     fn matches_community(&self, regex: &ComparableRegex) -> bool {
@@ -1829,5 +2068,161 @@ mod tests {
 
         let filter = Filter::new("origin_asns", "!12345,!67890").unwrap();
         assert!(!elem.match_filter(&filter)); // Should NOT match because origin ASN IS in the list
+    }
+
+    fn elem_with_attrs() -> BgpElem {
+        BgpElem {
+            timestamp: 1637437798_f64,
+            peer_ip: IpAddr::from_str("192.168.1.1").unwrap(),
+            peer_asn: Asn::new_32bit(12345),
+            peer_bgp_id: Some(Ipv4Addr::from_str("10.0.0.1").unwrap()),
+            prefix: NetworkPrefix::new(IpNet::from_str("192.168.1.0/24").unwrap(), None),
+            next_hop: Some(IpAddr::from_str("10.0.0.2").unwrap()),
+            as_path: Some(AsPath::from_sequence(vec![174, 1916, 52888])),
+            origin_asns: Some(vec![Asn::new_32bit(52888)]),
+            origin: Some(Origin::IGP),
+            local_pref: Some(100),
+            med: Some(50),
+            communities: None,
+            atomic: true,
+            aggr_asn: Some(Asn::new_32bit(65100)),
+            aggr_ip: Some(Ipv4Addr::from_str("10.0.0.3").unwrap()),
+            only_to_customer: Some(Asn::new_32bit(65200)),
+            unknown: None,
+            elem_type: ElemType::ANNOUNCE,
+            deprecated: None,
+        }
+    }
+
+    #[test]
+    fn test_extended_filters_value_match() {
+        let elem = elem_with_attrs();
+
+        // OTC
+        assert!(elem.match_filter(&Filter::new("otc", "65200").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("otc", "99999").unwrap()));
+
+        // Next hop
+        assert!(elem.match_filter(&Filter::new("next_hop", "10.0.0.2").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("next_hop", "10.0.0.9").unwrap()));
+
+        // Origin
+        assert!(elem.match_filter(&Filter::new("origin", "igp").unwrap()));
+        assert!(elem.match_filter(&Filter::new("origin", "IGP").unwrap())); // case-insensitive
+        assert!(!elem.match_filter(&Filter::new("origin", "egp").unwrap()));
+
+        // Local pref
+        assert!(elem.match_filter(&Filter::new("local_pref", "100").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("local_pref", "200").unwrap()));
+
+        // MED
+        assert!(elem.match_filter(&Filter::new("med", "50").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("med", "99").unwrap()));
+
+        // Atomic
+        assert!(elem.match_filter(&Filter::new("atomic", "true").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("atomic", "false").unwrap()));
+
+        // Aggr ASN
+        assert!(elem.match_filter(&Filter::new("aggr_asn", "65100").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("aggr_asn", "99999").unwrap()));
+
+        // Aggr IP
+        assert!(elem.match_filter(&Filter::new("aggr_ip", "10.0.0.3").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("aggr_ip", "10.0.0.9").unwrap()));
+
+        // Peer BGP ID
+        assert!(elem.match_filter(&Filter::new("peer_bgp_id", "10.0.0.1").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("peer_bgp_id", "10.0.0.9").unwrap()));
+    }
+
+    #[test]
+    fn test_extended_filters_negation() {
+        let elem = elem_with_attrs();
+
+        // Negated value match
+        assert!(elem.match_filter(&Filter::new("otc", "!99999").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("otc", "!65200").unwrap()));
+        assert!(elem.match_filter(&Filter::new("next_hop", "!10.0.0.9").unwrap()));
+        assert!(!elem.match_filter(&Filter::new("next_hop", "!10.0.0.2").unwrap()));
+        assert!(elem.match_filter(&Filter::new("origin", "!egp").unwrap()));
+        assert!(elem.match_filter(&Filter::new("local_pref", "!200").unwrap()));
+        assert!(elem.match_filter(&Filter::new("med", "!99").unwrap()));
+        assert!(elem.match_filter(&Filter::new("atomic", "!false").unwrap()));
+        assert!(elem.match_filter(&Filter::new("aggr_asn", "!99999").unwrap()));
+        assert!(elem.match_filter(&Filter::new("aggr_ip", "!10.0.0.9").unwrap()));
+        assert!(elem.match_filter(&Filter::new("peer_bgp_id", "!10.0.0.9").unwrap()));
+    }
+
+    #[test]
+    fn test_extended_filters_presence() {
+        let elem_full = elem_with_attrs();
+        let elem_empty = filter_test_elem(); // all optional fields are None
+
+        // Present on full elem
+        assert!(elem_full.match_filter(&Filter::new("otc", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("next_hop", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("origin", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("local_pref", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("med", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("aggr_asn", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("aggr_ip", "*").unwrap()));
+        assert!(elem_full.match_filter(&Filter::new("peer_bgp_id", "*").unwrap()));
+
+        // Absent on empty elem
+        assert!(!elem_empty.match_filter(&Filter::new("otc", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("next_hop", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("origin", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("local_pref", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("med", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("aggr_asn", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("aggr_ip", "*").unwrap()));
+        assert!(!elem_empty.match_filter(&Filter::new("peer_bgp_id", "*").unwrap()));
+
+        // Negated presence (absent) on empty elem
+        assert!(elem_empty.match_filter(&Filter::new("otc", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("next_hop", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("origin", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("local_pref", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("med", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("aggr_asn", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("aggr_ip", "!*").unwrap()));
+        assert!(elem_empty.match_filter(&Filter::new("peer_bgp_id", "!*").unwrap()));
+
+        // Negated presence on full elem → should not match
+        assert!(!elem_full.match_filter(&Filter::new("otc", "!*").unwrap()));
+        assert!(!elem_full.match_filter(&Filter::new("next_hop", "!*").unwrap()));
+    }
+
+    #[test]
+    fn test_extended_filters_on_route_elem() {
+        let elem = elem_with_attrs();
+        let route = route_projection(&elem);
+
+        // Non-negated elem-only filters do NOT match route elements
+        assert!(!route.match_filter(&Filter::new("otc", "65200").unwrap()));
+        assert!(!route.match_filter(&Filter::new("next_hop", "10.0.0.2").unwrap()));
+        assert!(!route.match_filter(&Filter::new("otc", "*").unwrap()));
+
+        // Negated elem-only filters also do NOT match route elements (fail-closed)
+        assert!(!route.match_filter(&Filter::new("otc", "!65200").unwrap()));
+        assert!(!route.match_filter(&Filter::new("otc", "!*").unwrap()));
+
+        // Route-level filters still work
+        assert!(route.match_filter(&Filter::new("origin_asn", "52888").unwrap()));
+        assert!(route.match_filter(&Filter::new("prefix", "192.168.1.0/24").unwrap()));
+    }
+
+    #[test]
+    fn test_extended_filter_parsing_errors() {
+        assert!(Filter::new("otc", "not_a_number").is_err());
+        assert!(Filter::new("next_hop", "not_an_ip").is_err());
+        assert!(Filter::new("origin", "invalid").is_err());
+        assert!(Filter::new("local_pref", "not_a_number").is_err());
+        assert!(Filter::new("med", "not_a_number").is_err());
+        assert!(Filter::new("atomic", "not_a_bool").is_err());
+        assert!(Filter::new("aggr_asn", "not_a_number").is_err());
+        assert!(Filter::new("aggr_ip", "not_an_ip").is_err());
+        assert!(Filter::new("peer_bgp_id", "not_an_ip").is_err());
     }
 }
