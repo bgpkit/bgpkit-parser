@@ -362,3 +362,36 @@ fn test_parser_error_with_bytes_display() {
     let display = format!("{}", err);
     assert!(display.contains("test error"));
 }
+
+// ========================================================================
+// Test 12: 1-byte NLRI field is now treated as malformed (was silently
+//          skipped before — Copilot review comment on PR #309)
+// ========================================================================
+
+#[test]
+fn test_one_byte_nlri_produces_warning_not_silent_skip() {
+    let asn_len = AsnLength::Bits32;
+
+    // A 1-byte NLRI field in the announced section — previously this was
+    // silently skipped (Ok(vec![])), now it produces a MalformedNlri warning.
+    let one_byte_nlri = vec![0xFF];
+    let body = build_update_body(&[], &build_valid_attrs(), &one_byte_nlri);
+    let update = parse_bgp_update_message(Bytes::from(body), false, &asn_len).unwrap();
+
+    assert!(update.announced_prefixes.is_empty());
+    assert!(
+        update.attributes.has_validation_warnings(),
+        "1-byte NLRI should produce a MalformedNlri warning"
+    );
+    assert!(update
+        .attributes
+        .validation_warnings()
+        .iter()
+        .any(|w| matches!(
+            w,
+            BgpValidationWarning::MalformedNlri {
+                nlri_type: "announced",
+                ..
+            }
+        )));
+}
