@@ -364,24 +364,24 @@ fn test_parser_error_with_bytes_display() {
 }
 
 // ========================================================================
-// Test 12: 1-byte NLRI field is now treated as malformed (was silently
-//          skipped before — Copilot review comment on PR #309)
+// Test 12: 1-byte NLRI with invalid prefix length is treated as malformed.
+//          A 1-byte NLRI with value 0x00 (default route /0) is valid and
+//          must NOT be flagged. (Copilot review comment on PR #309)
 // ========================================================================
 
 #[test]
-fn test_one_byte_nlri_produces_warning_not_silent_skip() {
+fn test_one_byte_nlri_invalid_prefix_produces_warning() {
     let asn_len = AsnLength::Bits32;
 
-    // A 1-byte NLRI field in the announced section — previously this was
-    // silently skipped (Ok(vec![])), now it produces a MalformedNlri warning.
-    let one_byte_nlri = vec![0xFF];
-    let body = build_update_body(&[], &build_valid_attrs(), &one_byte_nlri);
+    // A 1-byte NLRI with value 0xFF (prefix length 255) is invalid for IPv4.
+    let invalid_one_byte = vec![0xFF];
+    let body = build_update_body(&[], &build_valid_attrs(), &invalid_one_byte);
     let update = parse_bgp_update_message(Bytes::from(body), false, &asn_len).unwrap();
 
     assert!(update.announced_prefixes.is_empty());
     assert!(
         update.attributes.has_validation_warnings(),
-        "1-byte NLRI should produce a MalformedNlri warning"
+        "1-byte NLRI with invalid prefix length should produce a warning"
     );
     assert!(update
         .attributes
@@ -394,4 +394,29 @@ fn test_one_byte_nlri_produces_warning_not_silent_skip() {
                 ..
             }
         )));
+}
+
+// ========================================================================
+// Test 13: 1-byte NLRI encoding default route (0.0.0.0/0) is valid
+// ========================================================================
+
+#[test]
+fn test_one_byte_nlri_default_route_is_valid() {
+    let asn_len = AsnLength::Bits32;
+
+    // A 1-byte NLRI with value 0x00 encodes the default route (prefix
+    // length 0, no prefix octets). This is valid and must parse cleanly.
+    let default_route_nlri = vec![0x00];
+    let body = build_update_body(&[], &build_valid_attrs(), &default_route_nlri);
+    let update = parse_bgp_update_message(Bytes::from(body), false, &asn_len).unwrap();
+
+    assert_eq!(
+        update.announced_prefixes.len(),
+        1,
+        "default route 0.0.0.0/0 should be parsed"
+    );
+    assert!(
+        !update.attributes.has_validation_warnings(),
+        "valid default route NLRI must not produce warnings"
+    );
 }

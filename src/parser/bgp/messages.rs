@@ -428,18 +428,19 @@ impl BgpOpenMessage {
 /// read nlri portion of a bgp update message.
 ///
 /// Returns `Ok(vec![])` for empty NLRI. Returns `Err` for malformed NLRI
-/// (1-byte field, invalid prefix lengths, truncated data), so that the caller
+/// (invalid prefix lengths, truncated data), so that the caller
 /// in `parse_bgp_update_message` can convert it to a `MalformedNlri` warning.
 fn read_nlri(input: Bytes, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserError> {
     let length = input.len();
     if length == 0 {
         return Ok(vec![]);
     }
-    if length == 1 {
-        // 1 byte does not make a valid NLRI encoding
+    if length == 1 && input[0] != 0 {
+        // A single non-zero byte cannot be a valid NLRI: a valid 1-byte NLRI
+        // encodes only the default route (prefix length 0, no prefix octets).
         warn!("seeing strange one-byte NLRI field (parsing NLRI in BGP UPDATE message)");
         return Err(ParserError::ParseError(
-            "one-byte NLRI field is not a valid encoding".to_string(),
+            "one-byte NLRI field with non-zero value is not a valid encoding".to_string(),
         ));
     }
 
