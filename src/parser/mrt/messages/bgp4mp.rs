@@ -86,18 +86,25 @@ pub fn parse_bgp4mp(sub_type: u16, input: Bytes) -> Result<Bgp4MpEnum, ParserErr
   |                    BGP Message... (variable)
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
+pub(crate) fn validate_bgp4mp_afi(afi: &Afi) -> Result<(), ParserError> {
+    match afi {
+        Afi::Ipv4 | Afi::Ipv6 => Ok(()),
+        Afi::LinkState => Err(ParserError::ParseError(
+            "Link-State AFI is invalid in a BGP4MP envelope".to_string(),
+        )),
+    }
+}
+
 pub(crate) fn bgp4mp_message_payload_len(
     afi: &Afi,
     asn_len: &AsnLength,
     total_size: usize,
-) -> usize {
-    let ip_size = match afi {
-        Afi::Ipv4 => 4 * 2,
-        Afi::Ipv6 => 16 * 2,
-        // `read_address` consumes 0 bytes for Link-State (it returns a
-        // placeholder), so no address bytes are subtracted here. Using a
-        // non-zero size would underflow `total_size` for small records.
-        Afi::LinkState => 0,
+) -> Result<usize, ParserError> {
+    validate_bgp4mp_afi(afi)?;
+    let ip_size = if matches!(afi, Afi::Ipv4) {
+        4 * 2
+    } else {
+        16 * 2
     };
     let asn_size = match asn_len {
         AsnLength::Bits16 => 2 * 2,
@@ -106,11 +113,11 @@ pub(crate) fn bgp4mp_message_payload_len(
     // Saturating: on a truncated/inconsistent record the caller compares the
     // result against `data.remaining()` and rejects the mismatch, so a
     // saturated 0 simply fails that check instead of underflowing.
-    total_size
+    Ok(total_size
         .saturating_sub(asn_size)
         .saturating_sub(2)
         .saturating_sub(2)
-        .saturating_sub(ip_size)
+        .saturating_sub(ip_size))
 }
 /*
    0                   1                   2                   3
@@ -139,10 +146,10 @@ pub fn parse_bgp4mp_message(
     let local_asn: Asn = data.read_asn(asn_len)?;
     let interface_index: u16 = data.read_u16()?;
     let afi: Afi = data.read_afi()?;
+    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size)?;
     let peer_ip = data.read_address(&afi)?;
     let local_ip = data.read_address(&afi)?;
 
-    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size);
     if should_read != data.remaining() {
         return Err(ParserError::TruncatedMsg(format!(
             "truncated bgp4mp message: should read {} bytes, have {} bytes available",
@@ -217,6 +224,7 @@ pub fn parse_bgp4mp_state_change(
     let local_asn: Asn = input.read_asn(asn_len)?;
     let interface_index: u16 = input.read_u16()?;
     let address_family: Afi = input.read_afi()?;
+    validate_bgp4mp_afi(&address_family)?;
     let peer_ip = input.read_address(&address_family)?;
     let local_addr = input.read_address(&address_family)?;
     let old_state = BgpState::try_from(input.read_u16()?)?;
@@ -280,5 +288,46 @@ mod tests {
             }
             other => panic!("unexpected BGP4MP message: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_bgp4mp_message_rejects_link_state_envelope_afi() {
+        let mut data = BytesMut::new();
+        data.put_u16(65000);
+        data.put_u16(65001);
+        data.put_u16(0);
+        data.put_u16(Afi::LinkState as u16);
+        data.extend(&BgpMessage::KeepAlive.encode(AsnLength::Bits16));
+
+        let error = match parse_bgp4mp(Bgp4MpType::Message as u16, data.freeze()) {
+            Err(error) => error,
+            Ok(message) => panic!("unexpectedly parsed BGP4MP message: {message:?}"),
+        };
+        assert!(matches!(
+            error,
+            ParserError::ParseError(message)
+                if message == "Link-State AFI is invalid in a BGP4MP envelope"
+        ));
+    }
+
+    #[test]
+    fn test_bgp4mp_state_change_rejects_link_state_envelope_afi() {
+        let mut data = BytesMut::new();
+        data.put_u16(65000);
+        data.put_u16(65001);
+        data.put_u16(0);
+        data.put_u16(Afi::LinkState as u16);
+        data.put_u16(BgpState::Idle as u16);
+        data.put_u16(BgpState::Connect as u16);
+
+        let error = match parse_bgp4mp(Bgp4MpType::StateChange as u16, data.freeze()) {
+            Err(error) => error,
+            Ok(message) => panic!("unexpectedly parsed BGP4MP state change: {message:?}"),
+        };
+        assert!(matches!(
+            error,
+            ParserError::ParseError(message)
+                if message == "Link-State AFI is invalid in a BGP4MP envelope"
+        ));
     }
 }
