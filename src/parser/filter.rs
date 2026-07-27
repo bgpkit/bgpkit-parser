@@ -163,7 +163,7 @@ use std::str::FromStr;
 ///
 /// **Presence filters**: Fields that are `Option<T>` support `*` as a wildcard value to check
 /// whether the field is present (`Some`) or absent (`None`). For example, `otc=*` matches
-/// elements that carry an OTC value, while `!otc=*` matches elements without one.
+/// elements that carry an OTC value, while `otc=!*` matches elements without one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
     OriginAsn(u32),
@@ -656,8 +656,8 @@ fn present_field_for(filter_type: &str) -> Option<PresentField> {
 }
 
 /// Returns true if the filter variant requires full `BgpElem` attributes not available
-/// on `BgpRouteElem`. Used by route-level filtering to fail-closed (non-negated) or
-/// fail-open (negated).
+/// on `BgpRouteElem`. Used by route-level filtering to fail-closed for both non-negated
+/// and negated elem-only filters.
 fn is_elem_only_filter(filter: &Filter) -> bool {
     matches!(
         filter,
@@ -790,14 +790,19 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
 }
 
 fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
-    match filter {
-        // Negated elem-only filters on route-level views: fail-closed (return false)
-        // for consistency with the community filter pattern.
-        Filter::Negated(inner)
-            if is_elem_only_filter(inner.as_ref()) && !is_full_elem_view(view) =>
-        {
-            false
+    // All elem-only filters (both direct and negated) fail-closed on route-level views.
+    // Without this guard, a non-negated filter like Atomic(false) would incorrectly
+    // match BgpRouteElem because RouteFilterView::atomic() defaults to false.
+    if !is_full_elem_view(view) {
+        let inner = match filter {
+            Filter::Negated(inner) => inner.as_ref(),
+            f => f,
+        };
+        if is_elem_only_filter(inner) {
+            return false;
         }
+    }
+    match filter {
         Filter::Negated(inner) => !match_route_view_filter(view, inner),
         Filter::OriginAsn(v) => view.matches_origin_asn((*v).into()),
         Filter::OriginAsns(v) => v.iter().any(|asn| view.matches_origin_asn((*asn).into())),
@@ -2203,6 +2208,9 @@ mod tests {
         assert!(!route.match_filter(&Filter::new("otc", "65200").unwrap()));
         assert!(!route.match_filter(&Filter::new("next_hop", "10.0.0.2").unwrap()));
         assert!(!route.match_filter(&Filter::new("otc", "*").unwrap()));
+        // Atomic(false) must not match route elems even though the default atomic() returns false
+        assert!(!route.match_filter(&Filter::new("atomic", "false").unwrap()));
+        assert!(!route.match_filter(&Filter::new("atomic", "true").unwrap()));
 
         // Negated elem-only filters also do NOT match route elements (fail-closed)
         assert!(!route.match_filter(&Filter::new("otc", "!65200").unwrap()));
