@@ -8,6 +8,17 @@ All notable changes to this project will be documented in this file.
 
 * **Extended element filtering**: Added `Filter` variants for nine previously unfilterable `BgpElem` fields: `only_to_customer` (`otc`), `next_hop`, `origin`, `local_pref`, `med`, `atomic`, `aggr_asn`, `aggr_ip`, and `peer_bgp_id`. Each optional field also supports presence filtering via the `*` wildcard — e.g. `otc=*` matches elements that carry an OTC value, `otc=!*` matches elements without one. ([#306](https://github.com/bgpkit/bgpkit-parser/issues/306))
 * **MRT attribute code counter example**: Added `examples/count_attributes.rs`, which reports every parsed BGP path-attribute wire code in a local or remote MRT file, including raw-retained unsupported, deprecated, and unassigned attributes.
+* **RTR PDU fuzzer**: Added `fuzz_rtr` fuzz target for RPKI RTR PDU parsing. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+
+### Fixed
+
+* **FlowSpec prefix parsing OOB**: Reject FlowSpec prefix lengths > 128 before copying address bytes, preventing an out-of-bounds panic on the fixed 16-byte IPv6 buffer. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **RTR Error Report oversized text panic**: Validate the declared `error_text_len` fits within the PDU before slicing, preventing an out-of-bounds panic from a crafted length field. The `encap_pdu_len` check was also switched to subtraction to avoid `usize` overflow on 32-bit targets. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **RTR PDU memory-exhaustion DoS**: Cap RTR PDU allocations at `RTR_MAX_ERROR_REPORT_LEN` (~128 KiB) before allocating, so a crafted `length` header cannot drive a multi-gigabyte allocation. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **BGP4MP Link-State AFI rejection**: Reject `Afi::LinkState` in BGP4MP envelopes (Message, StateChange, route parsing), which previously fell through to an incorrect IPv4-format assumption. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **BGP4MP payload length underflow**: Switched `bgp4mp_message_payload_len` to saturating subtraction and made it fallible, preventing underflow on truncated/inconsistent records. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **OpenBMP admin-id clamp**: Removed the 255-byte clamp on `admin_id` length in OpenBMP header parsing; the declared length is now consumed in full to avoid misparsing subsequent fields. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
+* **AS path allocation overflow guard**: Validate ASN byte count via `checked_mul` before allocating in `read_asns`, preventing overflow-driven pre-allocation on 32-bit targets from a crafted count. ([#308](https://github.com/bgpkit/bgpkit-parser/pull/308))
 
 ### Changed
 
