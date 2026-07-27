@@ -135,6 +135,14 @@ fn parse_prefix_component(data: &[u8], offset: &mut usize) -> Result<NetworkPref
     let prefix_len = data[*offset];
     *offset += 1;
 
+    // Reject prefix lengths beyond the IPv6 maximum. Without this,
+    // `prefix_bytes` can reach 32 and the IPv6 branch below would copy past
+    // the fixed 16-byte buffer and panic. The `Ipv6Net::new` validation only
+    // runs *after* the copy, so the check must happen here.
+    if prefix_len > 128 {
+        return Err(FlowSpecError::InvalidPrefix);
+    }
+
     let prefix_bytes = prefix_len.div_ceil(8);
     if *offset + prefix_bytes as usize > data.len() {
         return Err(FlowSpecError::InsufficientData);
@@ -397,6 +405,21 @@ fn encode_bitmask_operators(operators: &[BitmaskOperator], data: &mut Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: an oversized prefix length (>128) must be rejected before
+    /// the address bytes are copied, rather than panicking on an out-of-bounds
+    /// copy into the fixed 16-byte buffer.
+    #[test]
+    fn test_parse_prefix_component_oversized_len_no_panic() {
+        // prefix_len = 0xFF (255) → 32 prefix bytes, followed by 32 bytes.
+        let mut data = vec![0xFF];
+        data.extend(std::iter::repeat_n(0u8, 32));
+        let mut offset = 0;
+        assert!(matches!(
+            parse_prefix_component(&data, &mut offset),
+            Err(FlowSpecError::InvalidPrefix)
+        ));
+    }
 
     #[test]
     fn test_length_encoding() {

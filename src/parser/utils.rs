@@ -118,17 +118,27 @@ pub trait ReadUtils: Buf {
     }
 
     fn read_asns(&mut self, as_length: &AsnLength, count: usize) -> Result<Vec<Asn>, ParserError> {
-        let mut path = Vec::with_capacity(count);
+        // Verify the bytes are actually present before allocating, so a large
+        // `count` cannot pre-allocate memory the buffer could never fill.
+        // `checked_mul` guards against overflow of `count * width` on 32-bit
+        // targets.
+        let width = match as_length {
+            AsnLength::Bits16 => 2,
+            AsnLength::Bits32 => 4,
+        };
+        let needed = count
+            .checked_mul(width)
+            .ok_or_else(|| TruncatedMsg("ASN count overflows buffer length".to_string()))?;
+        self.has_n_remaining(needed)?;
 
+        let mut path = Vec::with_capacity(count);
         match as_length {
             AsnLength::Bits16 => {
-                self.has_n_remaining(count * 2)?; // 2 bytes for 16-bit ASN
                 for _ in 0..count {
                     path.push(Asn::new_16bit(self.read_u16()?));
                 }
             }
             AsnLength::Bits32 => {
-                self.has_n_remaining(count * 4)?; // 4 bytes for 32-bit ASN
                 for _ in 0..count {
                     path.push(Asn::new_32bit(self.read_u32()?));
                 }

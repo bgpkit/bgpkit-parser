@@ -94,13 +94,23 @@ pub(crate) fn bgp4mp_message_payload_len(
     let ip_size = match afi {
         Afi::Ipv4 => 4 * 2,
         Afi::Ipv6 => 16 * 2,
-        Afi::LinkState => 4 * 2, // Link-State uses IPv4 format for compatibility
+        // `read_address` consumes 0 bytes for Link-State (it returns a
+        // placeholder), so no address bytes are subtracted here. Using a
+        // non-zero size would underflow `total_size` for small records.
+        Afi::LinkState => 0,
     };
     let asn_size = match asn_len {
         AsnLength::Bits16 => 2 * 2,
         AsnLength::Bits32 => 2 * 4,
     };
-    total_size - asn_size - 2 - 2 - ip_size
+    // Saturating: on a truncated/inconsistent record the caller compares the
+    // result against `data.remaining()` and rejects the mismatch, so a
+    // saturated 0 simply fails that check instead of underflowing.
+    total_size
+        .saturating_sub(asn_size)
+        .saturating_sub(2)
+        .saturating_sub(2)
+        .saturating_sub(ip_size)
 }
 /*
    0                   1                   2                   3

@@ -172,6 +172,19 @@ pub const RTR_CACHE_RESET_LEN: u32 = 8;
 /// Router Key PDU minimum length (header(8) + flags(1) + zero(1) + SKI(20) + ASN(4) = 34)
 pub const RTR_ROUTER_KEY_MIN_LEN: u32 = 34;
 
+/// Maximum accepted RTR PDU length.
+///
+/// The wire `length` field is a 32-bit value (up to ~4 GiB), but every RTR
+/// PDU type has a far smaller real maximum. The largest variable-length PDU
+/// is the ASPA PDU (RFC 8210-bis, §5.12): an 8-byte common header, a 4-byte
+/// Customer ASN, and a list of 4-byte Provider ASNs whose count is derived
+/// from `Length` as `(Length - 12) / 4`. That spec explicitly states the
+/// PDU length "MUST NOT exceed 65,535 octets", which is the largest a valid
+/// RTR PDU of any type can be. Capping here bounds the allocation in
+/// [`read_rtr_pdu`] so a crafted header cannot drive a large allocation
+/// (memory-exhaustion DoS).
+pub const RTR_MAX_PDU_LEN: usize = 65_535;
+
 // =============================================================================
 // Parsing Functions
 // =============================================================================
@@ -424,6 +437,19 @@ pub fn parse_rtr_pdu(input: &[u8]) -> Result<(RtrPdu, usize), RtrError> {
             ]) as usize;
 
             let error_text_offset = error_text_len_offset + 4;
+
+            // Validate the declared error text actually fits within the PDU
+            // before slicing. `length` is a wire-controlled u32, and
+            // `error_text_len` is independent of it, so an oversized value
+            // would otherwise index past the buffer and panic.
+            if error_text_offset + error_text_len > length_usize {
+                return Err(RtrError::InvalidLength {
+                    expected: (error_text_offset + error_text_len) as u32,
+                    actual: length,
+                    pdu_type: pdu_type_byte,
+                });
+            }
+
             let error_text = if error_text_len > 0 {
                 std::str::from_utf8(&input[error_text_offset..error_text_offset + error_text_len])
                     .map_err(|_| RtrError::InvalidUtf8)?
@@ -472,6 +498,16 @@ pub fn read_rtr_pdu<R: Read>(reader: &mut R) -> Result<RtrPdu, RtrError> {
     if length < RTR_HEADER_LEN {
         return Err(RtrError::InvalidLength {
             expected: RTR_HEADER_LEN as u32,
+            actual: length as u32,
+            pdu_type: header[1],
+        });
+    }
+
+    // Reject implausibly large PDUs before allocating, so a crafted header
+    // cannot drive a multi-gigabyte allocation (memory-exhaustion DoS).
+    if length > RTR_MAX_PDU_LEN {
+        return Err(RtrError::InvalidLength {
+            expected: RTR_MAX_PDU_LEN as u32,
             actual: length as u32,
             pdu_type: header[1],
         });
@@ -1507,5 +1543,38 @@ mod tests {
             }
             _ => panic!("Expected ErrorReport"),
         }
+    }
+
+    /// Regression: an ErrorReport declaring an `error_text_len` larger than the
+    /// buffer must return an error rather than panic on an out-of-bounds slice.
+    #[test]
+    fn test_error_report_oversized_text_len_no_panic() {
+        let bytes: Vec<u8> = vec![
+            0x01, 0x0A, 0x00, 0x00, // ver=1, type=10 (ErrorReport), error_code=0
+            0x00, 0x00, 0x00, 0x10, // length = 16
+            0x00, 0x00, 0x00, 0x00, // encap_pdu_len = 0
+            0xFF, 0xFF, 0xFF, 0xFF, // error_text_len = 0xFFFFFFFF (huge)
+        ];
+        assert!(matches!(
+            parse_rtr_pdu(&bytes),
+            Err(RtrError::InvalidLength { .. })
+        ));
+    }
+
+    /// Regression: `read_rtr_pdu` must reject an implausibly large declared
+    /// length before allocating, rather than attempting a multi-gigabyte
+    /// allocation (memory-exhaustion DoS).
+    #[test]
+    fn test_read_rtr_pdu_rejects_oversized_length() {
+        // Header claims length = 0xFFFFFFFF but no body follows.
+        let header: Vec<u8> = vec![
+            0x01, 0x03, 0x00, 0x00, // ver=1, type=3 (ResetQuery)
+            0xFF, 0xFF, 0xFF, 0xFF, // length = 0xFFFFFFFF
+        ];
+        let mut reader = std::io::Cursor::new(header);
+        assert!(matches!(
+            read_rtr_pdu(&mut reader),
+            Err(RtrError::InvalidLength { .. })
+        ));
     }
 }
