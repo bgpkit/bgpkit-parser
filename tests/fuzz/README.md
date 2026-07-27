@@ -22,6 +22,9 @@ cargo +nightly fuzz run --fuzz-dir tests/fuzz fuzz_bgp_message -- -max_total_tim
 # Full parser fuzzing (60s)
 cargo +nightly fuzz run --fuzz-dir tests/fuzz fuzz_parser -- -max_total_time=60
 
+# RPKI RTR PDU fuzzing (60s)
+cargo +nightly fuzz run --fuzz-dir tests/fuzz fuzz_rtr -- -max_total_time=60
+
 # Run all fuzzers (5 minutes each)
 cargo +nightly fuzz run --fuzz-dir tests/fuzz fuzz_mrt_record -- -max_total_time=300
 cargo +nightly fuzz run --fuzz-dir tests/fuzz fuzz_bgp_message -- -max_total_time=300

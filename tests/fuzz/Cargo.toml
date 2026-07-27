@@ -75,3 +75,10 @@ path = "fuzz_targets/fuzz_mrt_header.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_rtr"
+path = "fuzz_targets/fuzz_rtr.rs"
+test = false
+doc = false
+bench = false
