@@ -172,6 +172,30 @@ pub const RTR_CACHE_RESET_LEN: u32 = 8;
 /// Router Key PDU minimum length (header(8) + flags(1) + zero(1) + SKI(20) + ASN(4) = 34)
 pub const RTR_ROUTER_KEY_MIN_LEN: u32 = 34;
 
+/// Practical maximum length of an RTR PDU other than Error Report.
+///
+/// The wire `length` field is a 32-bit value (up to ~4 GiB), but every RTR
+/// PDU type has a far smaller practical maximum. The largest variable-length
+/// non-error PDU is the ASPA PDU (RFC 8210-bis, §5.12): an 8-byte common
+/// header, a 4-byte Customer ASN, and a list of 4-byte Provider ASNs whose
+/// count is derived from `Length` as `(Length - 12) / 4`. That spec
+/// explicitly states the PDU length "MUST NOT exceed 65,535 octets". Error
+/// Report PDUs can legitimately be larger (see [`RTR_MAX_ERROR_REPORT_LEN`]).
+pub const RTR_MAX_PDU_LEN: usize = 65_535;
+
+/// Maximum accepted RTR PDU length, used to cap the allocation in
+/// [`read_rtr_pdu`] so a crafted header cannot drive a large allocation
+/// (memory-exhaustion DoS).
+///
+/// Sized for the largest PDU: an Error Report (RFC 8210, §5.10), which
+/// encapsulates a copy of the erroneous PDU plus a diagnostic text:
+/// header(8) + encapsulated PDU length(4) + encapsulated PDU + error text
+/// length(4) + error text. The encapsulated PDU is itself at most
+/// [`RTR_MAX_PDU_LEN`]; the RFC places no explicit bound on the text, so the
+/// same 65,535 octets is used as a practical cap. Applied to every PDU type
+/// for simplicity, this keeps the worst-case allocation around 128 KiB.
+pub const RTR_MAX_ERROR_REPORT_LEN: usize = 8 + 4 + RTR_MAX_PDU_LEN + 4 + RTR_MAX_PDU_LEN;
+
 // =============================================================================
 // Parsing Functions
 // =============================================================================
@@ -400,10 +424,13 @@ pub fn parse_rtr_pdu(input: &[u8]) -> Result<(RtrPdu, usize), RtrError> {
             let encap_pdu_len =
                 u32::from_be_bytes([input[8], input[9], input[10], input[11]]) as usize;
 
-            // Validate encapsulated PDU fits
-            if 12 + encap_pdu_len + 4 > length_usize {
+            // Validate encapsulated PDU fits. `encap_pdu_len` is
+            // wire-controlled, so compare by subtraction (`length >= 16` was
+            // checked above) rather than addition, which could overflow
+            // `usize` on 32-bit targets and bypass the check.
+            if encap_pdu_len > length_usize - 16 {
                 return Err(RtrError::InvalidLength {
-                    expected: (12 + encap_pdu_len + 4) as u32,
+                    expected: u32::try_from(encap_pdu_len.saturating_add(16)).unwrap_or(u32::MAX),
                     actual: length,
                     pdu_type: pdu_type_byte,
                 });
@@ -424,6 +451,23 @@ pub fn parse_rtr_pdu(input: &[u8]) -> Result<(RtrPdu, usize), RtrError> {
             ]) as usize;
 
             let error_text_offset = error_text_len_offset + 4;
+
+            // Validate the declared error text actually fits within the PDU
+            // before slicing: `error_text_len` is wire-controlled and
+            // independent of `length`, so an oversized value would otherwise
+            // index past the buffer and panic. Compare by subtraction (the
+            // check above guarantees `error_text_offset <= length_usize`)
+            // rather than addition, which could overflow `usize` on 32-bit
+            // targets and bypass the check.
+            if error_text_len > length_usize - error_text_offset {
+                return Err(RtrError::InvalidLength {
+                    expected: u32::try_from(error_text_offset.saturating_add(error_text_len))
+                        .unwrap_or(u32::MAX),
+                    actual: length,
+                    pdu_type: pdu_type_byte,
+                });
+            }
+
             let error_text = if error_text_len > 0 {
                 std::str::from_utf8(&input[error_text_offset..error_text_offset + error_text_len])
                     .map_err(|_| RtrError::InvalidUtf8)?
@@ -472,6 +516,16 @@ pub fn read_rtr_pdu<R: Read>(reader: &mut R) -> Result<RtrPdu, RtrError> {
     if length < RTR_HEADER_LEN {
         return Err(RtrError::InvalidLength {
             expected: RTR_HEADER_LEN as u32,
+            actual: length as u32,
+            pdu_type: header[1],
+        });
+    }
+
+    // Reject implausibly large PDUs before allocating, so a crafted header
+    // cannot drive a multi-gigabyte allocation (memory-exhaustion DoS).
+    if length > RTR_MAX_ERROR_REPORT_LEN {
+        return Err(RtrError::InvalidLength {
+            expected: RTR_MAX_ERROR_REPORT_LEN as u32,
             actual: length as u32,
             pdu_type: header[1],
         });
@@ -1504,6 +1558,67 @@ mod tests {
                 assert_eq!(e.error_code, RtrErrorCode::CorruptData);
                 assert_eq!(e.erroneous_pdu, vec![1, 2, 3, 4, 5, 6, 7, 8]);
                 assert_eq!(e.error_text, "Something went wrong!");
+            }
+            _ => panic!("Expected ErrorReport"),
+        }
+    }
+
+    /// Regression: an ErrorReport declaring an `error_text_len` larger than the
+    /// buffer must return an error rather than panic on an out-of-bounds slice.
+    #[test]
+    fn test_error_report_oversized_text_len_no_panic() {
+        let bytes: Vec<u8> = vec![
+            0x01, 0x0A, 0x00, 0x00, // ver=1, type=10 (ErrorReport), error_code=0
+            0x00, 0x00, 0x00, 0x10, // length = 16
+            0x00, 0x00, 0x00, 0x00, // encap_pdu_len = 0
+            0xFF, 0xFF, 0xFF, 0xFF, // error_text_len = 0xFFFFFFFF (huge)
+        ];
+        assert!(matches!(
+            parse_rtr_pdu(&bytes),
+            Err(RtrError::InvalidLength { .. })
+        ));
+    }
+
+    /// Regression: `read_rtr_pdu` must reject an implausibly large declared
+    /// length before allocating, rather than attempting a multi-gigabyte
+    /// allocation (memory-exhaustion DoS).
+    #[test]
+    fn test_read_rtr_pdu_rejects_oversized_length() {
+        // Header claims length = 0xFFFFFFFF but no body follows.
+        let header: Vec<u8> = vec![
+            0x01, 0x03, 0x00, 0x00, // ver=1, type=3 (ResetQuery)
+            0xFF, 0xFF, 0xFF, 0xFF, // length = 0xFFFFFFFF
+        ];
+        let mut reader = std::io::Cursor::new(header);
+        assert!(matches!(
+            read_rtr_pdu(&mut reader),
+            Err(RtrError::InvalidLength { .. })
+        ));
+    }
+
+    /// An ErrorReport encapsulating a maximum-size PDU plus error text is
+    /// larger than `RTR_MAX_PDU_LEN` but still valid; the allocation cap in
+    /// `read_rtr_pdu` must not reject it.
+    #[test]
+    fn test_read_rtr_pdu_accepts_large_error_report() {
+        let encap_len = RTR_MAX_PDU_LEN; // 65,535-byte erroneous PDU copy
+        let text = "diagnostic text".repeat(10);
+        let length = 8 + 4 + encap_len + 4 + text.len();
+        assert!(length > RTR_MAX_PDU_LEN);
+        assert!(length <= RTR_MAX_ERROR_REPORT_LEN);
+
+        let mut bytes: Vec<u8> = vec![0x01, 0x0A, 0x00, 0x00]; // ver=1, type=10, error_code=0
+        bytes.extend((length as u32).to_be_bytes());
+        bytes.extend((encap_len as u32).to_be_bytes());
+        bytes.extend(std::iter::repeat_n(0xAAu8, encap_len));
+        bytes.extend((text.len() as u32).to_be_bytes());
+        bytes.extend(text.as_bytes());
+
+        let mut reader = std::io::Cursor::new(bytes);
+        match read_rtr_pdu(&mut reader).unwrap() {
+            RtrPdu::ErrorReport(report) => {
+                assert_eq!(report.erroneous_pdu.len(), encap_len);
+                assert_eq!(report.error_text, text);
             }
             _ => panic!("Expected ErrorReport"),
         }

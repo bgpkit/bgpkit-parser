@@ -96,10 +96,11 @@ pub fn parse_openbmp_header(data: &mut Bytes) -> Result<OpenBmpHeader, ParserBmp
     // read admin-id
     data.has_n_remaining(16)?;
     data.advance(16);
-    let mut name_len = data.read_u16()?;
-    if name_len > 255 {
-        name_len = 255;
-    }
+    // Consume exactly the declared admin-id length. Clamping it (to e.g. 255)
+    // would leave the unread remainder to be misparsed as the following
+    // fields (router hash/IP); `read_n_bytes_to_string` already bounds-checks
+    // against the remaining buffer and errors on truncation.
+    let name_len = data.read_u16()?;
     let admin_id = data.read_n_bytes_to_string(name_len as usize)?;
 
     // read router IP

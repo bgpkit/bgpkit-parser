@@ -429,10 +429,10 @@ fn parse_bgp4mp_routes(
     let _local_asn = data.read_asn(asn_len)?;
     let _interface_index = data.read_u16()?;
     let afi = data.read_afi()?;
+    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size)?;
     let peer_ip = data.read_address(&afi)?;
     let _local_ip = data.read_address(&afi)?;
 
-    let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size);
     if should_read != data.remaining() {
         return Err(ParserError::TruncatedMsg(format!(
             "truncated bgp4mp message: should read {} bytes, have {} bytes available",
@@ -1103,6 +1103,27 @@ mod tests {
 
         assert_eq!(routes, elem_projection);
         routes
+    }
+
+    #[test]
+    fn bgp4mp_routes_rejects_link_state_envelope_afi() {
+        let mut data = BytesMut::new();
+        data.put_u16(65000);
+        data.put_u16(65001);
+        data.put_u16(0);
+        data.put_u16(Afi::LinkState as u16);
+        data.extend(&BgpMessage::KeepAlive.encode(AsnLength::Bits16));
+
+        let error =
+            match parse_bgp4mp_routes(Bgp4MpType::Message as u16, data.freeze(), 1_700_000_000.0) {
+                Err(error) => error,
+                Ok(_) => panic!("unexpectedly parsed BGP4MP routes"),
+            };
+        assert!(matches!(
+            error,
+            ParserError::ParseError(message)
+                if message == "Link-State AFI is invalid in a BGP4MP envelope"
+        ));
     }
 
     #[test]
