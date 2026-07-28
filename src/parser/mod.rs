@@ -166,12 +166,27 @@ impl<R> BgpkitParser<R> {
     /// - `as_path` - AS path regex pattern
     /// - `community` - Community regex pattern
     /// - `ip_version` - IP version: "4"/"ipv4" or "6"/"ipv6"
+    /// - `otc` - Only-to-customer ASN (RFC 9234); `*` for present, `!*` for absent
+    /// - `next_hop` - Next hop IP address; `*`/`!*` for presence
+    /// - `origin` - Origin attribute: "igp", "egp", or "incomplete"; `*`/`!*` for presence
+    /// - `local_pref` - Local preference value; `*`/`!*` for presence
+    /// - `med` - Multi-exit discriminator value; `*`/`!*` for presence
+    /// - `atomic` - Atomic aggregate flag: "true"/"false"
+    /// - `aggr_asn` - Aggregator ASN; `*`/`!*` for presence
+    /// - `aggr_ip` - Aggregator IP address; `*`/`!*` for presence
+    /// - `peer_bgp_id` - Peer BGP identifier (router ID); `*`/`!*` for presence
     ///
     /// # Negative Filters
     ///
     /// Most filters support negation by prefixing the value with `!`. For example:
     /// - `origin_asn=!13335` matches elements where origin AS is NOT 13335
     /// - `prefix=!10.0.0.0/8` matches elements where prefix is NOT 10.0.0.0/8
+    ///
+    /// # Presence Filters
+    ///
+    /// Optional fields (`Option<T>`) support `*` as a wildcard to check whether a field
+    /// is present or absent: `otc=*` matches elements with an OTC value, `otc=!*` matches
+    /// elements without one.
     ///
     /// # Example
     ///

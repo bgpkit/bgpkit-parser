@@ -95,6 +95,13 @@ for elem in parser {
 - `peer_ip`: Match peer IP address
 - `type`: Filter by announcement (`a`) or withdrawal (`w`)
 - `as_path`: Match AS path with regex
+- `community`: Match BGP community with regex
+- `otc`: Match only-to-customer ASN (RFC 9234)
+- `next_hop`: Match next hop IP address
+- `origin`: Match origin attribute (`igp`, `egp`, `incomplete`)
+- `local_pref`: Match local preference value
+- `med`: Match multi-exit discriminator value
+- `atomic`: Match atomic aggregate flag (`true`/`false`)
 
 **Negative filters**: Most filters support negation by prefixing the filter value with `!`. For example:
 - `origin_asn = !13335`: Match elements where origin AS is NOT 13335
@@ -102,6 +109,11 @@ for elem in parser {
 - `peer_ip = !192.0.2.1`: Match elements where peer IP is NOT 192.0.2.1
 
 **Note**: Timestamp filters (`ts_start`, `ts_end`) do not support negation.
+
+**Presence filters**: Optional fields support `*` as a wildcard to check whether a field is present or absent. For example:
+- `otc = *`: Match elements that carry an OTC value
+- `otc = !*`: Match elements without an OTC value
+- `next_hop = *`: Match elements that have a next hop
 
 ```rust
 use bgpkit_parser::BgpkitParser;

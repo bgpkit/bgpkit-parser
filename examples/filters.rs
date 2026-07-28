@@ -1,6 +1,7 @@
 use bgpkit_parser::BgpkitParser;
 
-/// This example shows how to parse a MRT file and filter by prefix.
+/// This example shows how to parse a MRT file and filter by prefix, origin AS,
+/// and only-to-customer (OTC) attribute.
 ///
 /// The corresponding command line execution is:
 /// ```text
