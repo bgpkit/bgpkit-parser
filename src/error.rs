@@ -154,7 +154,11 @@ impl From<TryFromPrimitiveError<Safi>> for ParserError {
 
 /// BGP validation warnings for RFC 7606 compliant error handling.
 /// These represent non-fatal validation issues that don't prevent parsing.
+///
+/// This enum is `#[non_exhaustive]` so that new warning variants can be added
+/// in minor releases without breaking exhaustive matches.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BgpValidationWarning {
     /// Attribute flags conflict with attribute type code (RFC 4271 Section 6.3)
     AttributeFlagsError {
@@ -188,6 +192,23 @@ pub enum BgpValidationWarning {
     MalformedAttributeList { reason: String },
     /// Partial attribute with errors (RFC 7606)
     PartialAttributeError { attr_type: AttrType, reason: String },
+    /// Malformed NLRI field (RFC 7606 §5.3). The UPDATE message was parseable
+    /// up to the NLRI section, but the NLRI itself contained syntactic errors.
+    /// Per RFC 7606, the recommended action is "treat-as-withdrawal": all
+    /// routes carried in the NLRI section should be withdrawn.
+    ///
+    /// `nlri_type` distinguishes between the standard (IPv4 unicast) NLRI
+    /// field and the multiprotocol NLRI carried inside MP_REACH/MP_UNREACH
+    /// path attributes. `raw_bytes` preserves the offending NLRI bytes so
+    /// callers can inspect or export them without re-encoding.
+    MalformedNlri {
+        /// "withdrawn", "announced", "mp_reach", or "mp_unreach"
+        nlri_type: &'static str,
+        /// Human-readable description of the parse error
+        reason: String,
+        /// Raw NLRI bytes as they appeared in the UPDATE message
+        raw_bytes: Vec<u8>,
+    },
 }
 
 impl Display for BgpValidationWarning {
@@ -231,6 +252,9 @@ impl Display for BgpValidationWarning {
             }
             BgpValidationWarning::PartialAttributeError { attr_type, reason } => {
                 write!(f, "Partial attribute error for {attr_type:?}: {reason}")
+            }
+            BgpValidationWarning::MalformedNlri { nlri_type, reason, .. } => {
+                write!(f, "Malformed NLRI ({nlri_type}): {reason}")
             }
         }
     }

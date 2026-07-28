@@ -3,7 +3,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 
-use crate::error::ParserError;
+use crate::error::{BgpValidationWarning, ParserError};
 use crate::models::capabilities::{
     AddPathCapability, BgpCapabilityType, BgpExtendedMessageCapability, BgpRoleCapability,
     ExtendedNextHopCapability, FourOctetAsCapability, GracefulRestartCapability,
@@ -426,20 +426,22 @@ impl BgpOpenMessage {
 }
 
 /// read nlri portion of a bgp update message.
-fn read_nlri(
-    mut input: Bytes,
-    afi: &Afi,
-    add_path: bool,
-) -> Result<Vec<NetworkPrefix>, ParserError> {
+///
+/// Returns `Ok(vec![])` for empty NLRI. Returns `Err` for malformed NLRI
+/// (invalid prefix lengths, truncated data), so that the caller
+/// in `parse_bgp_update_message` can convert it to a `MalformedNlri` warning.
+fn read_nlri(input: Bytes, afi: &Afi, add_path: bool) -> Result<Vec<NetworkPrefix>, ParserError> {
     let length = input.len();
     if length == 0 {
         return Ok(vec![]);
     }
-    if length == 1 {
-        // 1 byte does not make sense
+    if length == 1 && input[0] != 0 {
+        // A single non-zero byte cannot be a valid NLRI: a valid 1-byte NLRI
+        // encodes only the default route (prefix length 0, no prefix octets).
         warn!("seeing strange one-byte NLRI field (parsing NLRI in BGP UPDATE message)");
-        input.advance(1); // skip the byte
-        return Ok(vec![]);
+        return Err(ParserError::ParseError(
+            "one-byte NLRI field with non-zero value is not a valid encoding".to_string(),
+        ));
     }
 
     parse_nlri_list(input, add_path, afi)
@@ -448,6 +450,12 @@ fn read_nlri(
 /// read bgp update message.
 ///
 /// RFC: <https://tools.ietf.org/html/rfc4271#section-4.3>
+///
+/// Per RFC 7606, NLRI parse errors are non-fatal: the message is returned with
+/// partial data and a [`BgpValidationWarning::MalformedNlri`] appended to
+/// `attributes.validation_warnings`. Callers that want RFC 7606 treat-as-withdrawal
+/// semantics can inspect the warnings and act accordingly. Attribute-section
+/// framing errors (wrong length fields, truncated data) remain fatal.
 pub fn parse_bgp_update_message(
     mut input: Bytes,
     add_path: bool,
@@ -461,7 +469,18 @@ pub fn parse_bgp_update_message(
     let withdrawn_bytes_length = withdrawn_bytes_length_raw as usize;
     input.has_n_remaining(withdrawn_bytes_length)?;
     let withdrawn_bytes = input.split_to(withdrawn_bytes_length);
-    let withdrawn_prefixes = read_nlri(withdrawn_bytes, &afi, add_path)?;
+    let (withdrawn_prefixes, withdrawn_nlri_error) =
+        match read_nlri(withdrawn_bytes.clone(), &afi, add_path) {
+            Ok(pfxs) => (pfxs, None),
+            Err(e) => (
+                Vec::new(),
+                Some(BgpValidationWarning::MalformedNlri {
+                    nlri_type: "withdrawn",
+                    reason: e.to_string(),
+                    raw_bytes: withdrawn_bytes.to_vec(),
+                }),
+            ),
+        };
 
     // parse attributes
     let attribute_length_raw = input.read_u16()?;
@@ -476,13 +495,37 @@ pub fn parse_bgp_update_message(
 
     // parse announced prefixes nlri.
     // the remaining bytes are announced prefixes.
-    let announced_prefixes = read_nlri(input, &afi, add_path)?;
+    let announced_bytes_present = !input.is_empty();
+    let (announced_prefixes, announced_nlri_error) = match read_nlri(input.clone(), &afi, add_path)
+    {
+        Ok(pfxs) => (pfxs, None),
+        Err(e) => (
+            Vec::new(),
+            Some(BgpValidationWarning::MalformedNlri {
+                nlri_type: "announced",
+                reason: e.to_string(),
+                raw_bytes: input.to_vec(),
+            }),
+        ),
+    };
 
-    // validate mandatory attributes
+    // validate mandatory attributes.
+    // Use `announced_bytes_present` (wire-level) rather than
+    // `!announced_prefixes.is_empty()` (parse result) so that a malformed
+    // NLRI section still triggers mandatory-attribute validation — the
+    // UPDATE clearly intended to announce routes.
     let is_announcement =
-        !announced_prefixes.is_empty() || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
-    let has_standard_nlri = !announced_prefixes.is_empty();
+        announced_bytes_present || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
+    let has_standard_nlri = announced_bytes_present;
     attributes.check_mandatory_attributes(is_announcement, has_standard_nlri);
+
+    // Attach NLRI parse warnings (RFC 7606 §5.3 treat-as-withdrawal evidence)
+    if let Some(w) = withdrawn_nlri_error {
+        attributes.add_validation_warning(w);
+    }
+    if let Some(w) = announced_nlri_error {
+        attributes.add_validation_warning(w);
+    }
 
     Ok(BgpUpdateMessage {
         withdrawn_prefixes,
