@@ -420,3 +420,67 @@ fn test_one_byte_nlri_default_route_is_valid() {
         "valid default route NLRI must not produce warnings"
     );
 }
+
+// ========================================================================
+// Test 14: Malformed announced NLRI still triggers mandatory-attr validation
+//         (Copilot review: is_announcement must reflect wire-level NLRI
+//         presence, not parse success)
+// ========================================================================
+
+#[test]
+fn test_malformed_nlri_still_triggers_mandatory_attr_check() {
+    let asn_len = AsnLength::Bits32;
+
+    // Build an UPDATE with malformed announced NLRI but NO mandatory
+    // attributes (no ORIGIN, no AS_PATH, no NEXT_HOP). The mandatory-attr
+    // check should still fire because the UPDATE clearly intended to
+    // announce routes (NLRI bytes were present on the wire).
+    let malformed_nlri = vec![0xC8, 0x01];
+    let body = build_update_body(&[], &[], &malformed_nlri);
+    let update = parse_bgp_update_message(Bytes::from(body), false, &asn_len).unwrap();
+
+    let warnings = update.attributes.validation_warnings();
+
+    // Should have MalformedNlri
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            BgpValidationWarning::MalformedNlri {
+                nlri_type: "announced",
+                ..
+            }
+        )),
+        "expected MalformedNlri warning"
+    );
+
+    // Should ALSO have missing mandatory attribute warnings — the UPDATE
+    // carried NLRI bytes (intent to announce) but lacked ORIGIN/AS_PATH/NEXT_HOP
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::ORIGIN
+            }
+        )),
+        "expected MissingWellKnownAttribute(ORIGIN) — mandatory check must fire even with malformed NLRI, got: {:?}",
+        warnings
+    );
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::AS_PATH
+            }
+        )),
+        "expected MissingWellKnownAttribute(AS_PATH)"
+    );
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::NEXT_HOP
+            }
+        )),
+        "expected MissingWellKnownAttribute(NEXT_HOP)"
+    );
+}

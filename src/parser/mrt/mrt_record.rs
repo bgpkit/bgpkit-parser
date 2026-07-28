@@ -165,21 +165,14 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
-    // Capture raw bytes before parse() consumes raw_record.
-    let header_bytes = raw_record.header_bytes.clone();
-    let message_bytes = raw_record.message_bytes.clone();
-    match raw_record.parse() {
+    // Parse from a clone so the original is available for raw_bytes() on error,
+    // avoiding manual reassembly that could diverge from RawMrtRecord::raw_bytes().
+    match raw_record.clone().parse() {
         Ok(record) => Ok(record),
-        Err(e) => {
-            // Build the raw bytes Vec directly from header + message bytes.
-            let mut bytes = Vec::with_capacity(header_bytes.len() + message_bytes.len());
-            bytes.extend_from_slice(&header_bytes);
-            bytes.extend_from_slice(&message_bytes);
-            Err(ParserErrorWithBytes {
-                error: e,
-                bytes: Some(bytes),
-            })
-        }
+        Err(e) => Err(ParserErrorWithBytes {
+            error: e,
+            bytes: Some(raw_record.raw_bytes().to_vec()),
+        }),
     }
 }
 

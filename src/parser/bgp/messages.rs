@@ -495,6 +495,7 @@ pub fn parse_bgp_update_message(
 
     // parse announced prefixes nlri.
     // the remaining bytes are announced prefixes.
+    let announced_bytes_present = !input.is_empty();
     let (announced_prefixes, announced_nlri_error) = match read_nlri(input.clone(), &afi, add_path)
     {
         Ok(pfxs) => (pfxs, None),
@@ -508,10 +509,14 @@ pub fn parse_bgp_update_message(
         ),
     };
 
-    // validate mandatory attributes
+    // validate mandatory attributes.
+    // Use `announced_bytes_present` (wire-level) rather than
+    // `!announced_prefixes.is_empty()` (parse result) so that a malformed
+    // NLRI section still triggers mandatory-attribute validation — the
+    // UPDATE clearly intended to announce routes.
     let is_announcement =
-        !announced_prefixes.is_empty() || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
-    let has_standard_nlri = !announced_prefixes.is_empty();
+        announced_bytes_present || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
+    let has_standard_nlri = announced_bytes_present;
     attributes.check_mandatory_attributes(is_announcement, has_standard_nlri);
 
     // Attach NLRI parse warnings (RFC 7606 §5.3 treat-as-withdrawal evidence)
