@@ -10,14 +10,24 @@ on:
       - v[0-9]+.*
 
 jobs:
+  release-test:
+    name: Build & Test (release gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --all-features
+
   release-format-check:
+    needs: release-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run format check
         run: cargo fmt --check
       - name: Run cargo-readme check
-        run: cargo install cargo-readme && cargo readme > TMP_README.md && diff -b TMP_README.md README.md
+        run: cargo install cargo-readme --locked && cargo readme > TMP_README.md && diff -b TMP_README.md README.md
 
   security-audit:
     needs: release-format-check
@@ -25,7 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Generate lockfile
+        run: cargo generate-lockfile
       - name: Run cargo audit
         run: cargo audit
 
@@ -84,7 +96,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           scope: '@bgpkit'
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: cargo install wasm-pack --locked
       - name: Add wasm target
         run: rustup target add wasm32-unknown-unknown
       - name: Build WASM npm package
