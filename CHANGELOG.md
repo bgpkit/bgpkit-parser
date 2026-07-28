@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 
 * **NLRI parse errors are now non-fatal**: `parse_bgp_update_message` previously returned `Err` on any malformed NLRI byte, discarding all attributes and partially-parsed prefixes. It now returns `Ok` with partial data and a `BgpValidationWarning::MalformedNlri`. This is the correct RFC 7606 behavior — callers should check `attributes.validation_warnings()` if they need to distinguish clean updates from partially-recovered ones.
 * **Examples documentation**: Expanded `examples/README.md` to index all maintained Rust, standalone, and WebAssembly examples. Refreshed standalone example instructions, corrected the RIB entry age study path, and made selected archive examples accept input sources or archive months.
-* **Dependency: oneio updated from 0.23 to 0.24**: Brings S3 multipart upload retry with exponential backoff, `ONEIO_S3_MAX_RETRIES` / `ONEIO_S3_RETRY_BACKOFF_MS` env vars, and per-request upload timeout. ([#305](https://github.com/bgpkit/bgpkit-parser/pull/305))
+* **Dependency: oneio updated from 0.23 to 0.24**: Brings S3 multipart upload retry with exponential backoff, `ONEIO_S3_MAX_RETRIES` / `ONEIO_S3_RETRY_BACKOFF_MS` env vars, per-request upload timeout, and zstd compression support (`.zst` suffix). ([#305](https://github.com/bgpkit/bgpkit-parser/pull/305))
 
 ## v0.18.0 - 2026-07-02
 
