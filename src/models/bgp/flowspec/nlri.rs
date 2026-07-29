@@ -513,4 +513,12 @@ mod tests {
 
         assert_eq!(original_nlri, parsed_nlri);
     }
+
+    #[test]
+    fn test_encode_flowspec_nlri_oversize() {
+        // Exceed u16::MAX total length → EncodingError
+        let ops = vec![NumericOperator::equal_to(0); 40000];
+        let nlri = FlowSpecNlri::new(vec![FlowSpecComponent::IpProtocol(ops)]);
+        assert!(encode_flowspec_nlri(&nlri).is_err());
+    }
 }

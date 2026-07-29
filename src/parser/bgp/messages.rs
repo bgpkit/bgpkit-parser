@@ -1945,4 +1945,249 @@ mod tests {
             panic!("Expected Capacities in second parameter");
         }
     }
+
+    #[test]
+    fn test_encoding_error_tunnel_encap_subtlv_oversize() {
+        use crate::models::tunnel_encap::{
+            SubTlv, SubTlvType, TunnelEncapAttribute, TunnelEncapTlv,
+        };
+
+        let encap = TunnelEncapAttribute {
+            tunnel_tlvs: vec![TunnelEncapTlv {
+                tunnel_type: crate::models::tunnel_encap::TunnelType::Vxlan,
+                sub_tlvs: vec![SubTlv {
+                    sub_tlv_type: SubTlvType::Color,
+                    value: vec![0; 300],
+                }],
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::TunnelEncapsulation(encap),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_tunnel_encap_ext_subtlv_oversize() {
+        use crate::models::tunnel_encap::{
+            SubTlv, SubTlvType, TunnelEncapAttribute, TunnelEncapTlv,
+        };
+
+        let encap = TunnelEncapAttribute {
+            tunnel_tlvs: vec![TunnelEncapTlv {
+                tunnel_type: crate::models::tunnel_encap::TunnelType::Vxlan,
+                sub_tlvs: vec![SubTlv {
+                    sub_tlv_type: SubTlvType::SegmentList,
+                    value: vec![0; 70000],
+                }],
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::TunnelEncapsulation(encap),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_tunnel_encap_tunnel_total_oversize() {
+        use crate::models::tunnel_encap::{
+            SubTlv, SubTlvType, TunnelEncapAttribute, TunnelEncapTlv,
+        };
+
+        let encap = TunnelEncapAttribute {
+            tunnel_tlvs: vec![TunnelEncapTlv {
+                tunnel_type: crate::models::tunnel_encap::TunnelType::Vxlan,
+                sub_tlvs: vec![
+                    SubTlv {
+                        sub_tlv_type: SubTlvType::SegmentList,
+                        value: vec![0; 40000],
+                    };
+                    2
+                ],
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::TunnelEncapsulation(encap),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_linkstate_oversize() {
+        use crate::models::linkstate::{LinkStateAttribute, NodeAttributeType};
+
+        let mut ls = LinkStateAttribute::new();
+        ls.add_node_attribute(NodeAttributeType::NodeName, vec![0; 70000]);
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::LinkState(ls),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+
+        let mut ls2 = LinkStateAttribute::new();
+        ls2.add_unknown_attribute(crate::models::linkstate::Tlv::new(1, vec![0; 70000]));
+        let attr2 = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::LinkState(ls2),
+        };
+        assert!(attr2.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_bfd_discriminator_oversize() {
+        use crate::models::{BfdDiscriminatorAttribute, RawTlv8};
+
+        let attr_val = BfdDiscriminatorAttribute {
+            mode: 0,
+            discriminator: 0,
+            tlvs: vec![RawTlv8 {
+                tlv_type: 1,
+                value: vec![0; 300].into(),
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::BfdDiscriminator(attr_val),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_bgp_prefix_sid_oversize() {
+        use crate::models::{BgpPrefixSidAttribute, RawTlv8Ext};
+
+        let attr_val = BgpPrefixSidAttribute {
+            tlvs: vec![RawTlv8Ext {
+                tlv_type: 1,
+                value: vec![0; 70000].into(),
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::BgpPrefixSid(attr_val),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_bier_oversize() {
+        use crate::models::{BierAttribute, RawTlv16};
+
+        let attr_val = BierAttribute {
+            tlvs: vec![RawTlv16 {
+                tlv_type: 1,
+                value: vec![0; 70000].into(),
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::Bier(attr_val),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_sfp_oversize() {
+        use crate::models::{RawTlv8Ext, SfpAttribute};
+
+        let attr_val = SfpAttribute {
+            tlvs: vec![RawTlv8Ext {
+                tlv_type: 1,
+                value: vec![0; 70000].into(),
+            }],
+        };
+        let attr = Attribute {
+            flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+            value: AttributeValue::Sfp(attr_val),
+        };
+        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_mrt_table_dump_oversize() {
+        use crate::models::{AttrFlags, AttrRaw, Attribute, AttributeValue, TableDumpMessage};
+
+        let attrs: Vec<Attribute> = (0..70)
+            .map(|_| Attribute {
+                flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+                value: AttributeValue::Raw(AttrRaw {
+                    code: 200,
+                    bytes: vec![0; 1000].into(),
+                }),
+            })
+            .collect();
+
+        let msg = TableDumpMessage {
+            view_number: 0,
+            sequence_number: 0,
+            prefix: "10.0.0.0/24".parse().unwrap(),
+            status: 0,
+            originated_time: 0,
+            peer_ip: std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)),
+            peer_asn: Asn::new_16bit(65000),
+            attributes: Attributes {
+                inner: attrs,
+                validation_warnings: vec![],
+                attr_mask: [0; 4],
+            },
+        };
+        assert!(msg.try_encode().is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_rib_entry_oversize() {
+        use crate::models::{AttrFlags, AttrRaw, Attribute, AttributeValue, RibEntry};
+
+        let attrs: Vec<Attribute> = (0..70)
+            .map(|_| Attribute {
+                flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+                value: AttributeValue::Raw(AttrRaw {
+                    code: 200,
+                    bytes: vec![0; 1000].into(),
+                }),
+            })
+            .collect();
+
+        let entry = RibEntry {
+            peer_index: 0,
+            originated_time: 0,
+            path_id: None,
+            attributes: Attributes {
+                inner: attrs,
+                validation_warnings: vec![],
+                attr_mask: [0; 4],
+            },
+        };
+        assert!(entry.try_encode().is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_peer_index_table_oversize() {
+        use crate::models::PeerIndexTable;
+
+        let table = PeerIndexTable {
+            collector_bgp_id: std::net::Ipv4Addr::new(0, 0, 0, 0),
+            view_name: "x".repeat(70000),
+            id_peer_map: std::collections::HashMap::new(),
+            peer_ip_id_map: std::collections::HashMap::new(),
+        };
+        assert!(table.try_encode().is_err());
+    }
+
+    #[test]
+    fn test_encoding_error_geo_peer_table_oversize() {
+        use crate::models::GeoPeerTable;
+
+        let table = GeoPeerTable {
+            collector_bgp_id: std::net::Ipv4Addr::new(0, 0, 0, 0),
+            view_name: "x".repeat(70000),
+            collector_latitude: 0.0,
+            collector_longitude: 0.0,
+            geo_peers: vec![],
+        };
+        assert!(table.try_encode().is_err());
+    }
 }
