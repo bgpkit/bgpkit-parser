@@ -126,7 +126,7 @@ impl SubTlv {
     }
 
     pub fn length(&self) -> u16 {
-        self.value.len() as u16
+        self.value.len().min(u16::MAX as usize) as u16
     }
 }
 

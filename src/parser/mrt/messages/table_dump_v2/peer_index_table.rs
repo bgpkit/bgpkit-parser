@@ -70,7 +70,7 @@ impl PeerIndexTable {
         match self.peer_ip_id_map.get(&peer.peer_ip) {
             Some(id) => *id,
             None => {
-                let peer_id = self.peer_ip_id_map.len() as u16;
+                let peer_id = self.peer_ip_id_map.len().min(u16::MAX as usize) as u16;
                 self.peer_ip_id_map.insert(peer.peer_ip, peer_id);
                 self.id_peer_map.insert(peer_id, peer);
                 peer_id
@@ -146,13 +146,13 @@ impl PeerIndexTable {
 
         // Encode view_name_length
         let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len() as u16);
+        buf.put_u16(view_name_bytes.len().min(u16::MAX as usize) as u16);
 
         // Encode view_name
         buf.extend(view_name_bytes);
 
         // Encode peer_count
-        let peer_count = self.id_peer_map.len() as u16;
+        let peer_count = self.id_peer_map.len().min(u16::MAX as usize) as u16;
         buf.put_u16(peer_count);
 
         // Encode peers

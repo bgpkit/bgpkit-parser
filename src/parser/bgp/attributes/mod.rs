@@ -25,7 +25,7 @@ use std::net::IpAddr;
 
 use crate::models::*;
 
-use crate::error::{BgpValidationWarning, ParserError};
+use crate::error::{BgpValidationWarning, EncodingError, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
 use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
 pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
@@ -499,7 +499,9 @@ pub fn parse_attributes(
 }
 
 impl Attribute {
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+    /// Fallible encoding: returns [`EncodingError`] when a value is too large
+    /// for its wire-format field instead of silently truncating.
+    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
 
         let flag = self.flag.bits();
@@ -518,7 +520,7 @@ impl Attribute {
                         false => AsnLength::Bits16,
                     },
                 };
-                encode_as_path(path, four_byte)
+                encode_as_path(path, four_byte)?
             }
             AttributeValue::NextHop(v) => encode_next_hop(v),
             AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
@@ -573,24 +575,47 @@ impl Attribute {
 
         match self.is_extended() {
             false => {
-                bytes.put_u8(value_bytes.len() as u8);
+                let len =
+                    u8::try_from(value_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                        field: "BGP attribute value length (non-extended)",
+                        actual: value_bytes.len(),
+                        max: u8::MAX as usize,
+                    })?;
+                bytes.put_u8(len);
             }
             true => {
-                bytes.put_u16(value_bytes.len() as u16);
+                let len =
+                    u16::try_from(value_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                        field: "BGP attribute value length (extended)",
+                        actual: value_bytes.len(),
+                        max: u16::MAX as usize,
+                    })?;
+                bytes.put_u16(len);
             }
         }
         bytes.extend(value_bytes);
-        bytes.freeze()
+        Ok(bytes.freeze())
+    }
+
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+        self.try_encode(asn_len)
+            .expect("BGP attribute encoding failed; use try_encode() for fallible handling")
     }
 }
 
 impl Attributes {
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+    /// Fallible encoding: returns [`EncodingError`] when a value is too large.
+    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         for attr in &self.inner {
-            bytes.extend(attr.encode(asn_len));
+            bytes.extend(attr.try_encode(asn_len)?);
         }
-        bytes.freeze()
+        Ok(bytes.freeze())
+    }
+
+    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+        self.try_encode(asn_len)
+            .expect("BGP attributes encoding failed; use try_encode() for fallible handling")
     }
 }
 

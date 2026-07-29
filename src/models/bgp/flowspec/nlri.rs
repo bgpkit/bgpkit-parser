@@ -90,7 +90,7 @@ pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Vec<u8> {
 
     // Prepend length
     let mut result = Vec::new();
-    encode_length(data.len() as u16, &mut result);
+    encode_length(data.len().min(u16::MAX as usize) as u16, &mut result);
     result.extend(data);
     result
 }

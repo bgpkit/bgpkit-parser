@@ -96,10 +96,10 @@ pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Byt
             // Encode sub-TLV type
             if sub_tlv_type < 128 {
                 sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u8(sub_tlv.value.len() as u8);
+                sub_tlv_bytes.put_u8(sub_tlv.value.len().min(u8::MAX as usize) as u8);
             } else {
                 sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u16(sub_tlv.value.len() as u16);
+                sub_tlv_bytes.put_u16(sub_tlv.value.len().min(u16::MAX as usize) as u16);
             }
 
             // Encode sub-TLV value
@@ -107,7 +107,7 @@ pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Byt
         }
 
         // Encode tunnel length
-        bytes.put_u16(sub_tlv_bytes.len() as u16);
+        bytes.put_u16(sub_tlv_bytes.len().min(u16::MAX as usize) as u16);
 
         // Append sub-TLV data
         bytes.extend_from_slice(&sub_tlv_bytes);

@@ -47,7 +47,7 @@ pub fn encode_bfd_discriminator(attr: &BfdDiscriminatorAttribute) -> Bytes {
     buf.put_u32(attr.discriminator);
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        buf.put_u8(tlv.value.len() as u8);
+        buf.put_u8(tlv.value.len().min(u8::MAX as usize) as u8);
         buf.extend_from_slice(&tlv.value);
     }
     buf.freeze()

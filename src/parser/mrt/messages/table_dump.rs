@@ -153,7 +153,7 @@ impl TableDumpMessage {
             attr_bytes.extend(attr.encode(AsnLength::Bits16));
         }
 
-        bytes.put_u16(attr_bytes.len() as u16);
+        bytes.put_u16(attr_bytes.len().min(u16::MAX as usize) as u16);
         bytes.put_slice(&attr_bytes);
 
         bytes.freeze()

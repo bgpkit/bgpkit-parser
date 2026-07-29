@@ -31,7 +31,7 @@ pub fn encode_bier(attr: &BierAttribute) -> Bytes {
     let mut buf = BytesMut::new();
     for tlv in &attr.tlvs {
         buf.put_u16(tlv.tlv_type);
-        buf.put_u16(tlv.value.len() as u16);
+        buf.put_u16(tlv.value.len().min(u16::MAX as usize) as u16);
         buf.extend_from_slice(&tlv.value);
     }
     buf.freeze()

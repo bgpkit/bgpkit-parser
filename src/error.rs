@@ -38,6 +38,40 @@ pub enum ParserError {
 
 impl Error for ParserError {}
 
+/// Errors that can occur during encoding of BGP/MRT messages to wire format.
+///
+/// These arise when in-memory data structures contain values that are too large
+/// for their wire-format length fields (e.g. an AS_PATH segment with more than
+/// 255 ASes, or an attribute value exceeding 65535 bytes). All such conditions
+/// were previously handled by panicking or silently truncating — see issue #313.
+#[derive(Debug)]
+pub enum EncodingError {
+    /// A value exceeded the maximum size that fits in its wire-format length
+    /// field.
+    ///
+    /// `field` names the wire field (e.g. `"AS_PATH segment count"`,
+    /// `"attribute value length"`, `"BGP message total length"`). `actual` is
+    /// the byte/element count that overflowed; `max` is the field's capacity.
+    ValueTooLarge {
+        field: &'static str,
+        actual: usize,
+        max: usize,
+    },
+}
+
+impl Display for EncodingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EncodingError::ValueTooLarge { field, actual, max } => write!(
+                f,
+                "encoding error: {field} ({actual}) exceeds maximum ({max})"
+            ),
+        }
+    }
+}
+
+impl Error for EncodingError {}
+
 #[derive(Debug)]
 pub struct ParserErrorWithBytes {
     pub error: ParserError,

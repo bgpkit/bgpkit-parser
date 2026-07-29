@@ -1,3 +1,4 @@
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -54,33 +55,25 @@ fn parse_as_path_segment(
     }
 }
 
-pub fn encode_as_path(path: &AsPath, asn_len: AsnLength) -> Bytes {
+pub fn encode_as_path(path: &AsPath, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
     let mut output = BytesMut::with_capacity(1024);
     for segment in path.segments.iter() {
-        match segment {
-            AsPathSegment::AsSet(asns) => {
-                output.put_u8(AS_PATH_AS_SET);
-                output.put_u8(asns.len() as u8);
-                write_asns(asns, asn_len, &mut output);
-            }
-            AsPathSegment::AsSequence(asns) => {
-                output.put_u8(AS_PATH_AS_SEQUENCE);
-                output.put_u8(asns.len() as u8);
-                write_asns(asns, asn_len, &mut output);
-            }
-            AsPathSegment::ConfedSequence(asns) => {
-                output.put_u8(AS_PATH_CONFED_SEQUENCE);
-                output.put_u8(asns.len() as u8);
-                write_asns(asns, asn_len, &mut output);
-            }
-            AsPathSegment::ConfedSet(asns) => {
-                output.put_u8(AS_PATH_CONFED_SET);
-                output.put_u8(asns.len() as u8);
-                write_asns(asns, asn_len, &mut output);
-            }
-        }
+        let (seg_type, asns) = match segment {
+            AsPathSegment::AsSet(asns) => (AS_PATH_AS_SET, asns),
+            AsPathSegment::AsSequence(asns) => (AS_PATH_AS_SEQUENCE, asns),
+            AsPathSegment::ConfedSequence(asns) => (AS_PATH_CONFED_SEQUENCE, asns),
+            AsPathSegment::ConfedSet(asns) => (AS_PATH_CONFED_SET, asns),
+        };
+        let count = u8::try_from(asns.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "AS_PATH segment AS count",
+            actual: asns.len(),
+            max: u8::MAX as usize,
+        })?;
+        output.put_u8(seg_type);
+        output.put_u8(count);
+        write_asns(asns, asn_len, &mut output);
     }
-    output.freeze()
+    Ok(output.freeze())
 }
 
 fn write_asns(asns: &[Asn], asn_len: AsnLength, output: &mut BytesMut) {
@@ -222,7 +215,7 @@ mod tests {
             0, 3, // AS3
         ]);
         let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
-        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16).unwrap();
         assert_eq!(data, encoded_bytes);
 
         let data = Bytes::from(vec![
@@ -233,7 +226,7 @@ mod tests {
             0, 0, 0, 3, // AS3
         ]);
         let path = parse_as_path(data.clone(), &AsnLength::Bits32).unwrap();
-        let encoded_bytes = encode_as_path(&path, AsnLength::Bits32);
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits32).unwrap();
         assert_eq!(data, encoded_bytes);
     }
 
@@ -245,7 +238,7 @@ mod tests {
             0, 1,
         ]);
         let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
-        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16).unwrap();
         assert_eq!(data, encoded_bytes);
 
         let data = Bytes::from(vec![
@@ -254,7 +247,7 @@ mod tests {
             0, 1,
         ]);
         let path = parse_as_path(data.clone(), &AsnLength::Bits16).unwrap();
-        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16);
+        let encoded_bytes = encode_as_path(&path, AsnLength::Bits16).unwrap();
         assert_eq!(data, encoded_bytes);
     }
 

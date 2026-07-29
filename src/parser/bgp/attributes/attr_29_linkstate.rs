@@ -439,7 +439,7 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
     for (attr_type, value) in &attr.node_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
+        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
         bytes.extend_from_slice(value);
     }
 
@@ -447,7 +447,7 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
     for (attr_type, value) in &attr.link_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
+        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
         bytes.extend_from_slice(value);
     }
 
@@ -455,7 +455,7 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
     for (attr_type, value) in &attr.prefix_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
+        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
         bytes.extend_from_slice(value);
     }
 

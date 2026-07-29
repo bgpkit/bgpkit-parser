@@ -8,9 +8,14 @@ All notable changes to this project will be documented in this file.
 
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
 
+### Added
+
+* **Fallible encoding API (`try_encode`)**: Added `EncodingError` type and `try_encode()` methods to `BgpOpenMessage`, `BgpUpdateMessage`, `BgpMessage`, `Attribute`, and `Attributes`. These return `Result<Bytes, EncodingError>` instead of panicking or silently truncating when a value is too large for its wire-format length field. The existing infallible `encode()` methods are retained as backwards-compatible wrappers that panic on encoding failure. `encode_as_path` now also returns `Result`. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+
 ### Fixed
 
 * **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
+* **Encoding crash and silent truncation**: Replaced `.expect()` panics and unchecked `as u8`/`as u16` truncation casts throughout the encoding layer with checked conversions. Previously, arbitrary input data (e.g. a round-tripped OPEN with an oversized raw capability, or an AS_PATH segment with >255 ASes) could crash the process or produce silently corrupt wire output. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
 
 ## v0.19.0 - 2026-07-28
 

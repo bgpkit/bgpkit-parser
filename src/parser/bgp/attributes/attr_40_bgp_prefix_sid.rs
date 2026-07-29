@@ -31,7 +31,7 @@ pub fn encode_bgp_prefix_sid(attr: &BgpPrefixSidAttribute) -> Bytes {
     let mut buf = BytesMut::new();
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        buf.put_u16(tlv.value.len() as u16);
+        buf.put_u16(tlv.value.len().min(u16::MAX as usize) as u16);
         buf.extend_from_slice(&tlv.value);
     }
     buf.freeze()

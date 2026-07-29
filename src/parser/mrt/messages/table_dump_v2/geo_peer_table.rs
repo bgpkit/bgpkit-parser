@@ -144,7 +144,7 @@ impl GeoPeerTable {
 
         // Encode view name length and view name
         let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len() as u16);
+        buf.put_u16(view_name_bytes.len().min(u16::MAX as usize) as u16);
         buf.extend(view_name_bytes);
 
         // Encode collector coordinates (4 bytes each, 32-bit float)
@@ -152,7 +152,7 @@ impl GeoPeerTable {
         buf.put_f32(self.collector_longitude);
 
         // Encode peer count
-        buf.put_u16(self.geo_peers.len() as u16);
+        buf.put_u16(self.geo_peers.len().min(u16::MAX as usize) as u16);
 
         // Encode each peer entry
         for geo_peer in &self.geo_peers {
@@ -209,7 +209,7 @@ mod tests {
 
         // View name length and name
         let view_name = "test-view";
-        data.put_u16(view_name.len() as u16);
+        data.put_u16(view_name.len().min(u16::MAX as usize) as u16);
         data.extend_from_slice(view_name.as_bytes());
 
         // Collector coordinates (London: 51.5074, -0.1278)
@@ -296,7 +296,7 @@ mod tests {
 
         // View name length and name
         let view_name = "private-view";
-        data.put_u16(view_name.len() as u16);
+        data.put_u16(view_name.len().min(u16::MAX as usize) as u16);
         data.extend_from_slice(view_name.as_bytes());
 
         // Private collector coordinates (NaN)
@@ -433,7 +433,7 @@ mod tests {
 
         // View name length and name
         let view_name = "test-view";
-        expected.put_u16(view_name.len() as u16);
+        expected.put_u16(view_name.len().min(u16::MAX as usize) as u16);
         expected.extend_from_slice(view_name.as_bytes());
 
         // Collector coordinates

@@ -22,7 +22,7 @@ pub use mrt::mrt_elem::{BgpUpdateElemIter, ElemError, Elementor, RecordElemIter}
 #[cfg(feature = "oneio")]
 use oneio::{get_cache_reader, get_reader};
 
-pub use crate::error::{ParserError, ParserErrorWithBytes};
+pub use crate::error::{EncodingError, ParserError, ParserErrorWithBytes};
 pub use bmp::{parse_bmp_msg, parse_openbmp_header, parse_openbmp_msg};
 pub use filter::*;
 pub use iters::*;
