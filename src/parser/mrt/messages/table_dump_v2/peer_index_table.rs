@@ -1,3 +1,4 @@
+use crate::error::EncodingError;
 use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -138,7 +139,8 @@ impl PeerIndexTable {
     ///
     /// let encoded = data.encode();
     /// ```
-    pub fn encode(&self) -> Bytes {
+    /// Fallible encoding: returns [`EncodingError`] when a value is too large.
+    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         let mut buf = BytesMut::new();
 
         // Encode collector_bgp_id
@@ -146,13 +148,24 @@ impl PeerIndexTable {
 
         // Encode view_name_length
         let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len().min(u16::MAX as usize) as u16);
+        let view_name_len =
+            u16::try_from(view_name_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "PeerIndexTable view name length",
+                actual: view_name_bytes.len(),
+                max: u16::MAX as usize,
+            })?;
+        buf.put_u16(view_name_len);
 
         // Encode view_name
         buf.extend(view_name_bytes);
 
         // Encode peer_count
-        let peer_count = self.id_peer_map.len().min(u16::MAX as usize) as u16;
+        let peer_count =
+            u16::try_from(self.id_peer_map.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "PeerIndexTable peer count",
+                actual: self.id_peer_map.len(),
+                max: u16::MAX as usize,
+            })?;
         buf.put_u16(peer_count);
 
         // Encode peers
@@ -184,7 +197,12 @@ impl PeerIndexTable {
         }
 
         // Return Bytes
-        buf.freeze()
+        Ok(buf.freeze())
+    }
+
+    pub fn encode(&self) -> Bytes {
+        self.try_encode()
+            .expect("PeerIndexTable encoding failed; use try_encode() for fallible handling")
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -27,14 +28,19 @@ pub fn parse_sfp(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Sfp(SfpAttribute { tlvs }))
 }
 
-pub fn encode_sfp(attr: &SfpAttribute) -> Bytes {
+pub fn encode_sfp(attr: &SfpAttribute) -> Result<Bytes, EncodingError> {
     let mut buf = BytesMut::new();
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        buf.put_u16(tlv.value.len().min(u16::MAX as usize) as u16);
+        let len = u16::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "SFP TLV value length",
+            actual: tlv.value.len(),
+            max: u16::MAX as usize,
+        })?;
+        buf.put_u16(len);
         buf.extend_from_slice(&tlv.value);
     }
-    buf.freeze()
+    Ok(buf.freeze())
 }
 
 #[cfg(test)]
@@ -53,7 +59,7 @@ mod tests {
                     attr.tlvs[0].value,
                     Bytes::from_static(&[0xaa, 0xbb, 0xcc, 0xdd])
                 );
-                assert_eq!(encode_sfp(&attr), input);
+                assert_eq!(encode_sfp(&attr).unwrap(), input);
             }
             value => panic!("expected SFP, got {value:?}"),
         }
@@ -67,7 +73,7 @@ mod tests {
             AttributeValue::Sfp(attr) => {
                 assert_eq!(attr.tlvs[0].tlv_type, 0x7f);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xde, 0xad]));
-                assert_eq!(encode_sfp(&attr), input);
+                assert_eq!(encode_sfp(&attr).unwrap(), input);
             }
             value => panic!("expected SFP, got {value:?}"),
         }
@@ -79,7 +85,7 @@ mod tests {
         match value {
             AttributeValue::Sfp(attr) => {
                 assert!(attr.tlvs.is_empty());
-                assert_eq!(encode_sfp(&attr), Bytes::new());
+                assert_eq!(encode_sfp(&attr).unwrap(), Bytes::new());
             }
             value => panic!("expected SFP, got {value:?}"),
         }

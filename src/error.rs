@@ -45,6 +45,7 @@ impl Error for ParserError {}
 /// 255 ASes, or an attribute value exceeding 65535 bytes). All such conditions
 /// were previously handled by panicking or silently truncating — see issue #313.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum EncodingError {
     /// A value exceeded the maximum size that fits in its wire-format length
     /// field.

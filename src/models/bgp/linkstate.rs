@@ -185,7 +185,8 @@ impl Tlv {
     }
 
     pub fn length(&self) -> u16 {
-        self.value.len().min(u16::MAX as usize) as u16
+        // Checked conversion: caller (encoder) already validates before reaching here
+        u16::try_from(self.value.len()).unwrap_or(u16::MAX)
     }
 }
 

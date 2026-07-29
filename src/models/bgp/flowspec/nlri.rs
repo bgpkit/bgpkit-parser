@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::EncodingError;
 use crate::models::NetworkPrefix;
 use ipnet::IpNet;
 
@@ -55,7 +56,7 @@ pub fn parse_flowspec_nlri(data: &[u8]) -> Result<FlowSpecNlri, FlowSpecError> {
 }
 
 /// Encode Flow-Spec NLRI to byte data
-pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Vec<u8> {
+pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Result<Vec<u8>, EncodingError> {
     let mut data = Vec::new();
 
     // Encode each component
@@ -90,9 +91,14 @@ pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Vec<u8> {
 
     // Prepend length
     let mut result = Vec::new();
-    encode_length(data.len().min(u16::MAX as usize) as u16, &mut result);
+    let nlri_len = u16::try_from(data.len()).map_err(|_| EncodingError::ValueTooLarge {
+        field: "FlowSpec NLRI total length",
+        actual: data.len(),
+        max: u16::MAX as usize,
+    })?;
+    encode_length(nlri_len, &mut result);
     result.extend(data);
-    result
+    Ok(result)
 }
 
 /// Parse length field (1 or 2 octets)
@@ -502,7 +508,7 @@ mod tests {
             FlowSpecComponent::DestinationPort(vec![NumericOperator::equal_to(80)]),
         ]);
 
-        let encoded = encode_flowspec_nlri(&original_nlri);
+        let encoded = encode_flowspec_nlri(&original_nlri).unwrap();
         let parsed_nlri = parse_flowspec_nlri(&encoded).unwrap();
 
         assert_eq!(original_nlri, parsed_nlri);

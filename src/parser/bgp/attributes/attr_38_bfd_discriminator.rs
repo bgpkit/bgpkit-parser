@@ -1,3 +1,4 @@
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -41,16 +42,21 @@ pub fn parse_bfd_discriminator(mut input: Bytes) -> Result<AttributeValue, Parse
     ))
 }
 
-pub fn encode_bfd_discriminator(attr: &BfdDiscriminatorAttribute) -> Bytes {
+pub fn encode_bfd_discriminator(attr: &BfdDiscriminatorAttribute) -> Result<Bytes, EncodingError> {
     let mut buf = BytesMut::new();
     buf.put_u8(attr.mode);
     buf.put_u32(attr.discriminator);
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        buf.put_u8(tlv.value.len().min(u8::MAX as usize) as u8);
+        let len = u8::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "BFD Discriminator TLV value length",
+            actual: tlv.value.len(),
+            max: u8::MAX as usize,
+        })?;
+        buf.put_u8(len);
         buf.extend_from_slice(&tlv.value);
     }
-    buf.freeze()
+    Ok(buf.freeze())
 }
 
 #[cfg(test)]
@@ -71,7 +77,7 @@ mod tests {
                 assert_eq!(attr.tlvs.len(), 1);
                 assert_eq!(attr.tlvs[0].tlv_type, 1);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[192, 0, 2, 1]));
-                assert_eq!(encode_bfd_discriminator(&attr), input);
+                assert_eq!(encode_bfd_discriminator(&attr).unwrap(), input);
             }
             value => panic!("expected BFD Discriminator, got {value:?}"),
         }
@@ -86,7 +92,7 @@ mod tests {
                 assert_eq!(attr.mode, 1);
                 assert_eq!(attr.discriminator, 0x01020304);
                 assert!(attr.tlvs.is_empty());
-                assert_eq!(encode_bfd_discriminator(&attr), input);
+                assert_eq!(encode_bfd_discriminator(&attr).unwrap(), input);
             }
             value => panic!("expected BFD Discriminator, got {value:?}"),
         }

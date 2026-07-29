@@ -1,4 +1,5 @@
 use crate::bgp::attributes::parse_attributes;
+use crate::error::EncodingError;
 use crate::models::{
     Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
 };
@@ -183,11 +184,16 @@ impl RibAfiEntries {
 }
 
 impl RibEntry {
-    pub fn encode(&self) -> Bytes {
+    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         self.encode_for_rib_type(self.path_id.is_some())
     }
 
-    fn encode_for_rib_type(&self, include_path_id: bool) -> Bytes {
+    pub fn encode(&self) -> Bytes {
+        self.try_encode()
+            .expect("RIB AFI entry encoding failed; use try_encode() for fallible handling")
+    }
+
+    fn encode_for_rib_type(&self, include_path_id: bool) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.peer_index);
         bytes.put_u32(self.originated_time);
@@ -196,10 +202,16 @@ impl RibEntry {
                 bytes.put_u32(path_id);
             }
         }
-        let attr_bytes = self.attributes.encode(AsnLength::Bits32);
-        bytes.put_u16(attr_bytes.len().min(u16::MAX as usize) as u16);
+        let attr_bytes = self.attributes.try_encode(AsnLength::Bits32)?;
+        let attr_len =
+            u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "RIB AFI entry attribute length",
+                actual: attr_bytes.len(),
+                max: u16::MAX as usize,
+            })?;
+        bytes.put_u16(attr_len);
         bytes.extend(attr_bytes);
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 

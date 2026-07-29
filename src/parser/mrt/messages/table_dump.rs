@@ -118,7 +118,7 @@ pub fn parse_table_dump_message(
 }
 
 impl TableDumpMessage {
-    pub fn encode(&self) -> Bytes {
+    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.view_number);
         bytes.put_u16(self.sequence_number);
@@ -150,13 +150,24 @@ impl TableDumpMessage {
         let mut attr_bytes = BytesMut::new();
         for attr in &self.attributes.inner {
             // asn_len always 16 bites
-            attr_bytes.extend(attr.encode(AsnLength::Bits16));
+            attr_bytes.extend(attr.try_encode(AsnLength::Bits16)?);
         }
 
-        bytes.put_u16(attr_bytes.len().min(u16::MAX as usize) as u16);
+        let attr_len =
+            u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "TABLE_DUMP attribute length",
+                actual: attr_bytes.len(),
+                max: u16::MAX as usize,
+            })?;
+        bytes.put_u16(attr_len);
         bytes.put_slice(&attr_bytes);
 
-        bytes.freeze()
+        Ok(bytes.freeze())
+    }
+
+    pub fn encode(&self) -> Bytes {
+        self.try_encode()
+            .expect("TABLE_DUMP encoding failed; use try_encode() for fallible handling")
     }
 }
 

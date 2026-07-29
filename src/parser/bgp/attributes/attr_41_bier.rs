@@ -1,3 +1,4 @@
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -27,14 +28,19 @@ pub fn parse_bier(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Bier(BierAttribute { tlvs }))
 }
 
-pub fn encode_bier(attr: &BierAttribute) -> Bytes {
+pub fn encode_bier(attr: &BierAttribute) -> Result<Bytes, EncodingError> {
     let mut buf = BytesMut::new();
     for tlv in &attr.tlvs {
         buf.put_u16(tlv.tlv_type);
-        buf.put_u16(tlv.value.len().min(u16::MAX as usize) as u16);
+        let len = u16::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "BIER TLV value length",
+            actual: tlv.value.len(),
+            max: u16::MAX as usize,
+        })?;
+        buf.put_u16(len);
         buf.extend_from_slice(&tlv.value);
     }
-    buf.freeze()
+    Ok(buf.freeze())
 }
 
 #[cfg(test)]
@@ -54,7 +60,7 @@ mod tests {
                 assert_eq!(attr.tlvs.len(), 1);
                 assert_eq!(attr.tlvs[0].tlv_type, 1);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xaa, 0xbb, 0xcc]));
-                assert_eq!(encode_bier(&attr), input);
+                assert_eq!(encode_bier(&attr).unwrap(), input);
             }
             value => panic!("expected BIER, got {value:?}"),
         }
@@ -68,7 +74,7 @@ mod tests {
             AttributeValue::Bier(attr) => {
                 assert_eq!(attr.tlvs[0].tlv_type, 0x1234);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xde, 0xad]));
-                assert_eq!(encode_bier(&attr), input);
+                assert_eq!(encode_bier(&attr).unwrap(), input);
             }
             value => panic!("expected BIER, got {value:?}"),
         }
@@ -80,7 +86,7 @@ mod tests {
         match value {
             AttributeValue::Bier(attr) => {
                 assert!(attr.tlvs.is_empty());
-                assert_eq!(encode_bier(&attr), Bytes::new());
+                assert_eq!(encode_bier(&attr).unwrap(), Bytes::new());
             }
             value => panic!("expected BIER, got {value:?}"),
         }

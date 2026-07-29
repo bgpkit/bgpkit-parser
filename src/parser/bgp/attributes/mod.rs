@@ -556,12 +556,12 @@ impl Attribute {
                     Bytes::new()
                 })
             }
-            AttributeValue::LinkState(v) => encode_link_state_attribute(v),
-            AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v),
-            AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v),
-            AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v),
-            AttributeValue::Bier(v) => encode_bier(v),
-            AttributeValue::Sfp(v) => encode_sfp(v),
+            AttributeValue::LinkState(v) => encode_link_state_attribute(v)?,
+            AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v)?,
+            AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v)?,
+            AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v)?,
+            AttributeValue::Bier(v) => encode_bier(v)?,
+            AttributeValue::Sfp(v) => encode_sfp(v)?,
             AttributeValue::Development(v) => Bytes::copy_from_slice(v),
             AttributeValue::Raw(v) => v.bytes.clone(),
             AttributeValue::Deprecated(v) => v.bytes.clone(),

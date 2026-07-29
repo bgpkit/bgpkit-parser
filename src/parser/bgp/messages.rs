@@ -480,6 +480,7 @@ impl BgpOpenMessage {
             } else {
                 // Fits in a u8: use_extended_length is set above whenever the
                 // non-extended framing (2 + value.len() per param) would exceed u8::MAX.
+                debug_assert!(value.len() <= u8::MAX as usize);
                 buf.put_u8(value.len() as u8);
             }
             buf.put_slice(&value);

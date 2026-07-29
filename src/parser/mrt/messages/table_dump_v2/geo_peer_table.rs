@@ -1,6 +1,6 @@
 //! RFC 6397: GEO_PEER_TABLE parsing for MRT TABLE_DUMP_V2 format
 
-use crate::error::ParserError;
+use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -136,7 +136,7 @@ impl GeoPeerTable {
     ///
     /// let encoded = geo_table.encode();
     /// ```
-    pub fn encode(&self) -> Bytes {
+    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         let mut buf = BytesMut::new();
 
         // Encode collector BGP ID (4 bytes)
@@ -144,7 +144,13 @@ impl GeoPeerTable {
 
         // Encode view name length and view name
         let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len().min(u16::MAX as usize) as u16);
+        let view_name_len =
+            u16::try_from(view_name_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "GEO_PEER_TABLE view name length",
+                actual: view_name_bytes.len(),
+                max: u16::MAX as usize,
+            })?;
+        buf.put_u16(view_name_len);
         buf.extend(view_name_bytes);
 
         // Encode collector coordinates (4 bytes each, 32-bit float)
@@ -152,7 +158,13 @@ impl GeoPeerTable {
         buf.put_f32(self.collector_longitude);
 
         // Encode peer count
-        buf.put_u16(self.geo_peers.len().min(u16::MAX as usize) as u16);
+        let peer_count =
+            u16::try_from(self.geo_peers.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "GEO_PEER_TABLE peer count",
+                actual: self.geo_peers.len(),
+                max: u16::MAX as usize,
+            })?;
+        buf.put_u16(peer_count);
 
         // Encode each peer entry
         for geo_peer in &self.geo_peers {
@@ -188,7 +200,12 @@ impl GeoPeerTable {
             buf.put_f32(geo_peer.peer_longitude);
         }
 
-        buf.freeze()
+        Ok(buf.freeze())
+    }
+
+    pub fn encode(&self) -> Bytes {
+        self.try_encode()
+            .expect("GEO_PEER_TABLE encoding failed; use try_encode() for fallible handling")
     }
 }
 

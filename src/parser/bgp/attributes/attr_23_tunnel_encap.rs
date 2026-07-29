@@ -2,7 +2,7 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::error::ParserError;
+use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 
@@ -81,7 +81,9 @@ fn parse_tunnel_tlv(tunnel_type: u16, mut data: Bytes) -> Result<TunnelEncapTlv,
 }
 
 /// Encode BGP Tunnel Encapsulation attribute
-pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Bytes {
+pub fn encode_tunnel_encapsulation_attribute(
+    attr: &TunnelEncapAttribute,
+) -> Result<Bytes, EncodingError> {
     let mut bytes = BytesMut::new();
 
     for tunnel_tlv in &attr.tunnel_tlvs {
@@ -96,10 +98,24 @@ pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Byt
             // Encode sub-TLV type
             if sub_tlv_type < 128 {
                 sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u8(sub_tlv.value.len().min(u8::MAX as usize) as u8);
+                let len = u8::try_from(sub_tlv.value.len()).map_err(|_| {
+                    EncodingError::ValueTooLarge {
+                        field: "Tunnel Encap sub-TLV value length",
+                        actual: sub_tlv.value.len(),
+                        max: u8::MAX as usize,
+                    }
+                })?;
+                sub_tlv_bytes.put_u8(len);
             } else {
                 sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u16(sub_tlv.value.len().min(u16::MAX as usize) as u16);
+                let len = u16::try_from(sub_tlv.value.len()).map_err(|_| {
+                    EncodingError::ValueTooLarge {
+                        field: "Tunnel Encap sub-TLV value length",
+                        actual: sub_tlv.value.len(),
+                        max: u16::MAX as usize,
+                    }
+                })?;
+                sub_tlv_bytes.put_u16(len);
             }
 
             // Encode sub-TLV value
@@ -107,13 +123,19 @@ pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Byt
         }
 
         // Encode tunnel length
-        bytes.put_u16(sub_tlv_bytes.len().min(u16::MAX as usize) as u16);
+        let tunnel_len =
+            u16::try_from(sub_tlv_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "Tunnel Encap tunnel total length",
+                actual: sub_tlv_bytes.len(),
+                max: u16::MAX as usize,
+            })?;
+        bytes.put_u16(tunnel_len);
 
         // Append sub-TLV data
         bytes.extend_from_slice(&sub_tlv_bytes);
     }
 
-    bytes.freeze()
+    Ok(bytes.freeze())
 }
 
 #[cfg(test)]
@@ -231,7 +253,7 @@ mod tests {
 
         attr.add_tunnel_tlv(tunnel_tlv);
 
-        let encoded = encode_tunnel_encapsulation_attribute(&attr);
+        let encoded = encode_tunnel_encapsulation_attribute(&attr).unwrap();
 
         // Should encode back to the same format we can parse
         let parsed = parse_tunnel_encapsulation_attribute(encoded).unwrap();

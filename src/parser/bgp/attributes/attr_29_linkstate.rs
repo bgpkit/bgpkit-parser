@@ -1,5 +1,6 @@
 //! BGP Link-State attribute parsing - RFC 7752
 
+use crate::error::EncodingError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -432,14 +433,19 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
 }
 
 /// Encode BGP Link-State attribute
-pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
+pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Result<Bytes, EncodingError> {
     let mut bytes = BytesMut::new();
 
     // Encode node attributes
     for (attr_type, value) in &attr.node_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
+        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "Link-State node attribute value length",
+            actual: value.len(),
+            max: u16::MAX as usize,
+        })?;
+        bytes.put_u16(len);
         bytes.extend_from_slice(value);
     }
 
@@ -447,7 +453,12 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
     for (attr_type, value) in &attr.link_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
+        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "Link-State link attribute value length",
+            actual: value.len(),
+            max: u16::MAX as usize,
+        })?;
+        bytes.put_u16(len);
         bytes.extend_from_slice(value);
     }
 
@@ -455,18 +466,28 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
     for (attr_type, value) in &attr.prefix_attributes {
         let type_code = u16::from(*attr_type);
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len().min(u16::MAX as usize) as u16);
+        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "Link-State prefix attribute value length",
+            actual: value.len(),
+            max: u16::MAX as usize,
+        })?;
+        bytes.put_u16(len);
         bytes.extend_from_slice(value);
     }
 
     // Encode unknown attributes
     for tlv in &attr.unknown_attributes {
         bytes.put_u16(tlv.tlv_type);
-        bytes.put_u16(tlv.length());
+        let len = u16::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
+            field: "Link-State unknown attribute value length",
+            actual: tlv.value.len(),
+            max: u16::MAX as usize,
+        })?;
+        bytes.put_u16(len);
         bytes.extend_from_slice(&tlv.value);
     }
 
-    bytes.freeze()
+    Ok(bytes.freeze())
 }
 
 #[cfg(test)]
@@ -531,7 +552,7 @@ mod tests {
         let mut attr = LinkStateAttribute::new();
         attr.add_node_attribute(NodeAttributeType::NodeName, b"router1".to_vec());
 
-        let encoded = encode_link_state_attribute(&attr);
+        let encoded = encode_link_state_attribute(&attr).unwrap();
         assert!(!encoded.is_empty());
 
         // Should contain the node name TLV
