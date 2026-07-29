@@ -1039,6 +1039,7 @@ mod tests {
 
     #[test]
     fn test_bgp_open_wire_fixtures_round_trip_byte_identically() {
+        // test vectors from sessions with RIS RRC00
         let fixtures = [
             (
                 "no optional parameters",
