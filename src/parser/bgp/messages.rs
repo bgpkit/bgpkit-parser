@@ -399,7 +399,9 @@ fn encode_bgp_open_param_value(param: &OptParam) -> Bytes {
                     CapabilityValue::BgpExtendedMessage(bem) => bem.encode(),
                     CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
                 };
-                buf.put_u8(encoded_value.len() as u8);
+                let capability_len = u8::try_from(encoded_value.len())
+                    .expect("BGP capability value length exceeds 255 octets");
+                buf.put_u8(capability_len);
                 buf.put_slice(&encoded_value);
             }
         }
@@ -1108,6 +1110,37 @@ mod tests {
         assert_eq!(&encoded[10..], &[254, 3, 0xAA, 0xBB, 0xCC]);
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
         assert_eq!(parsed.encode(), encoded);
+    }
+
+    #[test]
+    #[should_panic(expected = "BGP capability value length exceeds 255 octets")]
+    fn test_bgp_open_encoding_rejects_oversized_add_path_capability() {
+        use crate::models::capabilities::{AddPathAddressFamily, AddPathSendReceive};
+
+        let address_family = AddPathAddressFamily {
+            afi: Afi::Ipv4,
+            safi: Safi::Unicast,
+            send_receive: AddPathSendReceive::SendReceive,
+        };
+        let msg = BgpOpenMessage {
+            version: 4,
+            asn: Asn::new_16bit(64512),
+            hold_time: 90,
+            bgp_identifier: Ipv4Addr::new(192, 0, 2, 1),
+            extended_length: false,
+            opt_params: vec![OptParam {
+                param_type: 2,
+                param_value: ParamValue::Capacities(vec![Capability {
+                    ty: BgpCapabilityType::ADD_PATH_CAPABILITY,
+                    value: CapabilityValue::AddPath(AddPathCapability::new(vec![
+                        address_family;
+                        64
+                    ])),
+                }]),
+            }],
+        };
+
+        msg.encode();
     }
 
     #[test]
