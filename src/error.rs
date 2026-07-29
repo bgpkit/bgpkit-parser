@@ -67,6 +67,26 @@ pub enum EncodingError {
     },
 }
 
+impl EncodingError {
+    /// Check that a length fits in a `u8` field, returning `ValueTooLarge` if not.
+    pub fn check_u8(field: &'static str, len: usize) -> Result<u8, Self> {
+        u8::try_from(len).map_err(|_| EncodingError::ValueTooLarge {
+            field,
+            actual: len,
+            max: u8::MAX as usize,
+        })
+    }
+
+    /// Check that a length fits in a `u16` field, returning `ValueTooLarge` if not.
+    pub fn check_u16(field: &'static str, len: usize) -> Result<u16, Self> {
+        u16::try_from(len).map_err(|_| EncodingError::ValueTooLarge {
+            field,
+            actual: len,
+            max: u16::MAX as usize,
+        })
+    }
+}
+
 impl Display for EncodingError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {

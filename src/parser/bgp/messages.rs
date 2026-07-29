@@ -487,13 +487,10 @@ impl BgpOpenMessage {
         for (param_type, value) in encoded_params {
             buf.put_u8(param_type);
             if use_extended_length {
-                let val_len =
-                    u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
-                        field: "BGP OPEN extended optional parameter length",
-                        actual: value.len(),
-                        max: u16::MAX as usize,
-                    })?;
-                buf.put_u16(val_len);
+                // Guaranteed by the aggregate check above: encoded_params_len fits u16,
+                // and value.len() <= encoded_params_len, so this always fits.
+                debug_assert!(value.len() <= u16::MAX as usize);
+                buf.put_u16(value.len() as u16);
             } else {
                 // Fits in a u8: use_extended_length is set above whenever the
                 // non-extended framing (2 + value.len() per param) would exceed u8::MAX.

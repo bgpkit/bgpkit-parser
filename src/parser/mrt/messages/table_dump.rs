@@ -146,12 +146,7 @@ impl TableDumpMessage {
         }
         bytes.put_u16(self.peer_asn.into());
 
-        // encode attributes
-        let mut attr_bytes = BytesMut::new();
-        for attr in &self.attributes.inner {
-            // asn_len always 16 bites
-            attr_bytes.extend(attr.try_encode(AsnLength::Bits16)?);
-        }
+        let attr_bytes = self.attributes.try_encode(AsnLength::Bits16)?;
 
         let attr_len =
             u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {

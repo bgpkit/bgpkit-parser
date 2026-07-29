@@ -95,26 +95,21 @@ pub fn encode_tunnel_encapsulation_attribute(
         for sub_tlv in &tunnel_tlv.sub_tlvs {
             let sub_tlv_type = sub_tlv.sub_tlv_type as u16;
 
-            // Encode sub-TLV type
+            // Encode sub-TLV type (common to both branches)
+            sub_tlv_bytes.put_u8(sub_tlv_type as u8);
+
+            // Encode sub-TLV length: u8 for type < 128, u16 for type >= 128
             if sub_tlv_type < 128 {
-                sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                let len = u8::try_from(sub_tlv.value.len()).map_err(|_| {
-                    EncodingError::ValueTooLarge {
-                        field: "Tunnel Encap sub-TLV value length",
-                        actual: sub_tlv.value.len(),
-                        max: u8::MAX as usize,
-                    }
-                })?;
+                let len = EncodingError::check_u8(
+                    "Tunnel Encap sub-TLV value length",
+                    sub_tlv.value.len(),
+                )?;
                 sub_tlv_bytes.put_u8(len);
             } else {
-                sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                let len = u16::try_from(sub_tlv.value.len()).map_err(|_| {
-                    EncodingError::ValueTooLarge {
-                        field: "Tunnel Encap sub-TLV value length",
-                        actual: sub_tlv.value.len(),
-                        max: u16::MAX as usize,
-                    }
-                })?;
+                let len = EncodingError::check_u16(
+                    "Tunnel Encap sub-TLV value length",
+                    sub_tlv.value.len(),
+                )?;
                 sub_tlv_bytes.put_u16(len);
             }
 
