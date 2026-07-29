@@ -46,10 +46,14 @@ impl MrtRibEncoder {
 
     /// Processes a BgpElem and updates the internal data structures.
     ///
+    /// Returns [`EncodingError::ValueTooLarge`] if the element's peer would
+    /// exceed the 65535-peer capacity of the PEER_INDEX_TABLE; the encoder's
+    /// state is left unchanged in that case.
+    ///
     /// # Arguments
     ///
     /// * `elem` - A reference to a BgpElem that contains the information to be processed.
-    pub fn process_elem(&mut self, elem: &BgpElem) {
+    pub fn process_elem(&mut self, elem: &BgpElem) -> Result<(), EncodingError> {
         if self.timestamp == 0.0 {
             self.timestamp = elem.timestamp;
         }
@@ -58,7 +62,7 @@ impl MrtRibEncoder {
             IpAddr::V6(_ip) => Ipv4Addr::from(0),
         };
         let peer = Peer::new(bgp_identifier, elem.peer_ip, elem.peer_asn);
-        let peer_index = self.index_table.add_peer(peer);
+        let peer_index = self.index_table.add_peer(peer)?;
         let path_id = elem.prefix.path_id;
         let prefix = elem.prefix.prefix;
 
@@ -70,6 +74,7 @@ impl MrtRibEncoder {
             attributes: Attributes::from(elem),
         };
         entries_map.insert(peer_index, entry);
+        Ok(())
     }
 
     /// Export the data stored in the struct to a byte array.
@@ -158,9 +163,9 @@ mod tests {
             ..Default::default()
         };
         elem.prefix.prefix = "10.250.0.0/24".parse().unwrap();
-        encoder.process_elem(&elem);
+        encoder.process_elem(&elem).unwrap();
         elem.prefix.prefix = "10.251.0.0/24".parse().unwrap();
-        encoder.process_elem(&elem);
+        encoder.process_elem(&elem).unwrap();
         let bytes = encoder.export_bytes().unwrap();
 
         let mut cursor = Cursor::new(bytes.clone());
@@ -177,7 +182,7 @@ mod tests {
         };
         // ipv6 prefix
         elem.prefix.prefix = "2001:db8::/32".parse().unwrap();
-        encoder.process_elem(&elem);
+        encoder.process_elem(&elem).unwrap();
         let bytes = encoder.export_bytes().unwrap();
 
         let mut cursor = Cursor::new(bytes.clone());
@@ -195,7 +200,7 @@ mod tests {
             ..Default::default()
         };
         elem.prefix = NetworkPrefix::new("10.250.0.0/24".parse().unwrap(), Some(42));
-        encoder.process_elem(&elem);
+        encoder.process_elem(&elem).unwrap();
 
         let bytes = encoder.export_bytes().unwrap();
         let mut cursor = Cursor::new(bytes);

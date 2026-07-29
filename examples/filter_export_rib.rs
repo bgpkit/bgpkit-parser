@@ -18,7 +18,7 @@ fn main() {
 
     info!("processing rib {}", RIB_URL);
     for elem in parser {
-        encoder.process_elem(&elem);
+        encoder.process_elem(&elem).unwrap();
     }
 
     info!("exporting filtered RIB...");

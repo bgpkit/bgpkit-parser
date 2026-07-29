@@ -964,7 +964,7 @@ mod tests {
             Asn::new_32bit(64496),
         );
         let mut peer_table = PeerIndexTable::default();
-        let peer_index = peer_table.add_peer(peer);
+        let peer_index = peer_table.add_peer(peer).unwrap();
 
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
@@ -1021,7 +1021,7 @@ mod tests {
             Asn::new_32bit(64496),
         );
         let mut peer_table = PeerIndexTable::default();
-        let peer_index = peer_table.add_peer(peer);
+        let peer_index = peer_table.add_peer(peer).unwrap();
 
         let pit_record = MrtRecord {
             common_header: CommonHeader {
@@ -1501,7 +1501,7 @@ mod tests {
             Asn::new_32bit(64496),
         );
         let mut peer_table = PeerIndexTable::default();
-        let peer_index = peer_table.add_peer(peer);
+        let peer_index = peer_table.add_peer(peer).unwrap();
 
         let pit_record = MrtRecord {
             common_header: CommonHeader {
@@ -1729,7 +1729,7 @@ mod tests {
             Asn::new_32bit(64496),
         );
         let mut peer_table = PeerIndexTable::default();
-        let peer_index = peer_table.add_peer(peer);
+        let peer_index = peer_table.add_peer(peer).unwrap();
 
         let first_entry = RibEntry {
             peer_index,
