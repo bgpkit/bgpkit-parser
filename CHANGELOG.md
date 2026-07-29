@@ -6,10 +6,35 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
+* **Fallible encoding** ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313)): all encode paths now return `Result<_, EncodingError>` instead of silently truncating values that do not fit their wire-format fields. There are no panicking wrappers; callers that want the old "just give me bytes" ergonomics can `.unwrap()`. Migration table:
+
+  | Before | After |
+  | --- | --- |
+  | `Attribute::encode(asn_len) -> Bytes` | `-> Result<Bytes, EncodingError>` (also `encode_to(asn_len, &mut BytesMut)`) |
+  | `Attributes::encode(asn_len) -> Bytes` | `-> Result<Bytes, EncodingError>` (also `encode_to`) |
+  | `BgpOpenMessage::encode() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `BgpUpdateMessage::encode(asn_len) -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `BgpMessage::encode(asn_len) -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `TableDumpMessage::encode() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `RibEntry::encode()` / `RibAfiEntries::encode() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `PeerIndexTable::encode()` / `GeoPeerTable::encode() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `PeerIndexTable::add_peer(peer) -> u16` | `-> Result<u16, EncodingError>` (rejects the 65,536th peer instead of wrapping the id) |
+  | `MrtMessage::encode(sub_type)` / `Bgp4MpMessage::encode(asn_len)` / `MrtRecord::encode() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+  | `MrtRibEncoder::process_elem(&elem)` | `-> Result<(), EncodingError>` |
+  | `MrtRibEncoder::export_bytes()` / `MrtUpdatesEncoder::export_bytes() -> Bytes` | `-> Result<Bytes, EncodingError>` |
+
+  `EncodingError` has two variants: `ValueTooLarge { field, actual, max }` for wire-capacity overflows and `Unencodable { field, reason }` for values with no valid wire representation (ATTR_SET, RIB_GENERIC, OPEN parameter type 255, labeled NLRI with an empty label stack).
+* **`Tlv::length()` and `SubTlv::length()` removed**: both silently saturated at `u16::MAX`; encoders now compute checked lengths internally.
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
 
 ### Fixed
 
+* **Silent truncation on encode eliminated** ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313)): AS_PATH segments with >255 ASes, attribute values exceeding their (extended or non-extended) length field, TLV values in Tunnel Encapsulation / BGP-LS / SFP / BFD Discriminator / Prefix-SID / BIER attributes, RIB entry counts, peer counts, view names, and BGP message total lengths now return `EncodingError` instead of writing corrupt length fields.
+* **FlowSpec NLRI length bound**: the wire length field is 12-bit (RFC 8955); NLRI data of 4096..=65535 bytes previously passed an unchecked `u16` cast and encoded a corrupt length byte. It is now rejected with `ValueTooLarge`.
+* **MP_REACH/MP_UNREACH encoding errors are no longer swallowed**: labeled-NLRI failures previously logged a warning and emitted a zero-length (RFC-invalid) attribute value; they now propagate as `EncodingError`.
+* **FlowSpec NLRI entries are now encoded**: `Nlri::flowspec_nlris` was previously silently dropped when encoding MP_REACH/MP_UNREACH attributes.
+* **Peer index aliasing**: `PeerIndexTable::add_peer` previously wrapped the peer id at 65,536 peers, silently attributing routes to the wrong peer; it now returns an error and leaves the table unmodified.
+* **BGP OPEN parameter type 255 rejected**: RFC 9072 reserves type 255 as the extended-length marker; encoding it as a real parameter produced output that round-tripped to a structurally different message.
 * **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
 
 ## v0.19.0 - 2026-07-28
