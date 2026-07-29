@@ -185,8 +185,10 @@ impl Tlv {
     }
 
     pub fn length(&self) -> u16 {
-        // Checked conversion: caller (encoder) already validates before reaching here
-        u16::try_from(self.value.len()).unwrap_or(u16::MAX)
+        // Saturating cast: for values >65535 the wire format cannot represent
+        // the length. The encode path (encode_link_state_attribute) checks
+        // this separately via u16::try_from and returns EncodingError.
+        self.value.len().min(u16::MAX as usize) as u16
     }
 }
 
