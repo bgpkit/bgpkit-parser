@@ -72,7 +72,7 @@ fn create_bmp_mpls_message() -> Vec<u8> {
     let bgp_msg = BgpMessage::Update(bgp_update);
 
     // Encode the BGP message
-    let bgp_bytes = bgp_msg.encode(AsnLength::Bits32);
+    let bgp_bytes = bgp_msg.encode(AsnLength::Bits32).unwrap();
 
     // Now construct the BMP message
     // BMP Common Header (6 bytes) + Per-Peer Header (42 bytes) + BGP message

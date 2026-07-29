@@ -1,5 +1,7 @@
 use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
 use crate::parser::ReadUtils;
+use crate::encoder::sink::put_u16_len_slice;
+use crate::error::{check_max, EncodingError};
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
@@ -136,24 +138,25 @@ impl PeerIndexTable {
     ///     peer_ip_id_map: Default::default(),
     /// };
     ///
-    /// let encoded = data.encode();
+    /// let encoded = data.encode().unwrap();
     /// ```
-    pub fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
         let mut buf = BytesMut::new();
 
         // Encode collector_bgp_id
         buf.put_u32(self.collector_bgp_id.into());
 
-        // Encode view_name_length
-        let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len() as u16);
-
-        // Encode view_name
-        buf.extend(view_name_bytes);
+        // Encode view_name_length and view_name
+        put_u16_len_slice(
+            &mut buf,
+            "PeerIndexTable view name length",
+            self.view_name.as_bytes(),
+        )?;
 
         // Encode peer_count
-        let peer_count = self.id_peer_map.len() as u16;
-        buf.put_u16(peer_count);
+        let peer_count = self.id_peer_map.len();
+        check_max("PeerIndexTable peer count", peer_count, u16::MAX as usize)?;
+        buf.put_u16(peer_count as u16);
 
         // Encode peers
         let mut peer_ids: Vec<_> = self.id_peer_map.keys().collect();
@@ -184,7 +187,7 @@ impl PeerIndexTable {
         }
 
         // Return Bytes
-        buf.freeze()
+        Ok(buf.freeze())
     }
 }
 
@@ -214,7 +217,7 @@ mod tests {
             Asn::new_32bit(12345),
         ));
 
-        let encoded = index_table.encode();
+        let encoded = index_table.encode().unwrap();
         let parsed_index_table = parse_peer_index_table(&mut encoded.clone()).unwrap();
         assert_eq!(index_table, parsed_index_table);
     }

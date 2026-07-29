@@ -1,6 +1,6 @@
 use super::mrt_header::parse_common_header_with_bytes;
 use crate::bmp::messages::{BmpMessage, BmpMessageBody};
-use crate::error::ParserError;
+use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::{
     parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
@@ -227,8 +227,8 @@ pub fn parse_mrt_body(
 }
 
 impl MrtRecord {
-    pub fn encode(&self) -> Bytes {
-        let message_bytes = self.message.encode(self.common_header.entry_subtype);
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let message_bytes = self.message.encode(self.common_header.entry_subtype)?;
         let mut new_header = self.common_header;
         if message_bytes.len() != new_header.length as usize {
             warn!(
@@ -237,6 +237,11 @@ impl MrtRecord {
                 new_header.length
             );
         }
+        check_max(
+            "MRT record message length",
+            message_bytes.len(),
+            u32::MAX as usize,
+        )?;
         new_header.length = message_bytes.len() as u32;
         let header_bytes = new_header.encode();
 
@@ -253,7 +258,7 @@ impl MrtRecord {
         let mut bytes = BytesMut::with_capacity(header_bytes.len() + message_bytes.len());
         bytes.put_slice(&header_bytes);
         bytes.put_slice(&message_bytes);
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
@@ -294,12 +299,15 @@ impl TryFrom<&BmpMessage> for MrtRecord {
         let (seconds, microseconds) = convert_timestamp(bmp_header.timestamp);
 
         let subtype = Bgp4MpType::MessageAs4 as u16;
+        let encoded_message = mrt_message
+            .encode(subtype)
+            .map_err(|e| format!("cannot encode MRT message: {e}"))?;
         let mrt_header = CommonHeader {
             timestamp: seconds,
             microsecond_timestamp: Some(microseconds),
             entry_type: EntryType::BGP4MP_ET,
             entry_subtype: Bgp4MpType::MessageAs4 as u16,
-            length: mrt_message.encode(subtype).len() as u32,
+            length: encoded_message.len() as u32,
         };
 
         Ok(MrtRecord {
@@ -501,12 +509,12 @@ mod tests {
             })),
         };
 
-        let encoded = record.encode();
+        let encoded = record.encode().unwrap();
         let mut cursor = Cursor::new(encoded);
         let parsed = parse_mrt_record(&mut cursor).unwrap();
         let expected_len = parsed
             .message
-            .encode(parsed.common_header.entry_subtype)
+            .encode(parsed.common_header.entry_subtype).unwrap()
             .len() as u32;
 
         assert_eq!(parsed.common_header.length, expected_len);

@@ -23,7 +23,7 @@ fn main() {
 
     info!("exporting filtered RIB...");
     let mut writer = oneio::get_writer("filtered-13335.rib.gz").unwrap();
-    writer.write_all(encoder.export_bytes().as_ref()).unwrap();
+    writer.write_all(encoder.export_bytes().unwrap().as_ref()).unwrap();
     drop(writer);
 
     info!("exporting filtered RIB...done");

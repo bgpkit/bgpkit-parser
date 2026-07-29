@@ -3,7 +3,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 
-use crate::error::{BgpValidationWarning, ParserError};
+use crate::encoder::sink::{put_u16_len_slice, put_u8_len_slice, with_u16_len};
+use crate::error::{check_max, BgpValidationWarning, EncodingError, ParserError};
 use crate::models::capabilities::{
     AddPathCapability, BgpCapabilityType, BgpExtendedMessageCapability, BgpRoleCapability,
     ExtendedNextHopCapability, FourOctetAsCapability, GracefulRestartCapability,
@@ -382,7 +383,7 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     })
 }
 
-fn encode_bgp_open_param_value(param: &OptParam) -> Bytes {
+fn encode_bgp_open_param_value(param: &OptParam) -> Result<Bytes, EncodingError> {
     let mut buf = BytesMut::new();
     match &param.param_value {
         ParamValue::Capacities(capacities) => {
@@ -399,24 +400,32 @@ fn encode_bgp_open_param_value(param: &OptParam) -> Bytes {
                     CapabilityValue::BgpExtendedMessage(bem) => bem.encode(),
                     CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
                 };
-                let capability_len = u8::try_from(encoded_value.len())
-                    .expect("BGP capability value length exceeds 255 octets");
-                buf.put_u8(capability_len);
-                buf.put_slice(&encoded_value);
+                put_u8_len_slice(&mut buf, "BGP capability value length", &encoded_value)?;
             }
         }
         ParamValue::Raw(bytes) => buf.put_slice(bytes),
     }
-    buf.freeze()
+    Ok(buf.freeze())
 }
 
 impl BgpOpenMessage {
-    pub fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
         let encoded_params: Vec<(u8, Bytes)> = self
             .opt_params
             .iter()
-            .map(|param| (param.param_type, encode_bgp_open_param_value(param)))
-            .collect();
+            .map(|param| {
+                // RFC 9072 reserves optional parameter type 255 as the
+                // extended-length marker; emitting it as a real parameter
+                // would be misparsed on the receiving side.
+                if param.param_type == u8::MAX {
+                    return Err(EncodingError::unencodable(
+                        "BGP OPEN optional parameter type",
+                        "type 255 is reserved by RFC 9072 as the extended-length marker",
+                    ));
+                }
+                Ok((param.param_type, encode_bgp_open_param_value(param)?))
+            })
+            .collect::<Result<_, _>>()?;
 
         let values_len: usize = encoded_params.iter().map(|(_, value)| value.len()).sum();
         // Non-extended framing spends 2 header octets (type + 1-octet length) per
@@ -449,11 +458,11 @@ impl BgpOpenMessage {
         if use_extended_length {
             // RFC 9072: type 255 signals a two-octet aggregate length and
             // two-octet lengths for each optional parameter.
-            debug_assert!(
-                encoded_params_len <= u16::MAX as usize,
-                "BGP OPEN optional parameters ({encoded_params_len} bytes) exceed the \
-                 two-octet extended length field; wire framing would be corrupt"
-            );
+            check_max(
+                "BGP OPEN extended optional parameters total length",
+                encoded_params_len,
+                u16::MAX as usize,
+            )?;
             buf.put_u8(u8::MAX);
             buf.put_u16(encoded_params_len as u16);
         }
@@ -461,12 +470,9 @@ impl BgpOpenMessage {
         for (param_type, value) in encoded_params {
             buf.put_u8(param_type);
             if use_extended_length {
-                debug_assert!(
-                    value.len() <= u16::MAX as usize,
-                    "BGP OPEN optional parameter ({} bytes) exceeds the two-octet \
-                     length field; wire framing would be corrupt",
-                    value.len()
-                );
+                // Cannot overflow: the aggregate check above bounds
+                // encoded_params_len, and each value.len() <= encoded_params_len - 3.
+                debug_assert!(value.len() <= u16::MAX as usize);
                 buf.put_u16(value.len() as u16);
             } else {
                 // Fits in a u8: use_extended_length is set above whenever the
@@ -475,7 +481,7 @@ impl BgpOpenMessage {
             }
             buf.put_slice(&value);
         }
-        buf.freeze()
+        Ok(buf.freeze())
     }
 }
 
@@ -589,23 +595,24 @@ pub fn parse_bgp_update_message(
 }
 
 impl BgpUpdateMessage {
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
 
         // withdrawn prefixes
         let withdrawn_bytes = encode_nlri_prefixes(&self.withdrawn_prefixes);
-        bytes.put_u16(withdrawn_bytes.len() as u16);
-        bytes.put_slice(&withdrawn_bytes);
+        put_u16_len_slice(
+            &mut bytes,
+            "BGP UPDATE withdrawn routes length",
+            &withdrawn_bytes,
+        )?;
 
         // attributes
-        // TODO(fallible-encoding): temporary until BgpUpdateMessage::encode returns Result
-        let attr_bytes = self.attributes.encode(asn_len).expect("attribute encoding failed");
-
-        bytes.put_u16(attr_bytes.len() as u16);
-        bytes.put_slice(&attr_bytes);
+        with_u16_len(&mut bytes, "BGP UPDATE total path attribute length", |b| {
+            self.attributes.encode_to(asn_len, b)
+        })?;
 
         bytes.extend(encode_nlri_prefixes(&self.announced_prefixes));
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 
     /// Check if this is an end-of-rib message.
@@ -655,23 +662,25 @@ impl BgpMessage {
     /// BGP marker value: 16 bytes of 0xFF (RFC 4271)
     const MARKER: [u8; 16] = [0xFF; 16];
 
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         // RFC 4271: Marker is 16 bytes of 0xFF
         bytes.put_slice(&Self::MARKER);
 
         let (msg_type, msg_bytes) = match self {
-            BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()),
-            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(asn_len)),
+            BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.encode()?),
+            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(asn_len)?),
             BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
             BgpMessage::KeepAlive => (BgpMessageType::KEEPALIVE, Bytes::new()),
         };
 
         // msg total bytes length = msg bytes + 16 bytes marker + 2 bytes length + 1 byte type
-        bytes.put_u16(msg_bytes.len() as u16 + 16 + 2 + 1);
+        let total_len = msg_bytes.len() + 16 + 2 + 1;
+        check_max("BGP message total length", total_len, u16::MAX as usize)?;
+        bytes.put_u16(total_len as u16);
         bytes.put_u8(msg_type as u8);
         bytes.put_slice(&msg_bytes);
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
@@ -896,7 +905,7 @@ mod tests {
     fn test_bgp_marker_encoding_rfc4271() {
         // Test that BgpMessage::encode produces correct RFC 4271 marker (all 0xFF)
         let msg = BgpMessage::KeepAlive;
-        let encoded = msg.encode(AsnLength::Bits16);
+        let encoded = msg.encode(AsnLength::Bits16).unwrap();
 
         // First 16 bytes should be all 0xFF
         assert_eq!(
@@ -1027,7 +1036,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         };
-        let bytes = msg.encode();
+        let bytes = msg.encode().unwrap();
         assert_eq!(
             bytes,
             Bytes::from_static(&[
@@ -1085,7 +1094,7 @@ mod tests {
                 parse_bgp_message(&mut input, false, &AsnLength::Bits16).unwrap_or_else(|error| {
                     panic!("failed to parse {name}: {error}");
                 });
-            let encoded = parsed.encode(AsnLength::Bits16);
+            let encoded = parsed.encode(AsnLength::Bits16).unwrap();
 
             assert_eq!(encoded, wire, "{name}");
         }
@@ -1105,16 +1114,15 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         assert_eq!(encoded[9], 5);
         assert_eq!(&encoded[10..], &[254, 3, 0xAA, 0xBB, 0xCC]);
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
-        assert_eq!(parsed.encode(), encoded);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
-    #[should_panic(expected = "BGP capability value length exceeds 255 octets")]
     fn test_bgp_open_encoding_rejects_oversized_add_path_capability() {
         use crate::models::capabilities::{AddPathAddressFamily, AddPathSendReceive};
 
@@ -1141,7 +1149,15 @@ mod tests {
             }],
         };
 
-        msg.encode();
+        let err = msg.encode().unwrap_err();
+        assert_eq!(
+            err,
+            EncodingError::ValueTooLarge {
+                field: "BGP capability value length",
+                actual: 256,
+                max: 255
+            }
+        );
     }
 
     #[test]
@@ -1158,7 +1174,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         assert_eq!(
             &encoded[9..],
@@ -1166,7 +1182,7 @@ mod tests {
         );
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
         assert!(parsed.extended_length);
-        assert_eq!(parsed.encode(), encoded);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
@@ -1183,13 +1199,13 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         assert_eq!(encoded.len(), 272);
         assert_eq!(&encoded[9..16], &[0xFF, 0xFF, 0x01, 0x03, 254, 0x01, 0x00]);
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
         assert!(parsed.extended_length);
-        assert_eq!(parsed.encode(), encoded);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
@@ -1198,7 +1214,7 @@ mod tests {
             error: BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH),
             data: vec![0x00, 0x00],
         });
-        let bytes = bgp_message.encode(AsnLength::Bits16);
+        let bytes = bgp_message.encode(AsnLength::Bits16).unwrap();
         // RFC 4271: Marker is 16 bytes of 0xFF
         assert_eq!(
             bytes,
@@ -1453,7 +1469,7 @@ mod tests {
         use crate::models::capabilities::BgpExtendedMessageCapability;
 
         // Test that the encoding path for BgpExtendedMessage capability is covered
-        // This specifically tests the line: CapabilityValue::BgpExtendedMessage(bem) => bem.encode()
+        // This specifically tests the line: CapabilityValue::BgpExtendedMessage(bem) => bem.encode().unwrap()
         let capability_value =
             CapabilityValue::BgpExtendedMessage(BgpExtendedMessageCapability::new());
         let capability = Capability {
@@ -1476,7 +1492,7 @@ mod tests {
         };
 
         // This will exercise the encoding path we need to test
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
         assert!(!encoded.is_empty());
 
         // Verify we can parse it back (exercises the parsing path too)
@@ -1549,7 +1565,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse the encoded message back and verify it matches
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
@@ -1607,7 +1623,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse the encoded message back and verify it matches
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
@@ -1672,7 +1688,7 @@ mod tests {
         };
 
         // Encode the message
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse it back
         let mut encoded_bytes = encoded.clone();
@@ -1753,7 +1769,7 @@ mod tests {
         };
 
         // Encode and parse back
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
         let mut encoded_bytes = encoded.clone();
         let parsed = parse_bgp_open_message(&mut encoded_bytes).unwrap();
 

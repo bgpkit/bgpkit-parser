@@ -3,6 +3,8 @@ use crate::models::{
     Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
 };
 use crate::parser::ReadUtils;
+use crate::encoder::sink::with_u16_len;
+use crate::error::{check_max, EncodingError};
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::warn;
@@ -164,7 +166,7 @@ pub fn parse_rib_entry(
 }
 
 impl RibAfiEntries {
-    pub fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         let is_add_path = is_add_path_rib_type(self.rib_type);
 
@@ -172,23 +174,29 @@ impl RibAfiEntries {
         bytes.extend(self.prefix.encode());
 
         let entry_count = self.rib_entries.len();
+        check_max("RIB entry count", entry_count, u16::MAX as usize)?;
         bytes.put_u16(entry_count as u16);
 
         for entry in &self.rib_entries {
-            bytes.extend(entry.encode_for_rib_type(is_add_path));
+            entry.encode_for_rib_type(is_add_path, &mut bytes)?;
         }
 
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
 impl RibEntry {
-    pub fn encode(&self) -> Bytes {
-        self.encode_for_rib_type(self.path_id.is_some())
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut bytes = BytesMut::new();
+        self.encode_for_rib_type(self.path_id.is_some(), &mut bytes)?;
+        Ok(bytes.freeze())
     }
 
-    fn encode_for_rib_type(&self, include_path_id: bool) -> Bytes {
-        let mut bytes = BytesMut::new();
+    fn encode_for_rib_type(
+        &self,
+        include_path_id: bool,
+        bytes: &mut BytesMut,
+    ) -> Result<(), EncodingError> {
         bytes.put_u16(self.peer_index);
         bytes.put_u32(self.originated_time);
         if include_path_id {
@@ -196,14 +204,9 @@ impl RibEntry {
                 bytes.put_u32(path_id);
             }
         }
-        // TODO(fallible-encoding): temporary until RibEntry encoding returns Result
-        let attr_bytes = self
-            .attributes
-            .encode(AsnLength::Bits32)
-            .expect("attribute encoding failed");
-        bytes.put_u16(attr_bytes.len() as u16);
-        bytes.extend(attr_bytes);
-        bytes.freeze()
+        with_u16_len(bytes, "RIB entry attribute length", |b| {
+            self.attributes.encode_to(AsnLength::Bits32, b)
+        })
     }
 }
 
@@ -274,7 +277,7 @@ mod tests {
             attributes,
         };
 
-        let mut encoded = rib_entry.encode();
+        let mut encoded = rib_entry.encode().unwrap();
         assert_eq!(encoded.read_u16().unwrap(), 1);
         assert_eq!(encoded.read_u32().unwrap(), 12345);
         assert_eq!(encoded.read_u32().unwrap(), 42);
@@ -301,7 +304,7 @@ mod tests {
             }],
         };
 
-        let encoded = rib.encode();
+        let encoded = rib.encode().unwrap();
         let parsed = parse_rib_afi_entries(&mut encoded.clone(), rib.rib_type).unwrap();
         assert_eq!(parsed.rib_type, rib.rib_type);
         assert_eq!(parsed.sequence_number, rib.sequence_number);

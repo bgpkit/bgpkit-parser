@@ -90,7 +90,7 @@ fn main() {
     );
 
     // Encode and decode round-trip
-    let encoded = attributes.encode(AsnLength::Bits32);
+    let encoded = attributes.encode(AsnLength::Bits32).unwrap();
     println!("\nEncoded size: {} bytes", encoded.len());
 
     // Show raw access to the undecoded bytes

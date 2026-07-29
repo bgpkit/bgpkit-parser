@@ -8,6 +8,7 @@ use crate::models::{
     Attributes, BgpElem, CommonHeader, EntryType, MrtMessage, NetworkPrefix, Peer, PeerIndexTable,
     RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
 };
+use crate::error::EncodingError;
 use crate::utils::convert_timestamp;
 use bytes::{Bytes, BytesMut};
 use ipnet::IpNet;
@@ -78,8 +79,9 @@ impl MrtRibEncoder {
     /// The resulting `BytesMut` object is then converted to an immutable `Bytes` object using `freeze()` and returned.
     ///
     /// # Return
-    /// Returns a `Bytes` object containing the exported data as a byte array.
-    pub fn export_bytes(&mut self) -> Bytes {
+    /// Returns a `Bytes` object containing the exported data as a byte array,
+    /// or an [EncodingError] if any element cannot be represented in wire format.
+    pub fn export_bytes(&mut self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
 
         // encode peer-index-table
@@ -88,7 +90,7 @@ impl MrtRibEncoder {
         ));
         let (seconds, _microseconds) = convert_timestamp(self.timestamp);
         let subtype = TableDumpV2Type::PeerIndexTable as u16;
-        let data_bytes = mrt_message.encode(subtype);
+        let data_bytes = mrt_message.encode(subtype)?;
         let header = CommonHeader {
             timestamp: seconds,
             microsecond_timestamp: None,
@@ -120,7 +122,7 @@ impl MrtRibEncoder {
 
             let (seconds, _microseconds) = convert_timestamp(self.timestamp);
             let subtype = rib_type as u16;
-            let data_bytes = mrt_message.encode(subtype);
+            let data_bytes = mrt_message.encode(subtype)?;
             let header_bytes = CommonHeader {
                 timestamp: seconds,
                 microsecond_timestamp: None,
@@ -135,7 +137,7 @@ impl MrtRibEncoder {
 
         self.reset();
 
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
@@ -159,7 +161,7 @@ mod tests {
         encoder.process_elem(&elem);
         elem.prefix.prefix = "10.251.0.0/24".parse().unwrap();
         encoder.process_elem(&elem);
-        let bytes = encoder.export_bytes();
+        let bytes = encoder.export_bytes().unwrap();
 
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
@@ -176,7 +178,7 @@ mod tests {
         // ipv6 prefix
         elem.prefix.prefix = "2001:db8::/32".parse().unwrap();
         encoder.process_elem(&elem);
-        let bytes = encoder.export_bytes();
+        let bytes = encoder.export_bytes().unwrap();
 
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
@@ -195,7 +197,7 @@ mod tests {
         elem.prefix = NetworkPrefix::new("10.250.0.0/24".parse().unwrap(), Some(42));
         encoder.process_elem(&elem);
 
-        let bytes = encoder.export_bytes();
+        let bytes = encoder.export_bytes().unwrap();
         let mut cursor = Cursor::new(bytes);
         let _peer_table = parse_mrt_record(&mut cursor).unwrap();
         let parsed = parse_mrt_record(&mut cursor).unwrap();

@@ -1009,8 +1009,8 @@ mod tests {
             })),
         };
 
-        let mut bytes = pit_record.encode().to_vec();
-        bytes.extend_from_slice(&rib_record.encode());
+        let mut bytes = pit_record.encode().unwrap().to_vec();
+        bytes.extend_from_slice(&rib_record.encode().unwrap());
         bytes
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
         rib_body.put_u32(1);
         rib_body.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
         rib_body.put_u16(2);
-        rib_body.extend(first_entry.encode());
+        rib_body.extend(first_entry.encode().unwrap());
         rib_body.put_u16(peer_index);
         rib_body.put_u32(1_699_999_998);
         rib_body.put_u16(32);
@@ -1062,7 +1062,7 @@ mod tests {
             length: rib_body.len() as u32,
         };
 
-        let mut bytes = pit_record.encode().to_vec();
+        let mut bytes = pit_record.encode().unwrap().to_vec();
         bytes.extend_from_slice(&rib_header.encode());
         bytes.extend_from_slice(&rib_body);
 
@@ -1112,7 +1112,7 @@ mod tests {
         data.put_u16(65001);
         data.put_u16(0);
         data.put_u16(Afi::LinkState as u16);
-        data.extend(&BgpMessage::KeepAlive.encode(AsnLength::Bits16));
+        data.put_slice(&BgpMessage::KeepAlive.encode(AsnLength::Bits16).unwrap());
 
         let error =
             match parse_bgp4mp_routes(Bgp4MpType::Message as u16, data.freeze(), 1_700_000_000.0) {
@@ -1128,7 +1128,7 @@ mod tests {
 
     #[test]
     fn route_iterator_matches_elem_projection_for_update() {
-        let bytes = update_record().encode().to_vec();
+        let bytes = update_record().encode().unwrap().to_vec();
         let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].elem_type, ElemType::ANNOUNCE);
@@ -1149,7 +1149,7 @@ mod tests {
                 ],
             }),
         )
-        .encode()
+        .encode().unwrap()
         .to_vec();
 
         let routes = BgpkitParser::from_reader(Cursor::new(bytes))
@@ -1201,7 +1201,7 @@ mod tests {
                 announced_prefixes: vec![],
             }),
         )
-        .encode()
+        .encode().unwrap()
         .to_vec();
 
         let routes = assert_route_projection(bytes);
@@ -1234,7 +1234,7 @@ mod tests {
         ];
         let mut bytes = Vec::new();
         for record in records {
-            bytes.extend_from_slice(&record.encode());
+            bytes.extend_from_slice(&record.encode().unwrap());
         }
 
         assert!(assert_route_projection(bytes).is_empty());
@@ -1250,7 +1250,7 @@ mod tests {
                 announced_prefixes: vec![NetworkPrefix::from_str("203.0.113.0/24").unwrap()],
             }),
         )
-        .encode()
+        .encode().unwrap()
         .to_vec();
 
         let routes = assert_route_projection(bytes);
@@ -1260,7 +1260,7 @@ mod tests {
 
     #[test]
     fn route_iterator_filters_match_elem_projection_for_update() {
-        let bytes = update_record().encode().to_vec();
+        let bytes = update_record().encode().unwrap().to_vec();
         let cases: &[&[(&str, &str)]] = &[
             &[("peer_ip", "192.0.2.1")],
             &[("peer_ip", "192.0.2.99")],
@@ -1459,7 +1459,7 @@ mod tests {
 
     #[test]
     fn route_iterator_matches_elem_projection_for_table_dump() {
-        let bytes = table_dump_record().encode().to_vec();
+        let bytes = table_dump_record().encode().unwrap().to_vec();
         let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].timestamp, 1_699_999_998.0);
@@ -1468,7 +1468,7 @@ mod tests {
 
     #[test]
     fn route_iterator_matches_elem_projection_for_table_dump_ipv6() {
-        let bytes = table_dump_ipv6_record().encode().to_vec();
+        let bytes = table_dump_ipv6_record().encode().unwrap().to_vec();
         let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 1);
         assert_eq!(
@@ -1534,8 +1534,8 @@ mod tests {
             })),
         };
 
-        let mut bytes = pit_record.encode().to_vec();
-        bytes.extend_from_slice(&rib_record.encode());
+        let mut bytes = pit_record.encode().unwrap().to_vec();
+        bytes.extend_from_slice(&rib_record.encode().unwrap());
         let routes = assert_route_projection(bytes);
         assert_eq!(routes.len(), 1);
         assert_eq!(
@@ -1569,7 +1569,7 @@ mod tests {
             })),
         };
 
-        let routes = assert_route_projection(record.encode().to_vec());
+        let routes = assert_route_projection(record.encode().unwrap().to_vec());
         assert_eq!(routes.len(), 1);
         assert_eq!(
             routes[0].peer_ip,
@@ -1690,7 +1690,7 @@ mod tests {
         let mut no_peer_table = None;
         assert!(parse_table_dump_v2_routes(
             TableDumpV2Type::RibIpv4Unicast as u16,
-            rib.encode(),
+            rib.encode().unwrap(),
             &mut no_peer_table,
         )
         .is_err());
@@ -1699,7 +1699,7 @@ mod tests {
         let routes = collect_route_record_iter(
             parse_table_dump_v2_routes(
                 TableDumpV2Type::RibIpv4Unicast as u16,
-                rib.encode(),
+                rib.encode().unwrap(),
                 &mut empty_peer_table,
             )
             .unwrap(),
@@ -1741,7 +1741,7 @@ mod tests {
         add_path_truncated.put_u32(1);
         add_path_truncated.extend(NetworkPrefix::from_str("203.0.113.0/24").unwrap().encode());
         add_path_truncated.put_u16(2);
-        add_path_truncated.extend(first_entry.encode());
+        add_path_truncated.extend(first_entry.encode().unwrap());
         add_path_truncated.put_u16(peer_index);
         add_path_truncated.put_u32(1_699_999_998);
         add_path_truncated.put_u32(5678);
@@ -1836,7 +1836,7 @@ mod tests {
     fn route_iterator_skips_route_parse_errors() {
         let routes = BgpkitParser::from_reader(Cursor::new(
             table_dump_v2_rib_without_peer_table_record()
-                .encode()
+                .encode().unwrap()
                 .to_vec(),
         ))
         .into_route_iter()
@@ -1847,7 +1847,7 @@ mod tests {
 
     #[test]
     fn fallible_route_iterator_applies_filters_to_cached_routes() {
-        let routes = BgpkitParser::from_reader(Cursor::new(update_record().encode().to_vec()))
+        let routes = BgpkitParser::from_reader(Cursor::new(update_record().encode().unwrap().to_vec()))
             .add_filter("type", "w")
             .unwrap()
             .into_fallible_route_iter()
@@ -1862,7 +1862,7 @@ mod tests {
     fn fallible_route_iterator_returns_route_parse_errors() {
         let mut iter = BgpkitParser::from_reader(Cursor::new(
             table_dump_v2_rib_without_peer_table_record()
-                .encode()
+                .encode().unwrap()
                 .to_vec(),
         ))
         .into_fallible_route_iter();
@@ -1872,7 +1872,7 @@ mod tests {
 
     #[test]
     fn fallible_route_iterator_yields_routes() {
-        let bytes = update_record().encode().to_vec();
+        let bytes = update_record().encode().unwrap().to_vec();
         let routes = BgpkitParser::from_reader(Cursor::new(bytes))
             .into_fallible_route_iter()
             .collect::<Result<Vec<_>, _>>()
