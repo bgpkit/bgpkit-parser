@@ -125,9 +125,6 @@ impl SubTlv {
         }
     }
 
-    pub fn length(&self) -> u16 {
-        self.value.len() as u16
-    }
 }
 
 /// Tunnel Encapsulation TLV
@@ -336,9 +333,10 @@ mod tests {
     }
 
     #[test]
-    fn test_sub_tlv_length() {
+    fn test_sub_tlv_creation() {
         let sub_tlv = SubTlv::new(SubTlvType::Color, vec![0x00, 0x00, 0x00, 0x64]);
-        assert_eq!(sub_tlv.length(), 4);
+        assert_eq!(sub_tlv.sub_tlv_type, SubTlvType::Color);
+        assert_eq!(sub_tlv.value.len(), 4);
     }
 
     #[test]

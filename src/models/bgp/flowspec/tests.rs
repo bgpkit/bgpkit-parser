@@ -63,7 +63,7 @@ mod rfc_examples {
         }
 
         // Test round-trip encoding
-        let encoded = encode_flowspec_nlri(&nlri);
+        let encoded = encode_flowspec_nlri(&nlri).unwrap();
         assert_eq!(encoded, data);
     }
 
@@ -726,7 +726,7 @@ mod nlri_parsing_tests {
             prefix,
         }]);
 
-        let encoded = encode_flowspec_nlri(&nlri);
+        let encoded = encode_flowspec_nlri(&nlri).unwrap();
 
         // Should start with length, then type 1, then prefix len, then offset
         assert!(encoded.len() > 4);
@@ -789,7 +789,7 @@ mod nlri_parsing_tests {
             FlowSpecComponent::TcpFlags(vec![bm_op1, bm_op2]),
         ]);
 
-        let encoded = encode_flowspec_nlri(&nlri);
+        let encoded = encode_flowspec_nlri(&nlri).unwrap();
         let parsed = parse_flowspec_nlri(&encoded).unwrap();
 
         // Verify round-trip encoding worked

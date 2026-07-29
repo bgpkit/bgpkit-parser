@@ -598,7 +598,8 @@ impl BgpUpdateMessage {
         bytes.put_slice(&withdrawn_bytes);
 
         // attributes
-        let attr_bytes = self.attributes.encode(asn_len);
+        // TODO(fallible-encoding): temporary until BgpUpdateMessage::encode returns Result
+        let attr_bytes = self.attributes.encode(asn_len).expect("attribute encoding failed");
 
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.put_slice(&attr_bytes);

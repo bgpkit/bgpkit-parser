@@ -2,7 +2,8 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::error::ParserError;
+use crate::encoder::sink::{put_u8_len_slice, put_u16_len_slice, with_u16_len};
+use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 
@@ -81,39 +82,33 @@ fn parse_tunnel_tlv(tunnel_type: u16, mut data: Bytes) -> Result<TunnelEncapTlv,
 }
 
 /// Encode BGP Tunnel Encapsulation attribute
-pub fn encode_tunnel_encapsulation_attribute(attr: &TunnelEncapAttribute) -> Bytes {
-    let mut bytes = BytesMut::new();
-
+pub fn encode_tunnel_encapsulation_attribute(
+    attr: &TunnelEncapAttribute,
+    bytes: &mut BytesMut,
+) -> Result<(), EncodingError> {
     for tunnel_tlv in &attr.tunnel_tlvs {
         // Encode tunnel type
         bytes.put_u16(tunnel_tlv.tunnel_type as u16);
 
-        // Encode sub-TLVs first to calculate total length
-        let mut sub_tlv_bytes = BytesMut::new();
-        for sub_tlv in &tunnel_tlv.sub_tlvs {
-            let sub_tlv_type = sub_tlv.sub_tlv_type as u16;
+        // Encode tunnel length, then sub-TLVs
+        with_u16_len(bytes, "Tunnel Encap TLV length", |b| {
+            for sub_tlv in &tunnel_tlv.sub_tlvs {
+                let sub_tlv_type = sub_tlv.sub_tlv_type as u16;
+                b.put_u8(sub_tlv_type as u8);
 
-            // Encode sub-TLV type
-            if sub_tlv_type < 128 {
-                sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u8(sub_tlv.value.len() as u8);
-            } else {
-                sub_tlv_bytes.put_u8(sub_tlv_type as u8);
-                sub_tlv_bytes.put_u16(sub_tlv.value.len() as u16);
+                // RFC 9012: sub-TLV types < 128 use a 1-octet length field,
+                // types >= 128 use a 2-octet length field
+                if sub_tlv_type < 128 {
+                    put_u8_len_slice(b, "Tunnel Encap sub-TLV value length", &sub_tlv.value)?;
+                } else {
+                    put_u16_len_slice(b, "Tunnel Encap sub-TLV value length", &sub_tlv.value)?;
+                }
             }
-
-            // Encode sub-TLV value
-            sub_tlv_bytes.extend_from_slice(&sub_tlv.value);
-        }
-
-        // Encode tunnel length
-        bytes.put_u16(sub_tlv_bytes.len() as u16);
-
-        // Append sub-TLV data
-        bytes.extend_from_slice(&sub_tlv_bytes);
+            Ok(())
+        })?;
     }
 
-    bytes.freeze()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -231,10 +226,11 @@ mod tests {
 
         attr.add_tunnel_tlv(tunnel_tlv);
 
-        let encoded = encode_tunnel_encapsulation_attribute(&attr);
+        let mut encoded = BytesMut::new();
+        encode_tunnel_encapsulation_attribute(&attr, &mut encoded).unwrap();
 
         // Should encode back to the same format we can parse
-        let parsed = parse_tunnel_encapsulation_attribute(encoded).unwrap();
+        let parsed = parse_tunnel_encapsulation_attribute(encoded.freeze()).unwrap();
 
         if let AttributeValue::TunnelEncapsulation(parsed_attr) = parsed {
             assert_eq!(parsed_attr.tunnel_tlvs.len(), 1);

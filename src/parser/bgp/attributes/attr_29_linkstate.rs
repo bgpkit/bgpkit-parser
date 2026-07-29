@@ -3,7 +3,8 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::error::ParserError;
+use crate::encoder::sink::put_u16_len_slice;
+use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 
@@ -432,41 +433,37 @@ fn parse_ip_prefix_from_bytes(data: &[u8]) -> Result<NetworkPrefix, ParserError>
 }
 
 /// Encode BGP Link-State attribute
-pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Bytes {
-    let mut bytes = BytesMut::new();
+pub fn encode_link_state_attribute(
+    attr: &LinkStateAttribute,
+    bytes: &mut BytesMut,
+) -> Result<(), EncodingError> {
+    let typed_tlvs = attr
+        .node_attributes
+        .iter()
+        .map(|(attr_type, value)| (u16::from(*attr_type), value))
+        .chain(
+            attr.link_attributes
+                .iter()
+                .map(|(attr_type, value)| (u16::from(*attr_type), value)),
+        )
+        .chain(
+            attr.prefix_attributes
+                .iter()
+                .map(|(attr_type, value)| (u16::from(*attr_type), value)),
+        );
 
-    // Encode node attributes
-    for (attr_type, value) in &attr.node_attributes {
-        let type_code = u16::from(*attr_type);
+    for (type_code, value) in typed_tlvs {
         bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
-        bytes.extend_from_slice(value);
-    }
-
-    // Encode link attributes
-    for (attr_type, value) in &attr.link_attributes {
-        let type_code = u16::from(*attr_type);
-        bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
-        bytes.extend_from_slice(value);
-    }
-
-    // Encode prefix attributes
-    for (attr_type, value) in &attr.prefix_attributes {
-        let type_code = u16::from(*attr_type);
-        bytes.put_u16(type_code);
-        bytes.put_u16(value.len() as u16);
-        bytes.extend_from_slice(value);
+        put_u16_len_slice(bytes, "BGP-LS TLV value length", value)?;
     }
 
     // Encode unknown attributes
     for tlv in &attr.unknown_attributes {
         bytes.put_u16(tlv.tlv_type);
-        bytes.put_u16(tlv.length());
-        bytes.extend_from_slice(&tlv.value);
+        put_u16_len_slice(bytes, "BGP-LS TLV value length", &tlv.value)?;
     }
 
-    bytes.freeze()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -531,7 +528,8 @@ mod tests {
         let mut attr = LinkStateAttribute::new();
         attr.add_node_attribute(NodeAttributeType::NodeName, b"router1".to_vec());
 
-        let encoded = encode_link_state_attribute(&attr);
+        let mut encoded = BytesMut::new();
+        encode_link_state_attribute(&attr, &mut encoded).unwrap();
         assert!(!encoded.is_empty());
 
         // Should contain the node name TLV

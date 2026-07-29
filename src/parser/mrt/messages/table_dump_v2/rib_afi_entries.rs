@@ -196,7 +196,11 @@ impl RibEntry {
                 bytes.put_u32(path_id);
             }
         }
-        let attr_bytes = self.attributes.encode(AsnLength::Bits32);
+        // TODO(fallible-encoding): temporary until RibEntry encoding returns Result
+        let attr_bytes = self
+            .attributes
+            .encode(AsnLength::Bits32)
+            .expect("attribute encoding failed");
         bytes.put_u16(attr_bytes.len() as u16);
         bytes.extend(attr_bytes);
         bytes.freeze()

@@ -1,5 +1,7 @@
 use crate::models::*;
 use crate::parser::ReadUtils;
+use crate::encoder::sink::put_u16_len_slice;
+use crate::error::EncodingError;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
@@ -27,14 +29,12 @@ pub fn parse_sfp(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Sfp(SfpAttribute { tlvs }))
 }
 
-pub fn encode_sfp(attr: &SfpAttribute) -> Bytes {
-    let mut buf = BytesMut::new();
+pub fn encode_sfp(attr: &SfpAttribute, buf: &mut BytesMut) -> Result<(), EncodingError> {
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        buf.put_u16(tlv.value.len() as u16);
-        buf.extend_from_slice(&tlv.value);
+        put_u16_len_slice(buf, "SFP TLV value length", &tlv.value)?;
     }
-    buf.freeze()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -53,7 +53,9 @@ mod tests {
                     attr.tlvs[0].value,
                     Bytes::from_static(&[0xaa, 0xbb, 0xcc, 0xdd])
                 );
-                assert_eq!(encode_sfp(&attr), input);
+                let mut buf = BytesMut::new();
+                encode_sfp(&attr, &mut buf).unwrap();
+                assert_eq!(buf.freeze(), input);
             }
             value => panic!("expected SFP, got {value:?}"),
         }
@@ -67,7 +69,9 @@ mod tests {
             AttributeValue::Sfp(attr) => {
                 assert_eq!(attr.tlvs[0].tlv_type, 0x7f);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xde, 0xad]));
-                assert_eq!(encode_sfp(&attr), input);
+                let mut buf = BytesMut::new();
+                encode_sfp(&attr, &mut buf).unwrap();
+                assert_eq!(buf.freeze(), input);
             }
             value => panic!("expected SFP, got {value:?}"),
         }
@@ -79,7 +83,9 @@ mod tests {
         match value {
             AttributeValue::Sfp(attr) => {
                 assert!(attr.tlvs.is_empty());
-                assert_eq!(encode_sfp(&attr), Bytes::new());
+                let mut buf = BytesMut::new();
+                encode_sfp(&attr, &mut buf).unwrap();
+                assert!(buf.is_empty());
             }
             value => panic!("expected SFP, got {value:?}"),
         }

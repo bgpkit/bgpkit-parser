@@ -1303,7 +1303,7 @@ mod tests {
         );
 
         let attrs = parse_route_attributes(
-            attributes.encode(AsnLength::Bits16),
+            attributes.encode(AsnLength::Bits16).unwrap(),
             &AsnLength::Bits16,
             false,
             RouteAttributeContext {
@@ -1325,7 +1325,7 @@ mod tests {
     #[test]
     fn selective_attribute_parser_handles_as_path_without_as4_path() {
         let attrs = parse_route_attributes(
-            route_attributes([64500, 64501]).encode(AsnLength::Bits16),
+            route_attributes([64500, 64501]).encode(AsnLength::Bits16).unwrap(),
             &AsnLength::Bits16,
             false,
             RouteAttributeContext {
@@ -1356,7 +1356,7 @@ mod tests {
         );
 
         let attrs = parse_route_attributes(
-            attributes.encode(AsnLength::Bits16),
+            attributes.encode(AsnLength::Bits16).unwrap(),
             &AsnLength::Bits16,
             false,
             RouteAttributeContext {
