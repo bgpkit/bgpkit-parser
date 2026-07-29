@@ -25,9 +25,10 @@ use std::net::IpAddr;
 
 use crate::models::*;
 
+use crate::encoder::sink::{with_u16_len, with_u8_len};
 use crate::error::{BgpValidationWarning, EncodingError, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
-use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
+use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path_to;
 pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
 use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
@@ -499,131 +500,129 @@ pub fn parse_attributes(
 }
 
 impl Attribute {
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large
-    /// for its wire-format field instead of silently truncating.
-    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
+    /// Append the wire representation of this attribute to `buf`.
+    ///
+    /// Returns [`EncodingError`] when a value is too large for its wire-format
+    /// field, or cannot be encoded at all (e.g. `AttrSet`).
+    pub fn encode_to(&self, asn_len: AsnLength, buf: &mut BytesMut) -> Result<(), EncodingError> {
+        buf.put_u8(self.flag.bits());
+        buf.put_u8(self.value.attr_code());
 
-        let flag = self.flag.bits();
-        let type_code = self.value.attr_code();
-
-        bytes.put_u8(flag);
-        bytes.put_u8(type_code);
-
-        let value_bytes = match &self.value {
-            AttributeValue::Origin(v) => encode_origin(v),
-            AttributeValue::AsPath { path, is_as4 } => {
-                let four_byte = match is_as4 {
-                    true => AsnLength::Bits32,
-                    false => match asn_len.is_four_byte() {
+        let write_value = |b: &mut BytesMut| -> Result<(), EncodingError> {
+            match &self.value {
+                AttributeValue::Origin(v) => b.extend_from_slice(&encode_origin(v)),
+                AttributeValue::AsPath { path, is_as4 } => {
+                    let four_byte = match is_as4 {
                         true => AsnLength::Bits32,
-                        false => AsnLength::Bits16,
-                    },
-                };
-                encode_as_path(path, four_byte)?
+                        false => match asn_len.is_four_byte() {
+                            true => AsnLength::Bits32,
+                            false => AsnLength::Bits16,
+                        },
+                    };
+                    encode_as_path_to(path, four_byte, b)?;
+                }
+                AttributeValue::NextHop(v) => b.extend_from_slice(&encode_next_hop(v)),
+                AttributeValue::MultiExitDiscriminator(v) => b.extend_from_slice(&encode_med(*v)),
+                AttributeValue::LocalPreference(v) => b.extend_from_slice(&encode_local_pref(*v)),
+                AttributeValue::OnlyToCustomer(v) => {
+                    b.extend_from_slice(&encode_only_to_customer(v.into()))
+                }
+                AttributeValue::AtomicAggregate => {}
+                AttributeValue::Aggregator { asn, id, is_as4: _ } => {
+                    b.extend_from_slice(&encode_aggregator(asn, &IpAddr::from(*id)))
+                }
+                AttributeValue::Communities(v) => {
+                    b.extend_from_slice(&encode_regular_communities(v))
+                }
+                AttributeValue::ExtendedCommunities(v) => {
+                    b.extend_from_slice(&encode_extended_communities(v))
+                }
+                AttributeValue::LargeCommunities(v) => {
+                    b.extend_from_slice(&encode_large_communities(v))
+                }
+                AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => {
+                    b.extend_from_slice(&encode_ipv6_extended_communities(v))
+                }
+                AttributeValue::OriginatorId(v) => {
+                    b.extend_from_slice(&encode_originator_id(&IpAddr::from(*v)))
+                }
+                AttributeValue::Clusters(v) => b.extend_from_slice(&encode_clusters(v)),
+                AttributeValue::MpReachNlri(v) => {
+                    // Infer ADD-PATH from presence of path_id in any labeled prefix
+                    let add_path = v
+                        .labeled_prefixes
+                        .as_ref()
+                        .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()));
+                    let encoded = encode_nlri(v, true, add_path)
+                        .map_err(|e| EncodingError::unencodable("MP_REACH_NLRI", e.to_string()))?;
+                    b.extend_from_slice(&encoded);
+                }
+                AttributeValue::MpUnreachNlri(v) => {
+                    // Withdrawals don't use ADD-PATH encoding per RFC 8277
+                    let encoded = encode_nlri(v, false, false).map_err(|e| {
+                        EncodingError::unencodable("MP_UNREACH_NLRI", e.to_string())
+                    })?;
+                    b.extend_from_slice(&encoded);
+                }
+                AttributeValue::LinkState(v) => {
+                    b.extend_from_slice(&encode_link_state_attribute(v)?)
+                }
+                AttributeValue::TunnelEncapsulation(v) => {
+                    b.extend_from_slice(&encode_tunnel_encapsulation_attribute(v)?)
+                }
+                AttributeValue::BfdDiscriminator(v) => {
+                    b.extend_from_slice(&encode_bfd_discriminator(v)?)
+                }
+                AttributeValue::BgpPrefixSid(v) => b.extend_from_slice(&encode_bgp_prefix_sid(v)?),
+                AttributeValue::Bier(v) => b.extend_from_slice(&encode_bier(v)?),
+                AttributeValue::Sfp(v) => b.extend_from_slice(&encode_sfp(v)?),
+                AttributeValue::Development(v) => b.extend_from_slice(v),
+                AttributeValue::Raw(v) => b.extend_from_slice(&v.bytes),
+                AttributeValue::Deprecated(v) => b.extend_from_slice(&v.bytes),
+                AttributeValue::Unknown(v) => b.extend_from_slice(&v.bytes),
+                AttributeValue::Aigp(v) => b.extend_from_slice(&encode_aigp(v)),
+                AttributeValue::AttrSet(_v) => {
+                    return Err(EncodingError::unencodable(
+                        "ATTR_SET",
+                        "encoding not yet implemented",
+                    ));
+                }
             }
-            AttributeValue::NextHop(v) => encode_next_hop(v),
-            AttributeValue::MultiExitDiscriminator(v) => encode_med(*v),
-            AttributeValue::LocalPreference(v) => encode_local_pref(*v),
-            AttributeValue::OnlyToCustomer(v) => encode_only_to_customer(v.into()),
-            AttributeValue::AtomicAggregate => Bytes::default(),
-            AttributeValue::Aggregator { asn, id, is_as4: _ } => {
-                encode_aggregator(asn, &IpAddr::from(*id))
-            }
-            AttributeValue::Communities(v) => encode_regular_communities(v),
-            AttributeValue::ExtendedCommunities(v) => encode_extended_communities(v),
-            AttributeValue::LargeCommunities(v) => encode_large_communities(v),
-            AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => {
-                encode_ipv6_extended_communities(v)
-            }
-            AttributeValue::OriginatorId(v) => encode_originator_id(&IpAddr::from(*v)),
-            AttributeValue::Clusters(v) => encode_clusters(v),
-            AttributeValue::MpReachNlri(v) => {
-                // Infer ADD-PATH from presence of path_id in any labeled prefix
-                let add_path = v
-                    .labeled_prefixes
-                    .as_ref()
-                    .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()));
-                encode_nlri(v, true, add_path).map_err(|e| {
-                    log::warn!("Failed to encode MP_REACH_NLRI: {}", e);
-                    EncodingError::InvalidInput {
-                        field: "MP_REACH_NLRI",
-                        reason: "NLRI encoding failure",
-                    }
-                })?
-            }
-            AttributeValue::MpUnreachNlri(v) => {
-                // Withdrawals don't use ADD-PATH encoding per RFC 8277
-                encode_nlri(v, false, false).map_err(|e| {
-                    log::warn!("Failed to encode MP_UNREACH_NLRI: {}", e);
-                    EncodingError::InvalidInput {
-                        field: "MP_UNREACH_NLRI",
-                        reason: "NLRI encoding failure",
-                    }
-                })?
-            }
-            AttributeValue::LinkState(v) => encode_link_state_attribute(v)?,
-            AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v)?,
-            AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v)?,
-            AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v)?,
-            AttributeValue::Bier(v) => encode_bier(v)?,
-            AttributeValue::Sfp(v) => encode_sfp(v)?,
-            AttributeValue::Development(v) => Bytes::copy_from_slice(v),
-            AttributeValue::Raw(v) => v.bytes.clone(),
-            AttributeValue::Deprecated(v) => v.bytes.clone(),
-            AttributeValue::Unknown(v) => v.bytes.clone(),
-            AttributeValue::Aigp(v) => encode_aigp(v),
-            AttributeValue::AttrSet(_v) => {
-                return Err(EncodingError::InvalidInput {
-                    field: "ATTR_SET",
-                    reason: "encoding not yet implemented",
-                });
-            }
+            Ok(())
         };
 
         match self.is_extended() {
-            false => {
-                let len =
-                    u8::try_from(value_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                        field: "BGP attribute value length (non-extended)",
-                        actual: value_bytes.len(),
-                        max: u8::MAX as usize,
-                    })?;
-                bytes.put_u8(len);
-            }
-            true => {
-                let len =
-                    u16::try_from(value_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                        field: "BGP attribute value length (extended)",
-                        actual: value_bytes.len(),
-                        max: u16::MAX as usize,
-                    })?;
-                bytes.put_u16(len);
-            }
+            false => with_u8_len(
+                buf,
+                "BGP attribute value length (non-extended)",
+                write_value,
+            ),
+            true => with_u16_len(buf, "BGP attribute value length (extended)", write_value),
         }
-        bytes.extend(value_bytes);
-        Ok(bytes.freeze())
     }
 
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
-        self.try_encode(asn_len)
-            .expect("BGP attribute encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(asn_len, &mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
 impl Attributes {
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large.
-    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
+    /// Append the wire representation of all attributes to `buf`.
+    pub fn encode_to(&self, asn_len: AsnLength, buf: &mut BytesMut) -> Result<(), EncodingError> {
         for attr in &self.inner {
-            bytes.extend(attr.try_encode(asn_len)?);
+            attr.encode_to(asn_len, buf)?;
         }
-        Ok(bytes.freeze())
+        Ok(())
     }
 
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
-        self.try_encode(asn_len)
-            .expect("BGP attributes encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(asn_len, &mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -861,7 +860,7 @@ mod tests {
             value => panic!("expected Raw, got {value:?}"),
         }
         assert_eq!(
-            attributes.encode(AsnLength::Bits16),
+            attributes.encode(AsnLength::Bits16).unwrap(),
             Bytes::from_static(&[0x80, 0x16, 0x03, 0xaa, 0xbb, 0xcc])
         );
     }
@@ -882,7 +881,7 @@ mod tests {
             value => panic!("expected Deprecated, got {value:?}"),
         }
         assert_eq!(
-            attributes.encode(AsnLength::Bits16),
+            attributes.encode(AsnLength::Bits16).unwrap(),
             Bytes::from_static(&[0x80, 0x0d, 0x04, 0x01, 0x02, 0x03, 0x04])
         );
     }
@@ -903,7 +902,7 @@ mod tests {
             value => panic!("expected Raw fallback, got {value:?}"),
         }
         assert_eq!(
-            attributes.encode(AsnLength::Bits16),
+            attributes.encode(AsnLength::Bits16).unwrap(),
             Bytes::from_static(&[0x40, 0x03, 0x03, 0x01, 0x02, 0x03])
         );
     }
@@ -932,7 +931,10 @@ mod tests {
                 value => panic!("expected Raw for code {code}, got {value:?}"),
             }
             assert!(attributes.has_attr(AttrType::from(code)), "code {code}");
-            assert_eq!(attributes.encode(AsnLength::Bits16), Bytes::from(wire));
+            assert_eq!(
+                attributes.encode(AsnLength::Bits16).unwrap(),
+                Bytes::from(wire)
+            );
         }
     }
 
@@ -959,7 +961,10 @@ mod tests {
             value => panic!("expected Unknown, got {value:?}"),
         }
         assert!(attributes.has_attr(AttrType::Unknown(0x7f)));
-        assert_eq!(attributes.encode(AsnLength::Bits16), Bytes::from(wire));
+        assert_eq!(
+            attributes.encode(AsnLength::Bits16).unwrap(),
+            Bytes::from(wire)
+        );
     }
 
     #[test]
@@ -993,7 +998,7 @@ mod tests {
                 (_, value) => panic!("unexpected value for {name}: {value:?}"),
             }
             assert_eq!(
-                attributes.encode(AsnLength::Bits16),
+                attributes.encode(AsnLength::Bits16).unwrap(),
                 Bytes::from(wire),
                 "{name}"
             );

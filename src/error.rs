@@ -42,8 +42,9 @@ impl Error for ParserError {}
 ///
 /// These arise when in-memory data structures contain values that are too large
 /// for their wire-format length fields (e.g. an AS_PATH segment with more than
-/// 255 ASes, or an attribute value exceeding 65535 bytes). All such conditions
-/// were previously handled by panicking or silently truncating — see issue #313.
+/// 255 ASes, or an attribute value exceeding 65535 bytes), or values that cannot
+/// be represented on the wire at all. All such conditions were previously
+/// handled by panicking or silently truncating — see issue #313.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum EncodingError {
@@ -58,43 +59,37 @@ pub enum EncodingError {
         actual: usize,
         max: usize,
     },
-    /// Encoding failed for a reason other than field-size overflow — e.g. an
-    /// NLRI that could not be serialized due to internal structure issues, or
-    /// an attribute whose encoding is not yet implemented.
-    InvalidInput {
-        field: &'static str,
-        reason: &'static str,
-    },
+    /// The value cannot be represented in wire format at all — e.g. ATTR_SET
+    /// encoding not implemented, a labeled NLRI with an empty label stack, or
+    /// an OPEN optional parameter of type 255 in non-extended framing.
+    Unencodable { field: &'static str, reason: String },
 }
 
 impl EncodingError {
-    /// Check that a length fits in a `u8` field, returning `ValueTooLarge` if not.
-    pub fn check_u8(field: &'static str, len: usize) -> Result<u8, Self> {
-        u8::try_from(len).map_err(|_| EncodingError::ValueTooLarge {
-            field,
-            actual: len,
-            max: u8::MAX as usize,
-        })
+    /// Construct a [`ValueTooLarge`](EncodingError::ValueTooLarge) error.
+    pub(crate) fn too_large(field: &'static str, actual: usize, max: usize) -> Self {
+        EncodingError::ValueTooLarge { field, actual, max }
     }
 
-    /// Check that a length fits in a `u16` field, returning `ValueTooLarge` if not.
-    pub fn check_u16(field: &'static str, len: usize) -> Result<u16, Self> {
-        u16::try_from(len).map_err(|_| EncodingError::ValueTooLarge {
+    /// Construct an [`Unencodable`](EncodingError::Unencodable) error.
+    pub(crate) fn unencodable(field: &'static str, reason: impl Into<String>) -> Self {
+        EncodingError::Unencodable {
             field,
-            actual: len,
-            max: u16::MAX as usize,
-        })
+            reason: reason.into(),
+        }
     }
 }
 
 impl Display for EncodingError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            EncodingError::ValueTooLarge { field, actual, max } => write!(
-                f,
-                "encoding error: {field} ({actual}) exceeds maximum ({max})"
-            ),
-            EncodingError::InvalidInput { field, reason } => {
+            EncodingError::ValueTooLarge { field, actual, max } => {
+                write!(
+                    f,
+                    "encoding error: {field} ({actual}) exceeds maximum ({max})"
+                )
+            }
+            EncodingError::Unencodable { field, reason } => {
                 write!(f, "encoding error: {field}: {reason}")
             }
         }

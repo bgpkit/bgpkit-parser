@@ -1,3 +1,4 @@
+use crate::encoder::sink::with_u16_len;
 use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
@@ -32,13 +33,10 @@ pub fn encode_sfp(attr: &SfpAttribute) -> Result<Bytes, EncodingError> {
     let mut buf = BytesMut::new();
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        let len = u16::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "SFP TLV value length",
-            actual: tlv.value.len(),
-            max: u16::MAX as usize,
+        with_u16_len(&mut buf, "SFP TLV value length", |b| {
+            b.extend_from_slice(&tlv.value);
+            Ok(())
         })?;
-        buf.put_u16(len);
-        buf.extend_from_slice(&tlv.value);
     }
     Ok(buf.freeze())
 }

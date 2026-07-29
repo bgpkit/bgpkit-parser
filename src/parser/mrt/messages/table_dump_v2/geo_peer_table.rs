@@ -1,5 +1,6 @@
 //! RFC 6397: GEO_PEER_TABLE parsing for MRT TABLE_DUMP_V2 format
 
+use crate::encoder::sink::{check_max, with_u16_len};
 use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
@@ -136,35 +137,28 @@ impl GeoPeerTable {
     ///
     /// let encoded = geo_table.encode();
     /// ```
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        let mut buf = BytesMut::new();
-
+    /// Append the wire representation of this geo peer table to `buf`.
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
         // Encode collector BGP ID (4 bytes)
         buf.put_u32(self.collector_bgp_id.into());
 
-        // Encode view name length and view name
-        let view_name_bytes = self.view_name.as_bytes();
-        let view_name_len =
-            u16::try_from(view_name_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "GEO_PEER_TABLE view name length",
-                actual: view_name_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        buf.put_u16(view_name_len);
-        buf.extend(view_name_bytes);
+        // Encode view name with back-patched length
+        with_u16_len(buf, "GEO_PEER_TABLE view name length", |b| {
+            b.extend_from_slice(self.view_name.as_bytes());
+            Ok(())
+        })?;
 
         // Encode collector coordinates (4 bytes each, 32-bit float)
         buf.put_f32(self.collector_latitude);
         buf.put_f32(self.collector_longitude);
 
         // Encode peer count
-        let peer_count =
-            u16::try_from(self.geo_peers.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "GEO_PEER_TABLE peer count",
-                actual: self.geo_peers.len(),
-                max: u16::MAX as usize,
-            })?;
-        buf.put_u16(peer_count);
+        let peer_count = check_max(
+            "GEO_PEER_TABLE peer count",
+            self.geo_peers.len(),
+            u16::MAX as usize,
+        )?;
+        buf.put_u16(peer_count as u16);
 
         // Encode each peer entry
         for geo_peer in &self.geo_peers {
@@ -200,12 +194,14 @@ impl GeoPeerTable {
             buf.put_f32(geo_peer.peer_longitude);
         }
 
-        Ok(buf.freeze())
+        Ok(())
     }
 
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("GEO_PEER_TABLE encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -361,7 +357,7 @@ mod tests {
         original_table.add_geo_peer(geo_peer2);
 
         // Encode and then parse back
-        let encoded = original_table.encode();
+        let encoded = original_table.encode().unwrap();
         let mut encoded_bytes = encoded;
         let parsed_table = parse_geo_peer_table(&mut encoded_bytes).unwrap();
 
@@ -440,7 +436,7 @@ mod tests {
         geo_table.add_geo_peer(geo_peer2);
 
         // Encode the geo table
-        let encoded = geo_table.encode();
+        let encoded = geo_table.encode().unwrap();
 
         // Create expected bytes manually for comparison
         let mut expected = BytesMut::new();

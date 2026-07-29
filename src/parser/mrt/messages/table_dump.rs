@@ -1,3 +1,4 @@
+use crate::encoder::sink::with_u16_len;
 use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::parse_attributes;
@@ -118,51 +119,44 @@ pub fn parse_table_dump_message(
 }
 
 impl TableDumpMessage {
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
-        bytes.put_u16(self.view_number);
-        bytes.put_u16(self.sequence_number);
+    /// Append the wire representation of this TABLE_DUMP entry to `buf`.
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
+        buf.put_u16(self.view_number);
+        buf.put_u16(self.sequence_number);
         match &self.prefix.prefix {
             IpNet::V4(p) => {
-                bytes.put_u32(p.addr().into());
-                bytes.put_u8(p.prefix_len());
+                buf.put_u32(p.addr().into());
+                buf.put_u8(p.prefix_len());
             }
             IpNet::V6(p) => {
-                bytes.put_u128(p.addr().into());
-                bytes.put_u8(p.prefix_len());
+                buf.put_u128(p.addr().into());
+                buf.put_u8(p.prefix_len());
             }
         }
-        bytes.put_u8(self.status);
-        bytes.put_u32(self.originated_time as u32);
+        buf.put_u8(self.status);
+        buf.put_u32(self.originated_time as u32);
 
         // peer address and peer asn
         match self.peer_ip {
             IpAddr::V4(a) => {
-                bytes.put_u32(a.into());
+                buf.put_u32(a.into());
             }
             IpAddr::V6(a) => {
-                bytes.put_u128(a.into());
+                buf.put_u128(a.into());
             }
         }
-        bytes.put_u16(self.peer_asn.into());
+        buf.put_u16(self.peer_asn.into());
 
-        let attr_bytes = self.attributes.try_encode(AsnLength::Bits16)?;
-
-        let attr_len =
-            u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "TABLE_DUMP attribute length",
-                actual: attr_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        bytes.put_u16(attr_len);
-        bytes.put_slice(&attr_bytes);
-
-        Ok(bytes.freeze())
+        with_u16_len(buf, "TABLE_DUMP attribute length", |b| {
+            self.attributes.encode_to(AsnLength::Bits16, b)
+        })
     }
 
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("TABLE_DUMP encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -219,7 +213,7 @@ mod tests {
             "SEQUENCE_NUMBER mismatch"
         );
         // Add more assertions here as per your actual requirements
-        let encoded = table_dump_message.encode();
+        let encoded = table_dump_message.encode().unwrap();
         assert_eq!(encoded, bytes);
     }
     #[test]
@@ -258,7 +252,7 @@ mod tests {
         // Add more assertions here as per your actual requirements
 
         // test encoding
-        let encoded = table_dump_message.encode();
+        let encoded = table_dump_message.encode().unwrap();
         assert_eq!(encoded, bytes);
     }
 

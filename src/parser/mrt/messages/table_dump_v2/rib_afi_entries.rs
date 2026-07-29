@@ -1,4 +1,5 @@
 use crate::bgp::attributes::parse_attributes;
+use crate::encoder::sink::{check_max, with_u16_len};
 use crate::error::EncodingError;
 use crate::models::{
     Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
@@ -165,63 +166,63 @@ pub fn parse_rib_entry(
 }
 
 impl RibAfiEntries {
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
+    /// Append the wire representation of these RIB entries to `buf`.
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
         let is_add_path = is_add_path_rib_type(self.rib_type);
 
-        bytes.put_u32(self.sequence_number);
-        bytes.extend(self.prefix.encode());
+        buf.put_u32(self.sequence_number);
+        buf.extend_from_slice(&self.prefix.encode());
 
-        let entry_count =
-            u16::try_from(self.rib_entries.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "RIB AFI entry count",
-                actual: self.rib_entries.len(),
-                max: u16::MAX as usize,
-            })?;
-        bytes.put_u16(entry_count);
+        let entry_count = check_max(
+            "RIB AFI entry count",
+            self.rib_entries.len(),
+            u16::MAX as usize,
+        )?;
+        buf.put_u16(entry_count as u16);
 
         for entry in &self.rib_entries {
-            bytes.extend(entry.encode_for_rib_type(is_add_path)?);
+            entry.encode_to_for_rib_type(is_add_path, buf)?;
         }
 
-        Ok(bytes.freeze())
+        Ok(())
     }
 
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("RIB AFI entries encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
 impl RibEntry {
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        self.encode_for_rib_type(self.path_id.is_some())
+    /// Append the wire representation of this RIB entry to `buf`.
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
+        self.encode_to_for_rib_type(self.path_id.is_some(), buf)
     }
 
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("RIB AFI entry encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 
-    fn encode_for_rib_type(&self, include_path_id: bool) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
-        bytes.put_u16(self.peer_index);
-        bytes.put_u32(self.originated_time);
+    fn encode_to_for_rib_type(
+        &self,
+        include_path_id: bool,
+        buf: &mut BytesMut,
+    ) -> Result<(), EncodingError> {
+        buf.put_u16(self.peer_index);
+        buf.put_u32(self.originated_time);
         if include_path_id {
             if let Some(path_id) = self.path_id {
-                bytes.put_u32(path_id);
+                buf.put_u32(path_id);
             }
         }
-        let attr_bytes = self.attributes.try_encode(AsnLength::Bits32)?;
-        let attr_len =
-            u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "RIB AFI entry attribute length",
-                actual: attr_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        bytes.put_u16(attr_len);
-        bytes.extend(attr_bytes);
-        Ok(bytes.freeze())
+        with_u16_len(buf, "RIB AFI entry attribute length", |b| {
+            self.attributes.encode_to(AsnLength::Bits32, b)
+        })
     }
 }
 
@@ -292,7 +293,7 @@ mod tests {
             attributes,
         };
 
-        let mut encoded = rib_entry.encode();
+        let mut encoded = rib_entry.encode().unwrap();
         assert_eq!(encoded.read_u16().unwrap(), 1);
         assert_eq!(encoded.read_u32().unwrap(), 12345);
         assert_eq!(encoded.read_u32().unwrap(), 42);
@@ -319,7 +320,7 @@ mod tests {
             }],
         };
 
-        let encoded = rib.encode();
+        let encoded = rib.encode().unwrap();
         let parsed = parse_rib_afi_entries(&mut encoded.clone(), rib.rib_type).unwrap();
         assert_eq!(parsed.rib_type, rib.rib_type);
         assert_eq!(parsed.sequence_number, rib.sequence_number);
@@ -332,5 +333,74 @@ mod tests {
             parsed.rib_entries[0].attributes.inner,
             rib.rib_entries[0].attributes.inner
         );
+    }
+
+    /// Regression test for the `bytes.extend(Result)` silent-drop bug found in
+    /// review (issue #1): an oversized entry inside RibAfiEntries must surface
+    /// as an `Err` from `encode`, never as a truncated record.
+    #[test]
+    fn test_rib_afi_entries_oversized_entry_errors() {
+        use crate::models::{AttrFlags, AttrRaw, Attribute, AttributeValue, Attributes};
+
+        // 70 Raw attributes × ~1000 bytes = >65535 total attribute bytes
+        let attrs: Vec<Attribute> = (0..70)
+            .map(|_| Attribute {
+                flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
+                value: AttributeValue::Raw(AttrRaw {
+                    code: 200,
+                    bytes: vec![0; 1000].into(),
+                }),
+            })
+            .collect();
+
+        let rib = RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 1,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![RibEntry {
+                peer_index: 1,
+                originated_time: 0,
+                path_id: None,
+                attributes: Attributes::from(attrs),
+            }],
+        };
+
+        let result = rib.encode();
+        assert!(
+            result.is_err(),
+            "oversized entry must return Err, not a truncated record"
+        );
+        match result.unwrap_err() {
+            crate::error::EncodingError::ValueTooLarge { field, .. } => {
+                assert!(field.contains("attribute"), "field: {field}");
+            }
+            other => panic!("expected ValueTooLarge, got {other:?}"),
+        }
+    }
+
+    /// Regression: entry count beyond u16 must error instead of wrapping.
+    #[test]
+    fn test_rib_afi_entries_count_overflow() {
+        use crate::models::{AttributeValue, Attributes, Origin};
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+
+        let rib = RibAfiEntries {
+            rib_type: TableDumpV2Type::RibIpv4Unicast,
+            sequence_number: 1,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            rib_entries: vec![
+                RibEntry {
+                    peer_index: 1,
+                    originated_time: 0,
+                    path_id: None,
+                    attributes,
+                };
+                65536
+            ],
+        };
+
+        assert!(rib.encode().is_err());
     }
 }

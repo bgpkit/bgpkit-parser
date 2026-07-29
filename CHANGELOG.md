@@ -6,16 +6,37 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
+* **Encoding is now fallible and sink-based**: all `encode()` methods now return `Result<Bytes, EncodingError>` instead of `Bytes`, and most types also expose an `encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError>` sink method for zero-copy composition. Arbitrary input data (e.g. a round-tripped OPEN with an oversized raw capability, an AS_PATH segment with >255 ASes, or a RIB entry with >65535 bytes of attributes) previously crashed the process via `.expect()` or silently truncated length fields with `as u8`/`as u16` casts; it now surfaces as an `Err`. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+
+  Migration guide:
+
+  | Before | After |
+  | --- | --- |
+  | `msg.encode()` → `Bytes` | `msg.encode()` → `Result<Bytes, EncodingError>` |
+  | `msg.encode(asn_len)` → `Bytes` | `msg.encode(asn_len)` → `Result<Bytes, EncodingError>` |
+  | `mrt_message.encode(sub_type)` → `Bytes` | `mrt_message.encode(sub_type)` → `Result<Bytes, EncodingError>` |
+  | `encoder.export_bytes()` → `Bytes` | `encoder.export_bytes()` → `Result<Bytes, EncodingError>` |
+  | `encoder.process_elem(&elem)` → `()` | `encoder.process_elem(&elem)` → `Result<(), EncodingError>` |
+  | `table.add_peer(peer)` → `u16` | `table.add_peer(peer)` → `Result<u16, EncodingError>` |
+
+  Callers that want the old semantics write `.unwrap()` — the panic is visibly theirs.
+
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
+* **`Tlv::length()` and `SubTlv::length()` removed**: these were saturating casts that duplicated what the encode paths now check properly. Use `value.len()` and the fallible encoders.
+* **`PeerIndexTable::add_peer` returns `Result<u16, EncodingError>`**: errors on the 65537th distinct peer instead of silently aliasing it to id 65535 and corrupting the table.
 
 ### Added
 
-* **Fallible encoding API (`try_encode`)**: Added `EncodingError` type and `try_encode()` methods to `BgpOpenMessage`, `BgpUpdateMessage`, `BgpMessage`, `Attribute`, and `Attributes`. These return `Result<Bytes, EncodingError>` instead of panicking or silently truncating when a value is too large for its wire-format length field. The existing infallible `encode()` methods are retained as backwards-compatible wrappers that panic on encoding failure. `encode_as_path` now also returns `Result`. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+* **`EncodingError` type**: `ValueTooLarge` for values exceeding their wire-format field capacity, and `Unencodable` for values that cannot be represented on the wire at all (e.g. `ATTR_SET` encoding not yet implemented, OPEN `param_type == 255` in non-extended framing, NLRI with an empty label stack). Exported as `bgpkit_parser::EncodingError` and `bgpkit_parser::error::EncodingError`. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+* **Sink-style encoding helpers**: internal `with_u8_len`/`with_u16_len` back-patching helpers centralize all length-prefix writes, replacing 24 hand-rolled `try_from(..).map_err(..)` copies. Buffers are rolled back to their pre-call state if encoding fails.
 
 ### Fixed
 
-* **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
-* **Encoding crash and silent truncation**: Replaced `.expect()` panics and unchecked `as u8`/`as u16` truncation casts throughout the encoding layer with checked conversions. Previously, arbitrary input data (e.g. a round-tripped OPEN with an oversized raw capability, or an AS_PATH segment with >255 ASes) could crash the process or produce silently corrupt wire output. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+* **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required (documented auto-upgrade behavior).
+* **Encoding crash and silent truncation**: replaced `.expect()` panics and unchecked `as u8`/`as u16` casts throughout the encoding layer with checked conversions. ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313))
+* **MP_REACH/MP_UNREACH NLRI encoding failures** were silently replaced with empty attribute bytes; they now return `EncodingError::Unencodable`.
+* **`ATTR_SET` encoding** returned `Ok` with empty bytes; it now returns `EncodingError::Unencodable` until the encoding is implemented.
+* **FlowSpec NLRI length bound**: the check used `u16::MAX`, but the wire length field is 12-bit per RFC 8955/8956 — now bounded at 4095 (0x0FFF).
 
 ## v0.19.0 - 2026-07-28
 

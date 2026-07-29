@@ -361,7 +361,7 @@ bgpkit_parser::BgpkitParser::new(
     });
 
 let mut mrt_writer = oneio::get_writer("as3356_mrt.gz").unwrap();
-mrt_writer.write_all(updates_encoder.export_bytes().as_ref()).unwrap();
+mrt_writer.write_all(updates_encoder.export_bytes().unwrap().as_ref()).unwrap();
 drop(mrt_writer);
 ```
 

@@ -1,3 +1,4 @@
+use crate::encoder::sink::{check_max, with_u16_len};
 use crate::error::EncodingError;
 use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
 use crate::parser::ReadUtils;
@@ -68,16 +69,22 @@ pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, Parser
 impl PeerIndexTable {
     /// Add peer to peer index table and return peer id.
     ///
-    /// Returns `None` if the peer table is full (>65535 peers), which would
-    /// overflow the u16 peer index.
-    pub fn add_peer(&mut self, peer: Peer) -> Option<u16> {
+    /// Errors with [`EncodingError::ValueTooLarge`] when the table already has
+    /// 65536 peers — the u16 peer index cannot address a 65537th.
+    pub fn add_peer(&mut self, peer: Peer) -> Result<u16, EncodingError> {
         match self.peer_ip_id_map.get(&peer.peer_ip) {
-            Some(id) => Some(*id),
+            Some(id) => Ok(*id),
             None => {
-                let peer_id = u16::try_from(self.peer_ip_id_map.len()).ok()?;
+                let peer_id = u16::try_from(self.peer_ip_id_map.len()).map_err(|_| {
+                    EncodingError::too_large(
+                        "PeerIndexTable peer count",
+                        self.peer_ip_id_map.len() + 1,
+                        u16::MAX as usize + 1,
+                    )
+                })?;
                 self.peer_ip_id_map.insert(peer.peer_ip, peer_id);
                 self.id_peer_map.insert(peer_id, peer);
-                Some(peer_id)
+                Ok(peer_id)
             }
         }
     }
@@ -142,34 +149,24 @@ impl PeerIndexTable {
     ///
     /// let encoded = data.encode();
     /// ```
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large.
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        let mut buf = BytesMut::new();
-
+    /// Append the wire representation of this peer index table to `buf`.
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
         // Encode collector_bgp_id
         buf.put_u32(self.collector_bgp_id.into());
 
-        // Encode view_name_length
-        let view_name_bytes = self.view_name.as_bytes();
-        let view_name_len =
-            u16::try_from(view_name_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "PeerIndexTable view name length",
-                actual: view_name_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        buf.put_u16(view_name_len);
-
-        // Encode view_name
-        buf.extend(view_name_bytes);
+        // Encode view_name with back-patched length
+        with_u16_len(buf, "PeerIndexTable view name length", |b| {
+            b.extend_from_slice(self.view_name.as_bytes());
+            Ok(())
+        })?;
 
         // Encode peer_count
-        let peer_count =
-            u16::try_from(self.id_peer_map.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "PeerIndexTable peer count",
-                actual: self.id_peer_map.len(),
-                max: u16::MAX as usize,
-            })?;
-        buf.put_u16(peer_count);
+        let peer_count = check_max(
+            "PeerIndexTable peer count",
+            self.id_peer_map.len(),
+            u16::MAX as usize,
+        )?;
+        buf.put_u16(peer_count as u16);
 
         // Encode peers
         let mut peer_ids: Vec<_> = self.id_peer_map.keys().collect();
@@ -199,13 +196,14 @@ impl PeerIndexTable {
             };
         }
 
-        // Return Bytes
-        Ok(buf.freeze())
+        Ok(())
     }
 
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("PeerIndexTable encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -224,20 +222,62 @@ mod tests {
             peer_ip_id_map: Default::default(),
         };
 
-        index_table.add_peer(Peer::new(
-            Ipv4Addr::from(1234),
-            IpAddr::from_str("192.168.1.1").unwrap(),
-            Asn::new_32bit(1234),
-        ));
-        index_table.add_peer(Peer::new(
-            Ipv4Addr::from(12345),
-            IpAddr::from_str("192.168.1.2").unwrap(),
-            Asn::new_32bit(12345),
-        ));
+        index_table
+            .add_peer(Peer::new(
+                Ipv4Addr::from(1234),
+                IpAddr::from_str("192.168.1.1").unwrap(),
+                Asn::new_32bit(1234),
+            ))
+            .unwrap();
+        index_table
+            .add_peer(Peer::new(
+                Ipv4Addr::from(12345),
+                IpAddr::from_str("192.168.1.2").unwrap(),
+                Asn::new_32bit(12345),
+            ))
+            .unwrap();
 
-        let encoded = index_table.encode();
+        let encoded = index_table.encode().unwrap();
         let parsed_index_table = parse_peer_index_table(&mut encoded.clone()).unwrap();
         assert_eq!(index_table, parsed_index_table);
+    }
+
+    #[test]
+    fn test_add_peer_overflow_at_65537() {
+        // 65536 peers fit (ids 0..=65535); the 65537th must error, and the
+        // table must remain uncorrupted afterwards.
+        let mut table = PeerIndexTable::default();
+        for i in 0..65536u32 {
+            let peer = Peer::new(
+                Ipv4Addr::from(1),
+                IpAddr::V4(Ipv4Addr::from(i)),
+                Asn::new_32bit(i),
+            );
+            let id = table.add_peer(peer).unwrap();
+            assert_eq!(id as u32, i);
+        }
+        let overflow_peer = Peer::new(
+            Ipv4Addr::from(1),
+            IpAddr::V4(Ipv4Addr::from(65536)),
+            Asn::new_32bit(65536),
+        );
+        let err = table.add_peer(overflow_peer).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::EncodingError::ValueTooLarge { .. }
+        ));
+        // Table uncorrupted: the original peer at id 65535 still resolves correctly
+        let p65535 = table.get_peer_by_id(&65535).unwrap();
+        assert_eq!(p65535.peer_asn.to_u32(), 65535);
+        // Adding the same overflow peer again still errors (no partial insert)
+        assert!(table.add_peer(overflow_peer).is_err());
+        // Re-adding an existing peer still returns its id
+        let existing = Peer::new(
+            Ipv4Addr::from(1),
+            IpAddr::V4(Ipv4Addr::from(42)),
+            Asn::new_32bit(42),
+        );
+        assert_eq!(table.add_peer(existing).unwrap(), 42);
     }
 
     #[test]

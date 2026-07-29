@@ -183,16 +183,6 @@ impl Tlv {
     pub fn new(tlv_type: u16, value: Vec<u8>) -> Self {
         Self { tlv_type, value }
     }
-
-    /// Returns the value length as `u16`.
-    ///
-    /// **Note:** This is a saturating cast kept for backwards compatibility.
-    /// The encode path (`encode_link_state_attribute`) performs its own
-    /// `u16::try_from` checked conversion and returns `EncodingError` on overflow.
-    #[deprecated(note = "Use u16::try_from(value.len()) in encode paths for checked conversion")]
-    pub fn length(&self) -> u16 {
-        self.value.len().min(u16::MAX as usize) as u16
-    }
 }
 
 /// Node Descriptor TLVs
@@ -615,9 +605,7 @@ mod tests {
         let tlv = Tlv::new(1024, vec![0x01, 0x02, 0x03]);
         assert_eq!(tlv.tlv_type, 1024);
         assert_eq!(tlv.value, vec![0x01, 0x02, 0x03]);
-        #[allow(deprecated)]
-        let l = tlv.length();
-        assert_eq!(l, 3);
+        assert_eq!(tlv.value.len(), 3);
     }
 
     #[test]

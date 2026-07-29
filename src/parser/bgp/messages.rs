@@ -3,6 +3,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 
+use crate::encoder::sink::{check_max, with_u16_len, with_u8_len};
 use crate::error::{BgpValidationWarning, EncodingError, ParserError};
 use crate::models::capabilities::{
     AddPathCapability, BgpCapabilityType, BgpExtendedMessageCapability, BgpRoleCapability,
@@ -174,12 +175,18 @@ pub fn parse_bgp_notification_message(
 }
 
 impl BgpNotificationMessage {
-    pub fn encode(&self) -> Bytes {
-        let mut buf = BytesMut::new();
+    /// Notification messages are fixed-shape and cannot fail to encode.
+    pub fn encode_to(&self, buf: &mut BytesMut) {
         let (code, subcode) = self.error.get_codes();
         buf.put_u8(code);
         buf.put_u8(subcode);
-        buf.put_slice(&self.data);
+        buf.extend_from_slice(&self.data);
+    }
+
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf);
         buf.freeze()
     }
 }
@@ -382,80 +389,81 @@ pub fn parse_bgp_open_message(input: &mut Bytes) -> Result<BgpOpenMessage, Parse
     })
 }
 
-fn encode_bgp_open_param_value(param: &OptParam) -> Result<Bytes, EncodingError> {
-    let mut buf = BytesMut::new();
+fn encode_bgp_open_param_value_to(
+    param: &OptParam,
+    buf: &mut BytesMut,
+) -> Result<(), EncodingError> {
     match &param.param_value {
         ParamValue::Capacities(capacities) => {
             for cap in capacities {
                 buf.put_u8(cap.ty.into());
-                let encoded_value = match &cap.value {
-                    CapabilityValue::MultiprotocolExtensions(mp) => mp.encode(),
-                    CapabilityValue::RouteRefresh(rr) => rr.encode(),
-                    CapabilityValue::ExtendedNextHop(enh) => enh.encode(),
-                    CapabilityValue::GracefulRestart(gr) => gr.encode(),
-                    CapabilityValue::FourOctetAs(foa) => foa.encode(),
-                    CapabilityValue::AddPath(ap) => ap.encode(),
-                    CapabilityValue::BgpRole(br) => br.encode(),
-                    CapabilityValue::BgpExtendedMessage(bem) => bem.encode(),
-                    CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
-                };
-                let capability_len = u8::try_from(encoded_value.len()).map_err(|_| {
-                    EncodingError::ValueTooLarge {
-                        field: "BGP capability value length",
-                        actual: encoded_value.len(),
-                        max: u8::MAX as usize,
-                    }
+                with_u8_len(buf, "BGP capability value length", |b| {
+                    let encoded_value = match &cap.value {
+                        CapabilityValue::MultiprotocolExtensions(mp) => mp.encode(),
+                        CapabilityValue::RouteRefresh(rr) => rr.encode(),
+                        CapabilityValue::ExtendedNextHop(enh) => enh.encode(),
+                        CapabilityValue::GracefulRestart(gr) => gr.encode(),
+                        CapabilityValue::FourOctetAs(foa) => foa.encode(),
+                        CapabilityValue::AddPath(ap) => ap.encode(),
+                        CapabilityValue::BgpRole(br) => br.encode(),
+                        CapabilityValue::BgpExtendedMessage(bem) => bem.encode(),
+                        CapabilityValue::Raw(raw) => Bytes::from(raw.clone()),
+                    };
+                    b.extend_from_slice(&encoded_value);
+                    Ok(())
                 })?;
-                buf.put_u8(capability_len);
-                buf.put_slice(&encoded_value);
             }
         }
-        ParamValue::Raw(bytes) => buf.put_slice(bytes),
+        ParamValue::Raw(bytes) => buf.extend_from_slice(bytes),
     }
-    Ok(buf.freeze())
+    Ok(())
 }
 
 impl BgpOpenMessage {
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large
-    /// for its wire-format field instead of panicking or silently truncating.
-    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
-        let mut encoded_params: Vec<(u8, Bytes)> = Vec::with_capacity(self.opt_params.len());
+    /// Append the wire representation of this OPEN message to `buf`.
+    ///
+    /// If `extended_length` is false but the optional parameters do not fit in
+    /// the single-octet aggregate length field, the encoder automatically
+    /// upgrades to RFC 9072 extended framing (documented behavior). A
+    /// non-extended OPEN with `param_type == 255` cannot be expressed
+    /// unambiguously and returns [`EncodingError::Unencodable`].
+    pub fn encode_to(&self, buf: &mut BytesMut) -> Result<(), EncodingError> {
         for param in &self.opt_params {
-            let param_type = param.param_type;
             // RFC 9072: param_type 255 in the first position is the extended-length
             // marker. A non-extended OPEN with a real parameter of type 255 would be
             // ambiguous on the wire — the parser would misread it as extended framing.
-            if param_type == 255 && !self.extended_length {
-                return Err(EncodingError::InvalidInput {
-                    field: "BGP OPEN optional parameter type 255",
-                    reason:
-                        "non-extended OPEN cannot use parameter type 255 (reserved by RFC 9072)",
-                });
+            if param.param_type == 255 && !self.extended_length {
+                return Err(EncodingError::unencodable(
+                    "BGP OPEN optional parameter type 255",
+                    "non-extended OPEN cannot use parameter type 255 (reserved by RFC 9072)",
+                ));
             }
-            encoded_params.push((param_type, encode_bgp_open_param_value(param)?));
         }
 
-        let values_len: usize = encoded_params.iter().map(|(_, value)| value.len()).sum();
-        // Non-extended framing spends 2 header octets (type + 1-octet length) per
-        // parameter; if that would overflow the single-octet aggregate length field
-        // the caller must explicitly opt into RFC 9072 extended framing.
-        let non_extended_params_len = 2 * encoded_params.len() + values_len;
-        if !self.extended_length && non_extended_params_len > u8::MAX as usize {
-            return Err(EncodingError::ValueTooLarge {
-                field: "BGP OPEN optional parameters total length",
-                actual: non_extended_params_len,
-                max: u8::MAX as usize,
-            });
+        // Measure the params section to decide framing. We encode each param
+        // twice only on the (rare) extended path; for the common non-extended
+        // path we compute sizes from the values without re-encoding by
+        // pre-checking the aggregate against u8::MAX using a scratch pass.
+        //
+        // Compute values_len cheaply: encode params into buf after the header
+        // and back-patch both the aggregate and per-param lengths depending on
+        // the framing we end up needing. To keep one pass, we first encode all
+        // params into a scratch buffer to learn their sizes.
+        let mut scratch = BytesMut::new();
+        let mut per_param_value_lens = Vec::with_capacity(self.opt_params.len());
+        for param in &self.opt_params {
+            let start = scratch.len();
+            encode_bgp_open_param_value_to(param, &mut scratch)?;
+            per_param_value_lens.push(scratch.len() - start);
         }
-        let use_extended_length = self.extended_length;
+        let values_len = scratch.len();
+
+        let non_extended_params_len = 2 * self.opt_params.len() + values_len;
+        let use_extended_length =
+            self.extended_length || non_extended_params_len > u8::MAX as usize;
         let per_param_header = if use_extended_length { 3 } else { 2 };
-        let encoded_params_len = per_param_header * encoded_params.len() + values_len;
+        let encoded_params_len = per_param_header * self.opt_params.len() + values_len;
 
-        let mut buf = BytesMut::with_capacity(
-            size_of::<RawBgpOpenHeader>()
-                + encoded_params_len
-                + if use_extended_length { 3 } else { 0 },
-        );
         let raw_header = RawBgpOpenHeader {
             version: self.version,
             asn: U16::new(self.asn.into()),
@@ -464,8 +472,8 @@ impl BgpOpenMessage {
             opt_params_len: if use_extended_length {
                 u8::MAX
             } else {
-                // GUARANTEED by use_extended_length logic: non_extended_params_len <= u8::MAX
-                // and encoded_params_len == non_extended_params_len when not extended.
+                // Guaranteed: non_extended_params_len <= u8::MAX on this path,
+                // and encoded_params_len == non_extended_params_len here.
                 encoded_params_len as u8
             },
         };
@@ -474,41 +482,38 @@ impl BgpOpenMessage {
         if use_extended_length {
             // RFC 9072: type 255 signals a two-octet aggregate length and
             // two-octet lengths for each optional parameter.
-            let agg_len =
-                u16::try_from(encoded_params_len).map_err(|_| EncodingError::ValueTooLarge {
-                    field: "BGP OPEN extended optional parameters total length",
-                    actual: encoded_params_len,
-                    max: u16::MAX as usize,
-                })?;
+            check_max(
+                "BGP OPEN extended optional parameters total length",
+                encoded_params_len,
+                u16::MAX as usize,
+            )?;
             buf.put_u8(u8::MAX);
-            buf.put_u16(agg_len);
+            buf.put_u16(encoded_params_len as u16);
         }
 
-        for (param_type, value) in encoded_params {
-            buf.put_u8(param_type);
+        let mut scratch = scratch.freeze();
+        for (param, value_len) in self.opt_params.iter().zip(per_param_value_lens) {
+            buf.put_u8(param.param_type);
+            let value = scratch.split_to(value_len);
             if use_extended_length {
-                // Guaranteed by the aggregate check above: encoded_params_len fits u16,
-                // and value.len() <= encoded_params_len, so this always fits.
-                debug_assert!(value.len() <= u16::MAX as usize);
-                buf.put_u16(value.len() as u16);
+                // Guaranteed by the aggregate check above.
+                debug_assert!(value_len <= u16::MAX as usize);
+                buf.put_u16(value_len as u16);
             } else {
-                // Fits in a u8: use_extended_length is set above whenever the
-                // non-extended framing (2 + value.len() per param) would exceed u8::MAX.
-                debug_assert!(value.len() <= u8::MAX as usize);
-                buf.put_u8(value.len() as u8);
+                // Guaranteed by the framing decision above.
+                debug_assert!(value_len <= u8::MAX as usize);
+                buf.put_u8(value_len as u8);
             }
-            buf.put_slice(&value);
+            buf.extend_from_slice(&value);
         }
-        Ok(buf.freeze())
+        Ok(())
     }
 
-    /// Infallible encoding wrapper.
-    ///
-    /// Panics if encoding fails (e.g. oversized capability values). For
-    /// untrusted input use [`BgpOpenMessage::try_encode`] instead.
-    pub fn encode(&self) -> Bytes {
-        self.try_encode()
-            .expect("BGP OPEN encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -622,39 +627,29 @@ pub fn parse_bgp_update_message(
 }
 
 impl BgpUpdateMessage {
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large
-    /// for its wire-format field instead of silently truncating.
-    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
-
+    /// Append the wire representation of this UPDATE message to `buf`.
+    pub fn encode_to(&self, asn_len: AsnLength, buf: &mut BytesMut) -> Result<(), EncodingError> {
         // withdrawn prefixes
-        let withdrawn_bytes = encode_nlri_prefixes(&self.withdrawn_prefixes);
-        let w_len =
-            u16::try_from(withdrawn_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "BGP UPDATE withdrawn prefixes length",
-                actual: withdrawn_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        bytes.put_u16(w_len);
-        bytes.put_slice(&withdrawn_bytes);
+        with_u16_len(buf, "BGP UPDATE withdrawn prefixes length", |b| {
+            b.extend_from_slice(&encode_nlri_prefixes(&self.withdrawn_prefixes));
+            Ok(())
+        })?;
 
         // attributes
-        let attr_bytes = self.attributes.try_encode(asn_len)?;
-        let a_len = u16::try_from(attr_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "BGP UPDATE path attributes length",
-            actual: attr_bytes.len(),
-            max: u16::MAX as usize,
+        with_u16_len(buf, "BGP UPDATE path attributes length", |b| {
+            self.attributes.encode_to(asn_len, b)
         })?;
-        bytes.put_u16(a_len);
-        bytes.put_slice(&attr_bytes);
 
-        bytes.extend(encode_nlri_prefixes(&self.announced_prefixes));
-        Ok(bytes.freeze())
+        // announced prefixes (no length prefix — runs to end of message)
+        buf.extend_from_slice(&encode_nlri_prefixes(&self.announced_prefixes));
+        Ok(())
     }
 
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
-        self.try_encode(asn_len)
-            .expect("BGP UPDATE encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(asn_len, &mut buf)?;
+        Ok(buf.freeze())
     }
 
     /// Check if this is an end-of-rib message.
@@ -704,36 +699,59 @@ impl BgpMessage {
     /// BGP marker value: 16 bytes of 0xFF (RFC 4271)
     const MARKER: [u8; 16] = [0xFF; 16];
 
-    /// Fallible encoding: returns [`EncodingError`] when a value is too large
-    /// for its wire-format field.
-    pub fn try_encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
-        let mut bytes = BytesMut::new();
-        // RFC 4271: Marker is 16 bytes of 0xFF
-        bytes.put_slice(&Self::MARKER);
+    /// Append the wire representation of this BGP message to `buf`.
+    pub fn encode_to(&self, asn_len: AsnLength, buf: &mut BytesMut) -> Result<(), EncodingError> {
+        // RFC 4271: Marker is 16 bytes of 0xFF, then a back-patched total
+        // length covering marker + length field + type + body.
+        let at = buf.len();
+        buf.put_slice(&Self::MARKER);
+        buf.put_u16(0); // total-length placeholder
+        match self {
+            BgpMessage::Open(msg) => {
+                buf.put_u8(BgpMessageType::OPEN as u8);
+                if let Err(e) = msg.encode_to(buf) {
+                    buf.truncate(at);
+                    return Err(e);
+                }
+            }
+            BgpMessage::Update(msg) => {
+                buf.put_u8(BgpMessageType::UPDATE as u8);
+                if let Err(e) = msg.encode_to(asn_len, buf) {
+                    buf.truncate(at);
+                    return Err(e);
+                }
+            }
+            BgpMessage::Notification(msg) => {
+                buf.put_u8(BgpMessageType::NOTIFICATION as u8);
+                let (code, subcode) = msg.error.get_codes();
+                buf.put_u8(code);
+                buf.put_u8(subcode);
+                buf.extend_from_slice(&msg.data);
+            }
+            BgpMessage::KeepAlive => {
+                buf.put_u8(BgpMessageType::KEEPALIVE as u8);
+            }
+        }
 
-        let (msg_type, msg_bytes) = match self {
-            BgpMessage::Open(msg) => (BgpMessageType::OPEN, msg.try_encode()?),
-            BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.try_encode(asn_len)?),
-            BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
-            BgpMessage::KeepAlive => (BgpMessageType::KEEPALIVE, Bytes::new()),
+        let total = buf.len() - at;
+        let Ok(total) = u16::try_from(total) else {
+            let actual = buf.len() - at;
+            buf.truncate(at);
+            return Err(EncodingError::too_large(
+                "BGP message total length",
+                actual,
+                u16::MAX as usize,
+            ));
         };
-
-        // msg total bytes length = msg bytes + 16 bytes marker + 2 bytes length + 1 byte type
-        let total = msg_bytes.len() + 16 + 2 + 1;
-        let total_u16 = u16::try_from(total).map_err(|_| EncodingError::ValueTooLarge {
-            field: "BGP message total length",
-            actual: total,
-            max: u16::MAX as usize,
-        })?;
-        bytes.put_u16(total_u16);
-        bytes.put_u8(msg_type as u8);
-        bytes.put_slice(&msg_bytes);
-        Ok(bytes.freeze())
+        buf[at + 16..at + 18].copy_from_slice(&total.to_be_bytes());
+        Ok(())
     }
 
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
-        self.try_encode(asn_len)
-            .expect("BGP message encoding failed; use try_encode() for fallible handling")
+    /// Convenience: encode into a fresh buffer.
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
+        let mut buf = BytesMut::new();
+        self.encode_to(asn_len, &mut buf)?;
+        Ok(buf.freeze())
     }
 }
 
@@ -958,7 +976,7 @@ mod tests {
     fn test_bgp_marker_encoding_rfc4271() {
         // Test that BgpMessage::encode produces correct RFC 4271 marker (all 0xFF)
         let msg = BgpMessage::KeepAlive;
-        let encoded = msg.encode(AsnLength::Bits16);
+        let encoded = msg.encode(AsnLength::Bits16).unwrap();
 
         // First 16 bytes should be all 0xFF
         assert_eq!(
@@ -1089,7 +1107,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         };
-        let bytes = msg.encode();
+        let bytes = msg.encode().unwrap();
         assert_eq!(
             bytes,
             Bytes::from_static(&[
@@ -1147,7 +1165,7 @@ mod tests {
                 parse_bgp_message(&mut input, false, &AsnLength::Bits16).unwrap_or_else(|error| {
                     panic!("failed to parse {name}: {error}");
                 });
-            let encoded = parsed.encode(AsnLength::Bits16);
+            let encoded = parsed.encode(AsnLength::Bits16).unwrap();
 
             assert_eq!(encoded, wire, "{name}");
         }
@@ -1167,12 +1185,12 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         assert_eq!(encoded[9], 5);
         assert_eq!(&encoded[10..], &[254, 3, 0xAA, 0xBB, 0xCC]);
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
-        assert_eq!(parsed.encode(), encoded);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
@@ -1202,12 +1220,9 @@ mod tests {
             }],
         };
 
-        // try_encode returns Err instead of panicking
-        let result = msg.try_encode();
-        assert!(
-            result.is_err(),
-            "try_encode should reject oversized capability"
-        );
+        // encode returns Err instead of panicking
+        let result = msg.encode();
+        assert!(result.is_err(), "encode should reject oversized capability");
         match result.unwrap_err() {
             crate::error::EncodingError::ValueTooLarge { field, actual, max } => {
                 assert!(field.contains("capability value length"), "field: {field}");
@@ -1216,15 +1231,6 @@ mod tests {
             }
             other => panic!("expected ValueTooLarge, got {other:?}"),
         }
-
-        // encode() (infallible wrapper) panics with a helpful message
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            msg.encode();
-        }));
-        assert!(
-            result.is_err(),
-            "encode() should panic on oversized capability"
-        );
     }
 
     #[test]
@@ -1241,7 +1247,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         assert_eq!(
             &encoded[9..],
@@ -1249,13 +1255,13 @@ mod tests {
         );
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
         assert!(parsed.extended_length);
-        assert_eq!(parsed.encode(), encoded);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
-    fn test_bgp_open_non_extended_rejects_oversized_params() {
-        // A non-extended OPEN with params >255 bytes must return Err instead of
-        // silently switching to RFC 9072 extended format (finding #8 from review).
+    fn test_bgp_open_automatically_uses_extended_parameter_encoding() {
+        // Documented behavior: a non-extended OPEN whose params exceed 255 bytes
+        // is automatically upgraded to RFC 9072 extended framing.
         let msg = BgpOpenMessage {
             version: 4,
             asn: Asn::new_16bit(64512),
@@ -1268,7 +1274,13 @@ mod tests {
             }],
         };
 
-        assert!(msg.try_encode().is_err());
+        let encoded = msg.encode().unwrap();
+
+        assert_eq!(encoded.len(), 272);
+        assert_eq!(&encoded[9..16], &[0xFF, 0xFF, 0x01, 0x03, 254, 0x01, 0x00]);
+        let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
+        assert!(parsed.extended_length);
+        assert_eq!(parsed.encode().unwrap(), encoded);
     }
 
     #[test]
@@ -1281,17 +1293,17 @@ mod tests {
             value: AttributeValue::AsPath { path, is_as4: true },
         };
 
-        let result = attr.try_encode(AsnLength::Bits32);
+        let result = attr.encode(AsnLength::Bits32);
         assert!(
             result.is_err(),
-            "try_encode should reject AS_PATH with >255 ASes"
+            "encode should reject AS_PATH with >255 ASes"
         );
     }
 
     #[test]
     fn test_fallible_encoding_open_raw_capability_oversize() {
         // A CapabilityValue::Raw with >255 bytes should fail gracefully via
-        // try_encode, not panic.
+        // fallible encode, not panic.
         let msg = BgpOpenMessage {
             version: 4,
             asn: Asn::new_16bit(64512),
@@ -1307,7 +1319,7 @@ mod tests {
             }],
         };
 
-        assert!(msg.try_encode().is_err());
+        assert!(msg.encode().is_err());
     }
 
     #[test]
@@ -1325,10 +1337,10 @@ mod tests {
             }],
         };
 
-        let result = msg.try_encode();
+        let result = msg.encode();
         assert!(
             result.is_err(),
-            "try_encode should reject oversized extended param"
+            "encode should reject oversized extended param"
         );
     }
 
@@ -1359,10 +1371,10 @@ mod tests {
             announced_prefixes: vec![],
         };
 
-        let result = msg.try_encode(AsnLength::Bits32);
+        let result = msg.encode(AsnLength::Bits32);
         assert!(
             result.is_err(),
-            "try_encode should reject oversized UPDATE attributes"
+            "encode should reject oversized UPDATE attributes"
         );
     }
 
@@ -1372,7 +1384,7 @@ mod tests {
             error: BgpError::MessageHeaderError(MessageHeaderError::BAD_MESSAGE_LENGTH),
             data: vec![0x00, 0x00],
         });
-        let bytes = bgp_message.encode(AsnLength::Bits16);
+        let bytes = bgp_message.encode(AsnLength::Bits16).unwrap();
         // RFC 4271: Marker is 16 bytes of 0xFF
         assert_eq!(
             bytes,
@@ -1627,7 +1639,7 @@ mod tests {
         use crate::models::capabilities::BgpExtendedMessageCapability;
 
         // Test that the encoding path for BgpExtendedMessage capability is covered
-        // This specifically tests the line: CapabilityValue::BgpExtendedMessage(bem) => bem.encode()
+        // This specifically tests the line: CapabilityValue::BgpExtendedMessage(bem) => bem.encode().unwrap()
         let capability_value =
             CapabilityValue::BgpExtendedMessage(BgpExtendedMessageCapability::new());
         let capability = Capability {
@@ -1650,7 +1662,7 @@ mod tests {
         };
 
         // This will exercise the encoding path we need to test
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
         assert!(!encoded.is_empty());
 
         // Verify we can parse it back (exercises the parsing path too)
@@ -1723,7 +1735,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse the encoded message back and verify it matches
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
@@ -1781,7 +1793,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse the encoded message back and verify it matches
         let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
@@ -1846,7 +1858,7 @@ mod tests {
         };
 
         // Encode the message
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
 
         // Parse it back
         let mut encoded_bytes = encoded.clone();
@@ -1927,7 +1939,7 @@ mod tests {
         };
 
         // Encode and parse back
-        let encoded = msg.encode();
+        let encoded = msg.encode().unwrap();
         let mut encoded_bytes = encoded.clone();
         let parsed = parse_bgp_open_message(&mut encoded_bytes).unwrap();
 
@@ -1976,7 +1988,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::TunnelEncapsulation(encap),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -1998,7 +2010,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::TunnelEncapsulation(encap),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2023,7 +2035,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::TunnelEncapsulation(encap),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2036,7 +2048,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::LinkState(ls),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
 
         let mut ls2 = LinkStateAttribute::new();
         ls2.add_unknown_attribute(crate::models::linkstate::Tlv::new(1, vec![0; 70000]));
@@ -2044,7 +2056,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::LinkState(ls2),
         };
-        assert!(attr2.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr2.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2063,7 +2075,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::BfdDiscriminator(attr_val),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2080,7 +2092,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::BgpPrefixSid(attr_val),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2097,7 +2109,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::Bier(attr_val),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2114,7 +2126,7 @@ mod tests {
             flag: AttrFlags::OPTIONAL | AttrFlags::PARTIAL,
             value: AttributeValue::Sfp(attr_val),
         };
-        assert!(attr.try_encode(AsnLength::Bits32).is_err());
+        assert!(attr.encode(AsnLength::Bits32).is_err());
     }
 
     #[test]
@@ -2145,7 +2157,7 @@ mod tests {
                 attr_mask: [0; 4],
             },
         };
-        assert!(msg.try_encode().is_err());
+        assert!(msg.encode().is_err());
     }
 
     #[test]
@@ -2172,7 +2184,7 @@ mod tests {
                 attr_mask: [0; 4],
             },
         };
-        assert!(entry.try_encode().is_err());
+        assert!(entry.encode().is_err());
     }
 
     #[test]
@@ -2185,7 +2197,7 @@ mod tests {
             id_peer_map: std::collections::HashMap::new(),
             peer_ip_id_map: std::collections::HashMap::new(),
         };
-        assert!(table.try_encode().is_err());
+        assert!(table.encode().is_err());
     }
 
     #[test]
@@ -2199,6 +2211,6 @@ mod tests {
             collector_longitude: 0.0,
             geo_peers: vec![],
         };
-        assert!(table.try_encode().is_err());
+        assert!(table.encode().is_err());
     }
 }

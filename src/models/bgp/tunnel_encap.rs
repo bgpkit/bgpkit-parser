@@ -124,16 +124,6 @@ impl SubTlv {
             value,
         }
     }
-
-    /// Returns the value length as `u16`.
-    ///
-    /// **Note:** This is a saturating cast kept for backwards compatibility.
-    /// The encode path (`encode_tunnel_encapsulation_attribute`) performs its
-    /// own `u16::try_from` checked conversion and returns `EncodingError` on overflow.
-    #[deprecated(note = "Use u16::try_from(value.len()) in encode paths for checked conversion")]
-    pub fn length(&self) -> u16 {
-        self.value.len().min(u16::MAX as usize) as u16
-    }
 }
 
 /// Tunnel Encapsulation TLV
@@ -344,9 +334,7 @@ mod tests {
     #[test]
     fn test_sub_tlv_length() {
         let sub_tlv = SubTlv::new(SubTlvType::Color, vec![0x00, 0x00, 0x00, 0x64]);
-        #[allow(deprecated)]
-        let l = sub_tlv.length();
-        assert_eq!(l, 4);
+        assert_eq!(sub_tlv.value.len(), 4);
     }
 
     #[test]

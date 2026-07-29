@@ -27,7 +27,7 @@ fn main() {
     .unwrap()
     .into_record_iter()
     .for_each(|record| {
-        let bytes = record.encode();
+        let bytes = record.encode().unwrap();
         mrt_writer.write_all(&bytes).unwrap();
         records_count += 1;
         let mut elementor = Elementor::new();

@@ -2,6 +2,7 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+use crate::encoder::sink::{with_u16_len, with_u8_len};
 use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
@@ -84,53 +85,38 @@ fn parse_tunnel_tlv(tunnel_type: u16, mut data: Bytes) -> Result<TunnelEncapTlv,
 pub fn encode_tunnel_encapsulation_attribute(
     attr: &TunnelEncapAttribute,
 ) -> Result<Bytes, EncodingError> {
-    let mut bytes = BytesMut::new();
+    let mut buf = BytesMut::new();
 
     for tunnel_tlv in &attr.tunnel_tlvs {
         // Encode tunnel type
-        bytes.put_u16(tunnel_tlv.tunnel_type as u16);
+        buf.put_u16(tunnel_tlv.tunnel_type as u16);
 
-        // Encode sub-TLVs first to calculate total length
-        let mut sub_tlv_bytes = BytesMut::new();
-        for sub_tlv in &tunnel_tlv.sub_tlvs {
-            let sub_tlv_type = sub_tlv.sub_tlv_type as u16;
+        // Encode sub-TLVs with back-patched tunnel length
+        with_u16_len(&mut buf, "Tunnel Encap tunnel total length", |b| {
+            for sub_tlv in &tunnel_tlv.sub_tlvs {
+                let sub_tlv_type = sub_tlv.sub_tlv_type as u16;
 
-            // Encode sub-TLV type (common to both branches)
-            sub_tlv_bytes.put_u8(sub_tlv_type as u8);
+                // Encode sub-TLV type (common to both branches)
+                b.put_u8(sub_tlv_type as u8);
 
-            // Encode sub-TLV length: u8 for type < 128, u16 for type >= 128
-            if sub_tlv_type < 128 {
-                let len = EncodingError::check_u8(
-                    "Tunnel Encap sub-TLV value length",
-                    sub_tlv.value.len(),
-                )?;
-                sub_tlv_bytes.put_u8(len);
-            } else {
-                let len = EncodingError::check_u16(
-                    "Tunnel Encap sub-TLV value length",
-                    sub_tlv.value.len(),
-                )?;
-                sub_tlv_bytes.put_u16(len);
+                // Encode sub-TLV length+value: u8 for type < 128, u16 for type >= 128
+                if sub_tlv_type < 128 {
+                    with_u8_len(b, "Tunnel Encap sub-TLV value length", |b2| {
+                        b2.extend_from_slice(&sub_tlv.value);
+                        Ok(())
+                    })?;
+                } else {
+                    with_u16_len(b, "Tunnel Encap sub-TLV value length", |b2| {
+                        b2.extend_from_slice(&sub_tlv.value);
+                        Ok(())
+                    })?;
+                }
             }
-
-            // Encode sub-TLV value
-            sub_tlv_bytes.extend_from_slice(&sub_tlv.value);
-        }
-
-        // Encode tunnel length
-        let tunnel_len =
-            u16::try_from(sub_tlv_bytes.len()).map_err(|_| EncodingError::ValueTooLarge {
-                field: "Tunnel Encap tunnel total length",
-                actual: sub_tlv_bytes.len(),
-                max: u16::MAX as usize,
-            })?;
-        bytes.put_u16(tunnel_len);
-
-        // Append sub-TLV data
-        bytes.extend_from_slice(&sub_tlv_bytes);
+            Ok(())
+        })?;
     }
 
-    Ok(bytes.freeze())
+    Ok(buf.freeze())
 }
 
 #[cfg(test)]

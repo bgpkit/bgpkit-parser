@@ -1,4 +1,5 @@
 use super::*;
+use crate::encoder::sink::check_max;
 use crate::error::EncodingError;
 use crate::models::NetworkPrefix;
 use ipnet::IpNet;
@@ -89,22 +90,11 @@ pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Result<Vec<u8>, EncodingErro
         }
     }
 
-    // Prepend length
+    // Prepend length. RFC 8955/8956: the wire length field is 12-bit
+    // (0x0FFF = 4095), not 16-bit — check_max makes the bound explicit.
     let mut result = Vec::new();
-    let nlri_len = u16::try_from(data.len()).map_err(|_| EncodingError::ValueTooLarge {
-        field: "FlowSpec NLRI total length",
-        actual: data.len(),
-        max: 4095, // RFC 8955/8956: 12-bit length field (0x0FFF)
-    })?;
-    // RFC 8955/8956: lengths 4096–65535 cannot be encoded in the 12-bit field.
-    if nlri_len > 0x0FFF {
-        return Err(EncodingError::ValueTooLarge {
-            field: "FlowSpec NLRI total length (12-bit)",
-            actual: data.len(),
-            max: 0x0FFF,
-        });
-    }
-    encode_length(nlri_len, &mut result);
+    let nlri_len = check_max("FlowSpec NLRI total length", data.len(), 0x0FFF)?;
+    encode_length(nlri_len as u16, &mut result);
     result.extend(data);
     Ok(result)
 }

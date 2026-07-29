@@ -357,7 +357,7 @@ bgpkit_parser::BgpkitParser::new(
     });
 
 let mut mrt_writer = oneio::get_writer("as3356_mrt.gz").unwrap();
-mrt_writer.write_all(updates_encoder.export_bytes().as_ref()).unwrap();
+mrt_writer.write_all(updates_encoder.export_bytes().unwrap().as_ref()).unwrap();
 drop(mrt_writer);
 ```
 
@@ -858,6 +858,9 @@ Additional known attribute type codes are raw-retained (`AttributeValue::Raw`) a
     html_logo_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/icon-transparent.png",
     html_favicon_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/favicon.ico"
 )]
+// Encoding results must be consumed: dropping an encode_to/encode Result
+// without handling it is a compile error, not a silent data loss.
+#![deny(unused_must_use)]
 
 #[cfg(feature = "parser")]
 pub mod encoder;

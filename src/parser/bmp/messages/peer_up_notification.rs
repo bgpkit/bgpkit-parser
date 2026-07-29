@@ -203,7 +203,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_open_message_bytes = bgp_open_message.encode(AsnLength::Bits32);
+        let bgp_open_message_bytes = bgp_open_message.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_open_message_bytes);
         data.extend_from_slice(&bgp_open_message_bytes);
 
@@ -322,7 +322,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp1_bytes = bgp1.encode(AsnLength::Bits32);
+        let bgp1_bytes = bgp1.encode(AsnLength::Bits32).unwrap();
 
         // Second BGP OPEN message
         let bgp2 = crate::models::BgpMessage::Open(BgpOpenMessage {
@@ -333,7 +333,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp2_bytes = bgp2.encode(AsnLength::Bits32);
+        let bgp2_bytes = bgp2.encode(AsnLength::Bits32).unwrap();
 
         // Add both BGP messages consecutively
         data.extend_from_slice(&bgp1_bytes);
@@ -441,7 +441,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
 
         // Add incomplete second BGP message (only partial header)
@@ -483,7 +483,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -537,7 +537,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![], // No capabilities
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -586,7 +586,7 @@ mod tests {
                 }]),
             }],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -635,7 +635,7 @@ mod tests {
                 }]),
             }],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -689,7 +689,7 @@ mod tests {
                 }]),
             }],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -751,7 +751,7 @@ mod tests {
                 }]),
             }],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -804,7 +804,7 @@ mod tests {
                 }]),
             }],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -846,7 +846,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 
@@ -900,7 +900,7 @@ mod tests {
             extended_length: false,
             opt_params: vec![],
         });
-        let bgp_bytes = bgp_open.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_open.encode(AsnLength::Bits32).unwrap();
         data.extend_from_slice(&bgp_bytes);
         data.extend_from_slice(&bgp_bytes);
 

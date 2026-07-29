@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use crate::error::EncodingError;
 use crate::models::{
     Asn, Bgp4MpEnum, Bgp4MpMessage, Bgp4MpType, BgpMessage, BgpUpdateMessage, CommonHeader,
     EntryType, MrtMessage,
@@ -27,7 +28,10 @@ impl MrtUpdatesEncoder {
         self.cached_elems.push(elem.clone());
     }
 
-    pub fn export_bytes(&mut self) -> Bytes {
+    /// Export all cached elements as MRT BGP4MP records.
+    ///
+    /// Returns [`EncodingError`] if any element fails to encode.
+    pub fn export_bytes(&mut self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
 
         for elem in &self.cached_elems {
@@ -55,7 +59,7 @@ impl MrtUpdatesEncoder {
             let (seconds, microseconds) = convert_timestamp(elem.timestamp);
 
             let subtype = Bgp4MpType::MessageAs4 as u16;
-            let data_bytes = mrt_message.encode(subtype);
+            let data_bytes = mrt_message.encode(subtype)?;
             let header_bytes = CommonHeader {
                 timestamp: seconds,
                 microsecond_timestamp: Some(microseconds),
@@ -70,7 +74,7 @@ impl MrtUpdatesEncoder {
 
         self.reset();
 
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
@@ -94,7 +98,7 @@ mod tests {
         encoder.process_elem(&elem);
         elem.prefix.prefix = "10.251.0.0/24".parse().unwrap();
         encoder.process_elem(&elem);
-        let bytes = encoder.export_bytes();
+        let bytes = encoder.export_bytes().unwrap();
 
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
@@ -114,7 +118,7 @@ mod tests {
         // ipv6 prefix
         elem.prefix = NetworkPrefix::from_str("2001:db8::/32").unwrap();
         encoder.process_elem(&elem);
-        let bytes = encoder.export_bytes();
+        let bytes = encoder.export_bytes().unwrap();
         let mut cursor = Cursor::new(bytes.clone());
         while cursor.has_remaining() {
             let _parsed = parse_mrt_record(&mut cursor).unwrap();

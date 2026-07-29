@@ -1,3 +1,4 @@
+use crate::encoder::sink::with_u8_len;
 use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
@@ -48,13 +49,10 @@ pub fn encode_bfd_discriminator(attr: &BfdDiscriminatorAttribute) -> Result<Byte
     buf.put_u32(attr.discriminator);
     for tlv in &attr.tlvs {
         buf.put_u8(tlv.tlv_type);
-        let len = u8::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "BFD Discriminator TLV value length",
-            actual: tlv.value.len(),
-            max: u8::MAX as usize,
+        with_u8_len(&mut buf, "BFD Discriminator TLV value length", |b| {
+            b.extend_from_slice(&tlv.value);
+            Ok(())
         })?;
-        buf.put_u8(len);
-        buf.extend_from_slice(&tlv.value);
     }
     Ok(buf.freeze())
 }

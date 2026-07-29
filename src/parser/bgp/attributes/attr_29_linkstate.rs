@@ -1,5 +1,6 @@
 //! BGP Link-State attribute parsing - RFC 7752
 
+use crate::encoder::sink::with_u16_len;
 use crate::error::EncodingError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -438,53 +439,46 @@ pub fn encode_link_state_attribute(attr: &LinkStateAttribute) -> Result<Bytes, E
 
     // Encode node attributes
     for (attr_type, value) in &attr.node_attributes {
-        let type_code = u16::from(*attr_type);
-        bytes.put_u16(type_code);
-        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "Link-State node attribute value length",
-            actual: value.len(),
-            max: u16::MAX as usize,
+        bytes.put_u16(u16::from(*attr_type));
+        with_u16_len(&mut bytes, "Link-State node attribute value length", |b| {
+            b.extend_from_slice(value);
+            Ok(())
         })?;
-        bytes.put_u16(len);
-        bytes.extend_from_slice(value);
     }
 
     // Encode link attributes
     for (attr_type, value) in &attr.link_attributes {
-        let type_code = u16::from(*attr_type);
-        bytes.put_u16(type_code);
-        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "Link-State link attribute value length",
-            actual: value.len(),
-            max: u16::MAX as usize,
+        bytes.put_u16(u16::from(*attr_type));
+        with_u16_len(&mut bytes, "Link-State link attribute value length", |b| {
+            b.extend_from_slice(value);
+            Ok(())
         })?;
-        bytes.put_u16(len);
-        bytes.extend_from_slice(value);
     }
 
     // Encode prefix attributes
     for (attr_type, value) in &attr.prefix_attributes {
-        let type_code = u16::from(*attr_type);
-        bytes.put_u16(type_code);
-        let len = u16::try_from(value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "Link-State prefix attribute value length",
-            actual: value.len(),
-            max: u16::MAX as usize,
-        })?;
-        bytes.put_u16(len);
-        bytes.extend_from_slice(value);
+        bytes.put_u16(u16::from(*attr_type));
+        with_u16_len(
+            &mut bytes,
+            "Link-State prefix attribute value length",
+            |b| {
+                b.extend_from_slice(value);
+                Ok(())
+            },
+        )?;
     }
 
     // Encode unknown attributes
     for tlv in &attr.unknown_attributes {
         bytes.put_u16(tlv.tlv_type);
-        let len = u16::try_from(tlv.value.len()).map_err(|_| EncodingError::ValueTooLarge {
-            field: "Link-State unknown attribute value length",
-            actual: tlv.value.len(),
-            max: u16::MAX as usize,
-        })?;
-        bytes.put_u16(len);
-        bytes.extend_from_slice(&tlv.value);
+        with_u16_len(
+            &mut bytes,
+            "Link-State unknown attribute value length",
+            |b| {
+                b.extend_from_slice(&tlv.value);
+                Ok(())
+            },
+        )?;
     }
 
     Ok(bytes.freeze())
