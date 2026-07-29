@@ -858,6 +858,9 @@ Additional known attribute type codes are raw-retained (`AttributeValue::Raw`) a
     html_logo_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/icon-transparent.png",
     html_favicon_url = "https://raw.githubusercontent.com/bgpkit/assets/main/logos/favicon.ico"
 )]
+// A dropped `Result` from an encode_to() call would silently skip wire data —
+// exactly the corruption class the fallible encoding API exists to prevent.
+#![deny(unused_must_use)]
 
 #[cfg(feature = "parser")]
 pub mod encoder;

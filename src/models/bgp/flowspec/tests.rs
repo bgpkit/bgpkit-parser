@@ -326,6 +326,42 @@ mod error_handling {
         let parsed_length = parse_length(&data, &mut offset).unwrap();
         assert_eq!(parsed_length, 4095);
     }
+
+    #[test]
+    fn test_encode_rejects_length_beyond_12_bit_field() {
+        use crate::error::EncodingError;
+
+        // Component data in the 4096..=65535 range fits a u16 but NOT the
+        // 12-bit wire length field: encoding it would corrupt the length byte
+        // (e.g. 5000 = 0x1388 encodes as 0xF3 0x88, decoding back as 904).
+        // 2500 numeric operators encode to 2 bytes each, plus the type byte.
+        let nlri = FlowSpecNlri::new(vec![FlowSpecComponent::Port(vec![
+            NumericOperator::equal_to(
+                80
+            );
+            2500
+        ])]);
+        let err = encode_flowspec_nlri(&nlri).unwrap_err();
+        assert_eq!(
+            err,
+            EncodingError::ValueTooLarge {
+                field: "FlowSpec NLRI total length",
+                actual: 5001,
+                max: 0x0FFF
+            }
+        );
+
+        // 2000 operators (4001 bytes) still fit within the 12-bit bound
+        let nlri = FlowSpecNlri::new(vec![FlowSpecComponent::Port(vec![
+            NumericOperator::equal_to(
+                80
+            );
+            2000
+        ])]);
+        let encoded = encode_flowspec_nlri(&nlri).unwrap();
+        let mut offset = 0;
+        assert_eq!(parse_length(&encoded, &mut offset).unwrap(), 4001);
+    }
 }
 
 /// IPv6-specific test cases from RFC 8956
