@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking changes
+
+* **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
+
+### Fixed
+
+* **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
+
 ## v0.19.0 - 2026-07-28
 
 ### Breaking changes

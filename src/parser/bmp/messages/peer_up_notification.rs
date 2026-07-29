@@ -575,7 +575,6 @@ mod tests {
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
-                param_len: 6,
                 param_value: ParamValue::Capacities(vec![Capability {
                     ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
                     value: CapabilityValue::MultiprotocolExtensions(
@@ -625,7 +624,6 @@ mod tests {
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
-                param_len: 6,
                 param_value: ParamValue::Capacities(vec![Capability {
                     ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
                     value: CapabilityValue::MultiprotocolExtensions(
@@ -680,7 +678,6 @@ mod tests {
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
-                param_len: 6,
                 param_value: ParamValue::Capacities(vec![Capability {
                     ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
                     value: CapabilityValue::MultiprotocolExtensions(
@@ -743,7 +740,6 @@ mod tests {
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
-                param_len: 6,
                 param_value: ParamValue::Capacities(vec![Capability {
                     ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
                     value: CapabilityValue::MultiprotocolExtensions(
@@ -797,7 +793,6 @@ mod tests {
             extended_length: false,
             opt_params: vec![OptParam {
                 param_type: 2, // capability
-                param_len: 6,
                 param_value: ParamValue::Capacities(vec![Capability {
                     ty: BgpCapabilityType::MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4,
                     value: CapabilityValue::MultiprotocolExtensions(
