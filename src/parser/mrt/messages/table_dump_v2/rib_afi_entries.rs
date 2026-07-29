@@ -165,21 +165,31 @@ pub fn parse_rib_entry(
 }
 
 impl RibAfiEntries {
-    pub fn encode(&self) -> Bytes {
+    pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         let is_add_path = is_add_path_rib_type(self.rib_type);
 
         bytes.put_u32(self.sequence_number);
         bytes.extend(self.prefix.encode());
 
-        let entry_count = self.rib_entries.len();
-        bytes.put_u16(entry_count as u16);
+        let entry_count =
+            u16::try_from(self.rib_entries.len()).map_err(|_| EncodingError::ValueTooLarge {
+                field: "RIB AFI entry count",
+                actual: self.rib_entries.len(),
+                max: u16::MAX as usize,
+            })?;
+        bytes.put_u16(entry_count);
 
         for entry in &self.rib_entries {
-            bytes.extend(entry.encode_for_rib_type(is_add_path));
+            bytes.extend(entry.encode_for_rib_type(is_add_path)?);
         }
 
-        bytes.freeze()
+        Ok(bytes.freeze())
+    }
+
+    pub fn encode(&self) -> Bytes {
+        self.try_encode()
+            .expect("RIB AFI entries encoding failed; use try_encode() for fallible handling")
     }
 }
 

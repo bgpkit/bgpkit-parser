@@ -66,15 +66,18 @@ pub fn parse_peer_index_table(data: &mut Bytes) -> Result<PeerIndexTable, Parser
 }
 
 impl PeerIndexTable {
-    /// Add peer to peer index table and return peer id
-    pub fn add_peer(&mut self, peer: Peer) -> u16 {
+    /// Add peer to peer index table and return peer id.
+    ///
+    /// Returns `None` if the peer table is full (>65535 peers), which would
+    /// overflow the u16 peer index.
+    pub fn add_peer(&mut self, peer: Peer) -> Option<u16> {
         match self.peer_ip_id_map.get(&peer.peer_ip) {
-            Some(id) => *id,
+            Some(id) => Some(*id),
             None => {
-                let peer_id = self.peer_ip_id_map.len().min(u16::MAX as usize) as u16;
+                let peer_id = u16::try_from(self.peer_ip_id_map.len()).ok()?;
                 self.peer_ip_id_map.insert(peer.peer_ip, peer_id);
                 self.id_peer_map.insert(peer_id, peer);
-                peer_id
+                Some(peer_id)
             }
         }
     }
@@ -257,8 +260,8 @@ mod tests {
             Asn::new_32bit(12345),
         );
 
-        let peer1_id = index_table.add_peer(peer1);
-        let peer2_id = index_table.add_peer(peer2);
+        let peer1_id = index_table.add_peer(peer1).unwrap();
+        let peer2_id = index_table.add_peer(peer2).unwrap();
 
         assert_eq!(
             index_table.get_peer_by_id(&peer1_id),

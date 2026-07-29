@@ -184,10 +184,13 @@ impl Tlv {
         Self { tlv_type, value }
     }
 
+    /// Returns the value length as `u16`.
+    ///
+    /// **Note:** This is a saturating cast kept for backwards compatibility.
+    /// The encode path (`encode_link_state_attribute`) performs its own
+    /// `u16::try_from` checked conversion and returns `EncodingError` on overflow.
+    #[deprecated(note = "Use u16::try_from(value.len()) in encode paths for checked conversion")]
     pub fn length(&self) -> u16 {
-        // Saturating cast: for values >65535 the wire format cannot represent
-        // the length. The encode path (encode_link_state_attribute) checks
-        // this separately via u16::try_from and returns EncodingError.
         self.value.len().min(u16::MAX as usize) as u16
     }
 }
@@ -612,7 +615,9 @@ mod tests {
         let tlv = Tlv::new(1024, vec![0x01, 0x02, 0x03]);
         assert_eq!(tlv.tlv_type, 1024);
         assert_eq!(tlv.value, vec![0x01, 0x02, 0x03]);
-        assert_eq!(tlv.length(), 3);
+        #[allow(deprecated)]
+        let l = tlv.length();
+        assert_eq!(l, 3);
     }
 
     #[test]

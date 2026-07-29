@@ -421,16 +421,33 @@ impl BgpOpenMessage {
     pub fn try_encode(&self) -> Result<Bytes, EncodingError> {
         let mut encoded_params: Vec<(u8, Bytes)> = Vec::with_capacity(self.opt_params.len());
         for param in &self.opt_params {
-            encoded_params.push((param.param_type, encode_bgp_open_param_value(param)?));
+            let param_type = param.param_type;
+            // RFC 9072: param_type 255 in the first position is the extended-length
+            // marker. A non-extended OPEN with a real parameter of type 255 would be
+            // ambiguous on the wire — the parser would misread it as extended framing.
+            if param_type == 255 && !self.extended_length {
+                return Err(EncodingError::InvalidInput {
+                    field: "BGP OPEN optional parameter type 255",
+                    reason:
+                        "non-extended OPEN cannot use parameter type 255 (reserved by RFC 9072)",
+                });
+            }
+            encoded_params.push((param_type, encode_bgp_open_param_value(param)?));
         }
 
         let values_len: usize = encoded_params.iter().map(|(_, value)| value.len()).sum();
         // Non-extended framing spends 2 header octets (type + 1-octet length) per
         // parameter; if that would overflow the single-octet aggregate length field
-        // we must switch to RFC 9072 extended framing (3 header octets each).
+        // the caller must explicitly opt into RFC 9072 extended framing.
         let non_extended_params_len = 2 * encoded_params.len() + values_len;
-        let use_extended_length =
-            self.extended_length || non_extended_params_len > u8::MAX as usize;
+        if !self.extended_length && non_extended_params_len > u8::MAX as usize {
+            return Err(EncodingError::ValueTooLarge {
+                field: "BGP OPEN optional parameters total length",
+                actual: non_extended_params_len,
+                max: u8::MAX as usize,
+            });
+        }
+        let use_extended_length = self.extended_length;
         let per_param_header = if use_extended_length { 3 } else { 2 };
         let encoded_params_len = per_param_header * encoded_params.len() + values_len;
 
@@ -488,7 +505,7 @@ impl BgpOpenMessage {
         Ok(buf.freeze())
     }
 
-    /// Infinitely convenient infallible encoding wrapper.
+    /// Infallible encoding wrapper.
     ///
     /// Panics if encoding fails (e.g. oversized capability values). For
     /// untrusted input use [`BgpOpenMessage::try_encode`] instead.
@@ -1200,6 +1217,7 @@ mod tests {
                 assert_eq!(max, 255);
                 assert!(actual > 255, "actual={actual}");
             }
+            other => panic!("expected ValueTooLarge, got {other:?}"),
         }
 
         // encode() (infallible wrapper) panics with a helpful message
@@ -1238,7 +1256,9 @@ mod tests {
     }
 
     #[test]
-    fn test_bgp_open_automatically_uses_extended_parameter_encoding() {
+    fn test_bgp_open_non_extended_rejects_oversized_params() {
+        // A non-extended OPEN with params >255 bytes must return Err instead of
+        // silently switching to RFC 9072 extended format (finding #8 from review).
         let msg = BgpOpenMessage {
             version: 4,
             asn: Asn::new_16bit(64512),
@@ -1251,13 +1271,7 @@ mod tests {
             }],
         };
 
-        let encoded = msg.encode();
-
-        assert_eq!(encoded.len(), 272);
-        assert_eq!(&encoded[9..16], &[0xFF, 0xFF, 0x01, 0x03, 254, 0x01, 0x00]);
-        let parsed = parse_bgp_open_message(&mut encoded.clone()).unwrap();
-        assert!(parsed.extended_length);
-        assert_eq!(parsed.encode(), encoded);
+        assert!(msg.try_encode().is_err());
     }
 
     #[test]

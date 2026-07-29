@@ -58,6 +58,13 @@ pub enum EncodingError {
         actual: usize,
         max: usize,
     },
+    /// Encoding failed for a reason other than field-size overflow — e.g. an
+    /// NLRI that could not be serialized due to internal structure issues, or
+    /// an attribute whose encoding is not yet implemented.
+    InvalidInput {
+        field: &'static str,
+        reason: &'static str,
+    },
 }
 
 impl Display for EncodingError {
@@ -67,6 +74,9 @@ impl Display for EncodingError {
                 f,
                 "encoding error: {field} ({actual}) exceeds maximum ({max})"
             ),
+            EncodingError::InvalidInput { field, reason } => {
+                write!(f, "encoding error: {field}: {reason}")
+            }
         }
     }
 }

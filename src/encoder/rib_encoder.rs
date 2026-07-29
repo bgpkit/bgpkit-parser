@@ -57,7 +57,10 @@ impl MrtRibEncoder {
             IpAddr::V6(_ip) => Ipv4Addr::from(0),
         };
         let peer = Peer::new(bgp_identifier, elem.peer_ip, elem.peer_asn);
-        let peer_index = self.index_table.add_peer(peer);
+        let peer_index = self
+            .index_table
+            .add_peer(peer)
+            .expect("peer table overflow in RIB encoder");
         let path_id = elem.prefix.path_id;
         let prefix = elem.prefix.prefix;
 

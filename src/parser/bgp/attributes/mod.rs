@@ -544,17 +544,23 @@ impl Attribute {
                     .labeled_prefixes
                     .as_ref()
                     .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()));
-                encode_nlri(v, true, add_path).unwrap_or_else(|e| {
+                encode_nlri(v, true, add_path).map_err(|e| {
                     log::warn!("Failed to encode MP_REACH_NLRI: {}", e);
-                    Bytes::new()
-                })
+                    EncodingError::InvalidInput {
+                        field: "MP_REACH_NLRI",
+                        reason: "NLRI encoding failure",
+                    }
+                })?
             }
             AttributeValue::MpUnreachNlri(v) => {
                 // Withdrawals don't use ADD-PATH encoding per RFC 8277
-                encode_nlri(v, false, false).unwrap_or_else(|e| {
+                encode_nlri(v, false, false).map_err(|e| {
                     log::warn!("Failed to encode MP_UNREACH_NLRI: {}", e);
-                    Bytes::new()
-                })
+                    EncodingError::InvalidInput {
+                        field: "MP_UNREACH_NLRI",
+                        reason: "NLRI encoding failure",
+                    }
+                })?
             }
             AttributeValue::LinkState(v) => encode_link_state_attribute(v)?,
             AttributeValue::TunnelEncapsulation(v) => encode_tunnel_encapsulation_attribute(v)?,
@@ -568,8 +574,10 @@ impl Attribute {
             AttributeValue::Unknown(v) => v.bytes.clone(),
             AttributeValue::Aigp(v) => encode_aigp(v),
             AttributeValue::AttrSet(_v) => {
-                // ATTR_SET encoding not yet implemented - return empty bytes
-                Bytes::new()
+                return Err(EncodingError::InvalidInput {
+                    field: "ATTR_SET",
+                    reason: "encoding not yet implemented",
+                });
             }
         };
 
