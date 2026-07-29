@@ -1,7 +1,7 @@
-use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
-use crate::parser::ReadUtils;
 use crate::encoder::sink::put_u16_len_slice;
 use crate::error::{check_max, EncodingError};
+use crate::models::{Afi, AsnLength, Peer, PeerIndexTable, PeerType};
+use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::collections::HashMap;

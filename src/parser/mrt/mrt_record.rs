@@ -514,7 +514,8 @@ mod tests {
         let parsed = parse_mrt_record(&mut cursor).unwrap();
         let expected_len = parsed
             .message
-            .encode(parsed.common_header.entry_subtype).unwrap()
+            .encode(parsed.common_header.entry_subtype)
+            .unwrap()
             .len() as u32;
 
         assert_eq!(parsed.common_header.length, expected_len);

@@ -1,12 +1,12 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use crate::error::EncodingError;
 use crate::models::{
     Asn, Bgp4MpEnum, Bgp4MpMessage, Bgp4MpType, BgpMessage, BgpUpdateMessage, CommonHeader,
     EntryType, MrtMessage,
 };
 use crate::utils::convert_timestamp;
-use crate::error::EncodingError;
 use crate::BgpElem;
 use bytes::{Bytes, BytesMut};
 

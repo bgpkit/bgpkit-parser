@@ -915,7 +915,10 @@ mod tests {
                 value => panic!("expected Raw for code {code}, got {value:?}"),
             }
             assert!(attributes.has_attr(AttrType::from(code)), "code {code}");
-            assert_eq!(attributes.encode(AsnLength::Bits16).unwrap(), Bytes::from(wire));
+            assert_eq!(
+                attributes.encode(AsnLength::Bits16).unwrap(),
+                Bytes::from(wire)
+            );
         }
     }
 
@@ -942,7 +945,10 @@ mod tests {
             value => panic!("expected Unknown, got {value:?}"),
         }
         assert!(attributes.has_attr(AttrType::Unknown(0x7f)));
-        assert_eq!(attributes.encode(AsnLength::Bits16).unwrap(), Bytes::from(wire));
+        assert_eq!(
+            attributes.encode(AsnLength::Bits16).unwrap(),
+            Bytes::from(wire)
+        );
     }
 
     #[test]

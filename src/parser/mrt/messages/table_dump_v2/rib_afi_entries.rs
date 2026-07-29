@@ -1,10 +1,10 @@
 use crate::bgp::attributes::parse_attributes;
+use crate::encoder::sink::with_u16_len;
+use crate::error::{check_max, EncodingError};
 use crate::models::{
     Afi, AsnLength, NetworkPrefix, RibAfiEntries, RibEntry, Safi, TableDumpV2Type,
 };
 use crate::parser::ReadUtils;
-use crate::encoder::sink::with_u16_len;
-use crate::error::{check_max, EncodingError};
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::warn;

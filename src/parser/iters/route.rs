@@ -1149,7 +1149,8 @@ mod tests {
                 ],
             }),
         )
-        .encode().unwrap()
+        .encode()
+        .unwrap()
         .to_vec();
 
         let routes = BgpkitParser::from_reader(Cursor::new(bytes))
@@ -1201,7 +1202,8 @@ mod tests {
                 announced_prefixes: vec![],
             }),
         )
-        .encode().unwrap()
+        .encode()
+        .unwrap()
         .to_vec();
 
         let routes = assert_route_projection(bytes);
@@ -1250,7 +1252,8 @@ mod tests {
                 announced_prefixes: vec![NetworkPrefix::from_str("203.0.113.0/24").unwrap()],
             }),
         )
-        .encode().unwrap()
+        .encode()
+        .unwrap()
         .to_vec();
 
         let routes = assert_route_projection(bytes);
@@ -1325,7 +1328,9 @@ mod tests {
     #[test]
     fn selective_attribute_parser_handles_as_path_without_as4_path() {
         let attrs = parse_route_attributes(
-            route_attributes([64500, 64501]).encode(AsnLength::Bits16).unwrap(),
+            route_attributes([64500, 64501])
+                .encode(AsnLength::Bits16)
+                .unwrap(),
             &AsnLength::Bits16,
             false,
             RouteAttributeContext {
@@ -1836,7 +1841,8 @@ mod tests {
     fn route_iterator_skips_route_parse_errors() {
         let routes = BgpkitParser::from_reader(Cursor::new(
             table_dump_v2_rib_without_peer_table_record()
-                .encode().unwrap()
+                .encode()
+                .unwrap()
                 .to_vec(),
         ))
         .into_route_iter()
@@ -1847,12 +1853,13 @@ mod tests {
 
     #[test]
     fn fallible_route_iterator_applies_filters_to_cached_routes() {
-        let routes = BgpkitParser::from_reader(Cursor::new(update_record().encode().unwrap().to_vec()))
-            .add_filter("type", "w")
-            .unwrap()
-            .into_fallible_route_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let routes =
+            BgpkitParser::from_reader(Cursor::new(update_record().encode().unwrap().to_vec()))
+                .add_filter("type", "w")
+                .unwrap()
+                .into_fallible_route_iter()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
 
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
@@ -1862,7 +1869,8 @@ mod tests {
     fn fallible_route_iterator_returns_route_parse_errors() {
         let mut iter = BgpkitParser::from_reader(Cursor::new(
             table_dump_v2_rib_without_peer_table_record()
-                .encode().unwrap()
+                .encode()
+                .unwrap()
                 .to_vec(),
         ))
         .into_fallible_route_iter();

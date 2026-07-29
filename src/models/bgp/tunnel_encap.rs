@@ -124,7 +124,6 @@ impl SubTlv {
             value,
         }
     }
-
 }
 
 /// Tunnel Encapsulation TLV

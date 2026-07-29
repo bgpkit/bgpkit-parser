@@ -60,10 +60,7 @@ pub enum EncodingError {
     /// The value cannot be represented in wire format at all (e.g. ATTR_SET
     /// encoding is not implemented, a labeled NLRI has an empty label stack,
     /// or a BGP OPEN optional parameter uses the reserved type 255).
-    Unencodable {
-        field: &'static str,
-        reason: String,
-    },
+    Unencodable { field: &'static str, reason: String },
 }
 
 impl EncodingError {

@@ -4,11 +4,11 @@
 //! difficulty part of this process is the handling of TableDumpV2 RIB dumps, which requires
 //! reconstructing the peer index table before encoding all other contents.
 
+use crate::error::EncodingError;
 use crate::models::{
     Attributes, BgpElem, CommonHeader, EntryType, MrtMessage, NetworkPrefix, Peer, PeerIndexTable,
     RibAfiEntries, RibEntry, TableDumpV2Message, TableDumpV2Type,
 };
-use crate::error::EncodingError;
 use crate::utils::convert_timestamp;
 use bytes::{Bytes, BytesMut};
 use ipnet::IpNet;

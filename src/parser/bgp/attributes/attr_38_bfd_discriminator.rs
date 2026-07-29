@@ -1,7 +1,7 @@
-use crate::models::*;
-use crate::parser::ReadUtils;
 use crate::encoder::sink::put_u8_len_slice;
 use crate::error::EncodingError;
+use crate::models::*;
+use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 

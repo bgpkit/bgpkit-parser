@@ -2,7 +2,7 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::encoder::sink::{put_u8_len_slice, put_u16_len_slice, with_u16_len};
+use crate::encoder::sink::{put_u16_len_slice, put_u8_len_slice, with_u16_len};
 use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
