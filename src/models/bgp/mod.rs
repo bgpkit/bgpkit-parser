@@ -97,7 +97,6 @@ pub struct BgpOpenMessage {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptParam {
     pub param_type: u8,
-    pub param_len: u16,
     pub param_value: ParamValue,
 }
 
