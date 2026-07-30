@@ -1,3 +1,5 @@
+use crate::encoder::sink::put_u16_len_slice;
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -27,14 +29,12 @@ pub fn parse_bier(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::Bier(BierAttribute { tlvs }))
 }
 
-pub fn encode_bier(attr: &BierAttribute) -> Bytes {
-    let mut buf = BytesMut::new();
+pub fn encode_bier(attr: &BierAttribute, buf: &mut BytesMut) -> Result<(), EncodingError> {
     for tlv in &attr.tlvs {
         buf.put_u16(tlv.tlv_type);
-        buf.put_u16(tlv.value.len() as u16);
-        buf.extend_from_slice(&tlv.value);
+        put_u16_len_slice(buf, "BIER TLV value length", &tlv.value)?;
     }
-    buf.freeze()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -54,7 +54,9 @@ mod tests {
                 assert_eq!(attr.tlvs.len(), 1);
                 assert_eq!(attr.tlvs[0].tlv_type, 1);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xaa, 0xbb, 0xcc]));
-                assert_eq!(encode_bier(&attr), input);
+                let mut buf = BytesMut::new();
+                encode_bier(&attr, &mut buf).unwrap();
+                assert_eq!(buf.freeze(), input);
             }
             value => panic!("expected BIER, got {value:?}"),
         }
@@ -68,7 +70,9 @@ mod tests {
             AttributeValue::Bier(attr) => {
                 assert_eq!(attr.tlvs[0].tlv_type, 0x1234);
                 assert_eq!(attr.tlvs[0].value, Bytes::from_static(&[0xde, 0xad]));
-                assert_eq!(encode_bier(&attr), input);
+                let mut buf = BytesMut::new();
+                encode_bier(&attr, &mut buf).unwrap();
+                assert_eq!(buf.freeze(), input);
             }
             value => panic!("expected BIER, got {value:?}"),
         }
@@ -80,7 +84,9 @@ mod tests {
         match value {
             AttributeValue::Bier(attr) => {
                 assert!(attr.tlvs.is_empty());
-                assert_eq!(encode_bier(&attr), Bytes::new());
+                let mut buf = BytesMut::new();
+                encode_bier(&attr, &mut buf).unwrap();
+                assert!(buf.is_empty());
             }
             value => panic!("expected BIER, got {value:?}"),
         }

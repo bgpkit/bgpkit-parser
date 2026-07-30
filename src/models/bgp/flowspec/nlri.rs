@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::{check_max, EncodingError};
 use crate::models::NetworkPrefix;
 use ipnet::IpNet;
 
@@ -54,8 +55,12 @@ pub fn parse_flowspec_nlri(data: &[u8]) -> Result<FlowSpecNlri, FlowSpecError> {
     Ok(FlowSpecNlri { components })
 }
 
+/// Maximum encodable FlowSpec NLRI length: the wire length field is 12 bits
+/// (RFC 8955 §4.1 — a 2-octet length has its high nibble fixed to 0xF).
+pub(crate) const FLOWSPEC_NLRI_MAX_LEN: usize = 0x0FFF;
+
 /// Encode Flow-Spec NLRI to byte data
-pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Vec<u8> {
+pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Result<Vec<u8>, EncodingError> {
     let mut data = Vec::new();
 
     // Encode each component
@@ -88,11 +93,16 @@ pub fn encode_flowspec_nlri(nlri: &FlowSpecNlri) -> Vec<u8> {
         }
     }
 
-    // Prepend length
+    // Prepend length; the wire length field is 12-bit, not a full u16
+    check_max(
+        "FlowSpec NLRI total length",
+        data.len(),
+        FLOWSPEC_NLRI_MAX_LEN,
+    )?;
     let mut result = Vec::new();
     encode_length(data.len() as u16, &mut result);
     result.extend(data);
-    result
+    Ok(result)
 }
 
 /// Parse length field (1 or 2 octets)
@@ -502,7 +512,7 @@ mod tests {
             FlowSpecComponent::DestinationPort(vec![NumericOperator::equal_to(80)]),
         ]);
 
-        let encoded = encode_flowspec_nlri(&original_nlri);
+        let encoded = encode_flowspec_nlri(&original_nlri).unwrap();
         let parsed_nlri = parse_flowspec_nlri(&encoded).unwrap();
 
         assert_eq!(original_nlri, parsed_nlri);

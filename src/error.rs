@@ -38,6 +38,76 @@ pub enum ParserError {
 
 impl Error for ParserError {}
 
+/// Errors that can occur when encoding BGP/MRT messages to wire format.
+///
+/// These arise when in-memory data structures contain values that cannot be
+/// represented in their wire-format fields (e.g. an AS_PATH segment with more
+/// than 255 ASes, or an attribute value exceeding 65535 bytes). All such
+/// conditions were previously handled by silently truncating — see issue #313.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EncodingError {
+    /// A value exceeded the maximum size that fits in its wire-format field.
+    ///
+    /// `field` names the wire field (e.g. `"AS_PATH segment count"`,
+    /// `"BGP attribute value length"`). `actual` is the byte/element count
+    /// that overflowed; `max` is the field's capacity.
+    ValueTooLarge {
+        field: &'static str,
+        actual: usize,
+        max: usize,
+    },
+    /// The value cannot be represented in wire format at all (e.g. ATTR_SET
+    /// encoding is not implemented, a labeled NLRI has an empty label stack,
+    /// or a BGP OPEN optional parameter uses the reserved type 255).
+    Unencodable { field: &'static str, reason: String },
+}
+
+impl EncodingError {
+    pub(crate) fn too_large(field: &'static str, actual: usize, max: usize) -> Self {
+        EncodingError::ValueTooLarge { field, actual, max }
+    }
+
+    pub(crate) fn unencodable(field: &'static str, reason: impl Into<String>) -> Self {
+        EncodingError::Unencodable {
+            field,
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Check that `actual` fits within `max`, returning `actual` unchanged.
+///
+/// This is the single place where wire-format capacity checks happen, so
+/// non-power-of-two bounds (e.g. the 12-bit FlowSpec NLRI length) are an
+/// explicit, greppable decision at the call site.
+pub(crate) fn check_max(
+    field: &'static str,
+    actual: usize,
+    max: usize,
+) -> Result<usize, EncodingError> {
+    if actual > max {
+        return Err(EncodingError::too_large(field, actual, max));
+    }
+    Ok(actual)
+}
+
+impl Display for EncodingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EncodingError::ValueTooLarge { field, actual, max } => write!(
+                f,
+                "encoding error: {field} ({actual}) exceeds maximum ({max})"
+            ),
+            EncodingError::Unencodable { field, reason } => {
+                write!(f, "encoding error: {field} cannot be encoded: {reason}")
+            }
+        }
+    }
+}
+
+impl Error for EncodingError {}
+
 #[derive(Debug)]
 pub struct ParserErrorWithBytes {
     pub error: ParserError,

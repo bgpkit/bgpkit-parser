@@ -56,7 +56,7 @@ fn consume_and_archive(
                             }
                         };
 
-                        let bytes = mrt_record.encode();
+                        let bytes = mrt_record.encode().unwrap();
                         archive_writer.write_all(&bytes).unwrap();
                         archive_writer.flush().unwrap();
                         records_count += 1;

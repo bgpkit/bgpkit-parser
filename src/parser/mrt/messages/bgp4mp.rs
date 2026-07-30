@@ -1,4 +1,4 @@
-use crate::error::ParserError;
+use crate::error::{EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::{encode_asn, encode_ipaddr, ReadUtils};
@@ -171,7 +171,7 @@ pub fn parse_bgp4mp_message(
 }
 
 impl Bgp4MpMessage {
-    pub fn encode(&self, asn_len: AsnLength) -> Bytes {
+    pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         bytes.extend(encode_asn(&self.peer_asn, &asn_len));
         bytes.extend(encode_asn(&self.local_asn, &asn_len));
@@ -179,8 +179,8 @@ impl Bgp4MpMessage {
         bytes.put_u16(address_family(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.peer_ip));
         bytes.extend(encode_ipaddr(&self.local_ip));
-        bytes.extend(&self.bgp_message.encode(asn_len));
-        bytes.freeze()
+        bytes.put_slice(&self.bgp_message.encode(asn_len)?);
+        Ok(bytes.freeze())
     }
 }
 
@@ -274,7 +274,7 @@ mod tests {
             bgp_message: BgpMessage::KeepAlive,
         };
 
-        let encoded = message.encode(AsnLength::Bits16);
+        let encoded = message.encode(AsnLength::Bits16).unwrap();
         let parsed = parse_bgp4mp(Bgp4MpType::Message as u16, encoded).unwrap();
 
         match parsed {
@@ -297,7 +297,7 @@ mod tests {
         data.put_u16(65001);
         data.put_u16(0);
         data.put_u16(Afi::LinkState as u16);
-        data.extend(&BgpMessage::KeepAlive.encode(AsnLength::Bits16));
+        data.put_slice(&BgpMessage::KeepAlive.encode(AsnLength::Bits16).unwrap());
 
         let error = match parse_bgp4mp(Bgp4MpType::Message as u16, data.freeze()) {
             Err(error) => error,

@@ -1,3 +1,4 @@
+use crate::encoder::sink::with_u16_len;
 use crate::error::*;
 use crate::models::*;
 use crate::parser::bgp::attributes::parse_attributes;
@@ -118,7 +119,7 @@ pub fn parse_table_dump_message(
 }
 
 impl TableDumpMessage {
-    pub fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.view_number);
         bytes.put_u16(self.sequence_number);
@@ -146,17 +147,12 @@ impl TableDumpMessage {
         }
         bytes.put_u16(self.peer_asn.into());
 
-        // encode attributes
-        let mut attr_bytes = BytesMut::new();
-        for attr in &self.attributes.inner {
-            // asn_len always 16 bites
-            attr_bytes.extend(attr.encode(AsnLength::Bits16));
-        }
+        // encode attributes; asn_len is always 16-bit for TABLE_DUMP
+        with_u16_len(&mut bytes, "TABLE_DUMP attribute length", |b| {
+            self.attributes.encode_to(AsnLength::Bits16, b)
+        })?;
 
-        bytes.put_u16(attr_bytes.len() as u16);
-        bytes.put_slice(&attr_bytes);
-
-        bytes.freeze()
+        Ok(bytes.freeze())
     }
 }
 
@@ -213,7 +209,7 @@ mod tests {
             "SEQUENCE_NUMBER mismatch"
         );
         // Add more assertions here as per your actual requirements
-        let encoded = table_dump_message.encode();
+        let encoded = table_dump_message.encode().unwrap();
         assert_eq!(encoded, bytes);
     }
     #[test]
@@ -252,7 +248,7 @@ mod tests {
         // Add more assertions here as per your actual requirements
 
         // test encoding
-        let encoded = table_dump_message.encode();
+        let encoded = table_dump_message.encode().unwrap();
         assert_eq!(encoded, bytes);
     }
 
@@ -311,7 +307,7 @@ mod tests {
             attributes,
         };
 
-        // This should exercise the attr.encode(AsnLength::Bits16) line
-        let _encoded = table_dump.encode();
+        // This should exercise the attr.encode(AsnLength::Bits16).unwrap() line
+        let _encoded = table_dump.encode().unwrap();
     }
 }

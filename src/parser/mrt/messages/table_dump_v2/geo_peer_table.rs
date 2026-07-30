@@ -1,6 +1,7 @@
 //! RFC 6397: GEO_PEER_TABLE parsing for MRT TABLE_DUMP_V2 format
 
-use crate::error::ParserError;
+use crate::encoder::sink::put_u16_len_slice;
+use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -134,24 +135,31 @@ impl GeoPeerTable {
     ///     -0.1278,  // London longitude
     /// );
     ///
-    /// let encoded = geo_table.encode();
+    /// let encoded = geo_table.encode().unwrap();
     /// ```
-    pub fn encode(&self) -> Bytes {
+    pub fn encode(&self) -> Result<Bytes, EncodingError> {
         let mut buf = BytesMut::new();
 
         // Encode collector BGP ID (4 bytes)
         buf.put_u32(self.collector_bgp_id.into());
 
         // Encode view name length and view name
-        let view_name_bytes = self.view_name.as_bytes();
-        buf.put_u16(view_name_bytes.len() as u16);
-        buf.extend(view_name_bytes);
+        put_u16_len_slice(
+            &mut buf,
+            "GeoPeerTable view name length",
+            self.view_name.as_bytes(),
+        )?;
 
         // Encode collector coordinates (4 bytes each, 32-bit float)
         buf.put_f32(self.collector_latitude);
         buf.put_f32(self.collector_longitude);
 
         // Encode peer count
+        check_max(
+            "GeoPeerTable peer count",
+            self.geo_peers.len(),
+            u16::MAX as usize,
+        )?;
         buf.put_u16(self.geo_peers.len() as u16);
 
         // Encode each peer entry
@@ -188,7 +196,7 @@ impl GeoPeerTable {
             buf.put_f32(geo_peer.peer_longitude);
         }
 
-        buf.freeze()
+        Ok(buf.freeze())
     }
 }
 
@@ -344,7 +352,7 @@ mod tests {
         original_table.add_geo_peer(geo_peer2);
 
         // Encode and then parse back
-        let encoded = original_table.encode();
+        let encoded = original_table.encode().unwrap();
         let mut encoded_bytes = encoded;
         let parsed_table = parse_geo_peer_table(&mut encoded_bytes).unwrap();
 
@@ -423,7 +431,7 @@ mod tests {
         geo_table.add_geo_peer(geo_peer2);
 
         // Encode the geo table
-        let encoded = geo_table.encode();
+        let encoded = geo_table.encode().unwrap();
 
         // Create expected bytes manually for comparison
         let mut expected = BytesMut::new();

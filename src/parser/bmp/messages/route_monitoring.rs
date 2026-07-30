@@ -98,7 +98,7 @@ mod tests {
             attributes: Attributes::default(),
             announced_prefixes: vec![],
         });
-        let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits16).unwrap();
 
         let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits16; // RFC 9069 violation
@@ -121,7 +121,7 @@ mod tests {
             attributes: Attributes::default(),
             announced_prefixes: vec![],
         });
-        let bgp_bytes = bgp_update.encode(AsnLength::Bits32);
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits32).unwrap();
 
         let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits32; // RFC 9069 compliant
@@ -144,7 +144,7 @@ mod tests {
             attributes: Attributes::default(),
             announced_prefixes: vec![],
         });
-        let bgp_bytes = bgp_update.encode(AsnLength::Bits16);
+        let bgp_bytes = bgp_update.encode(AsnLength::Bits16).unwrap();
 
         let mut data = bgp_bytes;
         let asn_len = AsnLength::Bits16;

@@ -1,3 +1,5 @@
+use crate::encoder::sink::put_u8_len_slice;
+use crate::error::EncodingError;
 use crate::models::*;
 use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
 use crate::parser::bgp::attributes::attr_29_linkstate::parse_link_state_nlri;
@@ -152,9 +154,12 @@ pub fn parse_nlri(
 /// * `reachable` - Whether this is MP_REACH_NLRI (true) or MP_UNREACH_NLRI (false)
 /// * `add_path` - Whether ADD-PATH capability was negotiated (RFC 7911). If true,
 ///   path_id will be encoded; if false, prefixes with path_id will cause an error.
-pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Result<Bytes, ParserError> {
-    let mut bytes = BytesMut::new();
-
+pub fn encode_nlri(
+    nlri: &Nlri,
+    reachable: bool,
+    add_path: bool,
+    bytes: &mut BytesMut,
+) -> Result<(), EncodingError> {
     // encode address family
     bytes.put_u16(nlri.afi as u16);
     bytes.put_u8(nlri.safi as u8);
@@ -187,8 +192,8 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Result<Bytes
                 ip_bytes
             }
         };
-        bytes.put_u8(next_hop_bytes.len() as u8);
-        bytes.put_slice(&next_hop_bytes);
+        // all next-hop encodings are fixed-size (4..=48 bytes), so this cannot fail
+        put_u8_len_slice(bytes, "MP NLRI next hop length", &next_hop_bytes)?;
     }
 
     // Handle MPLS-labeled NLRI encoding (SAFI 4 per RFC 3107/8277)
@@ -210,7 +215,7 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Result<Bytes
                     labeled, mode, add_path, None, // peer_max_labels
                 )
                 .map_err(|e| {
-                    ParserError::ParseError(format!("Failed to encode labeled prefix: {:?}", e))
+                    EncodingError::unencodable("MP NLRI labeled prefix", format!("{e:?}"))
                 })?;
                 bytes.extend_from_slice(&encoded);
             }
@@ -238,9 +243,15 @@ pub fn encode_nlri(nlri: &Nlri, reachable: bool, add_path: bool) -> Result<Bytes
         for prefix in &nlri.prefixes {
             bytes.extend(prefix.encode());
         }
+        // FlowSpec NLRI entries (RFC 8955); previously silently dropped on encode
+        if let Some(flowspec_nlris) = &nlri.flowspec_nlris {
+            for flowspec in flowspec_nlris {
+                bytes.put_slice(&encode_flowspec_nlri(flowspec)?);
+            }
+        }
     }
 
-    Ok(bytes.freeze())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -389,7 +400,9 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, true, false).unwrap();
+        let mut buf = BytesMut::new();
+        encode_nlri(&nlri, true, false, &mut buf).unwrap();
+        let bytes = buf.freeze();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -420,7 +433,9 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, true, true).unwrap();
+        let mut buf = BytesMut::new();
+        encode_nlri(&nlri, true, true, &mut buf).unwrap();
+        let bytes = buf.freeze();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -479,7 +494,9 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri, false, false).unwrap();
+        let mut buf = BytesMut::new();
+        encode_nlri(&nlri, false, false, &mut buf).unwrap();
+        let bytes = buf.freeze();
         assert_eq!(
             bytes,
             Bytes::from(vec![
@@ -512,7 +529,9 @@ mod tests {
             link_state_nlris: None,
             flowspec_nlris: None,
         };
-        let bytes = encode_nlri(&nlri_with_next_hop, false, false).unwrap();
+        let mut buf = BytesMut::new();
+        encode_nlri(&nlri_with_next_hop, false, false, &mut buf).unwrap();
+        let bytes = buf.freeze();
         // The encoded bytes should include the next_hop
         assert_eq!(
             bytes,

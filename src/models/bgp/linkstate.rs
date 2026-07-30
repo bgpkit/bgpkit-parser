@@ -183,10 +183,6 @@ impl Tlv {
     pub fn new(tlv_type: u16, value: Vec<u8>) -> Self {
         Self { tlv_type, value }
     }
-
-    pub fn length(&self) -> u16 {
-        self.value.len() as u16
-    }
 }
 
 /// Node Descriptor TLVs
@@ -609,7 +605,6 @@ mod tests {
         let tlv = Tlv::new(1024, vec![0x01, 0x02, 0x03]);
         assert_eq!(tlv.tlv_type, 1024);
         assert_eq!(tlv.value, vec![0x01, 0x02, 0x03]);
-        assert_eq!(tlv.length(), 3);
     }
 
     #[test]

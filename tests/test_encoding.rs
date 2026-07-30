@@ -9,7 +9,7 @@ mod tests {
         let url = "https://spaces.bgpkit.org/parser/update-example.gz";
         let parser = BgpkitParser::new(url).unwrap();
         for record in parser.into_record_iter() {
-            let bytes = record.encode();
+            let bytes = record.encode().unwrap();
             let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
             assert_eq!(record, parsed_record);
         }
@@ -17,7 +17,7 @@ mod tests {
         let url = "http://archive.routeviews.org/bgpdata/2023.10/UPDATES/updates.20231029.2015.bz2";
         let parser = BgpkitParser::new(url).unwrap();
         for record in parser.into_record_iter() {
-            let bytes = record.encode();
+            let bytes = record.encode().unwrap();
             let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
             assert_eq!(record, parsed_record);
         }
@@ -28,7 +28,7 @@ mod tests {
         let url = "http://archive.routeviews.org/route-views6/bgpdata/2023.10/UPDATES/updates.20231029.2115.bz2";
         let parser = BgpkitParser::new(url).unwrap();
         for record in parser.into_record_iter() {
-            let bytes = record.encode();
+            let bytes = record.encode().unwrap();
             let parsed_record = match parse_mrt_record(&mut Cursor::new(bytes.clone())) {
                 Ok(r) => r,
                 Err(_) => {
@@ -48,7 +48,7 @@ mod tests {
         let url = "http://archive.routeviews.org/route-views.amsix/bgpdata/2023.05/UPDATES/updates.20230505.0330.bz2";
         let parser = BgpkitParser::new(url).unwrap();
         for record in parser.into_record_iter() {
-            let bytes = record.encode();
+            let bytes = record.encode().unwrap();
             let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
             assert_eq!(record, parsed_record);
         }
@@ -71,7 +71,7 @@ mod tests {
         let mut writer = oneio::get_writer(tempfile.as_str()).unwrap();
 
         for record in input_records.iter() {
-            let bytes = record.encode();
+            let bytes = record.encode().unwrap();
             writer.write_all(&bytes).unwrap();
             let parsed_record = parse_mrt_record(&mut Cursor::new(bytes)).unwrap();
             assert_eq!(*record, parsed_record);
