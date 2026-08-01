@@ -253,6 +253,13 @@ pub(crate) fn encode_table_dump_batch(
 
 /// Return true when a historical batched TABLE_DUMP body is structurally
 /// complete except for the final four attribute bytes.
+///
+/// This recovers files written by an old MRT writer, likely MRT Toolkit. The
+/// surviving MRT Toolkit source already has the fix: `bgp_table_dump_write`
+/// includes the 4-byte View Number and Sequence Number in the declared length.
+/// The fixture `bview.20000111.0032.gz` omits those four bytes from the length.
+///
+/// [original MRT writer]: https://fossies.org/linux/misc/old/mrt-2.2.2a-src.tar.gz/mrt-2.2.2a/src/lib/bgp_proto/bgp_dump2.c
 pub(crate) fn needs_legacy_length_correction(sub_type: u16, data: &[u8]) -> bool {
     let address_len = match sub_type {
         1 => 4usize,
