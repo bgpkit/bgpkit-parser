@@ -701,8 +701,8 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
-                            write_mrt_core_dump(true, e.bytes);
                             return None;
                         }
                         continue;

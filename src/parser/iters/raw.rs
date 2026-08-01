@@ -45,11 +45,8 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
                             return None;
                         } else {
                             continue;
@@ -62,12 +59,7 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                     ParserError::IoError(err) | ParserError::EofError(err) => {
                         // when reaching IO error, stop iterating
                         error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         return None;
                     }
                     #[cfg(feature = "oneio")]

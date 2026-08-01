@@ -46,6 +46,7 @@ for announcement in parser.into_update_iter() {
 */
 use crate::error::ParserError;
 use crate::models::*;
+use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::BgpkitParser;
 use crate::Elementor;
 use log::{error, warn};
@@ -178,21 +179,13 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: {}", err_str);
                         }
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
                             return None;
                         }
                         continue;
@@ -200,12 +193,7 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                     ParserError::EofExpected => return None,
                     ParserError::IoError(err) | ParserError::EofError(err) => {
                         error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         return None;
                     }
                     #[cfg(feature = "oneio")]
