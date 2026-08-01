@@ -4,6 +4,31 @@ use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::{encode_asn, encode_ipaddr, ReadUtils};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
+use std::net::{IpAddr, Ipv4Addr};
+
+pub(crate) fn is_short_zebra_open(data: &Bytes, asn_len: &AsnLength) -> bool {
+    if !matches!(asn_len, AsnLength::Bits16) {
+        return false;
+    }
+
+    let asn_bytes = asn_len.bytes() * 2;
+    data.len() >= asn_bytes + 19
+        && data[asn_bytes..asn_bytes + 16] == [0xff; 16]
+        && data[asn_bytes + 18] == BgpMessageType::OPEN as u8
+}
+
+pub(crate) fn uses_zebra_compat(sub_type: u16, data: &Bytes) -> bool {
+    match Bgp4MpType::try_from(sub_type) {
+        Ok(Bgp4MpType::StateChange) => data.len() == 8,
+        Ok(
+            Bgp4MpType::Message
+            | Bgp4MpType::MessageLocal
+            | Bgp4MpType::MessageAddpath
+            | Bgp4MpType::MessageLocalAddpath,
+        ) => is_short_zebra_open(data, &AsnLength::Bits16),
+        _ => false,
+    }
+}
 
 /// Parse MRT BGP4MP type
 ///
@@ -141,9 +166,28 @@ pub fn parse_bgp4mp_message(
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpMessage, ParserError> {
     let total_size = data.len();
+    let is_short_zebra_open = is_short_zebra_open(&data, &asn_len);
 
     let peer_asn: Asn = data.read_asn(asn_len)?;
     let local_asn: Asn = data.read_asn(asn_len)?;
+
+    // Old Zebra versions omitted the interface index, AFI, and peer/local IP
+    // addresses from some BGP OPEN records. The BGP marker therefore follows
+    // the two 16-bit ASNs immediately. Limit this compatibility path to that
+    // exact signature so other malformed envelopes still fail normally.
+    if is_short_zebra_open {
+        let bgp_message = parse_bgp_message(&mut data, add_path, &asn_len)?;
+        return Ok(Bgp4MpMessage {
+            msg_type: *msg_type,
+            peer_asn,
+            local_asn,
+            interface_index: 0,
+            peer_ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            local_ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            bgp_message,
+        });
+    }
+
     let interface_index: u16 = data.read_u16()?;
     let afi: Afi = data.read_afi()?;
     let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size)?;
@@ -220,8 +264,27 @@ pub fn parse_bgp4mp_state_change(
     asn_len: AsnLength,
     msg_type: &Bgp4MpType,
 ) -> Result<Bgp4MpStateChange, ParserError> {
+    let is_short_zebra_state_change = matches!(asn_len, AsnLength::Bits16) && input.len() == 8;
     let peer_asn: Asn = input.read_asn(asn_len)?;
     let local_asn: Asn = input.read_asn(asn_len)?;
+
+    // Work around a historical Zebra corruption where an 8-byte state-change
+    // record contains only the two ASNs and the old/new FSM states.
+    if is_short_zebra_state_change {
+        let old_state = BgpState::try_from(input.read_u16()?)?;
+        let new_state = BgpState::try_from(input.read_u16()?)?;
+        return Ok(Bgp4MpStateChange {
+            msg_type: *msg_type,
+            peer_asn,
+            local_asn,
+            interface_index: 0,
+            peer_ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            local_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            old_state,
+            new_state,
+        });
+    }
+
     let interface_index: u16 = input.read_u16()?;
     let address_family: Afi = input.read_afi()?;
     validate_bgp4mp_afi(&address_family)?;

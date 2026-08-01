@@ -234,11 +234,28 @@ fn record_io_error(error: std::io::Error, header: &[u8], body: &[u8]) -> ParserE
 }
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
+    parse_mrt_record_with_zebra_compat(input).map(|(record, _)| record)
+}
+
+pub(crate) fn raw_record_uses_zebra_compat(raw_record: &RawMrtRecord) -> bool {
+    matches!(
+        raw_record.common_header.entry_type,
+        EntryType::BGP4MP | EntryType::BGP4MP_ET
+    ) && crate::parser::mrt::messages::bgp4mp::uses_zebra_compat(
+        raw_record.common_header.entry_subtype,
+        &raw_record.message_bytes,
+    )
+}
+
+pub(crate) fn parse_mrt_record_with_zebra_compat(
+    input: &mut impl Read,
+) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
+    let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
     // Parse from a clone so the original is available for raw_bytes() on error,
     // avoiding manual reassembly that could diverge from RawMrtRecord::raw_bytes().
     match raw_record.clone().parse() {
-        Ok(record) => Ok(record),
+        Ok(record) => Ok((record, used_zebra_compat)),
         Err(e) => Err(ParserErrorWithBytes {
             error: e,
             bytes: Some(raw_record.raw_bytes().to_vec()),

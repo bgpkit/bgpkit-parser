@@ -3,9 +3,10 @@ use crate::models::*;
 use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
-use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
+use crate::parser::mrt::messages::bgp4mp::{bgp4mp_message_payload_len, is_short_zebra_open};
 use crate::parser::mrt::messages::legacy_bgp::{BGP_KEEPALIVE, BGP_STATE_CHANGE, BGP_UPDATE};
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
+use crate::parser::mrt::mrt_record::raw_record_uses_zebra_compat;
 use crate::parser::{
     chunk_mrt_record, parse_legacy_bgp, parse_nlri_list, BgpkitParser, Filterable, ReadUtils,
 };
@@ -13,7 +14,7 @@ use bytes::{Buf, Bytes};
 use ipnet::IpNet;
 use log::{error, warn};
 use std::io::Read;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -474,8 +475,19 @@ fn parse_bgp4mp_routes(
     };
 
     let total_size = data.len();
+    let is_short_zebra_open = is_short_zebra_open(&data, &asn_len);
     let peer_asn = data.read_asn(asn_len)?;
     let _local_asn = data.read_asn(asn_len)?;
+    if is_short_zebra_open {
+        return parse_bgp_message_routes(
+            data,
+            add_path,
+            &asn_len,
+            timestamp,
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            peer_asn,
+        );
+    }
     let _interface_index = data.read_u16()?;
     let afi = data.read_afi()?;
     let should_read = bgp4mp_message_payload_len(&afi, &asn_len, total_size)?;
@@ -730,9 +742,13 @@ impl<R: Read> Iterator for RouteIterator<R> {
                 },
             };
 
+            let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
             let raw_bytes = raw_record.raw_bytes().to_vec();
             match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
                 Ok(routes) => {
+                    if used_zebra_compat {
+                        self.parser.warn_zebra_compat_once();
+                    }
                     self.pending_routes = routes;
                     self.pending_raw_bytes = Some(raw_bytes);
                 }
@@ -797,9 +813,13 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                 Err(e) => return Some(Err(e)),
             };
 
+            let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
             let raw_bytes = raw_record.raw_bytes().to_vec();
             match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
                 Ok(routes) => {
+                    if used_zebra_compat {
+                        self.parser.warn_zebra_compat_once();
+                    }
                     self.pending_routes = routes;
                     self.pending_raw_bytes = Some(raw_bytes);
                 }

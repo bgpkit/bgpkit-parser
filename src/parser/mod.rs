@@ -18,6 +18,7 @@ pub mod rislive;
 pub(crate) use self::utils::*;
 
 use crate::models::MrtRecord;
+use log::warn;
 pub use mrt::mrt_elem::{BgpUpdateElemIter, ElemError, Elementor, RecordElemIter};
 #[cfg(feature = "oneio")]
 use oneio::{get_cache_reader, get_reader};
@@ -46,11 +47,13 @@ pub struct BgpkitParser<R> {
 
 pub(crate) struct ParserOptions {
     show_warnings: bool,
+    warned_zebra_compat: bool,
 }
 impl Default for ParserOptions {
     fn default() -> Self {
         ParserOptions {
             show_warnings: true,
+            warned_zebra_compat: false,
         }
     }
 }
@@ -116,11 +119,25 @@ impl<R: Read> BgpkitParser<R> {
 
     /// This is used in for loop `for item in parser{}`
     pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
-        parse_mrt_record(&mut self.reader)
+        let (record, used_zebra_compat) =
+            mrt::mrt_record::parse_mrt_record_with_zebra_compat(&mut self.reader)?;
+        if used_zebra_compat {
+            self.warn_zebra_compat_once();
+        }
+        Ok(record)
     }
 }
 
 impl<R> BgpkitParser<R> {
+    pub(crate) fn warn_zebra_compat_once(&mut self) {
+        if self.options.show_warnings && !self.options.warned_zebra_compat {
+            warn!(
+                "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
+            );
+            self.options.warned_zebra_compat = true;
+        }
+    }
+
     pub fn enable_core_dump(self) -> Self {
         BgpkitParser {
             reader: self.reader,
