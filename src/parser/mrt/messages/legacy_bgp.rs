@@ -10,6 +10,9 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr};
 
+// Deprecated BGP subtype codes for MRT type 5 records, from the IANA registry:
+//
+// https://www.iana.org/assignments/mrt/mrt.xhtml#bgp-subtype-codes
 pub const BGP_UPDATE: u16 = 1;
 pub const BGP_STATE_CHANGE: u16 = 3;
 pub const BGP_KEEPALIVE: u16 = 7;
