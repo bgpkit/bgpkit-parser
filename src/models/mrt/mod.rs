@@ -1,10 +1,12 @@
 //! MRT message and relevant structs.
 
 pub mod bgp4mp;
+pub mod legacy_bgp;
 pub mod table_dump;
 pub mod table_dump_v2;
 
 pub use bgp4mp::*;
+pub use legacy_bgp::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::fmt::{Display, Formatter};
 pub use table_dump::*;
@@ -130,6 +132,9 @@ impl Display for MrtMessage {
             MrtMessage::TableDumpMessage(msg) => {
                 write!(f, "TABLE_DUMP|{}|{}", msg.prefix, msg.peer_ip)
             }
+            MrtMessage::TableDumpMessageBatch(messages) => {
+                write!(f, "TABLE_DUMP_BATCH|{} entries", messages.len())
+            }
             MrtMessage::TableDumpV2Message(msg) => match msg {
                 TableDumpV2Message::PeerIndexTable(pit) => {
                     write!(f, "PEER_INDEX_TABLE|{}", pit.id_peer_map.len())
@@ -174,6 +179,22 @@ impl Display for MrtMessage {
                     write!(f, "BGP4MP|{}|{}|{}", msg.peer_ip, msg.peer_asn, msg_type)
                 }
             },
+            MrtMessage::LegacyBgp(bgp) => match bgp {
+                LegacyBgp::StateChange(sc) => write!(
+                    f,
+                    "BGP|STATE_CHANGE|{}|{}|{:?}->{:?}",
+                    sc.peer_ip, sc.peer_asn, sc.old_state, sc.new_state
+                ),
+                LegacyBgp::Message(msg) => {
+                    let msg_type = match &msg.bgp_message {
+                        crate::models::BgpMessage::Update(_) => "UPDATE",
+                        crate::models::BgpMessage::KeepAlive => "KEEPALIVE",
+                        crate::models::BgpMessage::Open(_) => "OPEN",
+                        crate::models::BgpMessage::Notification(_) => "NOTIFICATION",
+                    };
+                    write!(f, "BGP|{}|{}|{}", msg.peer_ip, msg.peer_asn, msg_type)
+                }
+            },
         }
     }
 }
@@ -182,8 +203,12 @@ impl Display for MrtMessage {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MrtMessage {
     TableDumpMessage(TableDumpMessage),
+    /// A historical physical TABLE_DUMP record containing multiple entries.
+    TableDumpMessageBatch(Vec<TableDumpMessage>),
     TableDumpV2Message(TableDumpV2Message),
     Bgp4Mp(Bgp4MpEnum),
+    /// Deprecated MRT Type 5 BGP message.
+    LegacyBgp(LegacyBgp),
 }
 
 /// MRT entry type.

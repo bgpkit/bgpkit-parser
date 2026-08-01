@@ -3,6 +3,7 @@ Default iterator implementations that skip errors and return successfully parsed
 */
 use crate::error::ParserError;
 use crate::models::*;
+use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use log::{error, warn};
@@ -62,10 +63,7 @@ impl<R: Read> Iterator for RecordIterator<R> {
                             if self.parser.options.show_warnings {
                                 warn!("parser warn: {}", err_str);
                             }
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
+                            write_mrt_core_dump(self.parser.core_dump, e.bytes);
                             continue;
                         }
                         ParserError::ParseError(err_str) => {

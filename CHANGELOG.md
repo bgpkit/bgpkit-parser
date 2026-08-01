@@ -26,9 +26,16 @@ All notable changes to this project will be documented in this file.
   `EncodingError` has two variants: `ValueTooLarge { field, actual, max }` for wire-capacity overflows and `Unencodable { field, reason }` for values with no valid wire representation (ATTR_SET, RIB_GENERIC, OPEN parameter type 255, labeled NLRI with an empty label stack).
 * **`Tlv::length()` and `SubTlv::length()` removed**: both silently saturated at `u16::MAX`; encoders now compute checked lengths internally.
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
+* **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
+
+### Added
+
+* **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP UPDATE, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
+* **Historical RIPE regression fixtures**: Added the original January 2000 RRC00 update and bview gzip files as repository-only, offline integration fixtures.
 
 ### Fixed
 
+* **Fallible MRT error bytes**: Header, oversized-record, partial-body, and route-iterator failures now retain all consumed record bytes. Default/raw iteration only writes `mrt_core_dump` when explicitly enabled, and raw error skipping no longer recurses.
 * **Silent truncation on encode eliminated** ([#313](https://github.com/bgpkit/bgpkit-parser/issues/313)): AS_PATH segments with >255 ASes, attribute values exceeding their (extended or non-extended) length field, TLV values in Tunnel Encapsulation / BGP-LS / SFP / BFD Discriminator / Prefix-SID / BIER attributes, RIB entry counts, peer counts, view names, and BGP message total lengths now return `EncodingError` instead of writing corrupt length fields.
 * **FlowSpec NLRI length bound**: the wire length field is 12-bit (RFC 8955); NLRI data of 4096..=65535 bytes previously passed an unchecked `u16` cast and encoded a corrupt length byte. It is now rejected with `ValueTooLarge`.
 * **MP_REACH/MP_UNREACH encoding errors are no longer swallowed**: labeled-NLRI failures previously logged a warning and emitted a zero-length (RFC-invalid) attribute value; they now propagate as `EncodingError`.

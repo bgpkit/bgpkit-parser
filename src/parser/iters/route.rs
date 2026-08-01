@@ -4,8 +4,11 @@ use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidat
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::bgp4mp_message_payload_len;
+use crate::parser::mrt::messages::legacy_bgp::{BGP_KEEPALIVE, BGP_STATE_CHANGE, BGP_UPDATE};
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
-use crate::parser::{chunk_mrt_record, parse_nlri_list, BgpkitParser, Filterable, ReadUtils};
+use crate::parser::{
+    chunk_mrt_record, parse_legacy_bgp, parse_nlri_list, BgpkitParser, Filterable, ReadUtils,
+};
 use bytes::{Buf, Bytes};
 use ipnet::IpNet;
 use log::{error, warn};
@@ -222,8 +225,8 @@ fn parse_route_peer_table(mut data: Bytes) -> Result<RoutePeerTable, ParserError
 enum RouteRecordIter {
     #[default]
     Empty,
-    One(Option<BgpRouteElem>),
     Update(RouteUpdateIter),
+    TableDump(RouteTableDumpIter),
     RibAfi(RouteRibAfiIter),
 }
 
@@ -231,10 +234,56 @@ impl RouteRecordIter {
     fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
         match self {
             RouteRecordIter::Empty => Ok(None),
-            RouteRecordIter::One(route) => Ok(route.take()),
             RouteRecordIter::Update(iter) => Ok(iter.next_route()),
+            RouteRecordIter::TableDump(iter) => iter.next_route(),
             RouteRecordIter::RibAfi(iter) => iter.next_route(),
         }
+    }
+}
+
+struct RouteTableDumpIter {
+    data: Bytes,
+    afi: Afi,
+}
+
+impl RouteTableDumpIter {
+    fn next_route(&mut self) -> Result<Option<BgpRouteElem>, ParserError> {
+        if self.data.is_empty() {
+            return Ok(None);
+        }
+
+        let prefix = match self.afi {
+            Afi::Ipv4 => self.data.read_ipv4_prefix().map(IpNet::V4),
+            Afi::Ipv6 => self.data.read_ipv6_prefix().map(IpNet::V6),
+            Afi::LinkState => unreachable!(),
+        }?;
+        let _status = self.data.read_u8()?;
+        let originated_time = self.data.read_u32()? as f64;
+        let peer_ip = self.data.read_address(&self.afi)?;
+        let peer_asn = Asn::new_16bit(self.data.read_u16()?);
+        let attribute_length = self.data.read_u16()? as usize;
+        self.data.has_n_remaining(attribute_length)?;
+        let attrs = parse_route_attributes(
+            self.data.split_to(attribute_length),
+            &AsnLength::Bits16,
+            false,
+            RouteAttributeContext {
+                afi: None,
+                safi: None,
+                prefixes: None,
+                is_announcement: Some(true),
+                has_standard_nlri: self.afi == Afi::Ipv4,
+            },
+        )?;
+
+        Ok(Some(BgpRouteElem {
+            timestamp: originated_time,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip,
+            peer_asn,
+            prefix: NetworkPrefix::new(prefix, None),
+            as_path: attrs.as_path,
+        }))
     }
 }
 
@@ -487,38 +536,42 @@ fn parse_table_dump_routes(sub_type: u16, mut data: Bytes) -> Result<RouteRecord
 
     let _view_number = data.read_u16()?;
     let _sequence_number = data.read_u16()?;
-    let prefix = match &afi {
-        Afi::Ipv4 => data.read_ipv4_prefix().map(IpNet::V4),
-        Afi::Ipv6 => data.read_ipv6_prefix().map(IpNet::V6),
-        Afi::LinkState => unreachable!(),
-    }?;
-    let _status = data.read_u8()?;
-    let originated_time = data.read_u32()? as f64;
-    let peer_ip = data.read_address(&afi)?;
-    let peer_asn = Asn::new_16bit(data.read_u16()?);
-    let attribute_length = data.read_u16()? as usize;
-    data.has_n_remaining(attribute_length)?;
-    let attrs = parse_route_attributes(
-        data.split_to(attribute_length),
-        &AsnLength::Bits16,
-        false,
-        RouteAttributeContext {
-            afi: None,
-            safi: None,
-            prefixes: None,
-            is_announcement: Some(true),
-            has_standard_nlri: afi == Afi::Ipv4,
-        },
-    )?;
+    if data.is_empty() {
+        return Err(ParserError::TruncatedMsg(
+            "TABLE_DUMP record contains no entries".to_string(),
+        ));
+    }
+    Ok(RouteRecordIter::TableDump(RouteTableDumpIter { data, afi }))
+}
 
-    Ok(RouteRecordIter::One(Some(BgpRouteElem {
-        timestamp: originated_time,
-        elem_type: ElemType::ANNOUNCE,
-        peer_ip,
-        peer_asn,
-        prefix: NetworkPrefix::new(prefix, None),
-        as_path: attrs.as_path,
-    })))
+fn parse_legacy_bgp_routes(
+    sub_type: u16,
+    mut data: Bytes,
+    timestamp: f64,
+) -> Result<RouteRecordIter, ParserError> {
+    match sub_type {
+        BGP_UPDATE => {
+            let peer_asn = Asn::new_16bit(data.read_u16()?);
+            let peer_ip = IpAddr::V4(data.read_ipv4_address()?);
+            let _local_asn = data.read_u16()?;
+            let _local_ip = data.read_ipv4_address()?;
+            Ok(RouteRecordIter::Update(parse_bgp_update_routes(
+                data,
+                false,
+                &AsnLength::Bits16,
+                timestamp,
+                peer_ip,
+                peer_asn,
+            )?))
+        }
+        BGP_STATE_CHANGE | BGP_KEEPALIVE => {
+            parse_legacy_bgp(sub_type, data)?;
+            Ok(RouteRecordIter::Empty)
+        }
+        _ => Err(ParserError::Unsupported(format!(
+            "unsupported legacy BGP subtype: {sub_type}"
+        ))),
+    }
 }
 
 fn parse_table_dump_v2_routes(
@@ -581,6 +634,11 @@ fn parse_raw_record_route_iter(
             raw_record.message_bytes,
             timestamp,
         ),
+        EntryType::BGP => parse_legacy_bgp_routes(
+            raw_record.common_header.entry_subtype,
+            raw_record.message_bytes,
+            timestamp,
+        ),
         v => Err(ParserError::Unsupported(format!(
             "unsupported MRT type: {v:?}"
         ))),
@@ -591,6 +649,7 @@ pub struct RouteIterator<R> {
     parser: BgpkitParser<R>,
     pending_routes: RouteRecordIter,
     peer_table: Option<RoutePeerTable>,
+    pending_raw_bytes: Option<Vec<u8>>,
 }
 
 impl<R> RouteIterator<R> {
@@ -599,6 +658,7 @@ impl<R> RouteIterator<R> {
             parser,
             pending_routes: RouteRecordIter::Empty,
             peer_table: None,
+            pending_raw_bytes: None,
         }
     }
 }
@@ -615,10 +675,13 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     }
                     continue;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    self.pending_raw_bytes = None;
+                }
                 Err(err) => {
                     error!("parser error: {}", err);
                     self.pending_routes = RouteRecordIter::Empty;
+                    write_mrt_core_dump(self.parser.core_dump, self.pending_raw_bytes.take());
                     if self.parser.core_dump {
                         return None;
                     }
@@ -667,12 +730,15 @@ impl<R: Read> Iterator for RouteIterator<R> {
                 },
             };
 
+            let raw_bytes = raw_record.raw_bytes().to_vec();
             match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
                 Ok(routes) => {
                     self.pending_routes = routes;
+                    self.pending_raw_bytes = Some(raw_bytes);
                 }
                 Err(err) => {
                     error!("parser error: {}", err);
+                    write_mrt_core_dump(self.parser.core_dump, Some(raw_bytes));
                     if self.parser.core_dump {
                         return None;
                     }
@@ -687,6 +753,7 @@ pub struct FallibleRouteIterator<R> {
     parser: BgpkitParser<R>,
     pending_routes: RouteRecordIter,
     peer_table: Option<RoutePeerTable>,
+    pending_raw_bytes: Option<Vec<u8>>,
 }
 
 impl<R> FallibleRouteIterator<R> {
@@ -695,6 +762,7 @@ impl<R> FallibleRouteIterator<R> {
             parser,
             pending_routes: RouteRecordIter::Empty,
             peer_table: None,
+            pending_raw_bytes: None,
         }
     }
 }
@@ -711,10 +779,15 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                     }
                     continue;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    self.pending_raw_bytes = None;
+                }
                 Err(error) => {
                     self.pending_routes = RouteRecordIter::Empty;
-                    return Some(Err(ParserErrorWithBytes { error, bytes: None }));
+                    return Some(Err(ParserErrorWithBytes {
+                        error,
+                        bytes: self.pending_raw_bytes.take(),
+                    }));
                 }
             }
 
@@ -724,11 +797,18 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                 Err(e) => return Some(Err(e)),
             };
 
+            let raw_bytes = raw_record.raw_bytes().to_vec();
             match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
                 Ok(routes) => {
                     self.pending_routes = routes;
+                    self.pending_raw_bytes = Some(raw_bytes);
                 }
-                Err(error) => return Some(Err(ParserErrorWithBytes { error, bytes: None })),
+                Err(error) => {
+                    return Some(Err(ParserErrorWithBytes {
+                        error,
+                        bytes: Some(raw_bytes),
+                    }))
+                }
             }
         }
     }
@@ -1867,15 +1947,15 @@ mod tests {
 
     #[test]
     fn fallible_route_iterator_returns_route_parse_errors() {
-        let mut iter = BgpkitParser::from_reader(Cursor::new(
-            table_dump_v2_rib_without_peer_table_record()
-                .encode()
-                .unwrap()
-                .to_vec(),
-        ))
-        .into_fallible_route_iter();
+        let bytes = table_dump_v2_rib_without_peer_table_record()
+            .encode()
+            .unwrap()
+            .to_vec();
+        let mut iter =
+            BgpkitParser::from_reader(Cursor::new(bytes.clone())).into_fallible_route_iter();
 
-        assert!(iter.next().unwrap().is_err());
+        let error = iter.next().unwrap().unwrap_err();
+        assert_eq!(error.bytes.as_deref(), Some(bytes.as_slice()));
     }
 
     #[test]
@@ -1902,8 +1982,9 @@ mod tests {
         ];
 
         let mut iter =
-            BgpkitParser::from_reader(Cursor::new(invalid_data)).into_fallible_route_iter();
+            BgpkitParser::from_reader(Cursor::new(invalid_data.clone())).into_fallible_route_iter();
 
-        assert!(iter.next().unwrap().is_err());
+        let error = iter.next().unwrap().unwrap_err();
+        assert_eq!(error.bytes.as_deref(), Some(&invalid_data[..12]));
     }
 }

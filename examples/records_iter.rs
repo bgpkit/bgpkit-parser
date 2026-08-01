@@ -8,6 +8,7 @@ fn main() {
     for record in parser.into_record_iter() {
         match record.message {
             MrtMessage::TableDumpMessage(_) => {}
+            MrtMessage::TableDumpMessageBatch(_) => {}
             MrtMessage::TableDumpV2Message(_) => {}
             MrtMessage::Bgp4Mp(msg) => match msg {
                 Bgp4MpEnum::StateChange(_) => {}
@@ -24,6 +25,7 @@ fn main() {
                     BgpMessage::KeepAlive => {}
                 },
             },
+            MrtMessage::LegacyBgp(_) => {}
         }
     }
 }

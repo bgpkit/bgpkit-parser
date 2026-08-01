@@ -38,8 +38,26 @@ use std::net::IpAddr;
 /// ```
 pub fn parse_table_dump_message(
     sub_type: u16,
-    mut data: Bytes,
+    data: Bytes,
 ) -> Result<TableDumpMessage, ParserError> {
+    let mut messages = parse_table_dump_messages(sub_type, data)?;
+    if messages.len() != 1 {
+        return Err(ParserError::ParseError(format!(
+            "expected one TABLE_DUMP entry, found {}",
+            messages.len()
+        )));
+    }
+    Ok(messages.remove(0))
+}
+
+/// Parse all entries carried by one physical TABLE_DUMP record.
+///
+/// RFC 6396 records contain one entry. Early MRT implementations batched
+/// multiple entries behind one view/sequence header.
+pub fn parse_table_dump_messages(
+    sub_type: u16,
+    mut data: Bytes,
+) -> Result<Vec<TableDumpMessage>, ParserError> {
     // ####
     // Step 0. prepare
     //   - define AS number length
@@ -71,6 +89,32 @@ pub fn parse_table_dump_message(
 
     let view_number = data.read_u16()?;
     let sequence_number = data.read_u16()?;
+    let mut messages = Vec::new();
+
+    while !data.is_empty() {
+        messages.push(parse_table_dump_entry(
+            &mut data,
+            &afi,
+            view_number,
+            sequence_number,
+        )?);
+    }
+
+    if messages.is_empty() {
+        return Err(ParserError::TruncatedMsg(
+            "TABLE_DUMP record contains no entries".to_string(),
+        ));
+    }
+
+    Ok(messages)
+}
+
+fn parse_table_dump_entry(
+    data: &mut Bytes,
+    afi: &Afi,
+    view_number: u16,
+    sequence_number: u16,
+) -> Result<TableDumpMessage, ParserError> {
     let prefix = match &afi {
         Afi::Ipv4 => data.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => data.read_ipv6_prefix().map(ipnet::IpNet::V6),
@@ -86,7 +130,7 @@ pub fn parse_table_dump_message(
     let status = data.read_u8()?;
     let time = data.read_u32()? as u64;
 
-    let peer_ip: IpAddr = data.read_address(&afi)?;
+    let peer_ip: IpAddr = data.read_address(afi)?;
     let peer_asn = Asn::new_16bit(data.read_u16()?);
 
     let attribute_length = data.read_u16()? as usize;
@@ -104,7 +148,7 @@ pub fn parse_table_dump_message(
         parse_attributes(attr_data_slice, &AsnLength::Bits16, false, None, None, None)?;
 
     // validate mandatory attributes (TABLE_DUMP is always an announcement)
-    attributes.check_mandatory_attributes(true, afi == Afi::Ipv4);
+    attributes.check_mandatory_attributes(true, *afi == Afi::Ipv4);
 
     Ok(TableDumpMessage {
         view_number,
@@ -123,6 +167,11 @@ impl TableDumpMessage {
         let mut bytes = BytesMut::new();
         bytes.put_u16(self.view_number);
         bytes.put_u16(self.sequence_number);
+        self.encode_entry_to(&mut bytes)?;
+        Ok(bytes.freeze())
+    }
+
+    fn encode_entry_to(&self, bytes: &mut BytesMut) -> Result<(), EncodingError> {
         match &self.prefix.prefix {
             IpNet::V4(p) => {
                 bytes.put_u32(p.addr().into());
@@ -148,12 +197,100 @@ impl TableDumpMessage {
         bytes.put_u16(self.peer_asn.into());
 
         // encode attributes; asn_len is always 16-bit for TABLE_DUMP
-        with_u16_len(&mut bytes, "TABLE_DUMP attribute length", |b| {
+        with_u16_len(bytes, "TABLE_DUMP attribute length", |b| {
             self.attributes.encode_to(AsnLength::Bits16, b)
         })?;
-
-        Ok(bytes.freeze())
+        Ok(())
     }
+}
+
+pub(crate) fn encode_table_dump_batch(
+    messages: &[TableDumpMessage],
+    sub_type: u16,
+) -> Result<Bytes, EncodingError> {
+    let Some(first) = messages.first() else {
+        return Err(EncodingError::unencodable(
+            "TABLE_DUMP batch",
+            "batch is empty",
+        ));
+    };
+
+    let expected_ipv4 = match sub_type {
+        1 => true,
+        2 => false,
+        _ => {
+            return Err(EncodingError::unencodable(
+                "TABLE_DUMP batch",
+                format!("invalid subtype {sub_type}"),
+            ));
+        }
+    };
+
+    let mut bytes = BytesMut::new();
+    bytes.put_u16(first.view_number);
+    bytes.put_u16(first.sequence_number);
+    for message in messages {
+        if message.view_number != first.view_number
+            || message.sequence_number != first.sequence_number
+        {
+            return Err(EncodingError::unencodable(
+                "TABLE_DUMP batch",
+                "all entries must have the same view and sequence numbers",
+            ));
+        }
+        if matches!(message.prefix.prefix, IpNet::V4(_)) != expected_ipv4
+            || matches!(message.peer_ip, IpAddr::V4(_)) != expected_ipv4
+        {
+            return Err(EncodingError::unencodable(
+                "TABLE_DUMP batch",
+                "entry address family does not match the MRT subtype",
+            ));
+        }
+        message.encode_entry_to(&mut bytes)?;
+    }
+    Ok(bytes.freeze())
+}
+
+/// Return true when a historical batched TABLE_DUMP body is structurally
+/// complete except for the final four attribute bytes.
+pub(crate) fn needs_legacy_length_correction(sub_type: u16, data: &[u8]) -> bool {
+    let address_len = match sub_type {
+        1 => 4usize,
+        2 => 16usize,
+        _ => return false,
+    };
+    if data.len() < 4 {
+        return false;
+    }
+
+    // Prefix, prefix length, status, originated time, peer IP, peer ASN,
+    // and the attribute-length field.
+    let fixed_entry_len = address_len * 2 + 10;
+    let mut offset = 4usize;
+    while offset < data.len() {
+        let Some(attr_len_offset) = offset.checked_add(fixed_entry_len - 2) else {
+            return false;
+        };
+        if attr_len_offset + 2 > data.len() {
+            return false;
+        }
+        let attr_len =
+            u16::from_be_bytes([data[attr_len_offset], data[attr_len_offset + 1]]) as usize;
+        let Some(entry_end) = offset
+            .checked_add(fixed_entry_len)
+            .and_then(|value| value.checked_add(attr_len))
+        else {
+            return false;
+        };
+        if entry_end == data.len() + 4 {
+            return true;
+        }
+        if entry_end <= offset || entry_end > data.len() {
+            return false;
+        }
+        offset = entry_end;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -309,5 +446,37 @@ mod tests {
 
         // This should exercise the attr.encode(AsnLength::Bits16).unwrap() line
         let _encoded = table_dump.encode().unwrap();
+    }
+
+    #[test]
+    fn parses_and_encodes_batched_table_dump_messages() {
+        use crate::models::{AttributeValue, Origin};
+        use std::str::FromStr;
+
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        let first = TableDumpMessage {
+            view_number: 7,
+            sequence_number: 9,
+            prefix: NetworkPrefix::from_str("192.0.2.0/24").unwrap(),
+            status: 1,
+            originated_time: 12345,
+            peer_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            peer_asn: Asn::new_16bit(64512),
+            attributes: attributes.clone(),
+        };
+        let second = TableDumpMessage {
+            prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+            ..first.clone()
+        };
+
+        let wire = encode_table_dump_batch(&[first.clone(), second.clone()], 1).unwrap();
+        let parsed = parse_table_dump_messages(1, wire.clone()).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].prefix, first.prefix);
+        assert_eq!(parsed[1].prefix, second.prefix);
+        assert!(!needs_legacy_length_correction(1, &wire));
+        assert!(needs_legacy_length_correction(1, &wire[..wire.len() - 4]));
+        assert!(!needs_legacy_length_correction(1, &wire[..wire.len() - 3]));
     }
 }

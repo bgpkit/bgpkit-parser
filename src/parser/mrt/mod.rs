@@ -9,6 +9,7 @@ pub mod mrt_header;
 pub mod mrt_record;
 
 pub use messages::bgp4mp::parse_bgp4mp;
-pub use messages::table_dump::parse_table_dump_message;
+pub use messages::legacy_bgp::parse_legacy_bgp;
+pub use messages::table_dump::{parse_table_dump_message, parse_table_dump_messages};
 pub use messages::table_dump_v2::parse_table_dump_v2_message;
 pub use mrt_record::{chunk_mrt_record, parse_mrt_record, RawMrtRecord};

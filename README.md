@@ -361,7 +361,7 @@ bgpkit_parser::BgpkitParser::new(
     });
 
 let mut mrt_writer = oneio::get_writer("as3356_mrt.gz").unwrap();
-mrt_writer.write_all(updates_encoder.export_bytes().as_ref()).unwrap();
+mrt_writer.write_all(updates_encoder.export_bytes().unwrap().as_ref()).unwrap();
 drop(mrt_writer);
 ```
 
@@ -657,6 +657,7 @@ cargo run --example rtr_client -- rtr.rpki.cloudflare.com 8282
 
 **Supported message types** (via enum variants):
 - `Bgp4MpUpdate`: BGP UPDATE messages from UPDATES files
+- `LegacyBgpUpdate`: Deprecated MRT Type 5 BGP UPDATE messages
 - `TableDumpV2Entry`: RIB entries from TableDumpV2 RIB dumps
 - `TableDumpMessage`: Legacy TableDump v1 messages
 
@@ -673,6 +674,9 @@ for update in parser.into_update_iter() {
                 u.peer_ip,
                 u.message.announced_prefixes.len()
             );
+        }
+        MrtUpdate::LegacyBgpUpdate(u) => {
+            println!("Legacy UPDATE from peer {}", u.peer_ip);
         }
         MrtUpdate::TableDumpV2Entry(e) => {
             // One prefix with multiple RIB entries (one per peer)
