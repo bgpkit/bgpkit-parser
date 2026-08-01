@@ -14,7 +14,10 @@ pub const BGP_UPDATE: u16 = 1;
 pub const BGP_STATE_CHANGE: u16 = 3;
 pub const BGP_KEEPALIVE: u16 = 7;
 
-/// Parse a deprecated MRT Type 5 BGP message.
+/// Parse a deprecated MRT Type 5 BGP message as defined in
+/// [RFC 6396, Appendix B.2.1].
+///
+/// [RFC 6396, Appendix B.2.1]: https://www.rfc-editor.org/rfc/rfc6396.html#appendix-B.2.1
 pub fn parse_legacy_bgp(sub_type: u16, mut data: Bytes) -> Result<LegacyBgp, ParserError> {
     match sub_type {
         BGP_UPDATE | BGP_KEEPALIVE => {

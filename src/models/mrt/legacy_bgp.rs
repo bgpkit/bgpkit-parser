@@ -4,6 +4,10 @@ use crate::models::{Asn, BgpMessage, BgpState};
 use std::net::IpAddr;
 
 /// A deprecated MRT Type 5 BGP message.
+///
+/// Defined in [RFC 6396, Appendix B.2.1].
+///
+/// [RFC 6396, Appendix B.2.1]: https://www.rfc-editor.org/rfc/rfc6396.html#appendix-B.2.1
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LegacyBgp {

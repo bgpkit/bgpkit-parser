@@ -70,7 +70,13 @@ pub struct Bgp4MpUpdate {
     pub message: BgpUpdateMessage,
 }
 
-/// A deprecated MRT Type 5 UPDATE message with endpoint metadata.
+/// A deprecated MRT Type 5 BGP_UPDATE message with endpoint metadata.
+///
+/// The wire format is defined in [RFC 6396, Appendix B.2.1.2]: peer AS,
+/// peer IPv4 address, local AS, local IPv4 address, followed by the BGP UPDATE
+/// contents without the BGP message header.
+///
+/// [RFC 6396, Appendix B.2.1.2]: https://www.rfc-editor.org/rfc/rfc6396.html#appendix-B.2.1.2
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LegacyBgpUpdate {
