@@ -49,7 +49,7 @@ fn parses_legacy_mrt_type_5_updates_fixture() {
         .unwrap()
         .into_fallible_update_iter()
         .map(Result::unwrap)
-        .map(|update| assert!(matches!(update, MrtUpdate::LegacyBgpUpdate(_))))
+        .inspect(|update| assert!(matches!(update, MrtUpdate::LegacyBgpUpdate(_))))
         .count();
     assert_eq!(updates, 3_818);
 
@@ -91,7 +91,7 @@ fn parses_historical_batched_table_dump_fixture() {
         .unwrap()
         .into_fallible_update_iter()
         .map(Result::unwrap)
-        .map(|update| assert!(matches!(update, MrtUpdate::TableDumpMessage(_))))
+        .inspect(|update| assert!(matches!(update, MrtUpdate::TableDumpMessage(_))))
         .count();
     assert_eq!(updates, 452_018);
 
