@@ -1,9 +1,11 @@
-use bgpkit_parser::models::{BgpMessage, LegacyBgp, MrtMessage};
+use bgpkit_parser::models::{BgpError, BgpMessage, LegacyBgp, MrtMessage};
 use bgpkit_parser::{BgpkitParser, MrtUpdate};
 use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv4Addr};
 
 const FIXTURE_DIR: &str = "tests/fixtures/ripe/rrc00/2000.01";
 const EARLIEST_UPDATE: &str = "tests/fixtures/ripe/rrc00/1999.09/updates.19990903.1041.gz";
+const OPEN_NOTIFY_UPDATE: &str = "tests/fixtures/ripe/rrc00/1999.12/updates.19991214.1621.gz";
 
 fn fixture(name: &str) -> String {
     format!("{}/{FIXTURE_DIR}/{name}", env!("CARGO_MANIFEST_DIR"))
@@ -27,8 +29,10 @@ fn prints_earliest_ris_update_statistics() {
     }
 
     let mut parsed_records = 0usize;
-    let mut parse_errors = 0usize;
+    let parse_errors = 0usize;
     let mut update_records = 0usize;
+    let mut opens = 0usize;
+    let mut notifications = 0usize;
     let mut keepalives = 0usize;
     let mut state_changes = 0usize;
 
@@ -43,20 +47,16 @@ fn prints_earliest_ris_update_statistics() {
                     MrtMessage::LegacyBgp(LegacyBgp::Message(message)) => {
                         match message.bgp_message {
                             BgpMessage::Update(_) => update_records += 1,
+                            BgpMessage::Open(_) => opens += 1,
+                            BgpMessage::Notification(_) => notifications += 1,
                             BgpMessage::KeepAlive => keepalives += 1,
-                            message => panic!("unexpected legacy BGP message: {message:?}"),
                         }
                     }
                     MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => state_changes += 1,
                     message => panic!("unexpected MRT message: {message:?}"),
                 }
             }
-            Err(error) => {
-                assert!(error
-                    .to_string()
-                    .contains("unsupported legacy BGP subtype: 5"));
-                parse_errors += 1;
-            }
+            Err(error) => panic!("unexpected MRT parse error: {error}"),
         }
     }
 
@@ -104,6 +104,8 @@ fn prints_earliest_ris_update_statistics() {
          parsed records: {parsed_records}\n\
          parse errors: {parse_errors}\n\
          update records: {update_records}\n\
+         opens: {opens}\n\
+         notifications: {notifications}\n\
          keepalives: {keepalives}\n\
          state changes: {state_changes}\n\
          BGP elements: {elements} (errors: {element_errors})\n\
@@ -116,18 +118,117 @@ fn prints_earliest_ris_update_statistics() {
         subtypes,
         BTreeMap::from([(1, 24_216), (3, 4), (5, 1), (7, 21)])
     );
-    assert_eq!(parsed_records, 24_241);
-    assert_eq!(parse_errors, 1);
+    assert_eq!(parsed_records, 24_242);
+    assert_eq!(parse_errors, 0);
     assert_eq!(update_records, 24_216);
+    assert_eq!(opens, 1);
+    assert_eq!(notifications, 0);
     assert_eq!(keepalives, 21);
     assert_eq!(state_changes, 4);
     assert_eq!(elements, 65_311);
-    assert_eq!(element_errors, 1);
+    assert_eq!(element_errors, 0);
     assert_eq!(updates, update_records);
-    assert_eq!(update_errors, 1);
+    assert_eq!(update_errors, 0);
     assert_eq!(routes, elements);
-    assert_eq!(route_errors, 1);
-    assert_eq!(parsed_records, update_records + keepalives + state_changes);
+    assert_eq!(route_errors, 0);
+    assert_eq!(
+        parsed_records,
+        update_records + opens + notifications + keepalives + state_changes
+    );
+}
+
+#[test]
+fn parses_legacy_open_and_notify_fixture() {
+    let source = repo_fixture(OPEN_NOTIFY_UPDATE);
+    let mut raw_records = 0usize;
+    let mut subtypes = BTreeMap::<u16, usize>::new();
+
+    for raw_record in BgpkitParser::new(&source).unwrap().into_raw_record_iter() {
+        raw_records += 1;
+        *subtypes
+            .entry(raw_record.common_header.entry_subtype)
+            .or_default() += 1;
+    }
+
+    let mut records = 0usize;
+    let mut updates = 0usize;
+    let mut opens = 0usize;
+    let mut notifications = 0usize;
+    let mut keepalives = 0usize;
+    let mut state_changes = 0usize;
+
+    for result in BgpkitParser::new(&source)
+        .unwrap()
+        .into_fallible_record_iter()
+    {
+        records += 1;
+        match result.unwrap().message {
+            MrtMessage::LegacyBgp(LegacyBgp::Message(message)) => match message.bgp_message {
+                BgpMessage::Update(_) => updates += 1,
+                BgpMessage::Open(open) => {
+                    opens += 1;
+                    assert_eq!(u32::from(message.peer_asn), 3549);
+                    assert_eq!(
+                        message.peer_ip,
+                        IpAddr::V4(Ipv4Addr::new(204, 152, 166, 29))
+                    );
+                    assert_eq!(u32::from(message.local_asn), 12654);
+                    assert_eq!(message.local_ip, IpAddr::V4(Ipv4Addr::new(193, 0, 0, 1)));
+                    assert_eq!(open.version, 4);
+                    assert_eq!(u32::from(open.asn), 3549);
+                    assert_eq!(open.hold_time, 180);
+                    assert_eq!(open.bgp_identifier, Ipv4Addr::new(204, 152, 166, 29));
+                    assert_eq!(open.opt_params.len(), 2);
+                }
+                BgpMessage::Notification(notification) => {
+                    notifications += 1;
+                    assert_eq!(u32::from(message.peer_asn), 3549);
+                    assert_eq!(message.peer_ip, IpAddr::V4(Ipv4Addr::new(206, 251, 0, 85)));
+                    assert_eq!(u32::from(message.local_asn), 12654);
+                    assert_eq!(message.local_ip, IpAddr::V4(Ipv4Addr::new(193, 0, 0, 1)));
+                    assert_eq!(notification.error, BgpError::HoldTimerExpired(0));
+                    assert!(notification.data.is_empty());
+                }
+                BgpMessage::KeepAlive => keepalives += 1,
+            },
+            MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => state_changes += 1,
+            message => panic!("unexpected MRT message: {message:?}"),
+        }
+    }
+
+    assert_eq!(raw_records, 18_203);
+    assert_eq!(
+        subtypes,
+        BTreeMap::from([(1, 18_054), (3, 27), (5, 1), (6, 1), (7, 120)])
+    );
+    assert_eq!(records, raw_records);
+    assert_eq!(updates, 18_054);
+    assert_eq!(opens, 1);
+    assert_eq!(notifications, 1);
+    assert_eq!(keepalives, 120);
+    assert_eq!(state_changes, 27);
+
+    let elements = BgpkitParser::new(&source)
+        .unwrap()
+        .into_fallible_elem_iter()
+        .map(Result::unwrap)
+        .count();
+    assert_eq!(elements, 55_489);
+
+    let mrt_updates = BgpkitParser::new(&source)
+        .unwrap()
+        .into_fallible_update_iter()
+        .map(Result::unwrap)
+        .inspect(|update| assert!(matches!(update, MrtUpdate::LegacyBgpUpdate(_))))
+        .count();
+    assert_eq!(mrt_updates, updates);
+
+    let routes = BgpkitParser::new(&source)
+        .unwrap()
+        .into_fallible_route_iter()
+        .map(Result::unwrap)
+        .count();
+    assert_eq!(routes, elements);
 }
 
 #[test]

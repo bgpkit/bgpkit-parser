@@ -30,8 +30,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-* **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP UPDATE, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
-* **Historical RIPE regression fixtures**: Added the original January 2000 RRC00 update and bview gzip files as repository-only, offline integration fixtures.
+* **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
+* **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
 
 ### Fixed
 

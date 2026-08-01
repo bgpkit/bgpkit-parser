@@ -4,7 +4,9 @@ use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidat
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::mrt::messages::bgp4mp::{bgp4mp_message_payload_len, is_short_zebra_open};
-use crate::parser::mrt::messages::legacy_bgp::{BGP_KEEPALIVE, BGP_STATE_CHANGE, BGP_UPDATE};
+use crate::parser::mrt::messages::legacy_bgp::{
+    BGP_KEEPALIVE, BGP_NOTIFY, BGP_OPEN, BGP_STATE_CHANGE, BGP_UPDATE,
+};
 use crate::parser::mrt::messages::table_dump_v2::rib_entry_min_len;
 use crate::parser::mrt::mrt_record::raw_record_uses_zebra_compat;
 use crate::parser::{
@@ -576,7 +578,7 @@ fn parse_legacy_bgp_routes(
                 peer_asn,
             )?))
         }
-        BGP_STATE_CHANGE | BGP_KEEPALIVE => {
+        BGP_STATE_CHANGE | BGP_OPEN | BGP_NOTIFY | BGP_KEEPALIVE => {
             parse_legacy_bgp(sub_type, data)?;
             Ok(RouteRecordIter::Empty)
         }

@@ -11,7 +11,7 @@ use std::net::IpAddr;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LegacyBgp {
-    /// An UPDATE or KEEPALIVE message with peer and local endpoint metadata.
+    /// An OPEN, UPDATE, NOTIFICATION, or KEEPALIVE message with peer and local endpoint metadata.
     Message(LegacyBgpMessage),
     /// A BGP finite-state-machine transition.
     StateChange(LegacyBgpStateChange),
