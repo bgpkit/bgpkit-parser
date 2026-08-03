@@ -2,7 +2,7 @@
 Update message iterator implementation.
 
 This module provides iterators that yield BGP announcement data from MRT files,
-supporting both BGP4MP UPDATE messages and RIB dump entries.
+supporting BGP4MP and deprecated MRT Type 5 UPDATE messages and RIB dump entries.
 
 ## Overview
 
@@ -31,6 +31,9 @@ for announcement in parser.into_update_iter() {
         bgpkit_parser::MrtUpdate::Bgp4MpUpdate(update) => {
             println!("BGP UPDATE from peer {}", update.peer_ip);
         }
+        bgpkit_parser::MrtUpdate::LegacyBgpUpdate(update) => {
+            println!("Legacy BGP UPDATE from peer {}", update.peer_ip);
+        }
         bgpkit_parser::MrtUpdate::TableDumpV2Entry(entry) => {
             println!("RIB entry for prefix {}", entry.prefix);
         }
@@ -43,6 +46,7 @@ for announcement in parser.into_update_iter() {
 */
 use crate::error::ParserError;
 use crate::models::*;
+use crate::parser::iters::write_mrt_core_dump;
 use crate::parser::BgpkitParser;
 use crate::Elementor;
 use log::{error, warn};
@@ -64,6 +68,24 @@ pub struct Bgp4MpUpdate {
     /// The ASN of the BGP peer that sent this update.
     pub peer_asn: Asn,
     /// The BGP UPDATE message containing announcements, withdrawals, and attributes.
+    pub message: BgpUpdateMessage,
+}
+
+/// A deprecated MRT Type 5 BGP_UPDATE message with endpoint metadata.
+///
+/// The wire format is defined in [RFC 6396, Appendix B.2.1.2]: peer AS,
+/// peer IPv4 address, local AS, local IPv4 address, followed by the BGP UPDATE
+/// contents without the BGP message header.
+///
+/// [RFC 6396, Appendix B.2.1.2]: https://www.rfc-editor.org/rfc/rfc6396.html#appendix-B.2.1.2
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LegacyBgpUpdate {
+    pub timestamp: f64,
+    pub peer_ip: IpAddr,
+    pub peer_asn: Asn,
+    pub local_ip: IpAddr,
+    pub local_asn: Asn,
     pub message: BgpUpdateMessage,
 }
 
@@ -98,6 +120,8 @@ pub struct TableDumpV2Entry {
 pub enum MrtUpdate {
     /// A BGP4MP UPDATE message from an UPDATES file.
     Bgp4MpUpdate(Bgp4MpUpdate),
+    /// A deprecated MRT Type 5 UPDATE message.
+    LegacyBgpUpdate(LegacyBgpUpdate),
     /// A TableDumpV2 RIB entry from a RIB dump file.
     TableDumpV2Entry(TableDumpV2Entry),
     /// A legacy TableDump (v1) message.
@@ -109,6 +133,7 @@ impl MrtUpdate {
     pub fn timestamp(&self) -> f64 {
         match self {
             MrtUpdate::Bgp4MpUpdate(u) => u.timestamp,
+            MrtUpdate::LegacyBgpUpdate(u) => u.timestamp,
             MrtUpdate::TableDumpV2Entry(e) => e.timestamp,
             MrtUpdate::TableDumpMessage(m) => m.originated_time as f64,
         }
@@ -126,6 +151,7 @@ impl MrtUpdate {
 pub struct UpdateIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    pending_table_dump: Vec<TableDumpMessage>,
 }
 
 impl<R> UpdateIterator<R> {
@@ -133,6 +159,7 @@ impl<R> UpdateIterator<R> {
         UpdateIterator {
             parser,
             elementor: Elementor::new(),
+            pending_table_dump: Vec::new(),
         }
     }
 }
@@ -142,6 +169,9 @@ impl<R: Read> Iterator for UpdateIterator<R> {
 
     fn next(&mut self) -> Option<MrtUpdate> {
         loop {
+            if let Some(message) = self.pending_table_dump.pop() {
+                return Some(MrtUpdate::TableDumpMessage(message));
+            }
             let record = match self.parser.next_record() {
                 Ok(record) => record,
                 Err(e) => match e.error {
@@ -149,21 +179,13 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: {}", err_str);
                         }
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
                             return None;
                         }
                         continue;
@@ -171,12 +193,7 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                     ParserError::EofExpected => return None,
                     ParserError::IoError(err) | ParserError::EofError(err) => {
                         error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         return None;
                     }
                     #[cfg(feature = "oneio")]
@@ -222,6 +239,20 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                     // State change messages don't contain announcement data
                     continue;
                 }
+                MrtMessage::LegacyBgp(LegacyBgp::Message(msg)) => {
+                    if let BgpMessage::Update(update) = msg.bgp_message {
+                        return Some(MrtUpdate::LegacyBgpUpdate(LegacyBgpUpdate {
+                            timestamp,
+                            peer_ip: msg.peer_ip,
+                            peer_asn: msg.peer_asn,
+                            local_ip: msg.local_ip,
+                            local_asn: msg.local_asn,
+                            message: update,
+                        }));
+                    }
+                    continue;
+                }
+                MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => continue,
                 MrtMessage::TableDumpV2Message(msg) => {
                     match msg {
                         TableDumpV2Message::PeerIndexTable(p) => {
@@ -251,6 +282,11 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                 MrtMessage::TableDumpMessage(msg) => {
                     return Some(MrtUpdate::TableDumpMessage(msg));
                 }
+                MrtMessage::TableDumpMessageBatch(mut messages) => {
+                    messages.reverse();
+                    self.pending_table_dump = messages;
+                    continue;
+                }
             }
         }
     }
@@ -263,6 +299,7 @@ impl<R: Read> Iterator for UpdateIterator<R> {
 pub struct FallibleUpdateIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    pending_table_dump: Vec<TableDumpMessage>,
 }
 
 impl<R> FallibleUpdateIterator<R> {
@@ -270,6 +307,7 @@ impl<R> FallibleUpdateIterator<R> {
         FallibleUpdateIterator {
             parser,
             elementor: Elementor::new(),
+            pending_table_dump: Vec::new(),
         }
     }
 }
@@ -279,6 +317,9 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            if let Some(message) = self.pending_table_dump.pop() {
+                return Some(Ok(MrtUpdate::TableDumpMessage(message)));
+            }
             match self.parser.next_record() {
                 Ok(record) => {
                     let t = record.common_header.timestamp;
@@ -305,6 +346,20 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
                         MrtMessage::Bgp4Mp(Bgp4MpEnum::StateChange(_)) => {
                             continue;
                         }
+                        MrtMessage::LegacyBgp(LegacyBgp::Message(msg)) => {
+                            if let BgpMessage::Update(update) = msg.bgp_message {
+                                return Some(Ok(MrtUpdate::LegacyBgpUpdate(LegacyBgpUpdate {
+                                    timestamp,
+                                    peer_ip: msg.peer_ip,
+                                    peer_asn: msg.peer_asn,
+                                    local_ip: msg.local_ip,
+                                    local_asn: msg.local_asn,
+                                    message: update,
+                                })));
+                            }
+                            continue;
+                        }
+                        MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => continue,
                         MrtMessage::TableDumpV2Message(msg) => match msg {
                             TableDumpV2Message::PeerIndexTable(p) => {
                                 self.elementor.peer_table = Some(p);
@@ -328,6 +383,11 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
                         },
                         MrtMessage::TableDumpMessage(msg) => {
                             return Some(Ok(MrtUpdate::TableDumpMessage(msg)));
+                        }
+                        MrtMessage::TableDumpMessageBatch(mut messages) => {
+                            messages.reverse();
+                            self.pending_table_dump = messages;
+                            continue;
                         }
                     }
                 }
@@ -541,6 +601,7 @@ mod tests {
         for (i, update) in updates.iter().enumerate() {
             match update {
                 MrtUpdate::Bgp4MpUpdate(_) => assert_eq!(i, 0),
+                MrtUpdate::LegacyBgpUpdate(_) => panic!("not part of this fixture"),
                 MrtUpdate::TableDumpV2Entry(_) => assert_eq!(i, 1),
                 MrtUpdate::TableDumpMessage(_) => assert_eq!(i, 2),
             }
@@ -628,6 +689,9 @@ mod tests {
                 MrtUpdate::TableDumpMessage(_) => {
                     panic!("Should not see TableDumpMessage in UPDATES file");
                 }
+                MrtUpdate::LegacyBgpUpdate(_) => {
+                    panic!("Should not see a legacy BGP update in this modern fixture");
+                }
             }
         }
 
@@ -652,6 +716,9 @@ mod tests {
             match update {
                 MrtUpdate::Bgp4MpUpdate(_) => {
                     panic!("Should not see Bgp4MpUpdate in RIB file");
+                }
+                MrtUpdate::LegacyBgpUpdate(_) => {
+                    panic!("Should not see LegacyBgpUpdate in RIB file");
                 }
                 MrtUpdate::TableDumpV2Entry(e) => {
                     rib_entry_count += 1;

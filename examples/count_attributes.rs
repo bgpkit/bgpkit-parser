@@ -7,7 +7,9 @@
 //! ```bash
 //! cargo run --release --example count_attributes -- <MRT_FILE_OR_URL>
 //! ```
-use bgpkit_parser::models::{Attributes, Bgp4MpEnum, BgpMessage, MrtMessage, TableDumpV2Message};
+use bgpkit_parser::models::{
+    Attributes, Bgp4MpEnum, BgpMessage, LegacyBgp, MrtMessage, TableDumpV2Message,
+};
 use bgpkit_parser::BgpkitParser;
 
 fn count_attributes(attributes: &Attributes, counts: &mut [u64; 256]) {
@@ -37,6 +39,16 @@ fn main() {
             }
             MrtMessage::TableDumpMessage(message) => {
                 count_attributes(&message.attributes, &mut counts);
+            }
+            MrtMessage::TableDumpMessageBatch(messages) => {
+                for message in messages {
+                    count_attributes(&message.attributes, &mut counts);
+                }
+            }
+            MrtMessage::LegacyBgp(LegacyBgp::Message(message)) => {
+                if let BgpMessage::Update(update) = message.bgp_message {
+                    count_attributes(&update.attributes, &mut counts);
+                }
             }
             MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(rib)) => {
                 for entry in &rib.rib_entries {

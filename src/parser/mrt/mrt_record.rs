@@ -3,11 +3,12 @@ use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
 use crate::parser::{
-    parse_bgp4mp, parse_table_dump_message, parse_table_dump_v2_message, ParserErrorWithBytes,
+    parse_bgp4mp, parse_legacy_bgp, parse_table_dump_messages, parse_table_dump_v2_message,
+    ParserErrorWithBytes,
 };
 use crate::utils::convert_timestamp;
 use bytes::{BufMut, Bytes, BytesMut};
-use log::warn;
+use log::{debug, warn};
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -115,17 +116,21 @@ impl RawMrtRecord {
 
 pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErrorWithBytes> {
     // parse common header and capture raw bytes
-    let parsed_header = match parse_common_header_with_bytes(input) {
+    let mut consumed_header = Vec::with_capacity(16);
+    let parsed_header = match parse_common_header_with_bytes(&mut CapturingReader {
+        inner: input,
+        captured: &mut consumed_header,
+    }) {
         Ok(v) => v,
         Err(e) => {
             if let ParserError::EofError(e) = &e {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
                     return Err(ParserErrorWithBytes::from(ParserError::EofExpected));
                 }
             }
             return Err(ParserErrorWithBytes {
                 error: e,
-                bytes: None,
+                bytes: Some(consumed_header),
             });
         }
     };
@@ -136,39 +141,121 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
     // Protect against unreasonable allocations from corrupt headers
     const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
     if common_header.length > MAX_MRT_MESSAGE_LEN {
-        return Err(ParserErrorWithBytes::from(ParserError::Unsupported(
-            format!("MRT message too large: {} bytes", common_header.length),
-        )));
+        return Err(ParserErrorWithBytes {
+            error: ParserError::Unsupported(format!(
+                "MRT message too large: {} bytes",
+                common_header.length
+            )),
+            bytes: Some(header_bytes.to_vec()),
+        });
     }
 
-    // read the whole message bytes to buffer
-    let mut buffer = BytesMut::zeroed(common_header.length as usize);
-    match input
+    // Read the declared body while retaining partial bytes on failure.
+    let mut buffer = Vec::with_capacity(common_header.length as usize + 4);
+    if let Err(error) = input
         .take(common_header.length as u64)
-        .read_exact(&mut buffer)
+        .read_to_end(&mut buffer)
     {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ParserErrorWithBytes {
-                error: ParserError::IoError(e),
-                bytes: None,
-            })
+        return Err(record_io_error(error, &header_bytes, &buffer));
+    }
+    if buffer.len() != common_header.length as usize {
+        return Err(record_io_error(
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "truncated MRT body: expected {} bytes, read {}",
+                    common_header.length,
+                    buffer.len()
+                ),
+            ),
+            &header_bytes,
+            &buffer,
+        ));
+    }
+
+    if common_header.entry_type == EntryType::TABLE_DUMP
+        && super::messages::table_dump::needs_legacy_length_correction(
+            common_header.entry_subtype,
+            &buffer,
+        )
+    {
+        let mut correction = Vec::with_capacity(4);
+        if let Err(error) = input.take(4).read_to_end(&mut correction) {
+            buffer.extend_from_slice(&correction);
+            return Err(record_io_error(error, &header_bytes, &buffer));
         }
+        buffer.extend_from_slice(&correction);
+        if correction.len() != 4 {
+            return Err(record_io_error(
+                std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "truncated historical TABLE_DUMP length correction",
+                ),
+                &header_bytes,
+                &buffer,
+            ));
+        }
+        debug!(
+            "recovered historical TABLE_DUMP record whose declared length was four bytes short (timestamp={}, subtype={}, declared_length={})",
+            common_header.timestamp,
+            common_header.entry_subtype,
+            common_header.length
+        );
     }
 
     Ok(RawMrtRecord {
         common_header,
         header_bytes,
-        message_bytes: buffer.freeze(),
+        message_bytes: Bytes::from(buffer),
     })
 }
 
+struct CapturingReader<'a, R: ?Sized> {
+    inner: &'a mut R,
+    captured: &'a mut Vec<u8>,
+}
+
+impl<R: Read + ?Sized> Read for CapturingReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.captured.extend_from_slice(&buffer[..read]);
+        Ok(read)
+    }
+}
+
+fn record_io_error(error: std::io::Error, header: &[u8], body: &[u8]) -> ParserErrorWithBytes {
+    let mut bytes = Vec::with_capacity(header.len() + body.len());
+    bytes.extend_from_slice(header);
+    bytes.extend_from_slice(body);
+    ParserErrorWithBytes {
+        error: ParserError::IoError(error),
+        bytes: Some(bytes),
+    }
+}
+
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
+    parse_mrt_record_with_zebra_compat(input).map(|(record, _)| record)
+}
+
+pub(crate) fn raw_record_uses_zebra_compat(raw_record: &RawMrtRecord) -> bool {
+    matches!(
+        raw_record.common_header.entry_type,
+        EntryType::BGP4MP | EntryType::BGP4MP_ET
+    ) && crate::parser::mrt::messages::bgp4mp::uses_zebra_compat(
+        raw_record.common_header.entry_subtype,
+        &raw_record.message_bytes,
+    )
+}
+
+pub(crate) fn parse_mrt_record_with_zebra_compat(
+    input: &mut impl Read,
+) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
+    let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
     // Parse from a clone so the original is available for raw_bytes() on error,
     // avoiding manual reassembly that could diverge from RawMrtRecord::raw_bytes().
     match raw_record.clone().parse() {
-        Ok(record) => Ok(record),
+        Ok(record) => Ok((record, used_zebra_compat)),
         Err(e) => Err(ParserErrorWithBytes {
             error: e,
             bytes: Some(raw_record.raw_bytes().to_vec()),
@@ -190,12 +277,11 @@ pub fn parse_mrt_body(
 
     let message: MrtMessage = match &etype {
         EntryType::TABLE_DUMP => {
-            let msg = parse_table_dump_message(entry_subtype, data);
-            match msg {
-                Ok(msg) => MrtMessage::TableDumpMessage(msg),
-                Err(e) => {
-                    return Err(e);
-                }
+            let mut messages = parse_table_dump_messages(entry_subtype, data)?;
+            if messages.len() == 1 {
+                MrtMessage::TableDumpMessage(messages.remove(0))
+            } else {
+                MrtMessage::TableDumpMessageBatch(messages)
             }
         }
         EntryType::TABLE_DUMP_V2 => {
@@ -216,6 +302,7 @@ pub fn parse_mrt_body(
                 }
             }
         }
+        EntryType::BGP => MrtMessage::LegacyBgp(parse_legacy_bgp(entry_subtype, data)?),
         v => {
             // deprecated
             return Err(ParserError::Unsupported(format!(
@@ -322,9 +409,26 @@ mod tests {
     use super::*;
     use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
     use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
+    use crate::models::{AttributeValue, Origin};
+    use crate::parser::mrt::messages::table_dump::encode_table_dump_batch;
     use std::io::Cursor;
     use std::net::Ipv4Addr;
     use tempfile::tempdir;
+
+    fn table_dump_message(prefix: &str) -> TableDumpMessage {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        TableDumpMessage {
+            view_number: 0,
+            sequence_number: 1,
+            prefix: prefix.parse().unwrap(),
+            status: 1,
+            originated_time: 946_684_800,
+            peer_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            peer_asn: Asn::new_16bit(64512),
+            attributes,
+        }
+    }
 
     #[test]
     fn test_raw_mrt_record_raw_bytes() {
@@ -519,5 +623,99 @@ mod tests {
             .len() as u32;
 
         assert_eq!(parsed.common_header.length, expected_len);
+    }
+
+    #[test]
+    fn chunk_recovers_four_byte_short_table_dump_and_preserves_alignment() {
+        let body = encode_table_dump_batch(
+            &[
+                table_dump_message("192.0.2.0/24"),
+                table_dump_message("198.51.100.0/24"),
+            ],
+            1,
+        )
+        .unwrap();
+        let header = CommonHeader {
+            timestamp: 946_684_800,
+            microsecond_timestamp: None,
+            entry_type: EntryType::TABLE_DUMP,
+            entry_subtype: 1,
+            length: (body.len() - 4) as u32,
+        };
+        let next_body = Bytes::from_static(&[0, 1, 192, 0, 2, 1, 0, 2, 192, 0, 2, 2]);
+        let next_header = CommonHeader {
+            timestamp: 946_684_801,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP,
+            entry_subtype: 7,
+            length: next_body.len() as u32,
+        };
+
+        let mut wire = BytesMut::new();
+        wire.put_slice(&header.encode());
+        wire.put_slice(&body);
+        wire.put_slice(&next_header.encode());
+        wire.put_slice(&next_body);
+        let mut cursor = Cursor::new(wire.freeze());
+
+        let first = chunk_mrt_record(&mut cursor).unwrap();
+        assert_eq!(first.message_bytes, body);
+        assert!(matches!(
+            first.parse().unwrap().message,
+            MrtMessage::TableDumpMessageBatch(messages) if messages.len() == 2
+        ));
+        let second = chunk_mrt_record(&mut cursor).unwrap();
+        assert_eq!(second.common_header, next_header);
+        assert!(matches!(
+            second.parse().unwrap().message,
+            MrtMessage::LegacyBgp(LegacyBgp::Message(LegacyBgpMessage {
+                bgp_message: BgpMessage::KeepAlive,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn chunk_does_not_overread_near_match_table_dump() {
+        let body = encode_table_dump_batch(&[table_dump_message("192.0.2.0/24")], 1).unwrap();
+        let declared_length = body.len() - 3;
+        let header = CommonHeader {
+            timestamp: 946_684_800,
+            microsecond_timestamp: None,
+            entry_type: EntryType::TABLE_DUMP,
+            entry_subtype: 1,
+            length: declared_length as u32,
+        };
+        let mut wire = BytesMut::new();
+        wire.put_slice(&header.encode());
+        wire.put_slice(&body);
+        wire.put_slice(&[0xaa; 12]);
+        let mut cursor = Cursor::new(wire.freeze());
+
+        let raw = chunk_mrt_record(&mut cursor).unwrap();
+        assert_eq!(raw.message_bytes.len(), declared_length);
+        assert_eq!(cursor.position(), (12 + declared_length) as u64);
+        let error = raw.parse().unwrap_err();
+        assert!(matches!(error, ParserError::TruncatedMsg(_)));
+    }
+
+    #[test]
+    fn chunk_errors_include_invalid_header_and_partial_body_bytes() {
+        let invalid_header = Bytes::from_static(&[0, 0, 0, 1, 0xff, 0xff, 0, 0, 0, 0, 0, 0]);
+        let error = chunk_mrt_record(&mut Cursor::new(invalid_header.clone())).unwrap_err();
+        assert_eq!(error.bytes.as_deref(), Some(invalid_header.as_ref()));
+
+        let header = CommonHeader {
+            timestamp: 1,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP,
+            entry_subtype: 7,
+            length: 5,
+        };
+        let mut wire = BytesMut::new();
+        wire.put_slice(&header.encode());
+        wire.put_slice(&[1, 2]);
+        let error = chunk_mrt_record(&mut Cursor::new(wire.clone().freeze())).unwrap_err();
+        assert_eq!(error.bytes.as_deref(), Some(wire.as_ref()));
     }
 }

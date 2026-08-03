@@ -12,6 +12,10 @@ categories = ["network-programming"]
 default-run = "bgpkit-parser"
 readme = "README.md"
 rust-version = "1.87.0"
+exclude = [
+    "tests/fixtures/ripe/**",
+    "tests/legacy_ripe_2000.rs",
+]
 
 [[bin]]
 name = "bgpkit-parser"

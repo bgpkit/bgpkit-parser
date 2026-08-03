@@ -13,9 +13,31 @@
 //!
 //! Run with: cargo run --example update_messages_iter --release
 
-use bgpkit_parser::models::{AttributeValue, ElemType};
+use bgpkit_parser::models::{AttributeValue, BgpUpdateMessage, ElemType};
 use bgpkit_parser::{BgpkitParser, MrtUpdate};
 use std::time::Instant;
+
+fn prefix_counts(message: &BgpUpdateMessage) -> (usize, usize) {
+    let announced = message.announced_prefixes.len()
+        + message
+            .attributes
+            .iter()
+            .filter_map(|attr| match attr {
+                AttributeValue::MpReachNlri(nlri) => Some(nlri.prefixes.len()),
+                _ => None,
+            })
+            .sum::<usize>();
+    let withdrawn = message.withdrawn_prefixes.len()
+        + message
+            .attributes
+            .iter()
+            .filter_map(|attr| match attr {
+                AttributeValue::MpUnreachNlri(nlri) => Some(nlri.prefixes.len()),
+                _ => None,
+            })
+            .sum::<usize>();
+    (announced, withdrawn)
+}
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -47,38 +69,14 @@ fn main() {
         match update {
             MrtUpdate::Bgp4MpUpdate(update) => {
                 bgp4mp_update_count += 1;
-
-                // Count announced prefixes (both from announced_prefixes and MP_REACH_NLRI)
-                let announced_count = update.message.announced_prefixes.len();
-                let mp_reach_count: usize = update
-                    .message
-                    .attributes
-                    .iter()
-                    .filter_map(|attr| {
-                        if let AttributeValue::MpReachNlri(nlri) = attr {
-                            Some(nlri.prefixes.len())
-                        } else {
-                            None
-                        }
-                    })
-                    .sum();
-                update_iter_announced += announced_count + mp_reach_count;
-
-                // Count withdrawn prefixes (both from withdrawn_prefixes and MP_UNREACH_NLRI)
-                let withdrawn_count = update.message.withdrawn_prefixes.len();
-                let mp_unreach_count: usize = update
-                    .message
-                    .attributes
-                    .iter()
-                    .filter_map(|attr| {
-                        if let AttributeValue::MpUnreachNlri(nlri) = attr {
-                            Some(nlri.prefixes.len())
-                        } else {
-                            None
-                        }
-                    })
-                    .sum();
-                update_iter_withdrawn += withdrawn_count + mp_unreach_count;
+                let (announced, withdrawn) = prefix_counts(&update.message);
+                update_iter_announced += announced;
+                update_iter_withdrawn += withdrawn;
+            }
+            MrtUpdate::LegacyBgpUpdate(update) => {
+                let (announced, withdrawn) = prefix_counts(&update.message);
+                update_iter_announced += announced;
+                update_iter_withdrawn += withdrawn;
             }
             MrtUpdate::TableDumpV2Entry(entry) => {
                 rib_entry_count += 1;
@@ -88,7 +86,7 @@ fn main() {
             }
             MrtUpdate::TableDumpMessage(_msg) => {
                 table_dump_v1_count += 1;
-                // Legacy TableDump v1: one record = one prefix = one announcement
+                // Each logical TableDump v1 entry is one announcement.
                 update_iter_announced += 1;
             }
         }

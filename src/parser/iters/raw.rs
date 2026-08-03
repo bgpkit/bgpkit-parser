@@ -11,6 +11,7 @@ when possible and continue processing the remaining data. It also supports confi
 warning messages and core dump generation for debugging purposes.
 */
 
+use crate::parser::iters::write_mrt_core_dump;
 use crate::{chunk_mrt_record, BgpkitParser, ParserError, RawMrtRecord};
 use log::{error, warn};
 use std::io::Read;
@@ -31,54 +32,41 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
 
     fn next(&mut self) -> Option<RawMrtRecord> {
         self.count += 1;
-        match chunk_mrt_record(&mut self.parser.reader) {
-            Ok(raw_record) => Some(raw_record),
-            Err(e) => {
-                match e.error {
+        loop {
+            match chunk_mrt_record(&mut self.parser.reader) {
+                Ok(raw_record) => return Some(raw_record),
+                Err(e) => match e.error {
                     ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: {}", err_str);
                         }
-                        if let Some(bytes) = e.bytes {
-                            std::fs::write("mrt_core_dump", bytes)
-                                .expect("Unable to write to mrt_core_dump");
-                        }
-                        // skip this record and try next
-                        self.next()
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
+                        continue;
                     }
                     ParserError::ParseError(err_str) => {
                         error!("parser error: {}", err_str);
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                            None
+                            return None;
                         } else {
-                            // skip this record and try next
-                            self.next()
+                            continue;
                         }
                     }
                     ParserError::EofExpected => {
                         // normal end of file
-                        None
+                        return None;
                     }
                     ParserError::IoError(err) | ParserError::EofError(err) => {
                         // when reaching IO error, stop iterating
                         error!("{:?}", err);
-                        if self.parser.core_dump {
-                            if let Some(bytes) = e.bytes {
-                                std::fs::write("mrt_core_dump", bytes)
-                                    .expect("Unable to write to mrt_core_dump");
-                            }
-                        }
-                        None
+                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
+                        return None;
                     }
                     #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => None,
+                    ParserError::OneIoError(_) => return None,
                     ParserError::FilterError(_) => {
                         // this should not happen at this stage
-                        None
+                        return None;
                     }
                     // Labeled NLRI parsing errors - treat as malformed and skip
                     ParserError::InvalidLabeledNlriLength
@@ -90,10 +78,9 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                         if self.parser.options.show_warnings {
                             warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
                         }
-                        // skip this record and try next
-                        self.next()
+                        continue;
                     }
-                }
+                },
             }
         }
     }

@@ -279,6 +279,8 @@ pub enum RecordElemIter<'a> {
     #[doc(hidden)]
     TableDump(Option<BgpElem>),
     #[doc(hidden)]
+    TableDumpBatch(std::vec::IntoIter<TableDumpMessage>),
+    #[doc(hidden)]
     RibAfi {
         peer_table: &'a PeerIndexTable,
         prefix: NetworkPrefix,
@@ -295,6 +297,7 @@ impl Iterator for RecordElemIter<'_> {
         match self {
             RecordElemIter::Empty => None,
             RecordElemIter::TableDump(elem) => elem.take(),
+            RecordElemIter::TableDumpBatch(entries) => entries.next().map(table_dump_to_elem),
             RecordElemIter::Bgp4Mp(iter) => iter.next(),
             RecordElemIter::RibAfi {
                 peer_table,
@@ -321,6 +324,10 @@ impl Iterator for RecordElemIter<'_> {
             RecordElemIter::TableDump(elem) => {
                 let n = elem.is_some() as usize;
                 (n, Some(n))
+            }
+            RecordElemIter::TableDumpBatch(entries) => {
+                let len = entries.len();
+                (len, Some(len))
             }
             RecordElemIter::Bgp4Mp(iter) => iter.size_hint(),
             RecordElemIter::RibAfi { entries, .. } => {
@@ -506,48 +513,10 @@ impl Elementor {
 
         match record.message {
             MrtMessage::TableDumpMessage(msg) => {
-                let (
-                    as_path,
-                    _as4_path,
-                    origin,
-                    next_hop,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggregator,
-                    _announced,
-                    _withdrawn,
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                ) = get_relevant_attributes(msg.attributes);
-
-                let origin_asns = as_path
-                    .as_ref()
-                    .map(|as_path| as_path.iter_origins().collect());
-
-                Ok(RecordElemIter::TableDump(Some(BgpElem {
-                    timestamp: msg.originated_time as f64,
-                    elem_type: ElemType::ANNOUNCE,
-                    peer_ip: msg.peer_ip,
-                    peer_asn: msg.peer_asn,
-                    peer_bgp_id: None,
-                    prefix: msg.prefix,
-                    next_hop,
-                    as_path,
-                    origin,
-                    origin_asns,
-                    local_pref,
-                    med,
-                    communities,
-                    atomic,
-                    aggr_asn: aggregator.map(|v| v.0),
-                    aggr_ip: aggregator.map(|v| v.1),
-                    only_to_customer,
-                    unknown,
-                    deprecated,
-                })))
+                Ok(RecordElemIter::TableDump(Some(table_dump_to_elem(msg))))
+            }
+            MrtMessage::TableDumpMessageBatch(messages) => {
+                Ok(RecordElemIter::TableDumpBatch(messages.into_iter()))
             }
 
             MrtMessage::TableDumpV2Message(msg) => match msg {
@@ -582,6 +551,18 @@ impl Elementor {
                         None => Ok(RecordElemIter::Empty),
                     }
                 }
+            },
+            MrtMessage::LegacyBgp(msg) => match msg {
+                LegacyBgp::StateChange(_) => Ok(RecordElemIter::Empty),
+                LegacyBgp::Message(message) => match Elementor::bgp_to_elems_iter(
+                    message.bgp_message,
+                    timestamp,
+                    &message.peer_ip,
+                    &message.peer_asn,
+                ) {
+                    Some(iter) => Ok(RecordElemIter::Bgp4Mp(iter)),
+                    None => Ok(RecordElemIter::Empty),
+                },
             },
         }
     }
@@ -712,6 +693,51 @@ impl Elementor {
                 }
             },
         }
+    }
+}
+
+fn table_dump_to_elem(msg: TableDumpMessage) -> BgpElem {
+    let (
+        as_path,
+        _as4_path,
+        origin,
+        next_hop,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggregator,
+        _announced,
+        _withdrawn,
+        only_to_customer,
+        unknown,
+        deprecated,
+    ) = get_relevant_attributes(msg.attributes);
+
+    let origin_asns = as_path
+        .as_ref()
+        .map(|as_path| as_path.iter_origins().collect());
+
+    BgpElem {
+        timestamp: msg.originated_time as f64,
+        elem_type: ElemType::ANNOUNCE,
+        peer_ip: msg.peer_ip,
+        peer_asn: msg.peer_asn,
+        peer_bgp_id: None,
+        prefix: msg.prefix,
+        next_hop,
+        as_path,
+        origin,
+        origin_asns,
+        local_pref,
+        med,
+        communities,
+        atomic,
+        aggr_asn: aggregator.map(|v| v.0),
+        aggr_ip: aggregator.map(|v| v.1),
+        only_to_customer,
+        unknown,
+        deprecated,
     }
 }
 

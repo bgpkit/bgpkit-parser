@@ -22,7 +22,8 @@ pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
 pub use route::{FallibleRouteIterator, RouteIterator};
 pub use update::{
-    Bgp4MpUpdate, FallibleUpdateIterator, MrtUpdate, TableDumpV2Entry, UpdateIterator,
+    Bgp4MpUpdate, FallibleUpdateIterator, LegacyBgpUpdate, MrtUpdate, TableDumpV2Entry,
+    UpdateIterator,
 };
 
 use crate::models::BgpElem;
@@ -83,6 +84,7 @@ impl<R> BgpkitParser<R> {
     ///
     /// The iterator returns an `MrtUpdate` enum with variants:
     /// - `Bgp4MpUpdate`: BGP UPDATE messages from UPDATES files
+    /// - `LegacyBgpUpdate`: Deprecated MRT Type 5 BGP UPDATE messages
     /// - `TableDumpV2Entry`: RIB entries from TableDumpV2 RIB dumps
     /// - `TableDumpMessage`: Legacy TableDump v1 messages
     ///
@@ -98,6 +100,9 @@ impl<R> BgpkitParser<R> {
     ///                 u.peer_ip,
     ///                 u.message.announced_prefixes.len()
     ///             );
+    ///         }
+    ///         MrtUpdate::LegacyBgpUpdate(u) => {
+    ///             println!("Legacy UPDATE from peer {}", u.peer_ip);
     ///         }
     ///         MrtUpdate::TableDumpV2Entry(e) => {
     ///             println!("RIB entry for {} with {} peers",
