@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 * **`Tlv::length()` and `SubTlv::length()` removed**: both silently saturated at `u16::MAX`; encoders now compute checked lengths internally.
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
 * **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
+* **Quagga BGP states**: `BgpState` gains the implementation-specific `Clearing` and `Deleted` variants for wire values 7 and 8. Downstream exhaustive matches must handle the new variants.
 
 ### Added
 
@@ -43,6 +44,7 @@ All notable changes to this project will be documented in this file.
 * **Peer index aliasing**: `PeerIndexTable::add_peer` previously wrapped the peer id at 65,536 peers, silently attributing routes to the wrong peer; it now returns an error and leaves the table unmodified.
 * **BGP OPEN parameter type 255 rejected**: RFC 9072 reserves type 255 as the extended-length marker; encoding it as a real parameter produced output that round-tripped to a structurally different message.
 * **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
+* **Historical Quagga state changes**: Parse BGP4MP state-change records containing Quagga's `Clearing` (7) and `Deleted` (8) FSM states instead of logging an error and dropping the MRT record.
 
 ## v0.19.0 - 2026-07-28
 

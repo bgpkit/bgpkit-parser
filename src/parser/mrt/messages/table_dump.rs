@@ -115,7 +115,7 @@ fn parse_table_dump_entry(
     view_number: u16,
     sequence_number: u16,
 ) -> Result<TableDumpMessage, ParserError> {
-    let prefix = match &afi {
+    let prefix = match afi {
         Afi::Ipv4 => data.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => data.read_ipv6_prefix().map(ipnet::IpNet::V6),
         Afi::LinkState => {
