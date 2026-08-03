@@ -15,6 +15,7 @@ rust-version = "1.87.0"
 exclude = [
     "tests/fixtures/ripe/**",
     "tests/legacy_ripe_2000.rs",
+    "tests/quagga_bgp_states.rs",
 ]
 
 [[bin]]

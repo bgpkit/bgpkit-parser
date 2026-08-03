@@ -3,7 +3,10 @@ use crate::models::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::IpAddr;
 
-/// BGP states enum.
+/// BGP finite-state-machine states.
+///
+/// Values 1 through 6 are defined by RFC 6396. [`BgpState::Clearing`] and
+/// [`BgpState::Deleted`] are Quagga extensions found in historical MRT data.
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u16)]
@@ -14,6 +17,8 @@ pub enum BgpState {
     OpenSent = 4,
     OpenConfirm = 5,
     Established = 6,
+    Clearing = 7,
+    Deleted = 8,
 }
 
 /// BGP4MP message types.
