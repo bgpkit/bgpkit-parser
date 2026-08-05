@@ -21,18 +21,45 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
         let ec: ExtendedCommunity = match ExtendedCommunityType::from(ec_type_u8) {
             ExtendedCommunityType::TransitiveTwoOctetAs => {
                 let sub_type = input.read_u8()?;
-                let global = input.read_u16()?;
-                let mut local: [u8; 4] = [0; 4];
-                input.read_exact(&mut local[..])?;
-                ExtendedCommunity::TransitiveTwoOctetAs(TwoOctetAsExtCommunity {
-                    subtype: sub_type,
-                    global_admin: Asn::new_16bit(global),
-                    local_admin: local,
-                })
+                match sub_type {
+                    0x04 => {
+                        // BGP Link Bandwidth - RFC 10005
+                        let global_admin = input.read_u16()?;
+                        let bandwidth_bits = input.read_u32()?;
+                        let bandwidth = f32::from_bits(bandwidth_bits);
+                        ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                            global_admin,
+                            bandwidth,
+                            transitive: true,
+                        })
+                    }
+                    _ => {
+                        // Standard TransitiveTwoOctetAs
+                        let global = input.read_u16()?;
+                        let mut local: [u8; 4] = [0; 4];
+                        input.read_exact(&mut local[..])?;
+                        ExtendedCommunity::TransitiveTwoOctetAs(TwoOctetAsExtCommunity {
+                            subtype: sub_type,
+                            global_admin: Asn::new_16bit(global),
+                            local_admin: local,
+                        })
+                    }
+                }
             }
             ExtendedCommunityType::NonTransitiveTwoOctetAs => {
                 let sub_type = input.read_u8()?;
                 match sub_type {
+                    0x04 => {
+                        // BGP Link Bandwidth - RFC 10005
+                        let global_admin = input.read_u16()?;
+                        let bandwidth_bits = input.read_u32()?;
+                        let bandwidth = f32::from_bits(bandwidth_bits);
+                        ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                            global_admin,
+                            bandwidth,
+                            transitive: false,
+                        })
+                    }
                     0x06 => {
                         // Flow-Spec Traffic Rate
                         let as_number = input.read_u16()?;
@@ -263,6 +290,12 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
                 bytes.put_u8(0); // reserved
                 bytes.put_u16(0); // reserved
             }
+            ExtendedCommunity::LinkBandwidth(link_bandwidth) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x04); // Link Bandwidth subtype
+                bytes.put_u16(link_bandwidth.global_admin);
+                bytes.put_f32(link_bandwidth.bandwidth);
+            }
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
@@ -334,6 +367,64 @@ mod tests {
                 assert_eq!(community.local_admin, [0x00, 0x00, 0x00, 0x01]);
             }
         }
+    }
+
+    #[test]
+    fn test_parse_transitive_link_bandwidth() {
+        // test Transitive Link Bandwidth
+        let data: Vec<u8> = vec![
+            0x00, // Transitive Two Octet AS Specific
+            0x04, // Link Bandwidth subtype
+            0x00, 0x01, // Global Administrator 1
+            0x44, 0x7A, 0x00, 0x00, // Bandwidth = 1000.0 bytes/second
+        ];
+
+        let parsed = parse_extended_community(Bytes::from(data)).unwrap();
+
+        let communities = match parsed {
+            AttributeValue::ExtendedCommunities(communities) => communities,
+            other => panic!("expected ExtendedCommunities, got {other:?}"),
+        };
+
+        assert_eq!(communities.len(), 1);
+
+        let community = match &communities[0] {
+            ExtendedCommunity::LinkBandwidth(community) => community,
+            other => panic!("expected LinkBandwidth, got {other:?}"),
+        };
+
+        assert_eq!(community.global_admin, 1);
+        assert_eq!(community.bandwidth.to_bits(), 1000.0_f32.to_bits());
+        assert!(community.transitive);
+    }
+
+    #[test]
+    fn test_parse_nontransitive_link_bandwidth() {
+        // test Non-Transitive Link Bandwidth
+        let data: Vec<u8> = vec![
+            0x40, // Non-Transitive Two Octet AS Specific
+            0x04, // Link Bandwidth subtype
+            0x00, 0x01, // Global Administrator 1
+            0x44, 0x7A, 0x00, 0x00, // Bandwidth = 1000.0 bytes/second
+        ];
+
+        let parsed = parse_extended_community(Bytes::from(data)).unwrap();
+
+        let communities = match parsed {
+            AttributeValue::ExtendedCommunities(communities) => communities,
+            other => panic!("expected ExtendedCommunities, got {other:?}"),
+        };
+
+        assert_eq!(communities.len(), 1);
+
+        let community = match &communities[0] {
+            ExtendedCommunity::LinkBandwidth(community) => community,
+            other => panic!("expected LinkBandwidth, got {other:?}"),
+        };
+
+        assert_eq!(community.global_admin, 1);
+        assert_eq!(community.bandwidth.to_bits(), 1000.0_f32.to_bits());
+        assert!(!community.transitive);
     }
 
     #[test]
@@ -447,6 +538,67 @@ mod tests {
             bytes,
             Bytes::from_static(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07])
         );
+    }
+
+    #[test]
+    fn test_encode_transitive_link_bandwidth() {
+        let community = ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+            global_admin: 1,
+            bandwidth: 1000.0,
+            transitive: true,
+        });
+        let bytes = encode_extended_communities(&vec![community]);
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[
+                0x00, // Transitive Two-Octet AS Specific
+                0x04, // Link Bandwidth subtype
+                0x00, 0x01, // Global Administrator 1
+                0x44, 0x7A, 0x00, 0x00, // Bandwidth 1000.0 bytes/second
+            ])
+        );
+    }
+
+    #[test]
+    fn test_encode_nontransitive_link_bandwidth() {
+        let community = ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+            global_admin: 1,
+            bandwidth: 1000.0,
+            transitive: false,
+        });
+        let bytes = encode_extended_communities(&vec![community]);
+        assert_eq!(
+            bytes,
+            Bytes::from_static(&[
+                0x40, // Non-Transitive Two-Octet AS Specific
+                0x04, // Link Bandwidth subtype
+                0x00, 0x01, // Global Administrator 1
+                0x44, 0x7A, 0x00, 0x00, // Bandwidth 1000.0 bytes/second
+            ])
+        );
+    }
+
+    #[test]
+    fn test_link_bandwidth_round_trip() {
+        let communities = vec![
+            ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                global_admin: 1,
+                bandwidth: 1000.0,
+                transitive: true,
+            }),
+            ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                global_admin: 64512,
+                bandwidth: 2500.0,
+                transitive: false,
+            }),
+        ];
+        let encoded = encode_extended_communities(&communities);
+        let parsed = parse_extended_community(encoded).unwrap();
+        let parsed_communities = match parsed {
+            AttributeValue::ExtendedCommunities(communities) => communities,
+            other => panic!("expected ExtendedCommunities, got {other:?}"),
+        };
+        assert_eq!(parsed_communities, communities);
     }
 
     #[test]

@@ -110,6 +110,8 @@ pub enum ExtendedCommunity {
     FlowSpecRedirect(TwoOctetAsExtCommunity),
     /// Flow-Spec Traffic Marking - RFC 8955
     FlowSpecTrafficMarking(FlowSpecTrafficMarking),
+    /// BGP Link Bandwidth - RFC 10005
+    LinkBandwidth(LinkBandwidth),
     Raw([u8; 8]),
 }
 
@@ -129,6 +131,13 @@ impl ExtendedCommunity {
             ExtendedCommunity::FlowSpecTrafficAction(_) => NonTransitiveTwoOctetAs,
             ExtendedCommunity::FlowSpecRedirect(_) => NonTransitiveTwoOctetAs,
             ExtendedCommunity::FlowSpecTrafficMarking(_) => NonTransitiveTwoOctetAs,
+            ExtendedCommunity::LinkBandwidth(link_bandwidth) => {
+                if link_bandwidth.transitive {
+                    TransitiveTwoOctetAs
+                } else {
+                    NonTransitiveTwoOctetAs
+                }
+            }
             ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
         }
     }
@@ -194,6 +203,30 @@ pub struct OpaqueExtCommunity {
     // 6 octet
     pub value: [u8; 6],
 }
+
+/// BGP Link Bandwidth Extended Community
+///
+/// RFC 10005 - subtype 0x04
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LinkBandwidth {
+    /// Global Administrator value (2 octets)
+    pub global_admin: u16,
+    /// Bandwidth in bytes per second (IEEE 754 single-precision float)
+    pub bandwidth: f32,
+    /// Whether the community uses type 0x00 rather than non-transitive type 0x40
+    pub transitive: bool,
+}
+
+impl PartialEq for LinkBandwidth {
+    fn eq(&self, other: &Self) -> bool {
+        self.global_admin == other.global_admin
+            && self.bandwidth.to_bits() == other.bandwidth.to_bits()
+            && self.transitive == other.transitive
+    }
+}
+
+impl Eq for LinkBandwidth {}
 
 /// Flow-Spec Traffic Rate Extended Community
 ///
@@ -386,6 +419,13 @@ impl Display for ExtendedCommunity {
             ExtendedCommunity::FlowSpecTrafficMarking(marking) => {
                 write!(f, "mark:DSCP{} (AS {})", marking.dscp, marking.as_number)
             }
+            ExtendedCommunity::LinkBandwidth(link_bandwidth) => {
+                write!(
+                    f,
+                    "{}:{}:{}:{}",
+                    ec_type, 0x04, link_bandwidth.global_admin, link_bandwidth.bandwidth
+                )
+            }
             ExtendedCommunity::Raw(ec) => {
                 write!(f, "{}", ToHexString(ec))
             }
@@ -528,6 +568,20 @@ mod tests {
         };
         let extended_community = ExtendedCommunity::NonTransitiveOpaque(opaque_ext_comm);
         assert_eq!(format!("{extended_community}"), "67:3:090A0B0C0D0E");
+
+        let link_bandwidth = ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+            global_admin: 1,
+            bandwidth: 1000.0,
+            transitive: true,
+        });
+        assert_eq!(format!("{link_bandwidth}"), "0:4:1:1000");
+
+        let link_bandwidth = ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+            global_admin: 1,
+            bandwidth: 1000.0,
+            transitive: false,
+        });
+        assert_eq!(format!("{link_bandwidth}"), "64:4:1:1000");
 
         let raw_ext_comm = [0, 1, 2, 3, 4, 5, 6, 7];
         let extended_community = ExtendedCommunity::Raw(raw_ext_comm);

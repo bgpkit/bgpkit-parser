@@ -819,6 +819,7 @@ Typed parsing for these RFC-defined BGP path attributes:
 - [RFC 9026](https://datatracker.ietf.org/doc/html/rfc9026): BFD Discriminator Attribute
 - [RFC 8669](https://datatracker.ietf.org/doc/html/rfc8669): BGP Prefix-SID Attribute
 - [RFC 9793](https://datatracker.ietf.org/doc/html/rfc9793): BGP Extensions for BIER
+- [RFC 10005](https://datatracker.ietf.org/doc/html/rfc10005): BGP Link Bandwidth Extended Community
 
 Additional known attribute type codes are raw-retained (`AttributeValue::Raw`) and re-encoded faithfully. Deprecated and unassigned codes are also preserved.
 
