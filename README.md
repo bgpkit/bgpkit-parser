@@ -814,6 +814,7 @@ Full support for standard, extended, and large communities:
 
 Typed parsing for these RFC-defined BGP path attributes:
 
+- [RFC 5543](https://datatracker.ietf.org/doc/html/rfc5543): BGP Traffic Engineering Attribute
 - [RFC 7311](https://datatracker.ietf.org/doc/html/rfc7311): Accumulated IGP Metric (AIGP) Attribute
 - [RFC 9015](https://datatracker.ietf.org/doc/html/rfc9015): BGP SFP Attribute
 - [RFC 9026](https://datatracker.ietf.org/doc/html/rfc9026): BFD Discriminator Attribute
