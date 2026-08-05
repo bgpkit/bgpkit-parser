@@ -308,6 +308,10 @@ fn parse_route_line(line: &str, columns: ColumnPositions) -> Option<RouteEntry> 
 /// AS-set delimiters (`{` / `}`) are silently dropped, flattening AS-sets
 /// into plain AS-sequences. This is intentional: the parser aims to recover
 /// the AS-level propagation path, and set membership is not preserved.
+///
+/// Only bare integer tokens are recognized (e.g. `13335`, `4755`). Cisco
+/// `sh ip bgp` output never uses the `AS{n}` notation, so `Asn`'s `FromStr`
+/// (which handles that syntax) is not needed here.
 fn as_path_from_tokens(tokens: &[String]) -> AsPath {
     let mut asns: Vec<Asn> = Vec::new();
     for token in tokens {
@@ -532,7 +536,16 @@ impl<R: BufRead> Iterator for TextDumpElemIterator<R> {
             match self.reader.read_line(&mut self.buf) {
                 Ok(0) => return None, // EOF
                 Ok(_) => {}
-                Err(_) => return None,
+                Err(e) => {
+                    // Iterator::next cannot propagate io::Error, so log the
+                    // failure rather than silently truncating. Note that the
+                    // collect-all wrapper (parse_text_dump_with_timestamp)
+                    // also loses the error since it uses this iterator
+                    // internally; callers needing error propagation should
+                    // construct the iterator and inspect logs.
+                    log::warn!("text-dump read error, stopping iteration: {e}");
+                    return None;
+                }
             }
 
             let line = self.buf.trim_end();

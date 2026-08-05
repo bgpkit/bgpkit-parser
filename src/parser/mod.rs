@@ -231,8 +231,8 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     }
 
     /// Create a parser from any reader, auto-detecting MRT vs text dump.
-    /// When text is detected, `timestamp` overrides the inferred value
-    /// (`None` → `0.0`).
+    /// `timestamp` sets the element timestamp for text dumps (`None` → `0.0`);
+    /// for filename-based inference, use [`new_auto`](Self::new_auto) instead.
     pub fn from_auto_reader_with_timestamp(
         reader: impl Read + Send + 'static,
         timestamp: Option<f64>,
