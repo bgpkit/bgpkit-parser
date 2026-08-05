@@ -116,9 +116,9 @@ Before pushing a new feature, run the script on your PR to identify lines that n
 
 When documenting changes in `CHANGELOG.md`:
 
-- **Contributor attribution**: For features or significant fixes contributed by external contributors, append `(thanks @<github-handle> for the contribution)` in plain text at the end of the bullet point. This ensures the attribution flows into the automated GitHub release notes.
-  - Example: `* **Route-level parser**: Added ... (thanks @ties for the contribution)`
-  - Do not use markdown links like `[@ties](https://github.com/ties)` — the automated release tool copies CHANGELOG verbatim, and plain text is preferred for consistency.
+- **Contributor attribution**: Credit external contributors in a `### Contributors` subsection at the end of the release section, linking each contributor's handle to their PRs — do not append per-entry thanks to individual bullets.
+  - Example: `* @ties — route-level parser ([#310](https://github.com/bgpkit/bgpkit-parser/pull/310))`
+  - Use plain `@handle` text (not markdown links like `[@ties](https://github.com/ties)`) — the automated release tool copies CHANGELOG verbatim, and the Contributors section flows into the GitHub release notes.
 
 ## Finding Missing Implementations
 
