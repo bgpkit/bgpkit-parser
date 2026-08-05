@@ -3,9 +3,8 @@ parser module maintains the main logic for processing BGP and MRT messages.
 */
 use crate::models::{BgpElem, MrtRecord};
 use log::warn;
-use std::collections::VecDeque;
 use std::io::{BufReader, Cursor, Read};
-pub use text_dump::{detect_text_dump, infer_timestamp_from_path, parse_text_dump_with_timestamp};
+pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIterator};
 
 #[macro_use]
 pub mod utils;
@@ -46,9 +45,9 @@ pub struct BgpkitParser<R> {
     core_dump: bool,
     filters: Vec<Filter>,
     options: ParserOptions,
-    /// Pre-parsed [`BgpElem`]s from a text dump (PCH / route-views). `None` for
-    /// MRT input, which is parsed lazily through [`Self::next_record`].
-    text_dump_elems: Option<VecDeque<BgpElem>>,
+    /// Streaming element iterator for text dumps. `None` for MRT input,
+    /// which is parsed lazily through [`Self::next_record`].
+    text_dump_iter: Option<Box<dyn Iterator<Item = BgpElem> + Send>>,
 }
 
 pub(crate) struct ParserOptions {
@@ -74,7 +73,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
-            text_dump_elems: None,
+            text_dump_iter: None,
         })
     }
 
@@ -95,7 +94,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
-            text_dump_elems: None,
+            text_dump_iter: None,
         })
     }
 
@@ -105,9 +104,10 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     /// The file is auto-decompressed by oneio. The timestamp for all elements
     /// is inferred from the file name when possible; pass
     /// [`infer_timestamp_from_path`] yourself to override. The resulting parser
-    /// iterates over [`BgpElem`]s — calling [`into_record_iter`](Self::into_record_iter)
-    /// or [`next_record`](Self::next_record) on a text-dump parser panics, since
-    /// text dumps have no MRT-record representation.
+    /// streams [`BgpElem`]s lazily — one route line at a time, constant memory.
+    /// Calling [`into_record_iter`](Self::into_record_iter) or
+    /// [`next_record`](Self::next_record) on a text-dump parser returns an
+    /// error, since text dumps have no MRT-record representation.
     ///
     /// # Example
     ///
@@ -171,13 +171,13 @@ impl<R: Read> BgpkitParser<R> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
-            text_dump_elems: None,
+            text_dump_iter: None,
         }
     }
 
     /// This is used in for loop `for item in parser{}`
     pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
-        if self.text_dump_elems.is_some() {
+        if self.text_dump_iter.is_some() {
             return Err(ParserError::Unsupported(
                 "text-dump parsers have no MRT record representation; iterate elements instead"
                     .to_string(),
@@ -204,21 +204,20 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     }
 
     /// Create a text-dump parser from a reader with an explicit element
-    /// timestamp. The reader is fully consumed up front; the resulting parser
-    /// iterates over [`BgpElem`]s but has no MRT-record representation.
+    /// timestamp. The parser streams elements lazily — one route line at a
+    /// time, constant memory. It has no MRT-record representation.
     pub fn from_text_reader_with_timestamp(
         reader: impl Read + Send + 'static,
         timestamp: f64,
     ) -> Result<Self, ParserErrorWithBytes> {
-        let mut buf_reader = BufReader::new(reader);
-        let elems = parse_text_dump_with_timestamp(&mut buf_reader, timestamp)
-            .map_err(ParserError::from)?;
+        let buf_reader = BufReader::new(reader);
+        let iter = TextDumpElemIterator::new(buf_reader, timestamp).map_err(ParserError::from)?;
         Ok(BgpkitParser {
             reader: Box::new(std::io::empty()),
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
-            text_dump_elems: Some(elems.into()),
+            text_dump_iter: Some(Box::new(iter)),
         })
     }
 
@@ -242,13 +241,13 @@ impl BgpkitParser<Box<dyn Read + Send>> {
         if is_text {
             let chained = BufReader::new(Cursor::new(head).chain(buf_reader));
             let ts = timestamp.unwrap_or(0.0);
-            let elems = parse_text_dump_with_timestamp(chained, ts).map_err(ParserError::from)?;
+            let iter = TextDumpElemIterator::new(chained, ts).map_err(ParserError::from)?;
             Ok(BgpkitParser {
                 reader: Box::new(std::io::empty()),
                 core_dump: false,
                 filters: vec![],
                 options: ParserOptions::default(),
-                text_dump_elems: Some(elems.into()),
+                text_dump_iter: Some(Box::new(iter)),
             })
         } else {
             Ok(BgpkitParser {
@@ -256,7 +255,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
                 core_dump: false,
                 filters: vec![],
                 options: ParserOptions::default(),
-                text_dump_elems: None,
+                text_dump_iter: None,
             })
         }
     }
@@ -278,7 +277,7 @@ impl<R> BgpkitParser<R> {
             core_dump: true,
             filters: self.filters,
             options: self.options,
-            text_dump_elems: self.text_dump_elems,
+            text_dump_iter: self.text_dump_iter,
         }
     }
 
@@ -290,7 +289,7 @@ impl<R> BgpkitParser<R> {
             core_dump: self.core_dump,
             filters: self.filters,
             options,
-            text_dump_elems: self.text_dump_elems,
+            text_dump_iter: self.text_dump_iter,
         }
     }
 
@@ -369,7 +368,7 @@ impl<R> BgpkitParser<R> {
             core_dump: self.core_dump,
             filters,
             options: self.options,
-            text_dump_elems: self.text_dump_elems,
+            text_dump_iter: self.text_dump_iter,
         })
     }
 

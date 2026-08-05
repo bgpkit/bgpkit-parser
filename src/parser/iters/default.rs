@@ -139,9 +139,9 @@ impl<R: Read> Iterator for ElemIterator<R> {
         self.count += 1;
 
         loop {
-            // Fast path: drain pre-parsed text-dump elems directly, with filter support.
-            if let Some(elems) = &mut self.record_iter.parser.text_dump_elems {
-                while let Some(elem) = elems.pop_front() {
+            // Fast path: drain streaming text-dump elems directly, with filter support.
+            if let Some(iter) = &mut self.record_iter.parser.text_dump_iter {
+                for elem in iter.by_ref() {
                     if elem.match_filters(&self.record_iter.parser.filters) {
                         return Some(elem);
                     }

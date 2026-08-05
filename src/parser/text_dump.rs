@@ -465,7 +465,114 @@ pub fn infer_timestamp_from_path(path: &str) -> Option<f64> {
     None
 }
 
-// ── Top-level parse ────────────────────────────────────────────────
+// ── Streaming iterator ─────────────────────────────────────────────
+
+/// A streaming iterator that yields [`BgpElem`]s from a Cisco `sh ip bgp`
+/// text dump, one route line at a time.
+///
+/// Created by [`TextDumpElemIterator::new`], which consumes the preamble
+/// (header + column definitions) and leaves the reader positioned at the
+/// first route line. Each call to [`Iterator::next`] reads at most one line,
+/// so peak memory is O(1) regardless of dump size.
+///
+/// Continuation lines (multipath entries with empty prefix) reuse the
+/// most-recently-seen prefix, and wrapped-prefix lines update that prefix
+/// without yielding an element — both are handled in-stream.
+pub struct TextDumpElemIterator<R> {
+    reader: R,
+    column_positions: ColumnPositions,
+    wrapped_column_positions: Option<ColumnPositions>,
+    peer_ip: IpAddr,
+    peer_asn: u32,
+    timestamp: f64,
+    current_prefix: String,
+    buf: String,
+}
+
+impl<R: BufRead> TextDumpElemIterator<R> {
+    /// Create a streaming text-dump element iterator.
+    ///
+    /// Reads and discards the preamble (up to and including the column header
+    /// line). All yielded elements carry the given `timestamp`.
+    pub fn new(mut reader: R, timestamp: f64) -> std::io::Result<Self> {
+        let header = parse_header(&mut reader)?;
+        let column_positions = match header.column_positions {
+            Some(positions) => positions,
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "missing Cisco BGP table column header",
+                ));
+            }
+        };
+        let peer_ip = header
+            .router_id
+            .unwrap_or_else(|| IpAddr::from([0, 0, 0, 0]));
+        let peer_asn = header.local_as.unwrap_or(0);
+
+        Ok(TextDumpElemIterator {
+            reader,
+            column_positions,
+            wrapped_column_positions: shift_columns_left(column_positions),
+            peer_ip,
+            peer_asn,
+            timestamp,
+            current_prefix: String::new(),
+            buf: String::new(),
+        })
+    }
+}
+
+impl<R: BufRead> Iterator for TextDumpElemIterator<R> {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        loop {
+            self.buf.clear();
+            match self.reader.read_line(&mut self.buf) {
+                Ok(0) => return None, // EOF
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+
+            let line = self.buf.trim_end();
+            if line.is_empty() {
+                continue;
+            }
+
+            // Try parsing as a fixed-width route line (standard or shifted columns).
+            let entry = parse_route_line(line, self.column_positions).or_else(|| {
+                self.wrapped_column_positions
+                    .and_then(|positions| parse_route_line(line, positions))
+            });
+            if let Some(entry) = entry {
+                if !entry.prefix.is_empty() {
+                    self.current_prefix = entry.prefix.clone();
+                }
+                if self.current_prefix.is_empty() {
+                    continue;
+                }
+                if let Some(elem) = entry_to_elem(
+                    &entry,
+                    &self.current_prefix,
+                    self.peer_ip,
+                    self.peer_asn,
+                    self.timestamp,
+                ) {
+                    return Some(elem);
+                }
+                continue;
+            }
+
+            // Wrapped-prefix-only line: update prefix, no element yielded.
+            if let Some(prefix) = parse_wrapped_prefix_line(line, self.column_positions.0) {
+                self.current_prefix = prefix;
+            }
+        }
+    }
+}
+
+// ── Convenience: collect-all wrappers ──────────────────────────────
 
 /// Parse a complete Cisco `sh ip bgp` text dump into [`BgpElem`]s with
 /// timestamp `0.0`.
@@ -481,6 +588,9 @@ pub fn parse_text_dump<R: BufRead>(reader: R) -> std::io::Result<Vec<BgpElem>> {
 /// [`infer_timestamp_from_path`] to derive one from a PCH or route-views
 /// file name when available.
 ///
+/// Internally this uses [`TextDumpElemIterator`] and collects the results.
+/// For streaming (constant-memory) usage, construct the iterator directly.
+///
 /// Route-views style snapshots omit the `BGP table version` / `local AS`
 /// preamble. The parser falls back to the unspecified sentinels rather than
 /// rejecting the dump: `0.0.0.0` and AS0 carry no peer identity.
@@ -488,66 +598,11 @@ pub fn parse_text_dump<R: BufRead>(reader: R) -> std::io::Result<Vec<BgpElem>> {
 /// Lines that do not parse as route entries (banner text, the trailing
 /// `Displayed ...` summary, malformed rows) are skipped silently.
 pub fn parse_text_dump_with_timestamp<R: BufRead>(
-    mut reader: R,
+    reader: R,
     timestamp: f64,
 ) -> std::io::Result<Vec<BgpElem>> {
-    let header = parse_header(&mut reader)?;
-    let column_positions = match header.column_positions {
-        Some(positions) => positions,
-        None => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "missing Cisco BGP table column header",
-            ));
-        }
-    };
-    let peer_ip = header
-        .router_id
-        .unwrap_or_else(|| IpAddr::from([0, 0, 0, 0]));
-    let peer_asn = header.local_as.unwrap_or(0);
-
-    let wrapped_column_positions = shift_columns_left(column_positions);
-
-    let mut buf = String::new();
-    let mut current_prefix = String::new();
-    let mut entries: Vec<(String, RouteEntry)> = Vec::new();
-
-    while reader.read_line(&mut buf)? > 0 {
-        let line = buf.trim_end().to_string();
-        buf.clear();
-
-        if line.is_empty() {
-            continue;
-        }
-
-        let entry = parse_route_line(&line, column_positions).or_else(|| {
-            wrapped_column_positions.and_then(|positions| parse_route_line(&line, positions))
-        });
-        if let Some(entry) = entry {
-            if !entry.prefix.is_empty() {
-                current_prefix = entry.prefix.clone();
-            }
-            entries.push((current_prefix.clone(), entry));
-            continue;
-        }
-
-        if let Some(prefix) = parse_wrapped_prefix_line(&line, column_positions.0) {
-            current_prefix = prefix;
-            continue;
-        }
-    }
-
-    let mut elems: Vec<BgpElem> = Vec::with_capacity(entries.len());
-    for (prefix, entry) in &entries {
-        if prefix.is_empty() {
-            continue;
-        }
-        if let Some(elem) = entry_to_elem(entry, prefix, peer_ip, peer_asn, timestamp) {
-            elems.push(elem);
-        }
-    }
-
-    Ok(elems)
+    let iter = TextDumpElemIterator::new(reader, timestamp)?;
+    Ok(iter.collect())
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
