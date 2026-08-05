@@ -1,7 +1,11 @@
 /*!
 parser module maintains the main logic for processing BGP and MRT messages.
 */
-use std::io::Read;
+use crate::models::{BgpElem, MrtRecord};
+use log::warn;
+use std::collections::VecDeque;
+use std::io::{BufReader, Cursor, Read};
+pub use text_dump::{detect_text_dump, infer_timestamp_from_path, parse_text_dump_with_timestamp};
 
 #[macro_use]
 pub mod utils;
@@ -11,14 +15,13 @@ pub mod filter;
 pub mod iters;
 pub mod mrt;
 pub mod rpki;
+pub mod text_dump;
 
 #[cfg(feature = "rislive")]
 pub mod rislive;
 
 pub(crate) use self::utils::*;
 
-use crate::models::MrtRecord;
-use log::warn;
 pub use mrt::mrt_elem::{BgpUpdateElemIter, ElemError, Elementor, RecordElemIter};
 #[cfg(feature = "oneio")]
 use oneio::{get_cache_reader, get_reader};
@@ -43,6 +46,9 @@ pub struct BgpkitParser<R> {
     core_dump: bool,
     filters: Vec<Filter>,
     options: ParserOptions,
+    /// Pre-parsed [`BgpElem`]s from a text dump (PCH / route-views). `None` for
+    /// MRT input, which is parsed lazily through [`Self::next_record`].
+    text_dump_elems: Option<VecDeque<BgpElem>>,
 }
 
 pub(crate) struct ParserOptions {
@@ -68,6 +74,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
+            text_dump_elems: None,
         })
     }
 
@@ -88,7 +95,57 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
+            text_dump_elems: None,
         })
+    }
+
+    /// Create a parser for a Cisco `sh ip bgp` text dump (PCH daily snapshots
+    /// or route-views `oix-full-snapshot-*` files).
+    ///
+    /// The file is auto-decompressed by oneio. The timestamp for all elements
+    /// is inferred from the file name when possible; pass
+    /// [`infer_timestamp_from_path`] yourself to override. The resulting parser
+    /// iterates over [`BgpElem`]s — calling [`into_record_iter`](Self::into_record_iter)
+    /// or [`next_record`](Self::next_record) on a text-dump parser panics, since
+    /// text dumps have no MRT-record representation.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let url = "https://downloads.pch.net/files/Routing_Data/IPv4_daily_snapshots/2026/07/route-collector.bom2.pch.net/route-collector.bom2.pch.net-ipv4_bgp_routes.2026.07.01.gz";
+    /// for elem in BgpkitParser::new_text(url).unwrap() {
+    ///     println!("{elem}");
+    /// }
+    /// ```
+    pub fn new_text(path: &str) -> Result<Self, ParserErrorWithBytes> {
+        let timestamp = infer_timestamp_from_path(path).unwrap_or(0.0);
+        let reader = get_reader(path)?;
+        Self::from_text_reader_with_timestamp(reader, timestamp)
+    }
+
+    /// Create a parser that auto-detects whether the input is an MRT file or a
+    /// Cisco `sh ip bgp` text dump, parsing accordingly.
+    ///
+    /// Peeks the first 256 bytes: if they look like a Cisco text dump the file
+    /// is parsed as one (timestamp inferred from the path); otherwise it is
+    /// treated as MRT and parsed lazily as usual. This is the most convenient
+    /// constructor when the input type is unknown.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// // works for either MRT or text dumps
+    /// for elem in BgpkitParser::new_auto("https://downloads.pch.net/files/Routing_Data/IPv4_daily_snapshots/2026/07/route-collector.bom2.pch.net/route-collector.bom2.pch.net-ipv4_bgp_routes.2026.07.01.gz").unwrap() {
+    ///     println!("{elem}");
+    /// }
+    /// ```
+    pub fn new_auto(path: &str) -> Result<Self, ParserErrorWithBytes> {
+        let reader = get_reader(path)?;
+        Self::from_auto_reader_with_timestamp(reader, infer_timestamp_from_path(path))
     }
 }
 
@@ -114,17 +171,94 @@ impl<R: Read> BgpkitParser<R> {
             core_dump: false,
             filters: vec![],
             options: ParserOptions::default(),
+            text_dump_elems: None,
         }
     }
 
     /// This is used in for loop `for item in parser{}`
     pub fn next_record(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
+        if self.text_dump_elems.is_some() {
+            return Err(ParserError::Unsupported(
+                "text-dump parsers have no MRT record representation; iterate elements instead"
+                    .to_string(),
+            )
+            .into());
+        }
         let (record, used_zebra_compat) =
             mrt::mrt_record::parse_mrt_record_with_zebra_compat(&mut self.reader)?;
         if used_zebra_compat {
             self.warn_zebra_compat_once();
         }
         Ok(record)
+    }
+}
+
+impl BgpkitParser<Box<dyn Read + Send>> {
+    /// Create a text-dump parser from any reader, with timestamp `0.0`.
+    /// Prefer [`BgpkitParser::new_text`] when you have a file path or URL,
+    /// as it will infer the timestamp automatically.
+    pub fn from_text_reader(
+        reader: impl Read + Send + 'static,
+    ) -> Result<Self, ParserErrorWithBytes> {
+        Self::from_text_reader_with_timestamp(reader, 0.0)
+    }
+
+    /// Create a text-dump parser from a reader with an explicit element
+    /// timestamp. The reader is fully consumed up front; the resulting parser
+    /// iterates over [`BgpElem`]s but has no MRT-record representation.
+    pub fn from_text_reader_with_timestamp(
+        reader: impl Read + Send + 'static,
+        timestamp: f64,
+    ) -> Result<Self, ParserErrorWithBytes> {
+        let mut buf_reader = BufReader::new(reader);
+        let elems = parse_text_dump_with_timestamp(&mut buf_reader, timestamp)
+            .map_err(ParserError::from)?;
+        Ok(BgpkitParser {
+            reader: Box::new(std::io::empty()),
+            core_dump: false,
+            filters: vec![],
+            options: ParserOptions::default(),
+            text_dump_elems: Some(elems.into()),
+        })
+    }
+
+    /// Create a parser from any reader, auto-detecting MRT vs text dump by
+    /// sniffing the first bytes. Timestamp defaults to `0.0` for text dumps.
+    pub fn from_auto_reader(
+        reader: impl Read + Send + 'static,
+    ) -> Result<Self, ParserErrorWithBytes> {
+        Self::from_auto_reader_with_timestamp(reader, None)
+    }
+
+    /// Create a parser from any reader, auto-detecting MRT vs text dump.
+    /// When text is detected, `timestamp` overrides the inferred value
+    /// (`None` → `0.0`).
+    pub fn from_auto_reader_with_timestamp(
+        reader: impl Read + Send + 'static,
+        timestamp: Option<f64>,
+    ) -> Result<Self, ParserErrorWithBytes> {
+        let mut buf_reader = BufReader::new(reader);
+        let (is_text, head) = detect_text_dump(&mut buf_reader).map_err(ParserError::from)?;
+        if is_text {
+            let chained = BufReader::new(Cursor::new(head).chain(buf_reader));
+            let ts = timestamp.unwrap_or(0.0);
+            let elems = parse_text_dump_with_timestamp(chained, ts).map_err(ParserError::from)?;
+            Ok(BgpkitParser {
+                reader: Box::new(std::io::empty()),
+                core_dump: false,
+                filters: vec![],
+                options: ParserOptions::default(),
+                text_dump_elems: Some(elems.into()),
+            })
+        } else {
+            Ok(BgpkitParser {
+                reader: Box::new(Cursor::new(head).chain(buf_reader)),
+                core_dump: false,
+                filters: vec![],
+                options: ParserOptions::default(),
+                text_dump_elems: None,
+            })
+        }
     }
 }
 
@@ -144,6 +278,7 @@ impl<R> BgpkitParser<R> {
             core_dump: true,
             filters: self.filters,
             options: self.options,
+            text_dump_elems: self.text_dump_elems,
         }
     }
 
@@ -155,6 +290,7 @@ impl<R> BgpkitParser<R> {
             core_dump: self.core_dump,
             filters: self.filters,
             options,
+            text_dump_elems: self.text_dump_elems,
         }
     }
 
@@ -233,6 +369,7 @@ impl<R> BgpkitParser<R> {
             core_dump: self.core_dump,
             filters,
             options: self.options,
+            text_dump_elems: self.text_dump_elems,
         })
     }
 
@@ -296,6 +433,7 @@ impl<R> BgpkitParser<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::Asn;
 
     #[test]
     fn test_new_with_reader() {
@@ -467,5 +605,71 @@ mod tests {
         // Both should have same count: 132 withdrawals from peer 185.1.8.65
         assert_eq!(count1, 132);
         assert_eq!(count2, 132);
+    }
+
+    #[test]
+    fn test_from_text_reader_inline() {
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n";
+        let parser =
+            BgpkitParser::from_text_reader(dump.as_bytes()).expect("inline text-dump parse");
+        let elems: Vec<_> = parser.into_elem_iter().collect();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].prefix.prefix.to_string(), "1.0.0.0/24");
+        assert_eq!(elems[0].peer_ip.to_string(), "1.2.3.4");
+        assert_eq!(u32::from(elems[0].peer_asn), 65001);
+        assert_eq!(elems[0].origin_asns, Some(vec![Asn::from(13335u32)]));
+    }
+
+    #[test]
+    fn test_from_auto_reader_detects_text() {
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n";
+        let parser = BgpkitParser::from_auto_reader(dump.as_bytes()).expect("auto-detect parse");
+        let elems: Vec<_> = parser.into_elem_iter().collect();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].origin_asns, Some(vec![Asn::from(13335u32)]));
+    }
+
+    #[test]
+    fn test_from_auto_reader_detects_mrt() {
+        // A few zero bytes — not a text dump, so auto-detect should fall
+        // through to the MRT path (which will then hit EOF cleanly).
+        let data: Vec<u8> = vec![0x00u8; 16];
+        let parser =
+            BgpkitParser::from_auto_reader(std::io::Cursor::new(data)).expect("auto-detect parse");
+        let count = parser.into_elem_iter().count();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_text_dump_parser_with_filter() {
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n\
+ *> 8.8.8.0/24       10.0.0.2                 0             0 15169 i\n";
+        let parser = BgpkitParser::from_text_reader(dump.as_bytes())
+            .unwrap()
+            .add_filter("origin_asn", "13335")
+            .unwrap();
+        let elems: Vec<_> = parser.into_elem_iter().collect();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].prefix.prefix.to_string(), "1.0.0.0/24");
+    }
+
+    #[test]
+    fn test_text_dump_next_record_errors() {
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n";
+        let mut parser =
+            BgpkitParser::from_text_reader(dump.as_bytes()).expect("inline text-dump parse");
+        assert!(parser.next_record().is_err());
     }
 }
