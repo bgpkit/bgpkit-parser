@@ -33,6 +33,11 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
     type Item = Result<MrtRecord, ParserErrorWithBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Text-dump parsers have no MRT-record representation; short-circuit
+        // instead of repeatedly returning Unsupported errors from next_record().
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             match self.parser.next_record() {
                 Ok(record) => {

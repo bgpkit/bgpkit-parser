@@ -102,12 +102,13 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     /// or route-views `oix-full-snapshot-*` files).
     ///
     /// The file is auto-decompressed by oneio. The timestamp for all elements
-    /// is inferred from the file name when possible; pass
-    /// [`infer_timestamp_from_path`] yourself to override. The resulting parser
-    /// streams [`BgpElem`]s lazily — one route line at a time, constant memory.
-    /// Calling [`into_record_iter`](Self::into_record_iter) or
-    /// [`next_record`](Self::next_record) on a text-dump parser returns an
-    /// error, since text dumps have no MRT-record representation.
+    /// is inferred from the file name when possible. To override the timestamp,
+    /// use [`from_text_reader_with_timestamp`](Self::from_text_reader_with_timestamp)
+    /// directly. The resulting parser streams [`BgpElem`]s lazily — one route
+    /// line at a time, constant memory. Calling [`into_record_iter`](Self::into_record_iter)
+    /// or [`next_record`](Self::next_record) on a text-dump parser returns no
+    /// records (text dumps have no MRT-record representation); use
+    /// [`into_elem_iter`](Self::into_elem_iter) or the `for elem in parser` loop instead.
     ///
     /// # Example
     ///
@@ -670,5 +671,18 @@ Default local pref 100, local AS 65001\n\n\
         let mut parser =
             BgpkitParser::from_text_reader(dump.as_bytes()).expect("inline text-dump parse");
         assert!(parser.next_record().is_err());
+    }
+
+    #[test]
+    fn test_text_dump_record_iter_terminates() {
+        // Calling into_record_iter on a text-dump parser should yield 0
+        // records immediately, not spin forever on Unsupported errors.
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n";
+        let parser =
+            BgpkitParser::from_text_reader(dump.as_bytes()).expect("inline text-dump parse");
+        assert_eq!(parser.into_record_iter().count(), 0);
     }
 }

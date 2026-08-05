@@ -681,6 +681,10 @@ impl<R: Read> Iterator for RouteIterator<R> {
     type Item = BgpRouteElem;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Text-dump parsers have no MRT-record representation; short-circuit.
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             match self.pending_routes.next_route() {
                 Ok(Some(route)) => {
@@ -789,6 +793,10 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
     type Item = Result<BgpRouteElem, ParserErrorWithBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Text-dump parsers have no MRT-record representation; short-circuit.
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             match self.pending_routes.next_route() {
                 Ok(Some(route)) => {

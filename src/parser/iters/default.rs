@@ -33,6 +33,11 @@ impl<R: Read> Iterator for RecordIterator<R> {
     type Item = MrtRecord;
 
     fn next(&mut self) -> Option<MrtRecord> {
+        // Text-dump parsers have no MRT-record representation; short-circuit
+        // instead of spinning forever on Unsupported errors from next_record().
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         self.count += 1;
         loop {
             return match self.parser.next_record() {
