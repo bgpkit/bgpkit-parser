@@ -149,6 +149,7 @@ fn get_relevant_attributes(
             | AttributeValue::Development(_)
             | AttributeValue::LinkState(_)
             | AttributeValue::TunnelEncapsulation(_)
+            | AttributeValue::TrafficEngineering(_)
             | AttributeValue::Aigp(_)
             | AttributeValue::BfdDiscriminator(_)
             | AttributeValue::BgpPrefixSid(_)

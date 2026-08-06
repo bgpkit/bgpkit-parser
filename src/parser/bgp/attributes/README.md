@@ -18,6 +18,7 @@
 | Extended Community       | [RFC4360][rfc4360] | 16,25 | Yes       |
 | Large Community          | [RFC8092][rfc8092] | 32    | Yes       |
 | Only To Customer         | [RFC9234][rfc9234] | 35    | Yes       |
+| Traffic Engineering      | [RFC5543][rfc5543] | 24    | Yes       |
 | AIGP                     | [RFC7311][rfc7311] | 26    | Yes       |
 | BFD Discriminator        | [RFC9026][rfc9026] | 38    | Yes       |
 | BGP Prefix-SID           | [RFC8669][rfc8669] | 40    | Yes       |
@@ -30,7 +31,6 @@
 |---------------------------------|-------------------------------|-----------|-----------------------------|----------------------------------|
 | ATTR_SET                        | [RFC6368][rfc6368]            | 128       | Raw-retained / model only  | Structured nested parser not yet implemented |
 | PMSI_TUNNEL                     | [RFC6514][rfc6514]            | 22        | Raw-retained              | Structured parser not implemented |
-| TRAFFIC_ENGINEERING             | [RFC5543][rfc5543]            | 24        | Raw-retained              | Structured parser not implemented |
 | IPv6_EXT_COMMUNITIES            | [RFC5701][rfc5701]            | 25        | ✅ Implemented            | Listed in main table above       |
 | PE_DISTINGUISHER_LABELS         | [RFC6514][rfc6514]            | 27        | Raw-retained              | Structured parser not implemented |
 | BGPSEC_PATH                     | [RFC8205][rfc8205]            | 33        | Raw-retained              | Structured parser not implemented |
