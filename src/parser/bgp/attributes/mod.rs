@@ -10,6 +10,7 @@ mod attr_10_13_cluster;
 mod attr_14_15_nlri;
 mod attr_16_25_extended_communities;
 mod attr_23_tunnel_encap;
+mod attr_24_traffic_engineering;
 mod attr_26_aigp;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
@@ -50,6 +51,9 @@ use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
 use crate::parser::bgp::attributes::attr_23_tunnel_encap::{
     encode_tunnel_encapsulation_attribute, parse_tunnel_encapsulation_attribute,
 };
+use crate::parser::bgp::attributes::attr_24_traffic_engineering::{
+    encode_traffic_engineering, parse_traffic_engineering,
+};
 use crate::parser::bgp::attributes::attr_26_aigp::{encode_aigp, parse_aigp};
 use crate::parser::bgp::attributes::attr_29_linkstate::{
     encode_link_state_attribute, parse_link_state_attribute,
@@ -86,7 +90,8 @@ fn validate_attribute_flags(
         | AttrType::ORIGINATOR_ID
         | AttrType::CLUSTER_LIST
         | AttrType::MP_REACHABLE_NLRI
-        | AttrType::MP_UNREACHABLE_NLRI => AttrFlags::OPTIONAL,
+        | AttrType::MP_UNREACHABLE_NLRI
+        | AttrType::TRAFFIC_ENGINEERING => AttrFlags::OPTIONAL,
         // Optional transitive attributes
         AttrType::AGGREGATOR
         | AttrType::AS4_AGGREGATOR
@@ -125,7 +130,8 @@ fn validate_attribute_flags(
             | AttrType::ORIGINATOR_ID
             | AttrType::CLUSTER_LIST
             | AttrType::MP_REACHABLE_NLRI
-            | AttrType::MP_UNREACHABLE_NLRI => {
+            | AttrType::MP_UNREACHABLE_NLRI
+            | AttrType::TRAFFIC_ENGINEERING => {
                 warnings.push(BgpValidationWarning::AttributeFlagsError {
                     attr_type,
                     expected_flags: expected_flags.bits(),
@@ -142,7 +148,6 @@ fn is_raw_retained_attr(attr_type: AttrType) -> bool {
         attr_type,
         AttrType::RESERVED
             | AttrType::PMSI_TUNNEL
-            | AttrType::TRAFFIC_ENGINEERING
             | AttrType::PE_DISTINGUISHER_LABELS
             | AttrType::BGPSEC_PATH
             | AttrType::ATTR_SET
@@ -462,6 +467,7 @@ pub fn parse_attributes(
             AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
             AttrType::AIGP => parse_aigp(attr_data),
             AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
+            AttrType::TRAFFIC_ENGINEERING => parse_traffic_engineering(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
             AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
             AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
@@ -560,6 +566,7 @@ impl Attribute {
                 AttributeValue::TunnelEncapsulation(v) => {
                     encode_tunnel_encapsulation_attribute(v, b)?
                 }
+                AttributeValue::TrafficEngineering(v) => encode_traffic_engineering(v, b)?,
                 AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v, b)?,
                 AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v, b)?,
                 AttributeValue::Bier(v) => encode_bier(v, b)?,

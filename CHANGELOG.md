@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 * **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
 * **Quagga BGP states**: `BgpState` gains the implementation-specific `Clearing` and `Deleted` variants for wire values 7 and 8. Downstream exhaustive matches must handle the new variants.
 * **Link Bandwidth extended community variant**: `ExtendedCommunity` gains `LinkBandwidth` ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Two-octet AS-specific extended communities with subtype 0x04 (RFC 10005 link bandwidth) now parse to this variant instead of `TransitiveTwoOctetAs` / `NonTransitiveTwoOctetAs`, changing their `Display` and serde representations (wire encoding is byte-identical). Downstream exhaustive matches must handle the new variant.
+* **Traffic Engineering attribute variant**: `AttributeValue` gains `TrafficEngineering` ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). The code-24 BGP Traffic Engineering attribute (RFC 5543), previously raw-retained, now parses to this typed variant. Downstream exhaustive matches must handle the new variant.
 
 ### Added
 
@@ -37,6 +38,7 @@ All notable changes to this project will be documented in this file.
 * **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.
 * **Cisco `sh ip bgp` text dump parsing** ([#320](https://github.com/bgpkit/bgpkit-parser/issues/320)): new `parser::text_dump` module parses fixed-width text RIB dumps published by PCH (daily routing table snapshots) and route-views (`oix-full-snapshot-*.bz2`) into `BgpElem`s. Column offsets are derived from the table header so blank numeric columns (Metric, LocPrf, Weight) stay distinct from AS-path data; multipath continuation lines and wrapped prefixes (including IPv6) are supported. Route-views dumps without the `BGP table version` / `local AS` preamble parse with sentinel peer identity (`0.0.0.0` / AS0). Also provides `detect_text_dump` for format sniffing and `infer_timestamp_from_path` for PCH (`YYYY.MM.DD`) and route-views (`YYYY-MM-DD-HHMM`) file-name timestamps. Ported from monocle ([#143](https://github.com/bgpkit/monocle/pull/143), [#146](https://github.com/bgpkit/monocle/pull/146)).
 * **Unified MRT/text-dump parser API**: `BgpkitParser` gains three new constructor groups that integrate text dumps into the standard `for elem in parser` iteration loop. `new_text(path)` / `from_text_reader(r)` parse a known text dump; `new_auto(path)` / `from_auto_reader(r)` peek the first bytes and auto-dispatch to the text or MRT path. Both text-dump paths **stream elements lazily** — one route line at a time, constant memory — via a new `TextDumpElemIterator`. All existing filter methods (`add_filter`, `with_filters`, etc.) work on both paths. The default `new(path)` constructor remains MRT-only.
+* **RFC 5543 Traffic Engineering attribute**: Typed parsing and encoding for the BGP Traffic Engineering attribute (type 24) ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). Exposes the Switching Capability, Encoding, Reserved, and eight Maximum LSP Bandwidth fields (IEEE-754), and retains switching-capability-specific information as raw bytes with wire-faithful round-trip.
 
 ### Fixed
 
@@ -53,7 +55,7 @@ All notable changes to this project will be documented in this file.
 ### Contributors
 
 * @ties — fallible encoding and MRT error-handling overhaul ([#312](https://github.com/bgpkit/bgpkit-parser/pull/312), [#315](https://github.com/bgpkit/bgpkit-parser/pull/315)), early RIPE RIS MRT support ([#316](https://github.com/bgpkit/bgpkit-parser/pull/316)), historical Quagga BGP states ([#317](https://github.com/bgpkit/bgpkit-parser/pull/317))
-* @downwithbgp — RFC 10005 Link Bandwidth Extended Community support ([#319](https://github.com/bgpkit/bgpkit-parser/pull/319))
+* @downwithbgp — RFC 10005 Link Bandwidth Extended Community support ([#319](https://github.com/bgpkit/bgpkit-parser/pull/319)), RFC 5543 Traffic Engineering attribute support ([#322](https://github.com/bgpkit/bgpkit-parser/pull/322))
 
 ## v0.19.0 - 2026-07-28
 

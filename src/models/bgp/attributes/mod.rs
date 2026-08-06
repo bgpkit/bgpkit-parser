@@ -615,6 +615,45 @@ pub struct SfpAttribute {
     pub tlvs: Vec<RawTlv8Ext>,
 }
 
+/// BGP Traffic Engineering Attribute - RFC 5543
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TrafficEngineering {
+    /// Switching Capability code defined by GMPLS.
+    pub switching_capability: u8,
+
+    /// Interface encoding code defined by GMPLS.
+    pub encoding: u8,
+
+    /// Reserved wire value.
+    ///
+    /// RFC 5543 says originators should set this to zero and receivers
+    /// must ignore it.
+    pub reserved: u16,
+
+    /// Maximum LSP bandwidth for priorities 0 through 7, in bytes per second.
+    pub max_lsp_bandwidth: [f32; 8],
+
+    /// Switching-capability-specific information retained as raw bytes.
+    pub switching_capability_specific: Bytes,
+}
+
+impl PartialEq for TrafficEngineering {
+    fn eq(&self, other: &Self) -> bool {
+        self.switching_capability == other.switching_capability
+            && self.encoding == other.encoding
+            && self.reserved == other.reserved
+            && self
+                .max_lsp_bandwidth
+                .iter()
+                .zip(other.max_lsp_bandwidth.iter())
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+            && self.switching_capability_specific == other.switching_capability_specific
+    }
+}
+
+impl Eq for TrafficEngineering {}
+
 /// ATTR_SET Attribute - RFC 6368
 ///
 /// Used in BGP/MPLS IP VPNs to transparently carry customer BGP path attributes
@@ -662,6 +701,8 @@ pub enum AttributeValue {
     LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
     /// BGP Tunnel Encapsulation attribute - RFC 9012
     TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
+    /// BGP Traffic Engineering attribute - RFC 5543
+    TrafficEngineering(TrafficEngineering),
     /// BFD Discriminator attribute - RFC 9026
     BfdDiscriminator(BfdDiscriminatorAttribute),
     /// BGP Prefix-SID attribute - RFC 8669
@@ -733,6 +774,7 @@ impl AttributeValue {
             AttributeValue::MpUnreachNlri(_) => AttrType::MP_UNREACHABLE_NLRI,
             AttributeValue::LinkState(_) => AttrType::BGP_LS_ATTRIBUTE,
             AttributeValue::TunnelEncapsulation(_) => AttrType::TUNNEL_ENCAPSULATION,
+            AttributeValue::TrafficEngineering(_) => AttrType::TRAFFIC_ENGINEERING,
             AttributeValue::BfdDiscriminator(_) => AttrType::BFD_DISCRIMINATOR,
             AttributeValue::BgpPrefixSid(_) => AttrType::BGP_PREFIX_SID,
             AttributeValue::Bier(_) => AttrType::BIER,
@@ -777,6 +819,7 @@ impl AttributeValue {
             AttributeValue::MpReachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::MpUnreachNlri(_) => Some(OptionalNonTransitive),
             AttributeValue::LinkState(_) => Some(OptionalNonTransitive),
+            AttributeValue::TrafficEngineering(_) => Some(OptionalNonTransitive),
             AttributeValue::Aigp(_) => Some(OptionalNonTransitive),
             AttributeValue::BfdDiscriminator(_) => Some(OptionalTransitive),
             AttributeValue::BgpPrefixSid(_) => Some(OptionalTransitive),
@@ -1142,6 +1185,24 @@ mod tests {
         assert_eq!(
             mp_reach_nlri_attr.attr_category(),
             Some(AttributeCategory::OptionalNonTransitive)
+        );
+
+        let traffic_engineering_attr = AttributeValue::TrafficEngineering(TrafficEngineering {
+            switching_capability: 1,
+            encoding: 1,
+            reserved: 0,
+            max_lsp_bandwidth: [0.0; 8],
+            switching_capability_specific: Bytes::new(),
+        });
+
+        assert_eq!(
+            traffic_engineering_attr.attr_category(),
+            Some(AttributeCategory::OptionalNonTransitive)
+        );
+
+        assert_eq!(
+            traffic_engineering_attr.default_flags(),
+            AttrFlags::OPTIONAL
         );
     }
 
