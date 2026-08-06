@@ -33,6 +33,11 @@ impl<R: Read> Iterator for RecordIterator<R> {
     type Item = MrtRecord;
 
     fn next(&mut self) -> Option<MrtRecord> {
+        // Text-dump parsers have no MRT-record representation; short-circuit
+        // instead of spinning forever on Unsupported errors from next_record().
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         self.count += 1;
         loop {
             return match self.parser.next_record() {
@@ -139,6 +144,16 @@ impl<R: Read> Iterator for ElemIterator<R> {
         self.count += 1;
 
         loop {
+            // Fast path: drain streaming text-dump elems directly, with filter support.
+            if let Some(iter) = &mut self.record_iter.parser.text_dump_iter {
+                for elem in iter.by_ref() {
+                    if elem.match_filters(&self.record_iter.parser.filters) {
+                        return Some(elem);
+                    }
+                }
+                return None;
+            }
+
             if self.cache_elems.is_empty() {
                 // refill cache elems
                 loop {

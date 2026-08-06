@@ -31,6 +31,10 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
     type Item = RawMrtRecord;
 
     fn next(&mut self) -> Option<RawMrtRecord> {
+        // Text-dump parsers have no MRT-record representation; short-circuit.
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         self.count += 1;
         loop {
             match chunk_mrt_record(&mut self.parser.reader) {

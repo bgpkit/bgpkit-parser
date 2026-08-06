@@ -33,6 +33,11 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
     type Item = Result<MrtRecord, ParserErrorWithBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Text-dump parsers have no MRT-record representation; short-circuit
+        // instead of repeatedly returning Unsupported errors from next_record().
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             match self.parser.next_record() {
                 Ok(record) => {
@@ -96,6 +101,16 @@ impl<R: Read> Iterator for FallibleElemIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            // Fast path: drain streaming text-dump elems directly, with filter support.
+            if let Some(iter) = &mut self.record_iter.parser.text_dump_iter {
+                for elem in iter.by_ref() {
+                    if elem.match_filters(&self.record_iter.parser.filters) {
+                        return Some(Ok(elem));
+                    }
+                }
+                return None;
+            }
+
             // First check if we have cached elements
             if !self.cache_elems.is_empty() {
                 if let Some(elem) = self.cache_elems.pop() {

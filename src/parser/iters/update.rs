@@ -168,6 +168,11 @@ impl<R: Read> Iterator for UpdateIterator<R> {
     type Item = MrtUpdate;
 
     fn next(&mut self) -> Option<MrtUpdate> {
+        // Text-dump parsers have no MRT-record representation; short-circuit
+        // instead of spinning forever on Unsupported errors from next_record().
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             if let Some(message) = self.pending_table_dump.pop() {
                 return Some(MrtUpdate::TableDumpMessage(message));
@@ -316,6 +321,10 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
     type Item = Result<MrtUpdate, crate::error::ParserErrorWithBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Text-dump parsers have no MRT-record representation; short-circuit.
+        if self.parser.text_dump_iter.is_some() {
+            return None;
+        }
         loop {
             if let Some(message) = self.pending_table_dump.pop() {
                 return Some(Ok(MrtUpdate::TableDumpMessage(message)));
