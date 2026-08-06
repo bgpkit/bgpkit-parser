@@ -29,12 +29,14 @@ All notable changes to this project will be documented in this file.
 * **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
 * **Quagga BGP states**: `BgpState` gains the implementation-specific `Clearing` and `Deleted` variants for wire values 7 and 8. Downstream exhaustive matches must handle the new variants.
 * **Link Bandwidth extended community variant**: `ExtendedCommunity` gains `LinkBandwidth` ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Two-octet AS-specific extended communities with subtype 0x04 (RFC 10005 link bandwidth) now parse to this variant instead of `TransitiveTwoOctetAs` / `NonTransitiveTwoOctetAs`, changing their `Display` and serde representations (wire encoding is byte-identical). Downstream exhaustive matches must handle the new variant.
+* **Traffic Engineering attribute variant**: `AttributeValue` gains `TrafficEngineering` ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). The code-24 BGP Traffic Engineering attribute (RFC 5543), previously raw-retained, now parses to this typed variant. Downstream exhaustive matches must handle the new variant.
 
 ### Added
 
 * **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
 * **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
 * **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.
+* **RFC 5543 Traffic Engineering attribute**: Typed parsing and encoding for the BGP Traffic Engineering attribute (type 24) ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). Exposes the Switching Capability, Encoding, Reserved, and eight Maximum LSP Bandwidth fields (IEEE-754), and retains switching-capability-specific information as raw bytes with wire-faithful round-trip.
 
 ### Fixed
 
@@ -51,7 +53,7 @@ All notable changes to this project will be documented in this file.
 ### Contributors
 
 * @ties — fallible encoding and MRT error-handling overhaul ([#312](https://github.com/bgpkit/bgpkit-parser/pull/312), [#315](https://github.com/bgpkit/bgpkit-parser/pull/315)), early RIPE RIS MRT support ([#316](https://github.com/bgpkit/bgpkit-parser/pull/316)), historical Quagga BGP states ([#317](https://github.com/bgpkit/bgpkit-parser/pull/317))
-* @downwithbgp — RFC 10005 Link Bandwidth Extended Community support ([#319](https://github.com/bgpkit/bgpkit-parser/pull/319))
+* @downwithbgp — RFC 10005 Link Bandwidth Extended Community support ([#319](https://github.com/bgpkit/bgpkit-parser/pull/319)), RFC 5543 Traffic Engineering attribute support ([#322](https://github.com/bgpkit/bgpkit-parser/pull/322))
 
 ## v0.19.0 - 2026-07-28
 
