@@ -13,6 +13,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [route_level_parsing.rs](route_level_parsing.rs) — Fast scan using `into_route_iter()` when only prefix, AS path, and peer metadata are needed. Skips communities, MED, next-hop for ~10–15% faster updates and ~50–70% faster RIB parsing.
 - [parallel_records_to_elem.rs](parallel_records_to_elem.rs) — Compare sequential and multi-threaded raw-record-to-element conversion using a shared immutable `Elementor`.
 - [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
+- [resumable_http.rs](resumable_http.rs) — Read a remote MRT file with the opt-in HTTP range-request reader and surface unrecoverable read failures through a fallible iterator.
 
 ## Filtering and Policy Examples
 - [filters.rs](filters.rs) — Parse an MRT file and filter by a specific prefix (e.g., 211.98.251.0/24), logging matching announcements.
@@ -42,11 +43,12 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [parse_bmp_mpls.rs](parse_bmp_mpls.rs) — Construct and parse a synthetic BMP Route Monitoring message containing MPLS-labeled NLRI (SAFI 4), demonstrating label stack extraction.
 
 ## Raw and Unimplemented Attributes
-+- [raw_attributes.rs](raw_attributes.rs) — Construct, inspect, encode, and round-trip typed, raw-retained, deprecated, and unknown path attributes.
-+- [scan_path_attributes.rs](scan_path_attributes.rs) — Scan selected RouteViews and RIPE RIS archive files from a chosen month for raw-retained, deprecated, and unknown path attributes.
+- [raw_attributes.rs](raw_attributes.rs) — Construct, inspect, encode, and round-trip typed, raw-retained, deprecated, and unknown path attributes.
+- [scan_path_attributes.rs](scan_path_attributes.rs) — Scan selected RouteViews and RIPE RIS archive files from a chosen month for raw-retained, deprecated, and unknown path attributes.
 
 ## Error Handling and Robustness
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
+- [diagnostic_iterator.rs](diagnostic_iterator.rs) — Classify clean records, RFC 7606 validation findings, and fatal parse failures while exporting each finding's raw MRT bytes.
 - [treat_as_withdrawal.rs](treat_as_withdrawal.rs) — Scan MRT files for RFC 7606 validation issues (malformed NLRI, bad attributes) and classify them by error-handling category: attribute discard vs. treat-as-withdrawal.
 
 ## Debugging and Analysis
@@ -58,7 +60,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [rtr_client.rs](rtr_client.rs) — Connect to an RTR server (RFC 6810/8210), fetch ROAs, and validate a route announcement (1.1.1.0/24 -> AS13335). Demonstrates RTR PDU parsing and encoding.
 
 ## Standalone and WebAssembly Examples
-+- [local_only](local_only/README.md) — Minimal standalone project that parses a local MRT file without remote I/O dependencies.
-+- [rib_entries_age_study](rib_entries_age_study/README.md) — Standalone two-phase study of RIB entry ages and their distributions.
-+- [WASM MRT parser](wasm/parse-mrt-file/README.md) — Experimental Node.js WebAssembly example that emits BGP elements from a local or remote MRT file.
-+- [WASM RouteViews Kafka stream](wasm/kafka-openbmp-stream/README.md) — Experimental Node.js WebAssembly consumer for RouteViews OpenBMP Kafka messages.
+- [local_only](local_only/README.md) — Minimal standalone project that parses a local MRT file without remote I/O dependencies.
+- [rib_entries_age_study](rib_entries_age_study/README.md) — Standalone two-phase study of RIB entry ages and their distributions.
+- [WASM MRT parser](wasm/parse-mrt-file/README.md) — Experimental Node.js WebAssembly example that emits BGP elements from a local or remote MRT file.
+- [WASM RouteViews Kafka stream](wasm/kafka-openbmp-stream/README.md) — Experimental Node.js WebAssembly consumer for RouteViews OpenBMP Kafka messages.

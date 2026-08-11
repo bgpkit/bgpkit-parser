@@ -24,23 +24,36 @@ All notable changes to this project will be documented in this file.
   | `MrtRibEncoder::export_bytes()` / `MrtUpdatesEncoder::export_bytes() -> Bytes` | `-> Result<Bytes, EncodingError>` |
 
   `EncodingError` has two variants: `ValueTooLarge { field, actual, max }` for wire-capacity overflows and `Unencodable { field, reason }` for values with no valid wire representation (ATTR_SET, RIB_GENERIC, OPEN parameter type 255, labeled NLRI with an empty label stack).
+* **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
+* **Traffic Engineering attribute variant**: `AttributeValue` gains `TrafficEngineering` ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). The code-24 BGP Traffic Engineering attribute (RFC 5543), previously raw-retained, now parses to this typed variant. Downstream exhaustive matches must handle the new variant.
+* **Link Bandwidth extended community variant**: `ExtendedCommunity` gains `LinkBandwidth` ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Two-octet AS-specific extended communities with subtype 0x04 (RFC 10005 link bandwidth) now parse to this variant instead of `TransitiveTwoOctetAs` / `NonTransitiveTwoOctetAs`, changing their `Display` and serde representations (wire encoding is byte-identical). Downstream exhaustive matches must handle the new variant.
 * **`Tlv::length()` and `SubTlv::length()` removed**: both silently saturated at `u16::MAX`; encoders now compute checked lengths internally.
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
-* **Legacy MRT enum variants**: `MrtMessage` gains `TableDumpMessageBatch` and `LegacyBgp`, and `MrtUpdate` gains `LegacyBgpUpdate`. Downstream exhaustive matches must handle the new variants.
 * **Quagga BGP states**: `BgpState` gains the implementation-specific `Clearing` and `Deleted` variants for wire values 7 and 8. Downstream exhaustive matches must handle the new variants.
-* **Link Bandwidth extended community variant**: `ExtendedCommunity` gains `LinkBandwidth` ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Two-octet AS-specific extended communities with subtype 0x04 (RFC 10005 link bandwidth) now parse to this variant instead of `TransitiveTwoOctetAs` / `NonTransitiveTwoOctetAs`, changing their `Display` and serde representations (wire encoding is byte-identical). Downstream exhaustive matches must handle the new variant.
-* **Traffic Engineering attribute variant**: `AttributeValue` gains `TrafficEngineering` ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). The code-24 BGP Traffic Engineering attribute (RFC 5543), previously raw-retained, now parses to this typed variant. Downstream exhaustive matches must handle the new variant.
 
 ### Added
 
+#### Parser interfaces
+
+* **Unified MRT/text-dump parser API**: `BgpkitParser` gains three new constructor groups that integrate text dumps into the standard `for elem in parser` iteration loop. `new_text(path)` / `from_text_reader(r)` parse a known text dump; `new_auto(path)` / `from_auto_reader(r)` peek the first bytes and auto-dispatch to the text or MRT path. Both text-dump paths **stream elements lazily** — one route line at a time, constant memory — via a new `TextDumpElemIterator`. All existing filter methods (`add_filter`, `with_filters`, etc.) work on both paths. The default `new(path)` constructor remains MRT-only.
 * **Diagnostic MRT iterator** ([#303](https://github.com/bgpkit/bgpkit-parser/issues/303)): added `into_diagnostic_iter()` for record-level malformed-data investigation. It emits clean records, recoverable RFC 7606 validation findings with original MRT bytes, and fatal parse errors with available header and byte context.
 * **Experimental resumable HTTP reader**: `BgpkitParser::new_resumable_http` uses oneio's range-request reader to resume interrupted HTTP(S) downloads without changing the behavior of `new`. Unsupported Range requests or inconsistent resumed responses return an error ([#288](https://github.com/bgpkit/bgpkit-parser/issues/288)).
-* **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
-* **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
-* **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.
 * **Cisco `sh ip bgp` text dump parsing** ([#320](https://github.com/bgpkit/bgpkit-parser/issues/320)): new `parser::text_dump` module parses fixed-width text RIB dumps published by PCH (daily routing table snapshots) and route-views (`oix-full-snapshot-*.bz2`) into `BgpElem`s. Column offsets are derived from the table header so blank numeric columns (Metric, LocPrf, Weight) stay distinct from AS-path data; multipath continuation lines and wrapped prefixes (including IPv6) are supported. Route-views dumps without the `BGP table version` / `local AS` preamble parse with sentinel peer identity (`0.0.0.0` / AS0). Also provides `detect_text_dump` for format sniffing and `infer_timestamp_from_path` for PCH (`YYYY.MM.DD`) and route-views (`YYYY-MM-DD-HHMM`) file-name timestamps. Ported from monocle ([#143](https://github.com/bgpkit/monocle/pull/143), [#146](https://github.com/bgpkit/monocle/pull/146)).
-* **Unified MRT/text-dump parser API**: `BgpkitParser` gains three new constructor groups that integrate text dumps into the standard `for elem in parser` iteration loop. `new_text(path)` / `from_text_reader(r)` parse a known text dump; `new_auto(path)` / `from_auto_reader(r)` peek the first bytes and auto-dispatch to the text or MRT path. Both text-dump paths **stream elements lazily** — one route line at a time, constant memory — via a new `TextDumpElemIterator`. All existing filter methods (`add_filter`, `with_filters`, etc.) work on both paths. The default `new(path)` constructor remains MRT-only.
+
+#### Protocol support
+
+* **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
 * **RFC 5543 Traffic Engineering attribute**: Typed parsing and encoding for the BGP Traffic Engineering attribute (type 24) ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). Exposes the Switching Capability, Encoding, Reserved, and eight Maximum LSP Bandwidth fields (IEEE-754), and retains switching-capability-specific information as raw bytes with wire-faithful round-trip.
+* **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.
+
+#### Test data
+
+* **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
+
+#### Examples
+
+* **Diagnostic MRT iterator example**: Added `examples/diagnostic_iterator.rs` to classify clean records, RFC 7606 validation findings, and fatal parse errors while exporting raw MRT bytes for each finding.
+* **Resumable HTTP reader example**: Added `examples/resumable_http.rs` to parse a remote MRT file with `new_resumable_http` and report unrecoverable read failures.
 
 ### Fixed
 
