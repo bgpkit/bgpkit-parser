@@ -28,6 +28,13 @@ pub struct RawMrtRecord {
     pub message_bytes: Bytes,
 }
 
+/// Internal framing error that retains MRT header context when it was parsed.
+pub(crate) struct RawMrtRecordError {
+    pub(crate) error: ParserError,
+    pub(crate) common_header: Option<CommonHeader>,
+    pub(crate) bytes: Option<Vec<u8>>,
+}
+
 impl RawMrtRecord {
     /// Parse the raw MRT record into a fully parsed MrtRecord.
     /// This consumes the RawMrtRecord and returns a MrtRecord.
@@ -115,6 +122,16 @@ impl RawMrtRecord {
 }
 
 pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErrorWithBytes> {
+    chunk_mrt_record_with_context(input).map_err(|error| ParserErrorWithBytes {
+        error: error.error,
+        bytes: error.bytes,
+    })
+}
+
+/// Read one raw MRT record while retaining parsed header context on framing errors.
+pub(crate) fn chunk_mrt_record_with_context(
+    input: &mut impl Read,
+) -> Result<RawMrtRecord, RawMrtRecordError> {
     // parse common header and capture raw bytes
     let mut consumed_header = Vec::with_capacity(16);
     let parsed_header = match parse_common_header_with_bytes(&mut CapturingReader {
@@ -125,11 +142,16 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
         Err(e) => {
             if let ParserError::EofError(e) = &e {
                 if e.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
-                    return Err(ParserErrorWithBytes::from(ParserError::EofExpected));
+                    return Err(RawMrtRecordError {
+                        error: ParserError::EofExpected,
+                        common_header: None,
+                        bytes: None,
+                    });
                 }
             }
-            return Err(ParserErrorWithBytes {
+            return Err(RawMrtRecordError {
                 error: e,
+                common_header: None,
                 bytes: Some(consumed_header),
             });
         }
@@ -141,11 +163,12 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
     // Protect against unreasonable allocations from corrupt headers
     const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
     if common_header.length > MAX_MRT_MESSAGE_LEN {
-        return Err(ParserErrorWithBytes {
+        return Err(RawMrtRecordError {
             error: ParserError::Unsupported(format!(
                 "MRT message too large: {} bytes",
                 common_header.length
             )),
+            common_header: Some(common_header),
             bytes: Some(header_bytes.to_vec()),
         });
     }
@@ -156,7 +179,12 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
         .take(common_header.length as u64)
         .read_to_end(&mut buffer)
     {
-        return Err(record_io_error(error, &header_bytes, &buffer));
+        return Err(record_io_error(
+            error,
+            common_header,
+            &header_bytes,
+            &buffer,
+        ));
     }
     if buffer.len() != common_header.length as usize {
         return Err(record_io_error(
@@ -168,6 +196,7 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
                     buffer.len()
                 ),
             ),
+            common_header,
             &header_bytes,
             &buffer,
         ));
@@ -182,7 +211,12 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
         let mut correction = Vec::with_capacity(4);
         if let Err(error) = input.take(4).read_to_end(&mut correction) {
             buffer.extend_from_slice(&correction);
-            return Err(record_io_error(error, &header_bytes, &buffer));
+            return Err(record_io_error(
+                error,
+                common_header,
+                &header_bytes,
+                &buffer,
+            ));
         }
         buffer.extend_from_slice(&correction);
         if correction.len() != 4 {
@@ -191,6 +225,7 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
                     std::io::ErrorKind::UnexpectedEof,
                     "truncated historical TABLE_DUMP length correction",
                 ),
+                common_header,
                 &header_bytes,
                 &buffer,
             ));
@@ -223,12 +258,18 @@ impl<R: Read + ?Sized> Read for CapturingReader<'_, R> {
     }
 }
 
-fn record_io_error(error: std::io::Error, header: &[u8], body: &[u8]) -> ParserErrorWithBytes {
+fn record_io_error(
+    error: std::io::Error,
+    common_header: CommonHeader,
+    header: &[u8],
+    body: &[u8],
+) -> RawMrtRecordError {
     let mut bytes = Vec::with_capacity(header.len() + body.len());
     bytes.extend_from_slice(header);
     bytes.extend_from_slice(body);
-    ParserErrorWithBytes {
+    RawMrtRecordError {
         error: ParserError::IoError(error),
+        common_header: Some(common_header),
         bytes: Some(bytes),
     }
 }

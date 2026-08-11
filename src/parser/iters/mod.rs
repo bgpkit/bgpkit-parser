@@ -11,6 +11,7 @@ Rust's iterator syntax.
 */
 
 pub mod default;
+mod diagnostic;
 pub mod fallible;
 mod raw;
 mod route;
@@ -18,6 +19,7 @@ mod update;
 
 // Re-export all iterator types for convenience
 pub use default::{ElemIterator, RecordIterator};
+pub use diagnostic::{DiagnosticEvent, DiagnosticIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
 pub use route::{FallibleRouteIterator, RouteIterator};
@@ -210,6 +212,39 @@ impl<R> BgpkitParser<R> {
     /// Creates a fallible iterator over lightweight route elements.
     pub fn into_fallible_route_iter(self) -> FallibleRouteIterator<R> {
         FallibleRouteIterator::new(self)
+    }
+
+    /// Creates an iterator that classifies each MRT record for malformed-data investigation.
+    ///
+    /// This iterator emits clean parsed records, recoverable RFC 7606 validation findings, and
+    /// fatal parse errors with available raw-byte context. It ignores parser filters so that
+    /// malformed records cannot be hidden by element-oriented matching. Text-dump parsers yield
+    /// no diagnostic events because they have no MRT record representation.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use bgpkit_parser::{BgpkitParser, DiagnosticEvent};
+    ///
+    /// for event in BgpkitParser::new("updates.mrt")?.into_diagnostic_iter() {
+    ///     match event {
+    ///         DiagnosticEvent::Record(record) => println!("{record}"),
+    ///         DiagnosticEvent::Validation { warnings, raw_record, .. } => {
+    ///             eprintln!("validation findings: {warnings:?}");
+    ///             raw_record.write_raw_bytes("malformed-record.mrt")?;
+    ///         }
+    ///         DiagnosticEvent::ParseError { error, raw_bytes, .. } => {
+    ///             eprintln!("parse error: {error}");
+    ///             if let Some(raw_bytes) = raw_bytes {
+    ///                 std::fs::write("malformed-record.mrt", raw_bytes)?;
+    ///             }
+    ///         }
+    ///         _ => {}
+    ///     }
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn into_diagnostic_iter(self) -> DiagnosticIterator<R> {
+        DiagnosticIterator::new(self)
     }
 
     /// Creates an Elementor pre-initialized with PeerIndexTable and an iterator over raw records.
