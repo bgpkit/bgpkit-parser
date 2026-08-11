@@ -36,11 +36,15 @@ pub enum DiagnosticEvent {
 /// Iterator over record-level parsing diagnostics.
 pub struct DiagnosticIterator<R> {
     parser: BgpkitParser<R>,
+    terminated: bool,
 }
 
 impl<R> DiagnosticIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
-        Self { parser }
+        Self {
+            parser,
+            terminated: false,
+        }
     }
 }
 
@@ -49,14 +53,20 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // Text dumps have no MRT record boundary or raw MRT representation.
-        if self.parser.text_dump_iter.is_some() {
+        if self.terminated || self.parser.text_dump_iter.is_some() {
             return None;
         }
 
         let raw_record = match chunk_mrt_record_with_context(&mut self.parser.reader) {
             Ok(raw_record) => raw_record,
-            Err(error) if matches!(error.error, ParserError::EofExpected) => return None,
+            Err(error) if matches!(error.error, ParserError::EofExpected) => {
+                self.terminated = true;
+                return None;
+            }
             Err(error) => {
+                // A framing error may leave the reader between record boundaries. Do not
+                // attempt to reinterpret the remaining bytes as another MRT header.
+                self.terminated = true;
                 return Some(DiagnosticEvent::ParseError {
                     error: error.error,
                     common_header: error.common_header,
@@ -165,6 +175,74 @@ mod tests {
         attributes
     }
 
+    fn update_wire_body(withdrawn: &[u8], attributes: &[u8], announced: &[u8]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&(withdrawn.len() as u16).to_be_bytes());
+        body.extend_from_slice(withdrawn);
+        body.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        body.extend_from_slice(attributes);
+        body.extend_from_slice(announced);
+        body
+    }
+
+    fn bgp4mp_update_wire(withdrawn: &[u8], attributes: &[u8], announced: &[u8]) -> Vec<u8> {
+        let update_body = update_wire_body(withdrawn, attributes, announced);
+        let mut bgp_message = vec![0xff; 16];
+        bgp_message.extend_from_slice(&((19 + update_body.len()) as u16).to_be_bytes());
+        bgp_message.push(BgpMessageType::UPDATE as u8);
+        bgp_message.extend_from_slice(&update_body);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&64496u32.to_be_bytes());
+        body.extend_from_slice(&64497u32.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&1u16.to_be_bytes());
+        body.extend_from_slice(&[192, 0, 2, 1]);
+        body.extend_from_slice(&[192, 0, 2, 2]);
+        body.extend_from_slice(&bgp_message);
+
+        let header = CommonHeader {
+            timestamp: 1_700_000_000,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            length: body.len() as u32,
+        };
+        let mut wire = header.encode().to_vec();
+        wire.extend_from_slice(&body);
+        wire
+    }
+
+    fn valid_update_attributes_wire() -> Vec<u8> {
+        vec![
+            0x40, 0x01, 0x01, 0x00, // ORIGIN = IGP
+            0x40, 0x02, 0x00, // AS_PATH = empty
+            0x40, 0x03, 0x04, 192, 0, 2, 254, // NEXT_HOP
+        ]
+    }
+
+    fn assert_wire_validation(
+        wire: Vec<u8>,
+        expected_warning: impl Fn(&BgpValidationWarning) -> bool,
+    ) {
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire.clone())).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::Validation {
+                warnings,
+                raw_record,
+                ..
+            } => {
+                assert!(
+                    warnings.iter().any(expected_warning),
+                    "expected validation warning, got {warnings:?}"
+                );
+                assert_eq!(raw_record.raw_bytes().as_ref(), wire.as_slice());
+            }
+            event => panic!("expected validation event, got {event:?}"),
+        }
+        assert!(iter.next().is_none());
+    }
+
     #[test]
     fn diagnostic_iterator_yields_clean_record() {
         let wire = update_record(valid_attributes()).encode().unwrap().to_vec();
@@ -263,6 +341,33 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_iterator_terminates_after_framing_error() {
+        let header = CommonHeader {
+            timestamp: 3,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            length: 16 * 1024 * 1024 + 1,
+        };
+        let mut input = header.encode().to_vec();
+        input.extend_from_slice(&update_record(valid_attributes()).encode().unwrap());
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input)).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::ParseError {
+                common_header,
+                raw_bytes,
+                ..
+            } => {
+                assert_eq!(common_header, Some(header));
+                assert_eq!(raw_bytes.as_deref(), Some(header.encode().as_ref()));
+            }
+            event => panic!("expected parse error event, got {event:?}"),
+        }
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
     fn diagnostic_iterator_preserves_invalid_header_bytes() {
         let invalid_header = vec![
             0, 0, 0, 1, // timestamp
@@ -299,5 +404,214 @@ mod tests {
             parser.into_diagnostic_iter().next(),
             Some(DiagnosticEvent::Record(_))
         ));
+    }
+
+    #[test]
+    fn diagnostic_iterator_reports_wire_level_nlri_warnings_and_continues() {
+        let malformed_nlri = [0xc8, 0x01];
+        let invalid_wire = bgp4mp_update_wire(
+            &malformed_nlri,
+            &valid_update_attributes_wire(),
+            &malformed_nlri,
+        );
+        let mut input = invalid_wire.clone();
+        input.extend_from_slice(&update_record(valid_attributes()).encode().unwrap());
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input)).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::Validation {
+                warnings,
+                raw_record,
+                ..
+            } => {
+                assert!(warnings.iter().any(|warning| {
+                    matches!(
+                        warning,
+                        BgpValidationWarning::MalformedNlri {
+                            nlri_type: "withdrawn",
+                            raw_bytes,
+                            ..
+                        } if raw_bytes == &malformed_nlri
+                    )
+                }));
+                assert!(warnings.iter().any(|warning| {
+                    matches!(
+                        warning,
+                        BgpValidationWarning::MalformedNlri {
+                            nlri_type: "announced",
+                            raw_bytes,
+                            ..
+                        } if raw_bytes == &malformed_nlri
+                    )
+                }));
+                assert_eq!(raw_record.raw_bytes().as_ref(), invalid_wire.as_slice());
+            }
+            event => panic!("expected validation event, got {event:?}"),
+        }
+        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record(_))));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn diagnostic_iterator_reports_wire_level_attribute_warnings() {
+        let announced = [0x18, 10, 0, 0];
+        let mut flags_and_duplicate = valid_update_attributes_wire();
+        flags_and_duplicate[0] = 0x80;
+        flags_and_duplicate.extend_from_slice(&[0x40, 0x01, 0x01, 0x00]);
+        assert_wire_validation(
+            bgp4mp_update_wire(&[], &flags_and_duplicate, &announced),
+            |warning| {
+                matches!(
+                    warning,
+                    BgpValidationWarning::AttributeFlagsError {
+                        attr_type: AttrType::ORIGIN,
+                        ..
+                    }
+                )
+            },
+        );
+        assert_wire_validation(
+            bgp4mp_update_wire(&[], &flags_and_duplicate, &announced),
+            |warning| {
+                matches!(
+                    warning,
+                    BgpValidationWarning::DuplicateAttribute {
+                        attr_type: AttrType::ORIGIN
+                    }
+                )
+            },
+        );
+
+        let mut invalid_origin = valid_update_attributes_wire();
+        invalid_origin[3] = 3;
+        assert_wire_validation(
+            bgp4mp_update_wire(&[], &invalid_origin, &announced),
+            |warning| matches!(warning, BgpValidationWarning::MalformedAttributeList { .. }),
+        );
+
+        let malformed_as_path = vec![
+            0x40, 0x01, 0x01, 0x00, // ORIGIN = IGP
+            0x40, 0x02, 0x02, 0x02, 0x01, // AS_PATH segment lacks its ASN
+            0x40, 0x03, 0x04, 192, 0, 2, 254, // NEXT_HOP
+        ];
+        assert_wire_validation(
+            bgp4mp_update_wire(&[], &malformed_as_path, &announced),
+            |warning| matches!(warning, BgpValidationWarning::MalformedAttributeList { .. }),
+        );
+
+        let invalid_next_hop = vec![
+            0x40, 0x01, 0x01, 0x00, // ORIGIN = IGP
+            0x40, 0x02, 0x00, // AS_PATH = empty
+            0x40, 0x03, 0x03, 192, 0, 2, // NEXT_HOP has the wrong length
+        ];
+        assert_wire_validation(
+            bgp4mp_update_wire(&[], &invalid_next_hop, &announced),
+            |warning| {
+                matches!(
+                    warning,
+                    BgpValidationWarning::AttributeLengthError {
+                        attr_type: AttrType::NEXT_HOP,
+                        ..
+                    }
+                )
+            },
+        );
+    }
+
+    #[test]
+    fn diagnostic_iterator_collects_table_dump_batch_and_rib_warnings() {
+        let table_dump_messages = vec![
+            TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("192.0.2.0/24").unwrap(),
+                status: 1,
+                originated_time: 1,
+                peer_ip: IpAddr::from_str("192.0.2.1").unwrap(),
+                peer_asn: Asn::new_16bit(64512),
+                attributes: Attributes::default(),
+            },
+            TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                status: 1,
+                originated_time: 2,
+                peer_ip: IpAddr::from_str("192.0.2.2").unwrap(),
+                peer_asn: Asn::new_16bit(64513),
+                attributes: Attributes::default(),
+            },
+        ];
+        let table_dump_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 1,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP,
+                entry_subtype: 1,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpMessageBatch(table_dump_messages),
+        };
+        let table_dump_wire = table_dump_record.encode().unwrap().to_vec();
+        match BgpkitParser::from_reader(Cursor::new(table_dump_wire.clone()))
+            .into_diagnostic_iter()
+            .next()
+            .unwrap()
+        {
+            DiagnosticEvent::Validation {
+                record,
+                warnings,
+                raw_record,
+            } => {
+                assert!(matches!(
+                    record.message,
+                    MrtMessage::TableDumpMessageBatch(_)
+                ));
+                assert_eq!(warnings.len(), 6);
+                assert_eq!(raw_record.raw_bytes().as_ref(), table_dump_wire.as_slice());
+            }
+            event => panic!("expected validation event, got {event:?}"),
+        }
+
+        let rib_record = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 2,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: TableDumpV2Type::RibIpv4Unicast as u16,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv4Unicast,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("203.0.113.0/24").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index: 0,
+                    originated_time: 1,
+                    path_id: None,
+                    attributes: Attributes::default(),
+                }],
+            })),
+        };
+        let rib_wire = rib_record.encode().unwrap().to_vec();
+        match BgpkitParser::from_reader(Cursor::new(rib_wire.clone()))
+            .into_diagnostic_iter()
+            .next()
+            .unwrap()
+        {
+            DiagnosticEvent::Validation {
+                record,
+                warnings,
+                raw_record,
+            } => {
+                assert!(matches!(
+                    record.message,
+                    MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(_))
+                ));
+                assert_eq!(warnings.len(), 3);
+                assert_eq!(raw_record.raw_bytes().as_ref(), rib_wire.as_slice());
+            }
+            event => panic!("expected validation event, got {event:?}"),
+        }
     }
 }

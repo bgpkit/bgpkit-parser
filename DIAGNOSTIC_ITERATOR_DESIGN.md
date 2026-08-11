@@ -60,11 +60,11 @@ nor original MRT bytes, and their current streaming parser returns `BgpElem` rat
 structured validation/error events. As with record-based iterators today, a text-dump
 parser produces no diagnostic events.
 
-**Continue after records whose declared boundary was consumed.** If the common header and
-declared body were fully consumed, parsing the next event begins at the next MRT record,
-including after `ParseError`. A malformed or truncated common header/body cannot always
-be resynchronized; the iterator emits the available `ParseError` and subsequent behavior
-is limited to what the underlying reader can still frame. It must never loop indefinitely.
+**Continue only after body parse errors.** If the common header and declared body were fully
+consumed, a body parse error is followed by the next MRT record. A malformed or truncated
+header/body cannot always be resynchronized, so the iterator emits one `ParseError` and then
+terminates. This prevents it from reinterpreting a partial record as a new MRT header or
+looping on a persistent reader error.
 
 **Do not change `ParserErrorWithBytes`.** Adding a field to its public struct would break
 external struct literals. Instead, the raw-record reader gets an internal contextual error
@@ -145,7 +145,7 @@ fn next():
   1. If this is a text-dump parser, return None.
   2. Call chunk_mrt_record_with_context(reader).
   3. If the error is EofExpected, return None.
-  4. If framing failed, return ParseError {
+  4. If framing failed, mark the iterator terminated and return ParseError {
        error, common_header, raw_bytes: bytes,
      }.
   5. Retain the successful RawMrtRecord and call raw_record.clone().parse().
@@ -332,8 +332,9 @@ used by iterator and RFC 7606 tests rather than adding binary fixtures.
   consumed bytes.
 - A declared body that ends early -> `ParseError` with `Some` common header and the header
   plus partial body bytes.
-- `[bad framed record][clean record]` -> `ParseError` followed by `Record` when the first
-  record's declared body was consumed.
+- `[bad fully framed body][clean record]` -> `ParseError` followed by `Record`.
+- A framing error (for example, an oversized declared body) -> one `ParseError`, then end of
+  iteration even if bytes follow it.
 - TABLE_DUMP batch and TABLE_DUMP_V2 RIB entries with warnings -> a single `Validation`
   event per physical MRT record; warnings are collected in entry order.
 - Parser with a filter configured -> the same diagnostic event sequence as an unfiltered
@@ -380,8 +381,9 @@ and has no raw MRT record to export.
   clean records by design.
 - A `ParseError` from a malformed header cannot reliably name a `CommonHeader`; that field
   is intentionally optional.
-- Event continuation means the reader consumed a known record boundary. It is not a claim
-  that arbitrary corrupted byte streams can be resynchronized.
+- Event continuation applies only to a body parse error after the reader consumed a known
+  record boundary. Framing errors terminate the iterator rather than attempting to
+  resynchronize arbitrary corrupted byte streams.
 - The existing `enable_core_dump()` option is intentionally irrelevant to this iterator:
   writing files as a side effect would make an application-level event API surprising.
 - The iterator should be documented as a debugging and data-quality API. It is not expected
