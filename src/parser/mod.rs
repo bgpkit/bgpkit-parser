@@ -23,7 +23,7 @@ pub(crate) use self::utils::*;
 
 pub use mrt::mrt_elem::{BgpUpdateElemIter, ElemError, Elementor, RecordElemIter};
 #[cfg(feature = "oneio")]
-use oneio::{get_cache_reader, get_reader};
+use oneio::{get_cache_reader, get_reader, get_resumable_http_reader};
 
 pub use crate::error::{ParserError, ParserErrorWithBytes};
 pub use bmp::{parse_bmp_msg, parse_openbmp_header, parse_openbmp_msg};
@@ -68,6 +68,38 @@ impl BgpkitParser<Box<dyn Read + Send>> {
     /// Creating a new parser from a object that implements [Read] trait.
     pub fn new(path: &str) -> Result<Self, ParserErrorWithBytes> {
         let reader = get_reader(path)?;
+        Ok(BgpkitParser {
+            reader,
+            core_dump: false,
+            filters: vec![],
+            options: ParserOptions::default(),
+            text_dump_iter: None,
+        })
+    }
+
+    /// Creates a parser backed by an experimental resumable HTTP(S) reader.
+    ///
+    /// If a remote server drops a connection while the parser is reading, the
+    /// reader reconnects with an HTTP Range request and continues at the last
+    /// byte read. Resumed responses are validated by `oneio`; servers that do
+    /// not support Range requests, or resources that change while being read,
+    /// return an error instead of combining inconsistent bytes.
+    ///
+    /// This constructor is opt-in. [`BgpkitParser::new`] retains its existing
+    /// reader behavior. Use a fallible iterator when the caller needs to
+    /// handle an unrecoverable read failure explicitly.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let url = "https://data.ris.ripe.net/rrc00/latest-update.gz";
+    /// let parser = BgpkitParser::new_resumable_http(url)?;
+    /// # Ok::<(), bgpkit_parser::ParserErrorWithBytes>(())
+    /// ```
+    pub fn new_resumable_http(path: &str) -> Result<Self, ParserErrorWithBytes> {
+        let reader = get_resumable_http_reader(path)?;
         Ok(BgpkitParser {
             reader,
             core_dump: false,
@@ -450,6 +482,14 @@ mod tests {
             8160,
             BgpkitParser::from_reader(reader).into_elem_iter().count()
         );
+    }
+
+    #[test]
+    fn test_new_resumable_http() {
+        let parser =
+            BgpkitParser::new_resumable_http("https://spaces.bgpkit.org/parser/update-example.gz")
+                .unwrap();
+        assert_eq!(8160, parser.into_elem_iter().count());
     }
 
     #[test]
