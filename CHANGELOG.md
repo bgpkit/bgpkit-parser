@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+* **Diagnostic MRT iterator** ([#303](https://github.com/bgpkit/bgpkit-parser/issues/303)): added `into_diagnostic_iter()` for record-level malformed-data investigation. It emits clean records, recoverable RFC 7606 validation findings with original MRT bytes, and fatal parse errors with available header and byte context.
 * **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
 * **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
 * **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.

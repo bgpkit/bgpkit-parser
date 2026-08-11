@@ -20,6 +20,7 @@ examples/debug-file.rs
 benchmarks
 docs/
 *.md
+!DIAGNOSTIC_ITERATOR_DESIGN.md
 !examples/**/*.md
 !src/wasm/**/*.md
 !tests/fixtures/ripe/**/*.md
