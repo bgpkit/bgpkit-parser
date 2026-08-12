@@ -3,13 +3,30 @@
 //! Recovery is deliberately separate from the default iterators. It never attempts to
 //! reconstruct a damaged record: bytes are skipped until a conservatively validated chain of
 //! records is found, and the skipped range is reported as a [`RecoveryEvent::Gap`].
+//!
+//! Damage is classified before scanning. When a record frames correctly — its header and
+//! declared length were consumed exactly — but its body fails to parse, and intact records
+//! (or a clean end of stream) follow at the declared boundary, exactly that record is
+//! skipped without scanning. Damage that extends to the end of the stream is reported as a
+//! terminal gap rather than an error, so trailing truncation — the most common real-world
+//! corruption — still yields every intact record plus an explicit account of the discarded
+//! tail. A [`RecoveryError`] is reserved for I/O failures, unsupported input, and scan
+//! windows exhausted without finding a boundary mid-stream.
+//!
+//! The undamaged fast path reads straight from the underlying reader; bytes are only
+//! buffered while a recovery scan is in progress.
 
-use crate::models::{Bgp4MpType, EntryType, MrtRecord};
-use crate::parser::iters::record_matches_filters;
+use crate::models::{Bgp4MpType, BgpElem, EntryType, MrtRecord};
+use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
 use crate::parser::mrt::messages::bgp4mp::uses_zebra_compat;
 use crate::parser::mrt::mrt_header::parse_common_header_with_bytes;
-use crate::parser::mrt::mrt_record::parse_mrt_record_with_zebra_compat;
-use crate::parser::{BgpkitParser, Elementor, ParserError, ParserErrorWithBytes, ParserOptions};
+use crate::parser::mrt::mrt_record::{
+    chunk_mrt_record, parse_mrt_record_with_zebra_compat, raw_record_uses_zebra_compat,
+};
+use crate::parser::{
+    BgpkitParser, Elementor, Filter, ParserError, ParserErrorWithBytes, ParserOptions,
+};
+use crate::Filterable;
 use bytes::Bytes;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Read};
@@ -17,6 +34,7 @@ use std::io::{self, Read};
 const DEFAULT_MAX_SCAN_BYTES: usize = 1024 * 1024;
 const DEFAULT_CONFIRMATION_RECORDS: u8 = 3;
 const MAX_RECOVERY_RECORD_LEN: u32 = 65_599;
+const SCAN_FILL_CHUNK: usize = 8_192;
 
 /// Settings for opt-in MRT framing recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +87,13 @@ pub enum RecoveryEvidence {
     BgpMarkerChain,
     /// A BGP4MP state-change record, which has no embedded BGP message header.
     Bgp4MpStateChangeChain,
+    /// The damaged record's framing was intact: complete MRT records of any type (or a
+    /// clean end of stream) followed at its declared end offset, so exactly that record
+    /// was skipped without scanning.
+    AlignedRecordChain,
+    /// No boundary was validated before the stream ended; the gap extends to the end of
+    /// the input.
+    EndOfStream,
 }
 
 /// A byte range discarded while restoring MRT record framing.
@@ -83,7 +108,8 @@ pub struct RecoveryGap {
     pub cause: String,
     /// Structural evidence used to accept `end_offset` as a new boundary.
     pub evidence: RecoveryEvidence,
-    /// Number of consecutive records validated at the recovered boundary.
+    /// Number of consecutive records validated at the recovered boundary. Zero when the
+    /// gap ends at the end of the stream.
     pub confirmed_records: u8,
 }
 
@@ -101,7 +127,11 @@ pub enum RecoveryEvent<T> {
     Gap(RecoveryGap),
 }
 
-/// A framing error for which no sufficiently strong recovery boundary was found.
+/// A framing error for which no recovery boundary was found within the scan window, an
+/// I/O failure, or unsupported input.
+///
+/// Damage that extends to the end of the stream is reported as a terminal
+/// [`RecoveryEvent::Gap`] instead of this error.
 #[derive(Debug)]
 pub struct RecoveryError {
     pub offset: u64,
@@ -127,22 +157,30 @@ impl std::error::Error for RecoveryError {
 
 /// Iterator over parsed MRT records and explicit recovery gaps.
 pub struct RecoveringRecordIterator<R> {
-    reader: ReplayReader<R>,
+    reader: CarryoverReader<R>,
     config: RecoveryConfig,
-    filters: Vec<crate::parser::Filter>,
+    filters: Vec<Filter>,
     elementor: Elementor,
     options: ParserOptions,
+    core_dump: bool,
+    unsupported_input: Option<String>,
     finished: bool,
 }
 
 impl<R> RecoveringRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>, config: RecoveryConfig) -> Self {
+        let unsupported_input = parser.text_dump_iter.is_some().then(|| {
+            "text-dump parsers have no MRT record representation; iterate elements instead"
+                .to_string()
+        });
         Self {
-            reader: ReplayReader::new(parser.reader),
+            reader: CarryoverReader::new(parser.reader),
             config,
             filters: parser.filters,
             elementor: Elementor::new(),
             options: parser.options,
+            core_dump: parser.core_dump,
+            unsupported_input,
             finished: false,
         }
     }
@@ -155,20 +193,19 @@ impl<R: Read> Iterator for RecoveringRecordIterator<R> {
         if self.finished {
             return None;
         }
+        if let Some(message) = self.unsupported_input.take() {
+            self.finished = true;
+            return Some(Err(RecoveryError {
+                offset: 0,
+                scanned_bytes: 0,
+                error: ParserErrorWithBytes::from(ParserError::Unsupported(message)),
+            }));
+        }
 
         loop {
             let record_start = self.reader.position();
-            match parse_mrt_record_with_zebra_compat(&mut self.reader) {
-                Ok((record, used_zebra_compat)) => {
-                    self.reader.discard_before_current();
-                    if used_zebra_compat {
-                        self.options.warn_zebra_compat_once();
-                    }
-
-                    if record_matches_filters(&record, &self.filters, &mut self.elementor) {
-                        return Some(Ok(RecoveryEvent::Item(record)));
-                    }
-                }
+            let raw_record = match chunk_mrt_record(&mut self.reader) {
+                Ok(raw_record) => raw_record,
                 Err(error) if matches!(error.error, ParserError::EofExpected) => {
                     self.finished = true;
                     return None;
@@ -181,85 +218,163 @@ impl<R: Read> Iterator for RecoveringRecordIterator<R> {
                         error,
                     }));
                 }
-                Err(error) => match self.find_recovery(record_start, &error) {
-                    Ok(Some((end_offset, evidence, confirmed_records))) => {
-                        let gap = RecoveryGap {
-                            start_offset: record_start,
-                            end_offset,
-                            cause: error.to_string(),
-                            evidence,
-                            confirmed_records,
-                        };
-                        match self.reader.move_to(end_offset) {
-                            Ok(true) => {
-                                self.reader.discard_before_current();
-                                return Some(Ok(RecoveryEvent::Gap(gap)));
-                            }
-                            Ok(false) => {
-                                self.finished = true;
-                                return Some(Err(RecoveryError {
-                                    offset: record_start,
-                                    scanned_bytes: end_offset.saturating_sub(record_start),
-                                    error,
-                                }));
-                            }
-                            Err(io_error) => {
-                                self.finished = true;
-                                return Some(Err(RecoveryError {
-                                    offset: record_start,
-                                    scanned_bytes: end_offset.saturating_sub(record_start),
-                                    error: ParserErrorWithBytes::from(ParserError::IoError(
-                                        io_error,
-                                    )),
-                                }));
-                            }
-                        }
+                Err(error) => return self.recover(record_start, None, error),
+            };
+
+            let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
+            match raw_record.clone().parse() {
+                Ok(record) => {
+                    if used_zebra_compat {
+                        self.options.warn_zebra_compat_once();
                     }
-                    Ok(None) => {
-                        self.finished = true;
-                        return Some(Err(RecoveryError {
-                            offset: record_start,
-                            scanned_bytes: self
-                                .reader
-                                .buffered_end()
-                                .saturating_sub(record_start)
-                                .min(self.config.max_scan_bytes as u64),
-                            error,
-                        }));
+                    if record_matches_filters(&record, &self.filters, &mut self.elementor) {
+                        return Some(Ok(RecoveryEvent::Item(record)));
                     }
-                    Err(io_error) => {
-                        self.finished = true;
-                        return Some(Err(RecoveryError {
-                            offset: record_start,
-                            scanned_bytes: self.reader.position().saturating_sub(record_start),
-                            error: ParserErrorWithBytes::from(ParserError::IoError(io_error)),
-                        }));
-                    }
-                },
+                }
+                Err(error) => {
+                    // The header and declared length were consumed exactly, so the
+                    // stream may still be aligned even though the body is unparsable.
+                    let framed_end = self.reader.position();
+                    let error = ParserErrorWithBytes {
+                        error,
+                        bytes: Some(raw_record.raw_bytes().to_vec()),
+                    };
+                    return self.recover(record_start, Some(framed_end), error);
+                }
             }
         }
     }
 }
 
 impl<R: Read> RecoveringRecordIterator<R> {
-    fn find_recovery(
+    fn recover(
         &mut self,
-        failed_start: u64,
-        _error: &ParserErrorWithBytes,
-    ) -> io::Result<Option<(u64, RecoveryEvidence, u8)>> {
+        record_start: u64,
+        framed_end: Option<u64>,
+        error: ParserErrorWithBytes,
+    ) -> Option<Result<RecoveryEvent<MrtRecord>, RecoveryError>> {
+        write_mrt_core_dump(self.core_dump, error.bytes.clone());
+        let consumed = error.bytes.clone().unwrap_or_default();
+        debug_assert_eq!(record_start + consumed.len() as u64, self.reader.position());
         let confirmations = self.config.confirmation_records.max(1);
-        for distance in 1..=self.config.max_scan_bytes {
-            let candidate_offset = failed_start + distance as u64;
-            if !self.reader.move_to(candidate_offset)? {
-                return Ok(None);
-            }
-            if let Some((evidence, confirmed)) =
-                validate_chain(&mut self.reader, candidate_offset, confirmations)?
-            {
-                return Ok(Some((candidate_offset, evidence, confirmed)));
+        let max_scan_bytes = self.config.max_scan_bytes;
+        let mut window = ReplayReader::seeded(&mut self.reader, consumed, record_start);
+
+        if let Some(framed_end) = framed_end {
+            match confirm_aligned_boundary(&mut window, framed_end, confirmations) {
+                Ok(Some(confirmed_records)) => {
+                    let leftover = window.into_leftover(framed_end);
+                    self.reader.resume_with(leftover, framed_end);
+                    return Some(Ok(RecoveryEvent::Gap(RecoveryGap {
+                        start_offset: record_start,
+                        end_offset: framed_end,
+                        cause: error.to_string(),
+                        evidence: RecoveryEvidence::AlignedRecordChain,
+                        confirmed_records,
+                    })));
+                }
+                Ok(None) => {}
+                Err(io_error) => {
+                    self.finished = true;
+                    return Some(Err(RecoveryError {
+                        offset: record_start,
+                        scanned_bytes: 0,
+                        error: ParserErrorWithBytes::from(ParserError::IoError(io_error)),
+                    }));
+                }
             }
         }
-        Ok(None)
+
+        match find_recovery(&mut window, record_start, max_scan_bytes, confirmations) {
+            Ok(ScanOutcome::Found {
+                offset,
+                evidence,
+                confirmed_records,
+            }) => {
+                let leftover = window.into_leftover(offset);
+                self.reader.resume_with(leftover, offset);
+                Some(Ok(RecoveryEvent::Gap(RecoveryGap {
+                    start_offset: record_start,
+                    end_offset: offset,
+                    cause: error.to_string(),
+                    evidence,
+                    confirmed_records,
+                })))
+            }
+            Ok(ScanOutcome::EndOfStream { end_offset }) => {
+                let leftover = window.into_leftover(end_offset);
+                self.reader.resume_with(leftover, end_offset);
+                Some(Ok(RecoveryEvent::Gap(RecoveryGap {
+                    start_offset: record_start,
+                    end_offset,
+                    cause: error.to_string(),
+                    evidence: RecoveryEvidence::EndOfStream,
+                    confirmed_records: 0,
+                })))
+            }
+            Ok(ScanOutcome::WindowExhausted) => {
+                self.finished = true;
+                Some(Err(RecoveryError {
+                    offset: record_start,
+                    scanned_bytes: max_scan_bytes as u64,
+                    error,
+                }))
+            }
+            Err(io_error) => {
+                self.finished = true;
+                Some(Err(RecoveryError {
+                    offset: record_start,
+                    scanned_bytes: window.position().saturating_sub(record_start),
+                    error: ParserErrorWithBytes::from(ParserError::IoError(io_error)),
+                }))
+            }
+        }
+    }
+}
+
+/// Iterator over BGP elements and explicit recovery gaps.
+///
+/// Filters are applied per element; each record is converted to elements exactly once.
+pub struct RecoveringElemIterator<R> {
+    inner: RecoveringRecordIterator<R>,
+    elementor: Elementor,
+    filters: Vec<Filter>,
+    cache_elems: Vec<BgpElem>,
+}
+
+impl<R> RecoveringElemIterator<R> {
+    pub(crate) fn new(mut parser: BgpkitParser<R>, config: RecoveryConfig) -> Self {
+        // Elements are filtered here; strip the parser filters so the inner record
+        // iterator does not also convert every record for record-level matching.
+        let filters = std::mem::take(&mut parser.filters);
+        Self {
+            inner: RecoveringRecordIterator::new(parser, config),
+            elementor: Elementor::new(),
+            filters,
+            cache_elems: Vec::new(),
+        }
+    }
+}
+
+impl<R: Read> Iterator for RecoveringElemIterator<R> {
+    type Item = Result<RecoveryEvent<BgpElem>, RecoveryError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(elem) = self.cache_elems.pop() {
+                return Some(Ok(RecoveryEvent::Item(elem)));
+            }
+            match self.inner.next()? {
+                Ok(RecoveryEvent::Item(record)) => {
+                    let mut elems = self.elementor.record_to_elems(record);
+                    elems.retain(|elem| elem.match_filters(&self.filters));
+                    elems.reverse();
+                    self.cache_elems = elems;
+                }
+                Ok(RecoveryEvent::Gap(gap)) => return Some(Ok(RecoveryEvent::Gap(gap))),
+                Err(error) => return Some(Err(error)),
+            }
+        }
     }
 }
 
@@ -272,6 +387,87 @@ enum StreamFamily {
 struct Candidate {
     family: StreamFamily,
     evidence: RecoveryEvidence,
+}
+
+enum ScanOutcome {
+    Found {
+        offset: u64,
+        evidence: RecoveryEvidence,
+        confirmed_records: u8,
+    },
+    EndOfStream {
+        end_offset: u64,
+    },
+    WindowExhausted,
+}
+
+/// Confirm that intact records (of any MRT type) parse at the failed record's declared
+/// end offset, distinguishing an unparsable-but-correctly-framed record from framing
+/// damage. A clean end of stream on the boundary is consistent with intact framing.
+fn confirm_aligned_boundary<R: Read>(
+    window: &mut ReplayReader<R>,
+    boundary: u64,
+    required: u8,
+) -> io::Result<Option<u8>> {
+    if !window.move_to(boundary)? {
+        return Ok(None);
+    }
+    let mut confirmed = 0u8;
+    while confirmed < required {
+        match parse_mrt_record_with_zebra_compat(window) {
+            Ok(_) => confirmed += 1,
+            Err(error) => {
+                return match error.error {
+                    ParserError::EofExpected => Ok(Some(confirmed)),
+                    ParserError::IoError(inner) | ParserError::EofError(inner)
+                        if inner.kind() != io::ErrorKind::UnexpectedEof =>
+                    {
+                        Err(inner)
+                    }
+                    _ => Ok(None),
+                };
+            }
+        }
+    }
+    Ok(Some(confirmed))
+}
+
+fn is_anchor_entry_type(bytes: [u8; 2]) -> bool {
+    let value = u16::from_be_bytes(bytes);
+    value == EntryType::BGP as u16
+        || value == EntryType::BGP4MP as u16
+        || value == EntryType::BGP4MP_ET as u16
+}
+
+fn find_recovery<R: Read>(
+    window: &mut ReplayReader<R>,
+    failed_start: u64,
+    max_scan_bytes: usize,
+    confirmations: u8,
+) -> io::Result<ScanOutcome> {
+    for distance in 1..=max_scan_bytes {
+        let candidate = failed_start + distance as u64;
+        // Cheap anchor pre-filter: only offsets whose entry-type field matches a
+        // recoverable stream family warrant header parsing and chain validation.
+        let Some(entry_type) = window.peek_two_at(candidate + 4)? else {
+            return Ok(ScanOutcome::EndOfStream {
+                end_offset: window.buffered_end(),
+            });
+        };
+        if !is_anchor_entry_type(entry_type) {
+            continue;
+        }
+        if let Some((evidence, confirmed_records)) =
+            validate_chain(window, candidate, confirmations)?
+        {
+            return Ok(ScanOutcome::Found {
+                offset: candidate,
+                evidence,
+                confirmed_records,
+            });
+        }
+    }
+    Ok(ScanOutcome::WindowExhausted)
 }
 
 fn validate_chain<R: Read>(
@@ -330,13 +526,14 @@ fn read_candidate<R: Read>(reader: &mut ReplayReader<R>) -> io::Result<Option<Ca
         return Ok(None);
     }
 
-    let mut body = vec![0u8; header.length as usize];
-    if let Err(error) = reader.read_exact(&mut body) {
-        return if error.kind() == io::ErrorKind::UnexpectedEof {
-            Ok(None)
-        } else {
-            Err(error)
-        };
+    let mut body = Vec::with_capacity(header.length as usize);
+    reader
+        .by_ref()
+        .take(header.length as u64)
+        .read_to_end(&mut body)?;
+    if body.len() != header.length as usize {
+        // The stream ended inside the candidate body.
+        return Ok(None);
     }
     let raw_record = crate::RawMrtRecord {
         common_header: header,
@@ -467,60 +664,130 @@ fn is_non_eof_io_error(error: &ParserError) -> bool {
     )
 }
 
+/// Reader adapter that tracks the absolute decompressed-stream offset and can be handed
+/// back unconsumed bytes after a recovery scan read past the resume boundary.
+struct CarryoverReader<R> {
+    inner: R,
+    carryover: Vec<u8>,
+    carry_pos: usize,
+    offset: u64,
+}
+
+impl<R> CarryoverReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            carryover: Vec::new(),
+            carry_pos: 0,
+            offset: 0,
+        }
+    }
+
+    fn position(&self) -> u64 {
+        self.offset
+    }
+
+    /// Resume reading at `offset`, serving `bytes` (followed by any bytes already held
+    /// but not yet served) before the underlying reader.
+    fn resume_with(&mut self, mut bytes: Vec<u8>, offset: u64) {
+        bytes.extend_from_slice(&self.carryover[self.carry_pos..]);
+        self.carryover = bytes;
+        self.carry_pos = 0;
+        self.offset = offset;
+    }
+}
+
+impl<R: Read> Read for CarryoverReader<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        if self.carry_pos < self.carryover.len() {
+            let count = output.len().min(self.carryover.len() - self.carry_pos);
+            output[..count]
+                .copy_from_slice(&self.carryover[self.carry_pos..self.carry_pos + count]);
+            self.carry_pos += count;
+            self.offset += count as u64;
+            if self.carry_pos == self.carryover.len() {
+                self.carryover.clear();
+                self.carry_pos = 0;
+            }
+            return Ok(count);
+        }
+        let read = self.inner.read(output)?;
+        self.offset += read as u64;
+        Ok(read)
+    }
+}
+
+/// Bounded lookahead buffer used only while scanning for a recovery boundary.
+///
+/// It is seeded with the bytes already consumed by the failed record and buffers further
+/// bytes on demand so candidate boundaries can be revisited. It exists only for the
+/// duration of one recovery attempt; the undamaged fast path never copies through it.
 struct ReplayReader<R> {
     inner: R,
     data: Vec<u8>,
-    start: usize,
     cursor: usize,
     base_offset: u64,
 }
 
 impl<R> ReplayReader<R> {
-    fn new(inner: R) -> Self {
+    fn seeded(inner: R, data: Vec<u8>, base_offset: u64) -> Self {
         Self {
             inner,
-            data: Vec::new(),
-            start: 0,
+            data,
             cursor: 0,
-            base_offset: 0,
+            base_offset,
         }
     }
 
     fn position(&self) -> u64 {
-        self.base_offset + (self.cursor - self.start) as u64
+        self.base_offset + self.cursor as u64
     }
 
     fn buffered_end(&self) -> u64 {
-        self.base_offset + (self.data.len() - self.start) as u64
+        self.base_offset + self.data.len() as u64
     }
 
-    fn discard_before_current(&mut self) {
-        self.base_offset = self.position();
-        self.start = self.cursor;
-        if self.start >= 64 * 1024 && self.start * 2 >= self.data.len() {
-            self.data.drain(..self.start);
-            self.cursor -= self.start;
-            self.start = 0;
-        }
+    /// Consume the window, returning the buffered bytes at and beyond `offset`.
+    fn into_leftover(mut self, offset: u64) -> Vec<u8> {
+        let index = (offset.saturating_sub(self.base_offset) as usize).min(self.data.len());
+        self.data.split_off(index)
     }
 }
 
 impl<R: Read> ReplayReader<R> {
+    /// Buffer through `offset` and place the cursor there. Returns false when the stream
+    /// ends first or `offset` precedes the window.
     fn move_to(&mut self, offset: u64) -> io::Result<bool> {
         if offset < self.base_offset {
             return Ok(false);
         }
-        while offset > self.buffered_end() {
-            self.cursor = self.data.len();
-            let remaining = (offset - self.buffered_end()).min(8_192) as usize;
-            let mut scratch = vec![0u8; remaining];
-            let read = self.read(&mut scratch)?;
+        let target = (offset - self.base_offset) as usize;
+        while self.data.len() < target {
+            let filled = self.data.len();
+            let chunk = (target - filled).min(SCAN_FILL_CHUNK);
+            self.data.resize(filled + chunk, 0);
+            let read = self.inner.read(&mut self.data[filled..])?;
+            self.data.truncate(filled + read);
             if read == 0 {
+                self.cursor = self.data.len();
                 return Ok(false);
             }
         }
-        self.cursor = self.start + (offset - self.base_offset) as usize;
+        self.cursor = target;
         Ok(true)
+    }
+
+    /// Read two bytes at `offset`, buffering as needed. Returns `None` when the stream
+    /// ends first. Callers re-position with [`Self::move_to`] before parsing.
+    fn peek_two_at(&mut self, offset: u64) -> io::Result<Option<[u8; 2]>> {
+        if !self.move_to(offset + 2)? {
+            return Ok(None);
+        }
+        let index = (offset - self.base_offset) as usize;
+        Ok(Some([self.data[index], self.data[index + 1]]))
     }
 }
 
@@ -588,6 +855,18 @@ mod tests {
         .to_vec()
     }
 
+    /// A record with a well-formed common header and declared length, whose body cannot
+    /// be parsed as a BGP4MP message.
+    fn framed_record_with_garbage_body(timestamp: u32, body: &[u8]) -> Vec<u8> {
+        let mut bytes = BytesMut::new();
+        bytes.put_u32(timestamp);
+        bytes.put_u16(EntryType::BGP4MP as u16);
+        bytes.put_u16(Bgp4MpType::Message as u16);
+        bytes.put_u32(body.len() as u32);
+        bytes.put_slice(body);
+        bytes.to_vec()
+    }
+
     #[test]
     fn recovers_at_three_record_legacy_chain() {
         let first = legacy_state(100);
@@ -618,32 +897,211 @@ mod tests {
     }
 
     #[test]
-    fn rejects_chain_shorter_than_configured_before_non_eof_garbage() {
+    fn emits_terminal_gap_when_chain_too_short_before_non_eof_garbage() {
         let mut input = vec![0xff; 12];
         input.extend_from_slice(&legacy_state(101));
         input.extend_from_slice(&legacy_state(102));
         input.extend_from_slice(&[1, 2, 3]);
+        let total = input.len() as u64;
 
         let parser = BgpkitParser::from_reader(Cursor::new(input));
-        let result = parser
+        let events = parser
             .into_recovering_record_iter(RecoveryConfig::default())
-            .next()
-            .expect("one error");
-        assert!(result.is_err());
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // A two-record chain is below the configured confirmation count, so nothing is
+        // recovered; the damage extends to the end of the stream and is reported as a
+        // terminal gap rather than an error.
+        assert_eq!(events.len(), 1);
+        let RecoveryEvent::Gap(gap) = &events[0] else {
+            panic!("expected terminal gap")
+        };
+        assert_eq!(gap.start_offset, 0);
+        assert_eq!(gap.end_offset, total);
+        assert_eq!(gap.evidence, RecoveryEvidence::EndOfStream);
+        assert_eq!(gap.confirmed_records, 0);
     }
 
     #[test]
-    fn rejects_chain_shorter_than_configured_at_clean_eof() {
+    fn emits_terminal_gap_when_chain_too_short_at_clean_eof() {
         let mut input = vec![0xff; 12];
         input.extend_from_slice(&legacy_state(101));
         input.extend_from_slice(&legacy_state(102));
+        let total = input.len() as u64;
 
         let parser = BgpkitParser::from_reader(Cursor::new(input));
-        let result = parser
+        let events = parser
             .into_recovering_record_iter(RecoveryConfig::default())
-            .next()
-            .expect("one error");
-        assert!(result.is_err());
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        let RecoveryEvent::Gap(gap) = &events[0] else {
+            panic!("expected terminal gap")
+        };
+        assert_eq!(gap.start_offset, 0);
+        assert_eq!(gap.end_offset, total);
+        assert_eq!(gap.evidence, RecoveryEvidence::EndOfStream);
+        assert_eq!(gap.confirmed_records, 0);
+    }
+
+    #[test]
+    fn truncated_final_record_yields_terminal_gap() {
+        let mut input = bgp4mp_keepalive(100);
+        input.extend_from_slice(&bgp4mp_keepalive(101));
+        let boundary = input.len() as u64;
+        let tail = bgp4mp_keepalive(102);
+        input.extend_from_slice(&tail[..10]);
+        let total = input.len() as u64;
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input));
+        let events = parser
+            .into_recovering_record_iter(RecoveryConfig::default())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], RecoveryEvent::Item(_)));
+        assert!(matches!(events[1], RecoveryEvent::Item(_)));
+        let RecoveryEvent::Gap(gap) = &events[2] else {
+            panic!("expected terminal gap")
+        };
+        assert_eq!(gap.start_offset, boundary);
+        assert_eq!(gap.end_offset, total);
+        assert_eq!(gap.evidence, RecoveryEvidence::EndOfStream);
+        assert_eq!(gap.confirmed_records, 0);
+    }
+
+    #[test]
+    fn skips_exactly_one_framed_record_with_unparsable_body() {
+        let first = bgp4mp_keepalive(100);
+        let bad = framed_record_with_garbage_body(101, &[0xde, 0xad, 0xbe]);
+        let mut input = first.clone();
+        input.extend_from_slice(&bad);
+        input.extend_from_slice(&bgp4mp_keepalive(102));
+        input.extend_from_slice(&bgp4mp_keepalive(103));
+        input.extend_from_slice(&bgp4mp_keepalive(104));
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input));
+        let events = parser
+            .into_recovering_record_iter(RecoveryConfig::default())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // The bad record framed correctly, so exactly its bytes are skipped without a
+        // boundary scan and all following records survive.
+        assert_eq!(events.len(), 5);
+        assert!(matches!(events[0], RecoveryEvent::Item(_)));
+        let RecoveryEvent::Gap(gap) = &events[1] else {
+            panic!("expected aligned-boundary gap")
+        };
+        assert_eq!(gap.start_offset, first.len() as u64);
+        assert_eq!(gap.end_offset, (first.len() + bad.len()) as u64);
+        assert_eq!(gap.evidence, RecoveryEvidence::AlignedRecordChain);
+        assert_eq!(gap.confirmed_records, 3);
+        assert!(events[2..]
+            .iter()
+            .all(|event| matches!(event, RecoveryEvent::Item(_))));
+    }
+
+    #[test]
+    fn skips_framed_record_with_unparsable_body_at_clean_eof() {
+        let first = bgp4mp_keepalive(100);
+        let bad = framed_record_with_garbage_body(101, &[0xde, 0xad, 0xbe]);
+        let mut input = first.clone();
+        input.extend_from_slice(&bad);
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input));
+        let events = parser
+            .into_recovering_record_iter(RecoveryConfig::default())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], RecoveryEvent::Item(_)));
+        let RecoveryEvent::Gap(gap) = &events[1] else {
+            panic!("expected aligned-boundary gap")
+        };
+        assert_eq!(gap.start_offset, first.len() as u64);
+        assert_eq!(gap.end_offset, (first.len() + bad.len()) as u64);
+        assert_eq!(gap.evidence, RecoveryEvidence::AlignedRecordChain);
+        assert_eq!(gap.confirmed_records, 0);
+    }
+
+    #[test]
+    fn misframed_record_falls_back_to_boundary_scan() {
+        let first = bgp4mp_keepalive(100);
+        // A header whose declared length overlaps the next record: the declared
+        // boundary is misaligned, so aligned-boundary confirmation must fail and the
+        // byte scan must find the true boundary.
+        let mut bad = BytesMut::new();
+        bad.put_u32(101);
+        bad.put_u16(EntryType::BGP4MP as u16);
+        bad.put_u16(Bgp4MpType::Message as u16);
+        bad.put_u32(5);
+        let mut input = first.clone();
+        input.extend_from_slice(&bad);
+        input.extend_from_slice(&[0xde, 0xad, 0xbe]);
+        input.extend_from_slice(&bgp4mp_keepalive(102));
+        input.extend_from_slice(&bgp4mp_keepalive(103));
+        input.extend_from_slice(&bgp4mp_keepalive(104));
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input));
+        let events = parser
+            .into_recovering_record_iter(RecoveryConfig::default())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(events.len(), 5);
+        let RecoveryEvent::Gap(gap) = &events[1] else {
+            panic!("expected recovery gap")
+        };
+        assert_eq!(gap.start_offset, first.len() as u64);
+        assert_eq!(gap.end_offset, (first.len() + bad.len() + 3) as u64);
+        assert_eq!(gap.evidence, RecoveryEvidence::BgpMarkerChain);
+        assert_eq!(gap.confirmed_records, 3);
+        assert!(events[2..]
+            .iter()
+            .all(|event| matches!(event, RecoveryEvent::Item(_))));
+    }
+
+    #[test]
+    fn text_dump_parser_yields_unsupported_error() {
+        let dump = "BGP table version is 1, local router ID is 1.2.3.4, vrf id 0\n\
+Default local pref 100, local AS 65001\n\n\
+    Network          Next Hop            Metric LocPrf Weight Path\n\
+ *> 1.0.0.0/24       10.0.0.1                 0             0 13335 i\n";
+        let parser = BgpkitParser::from_text_reader(dump.as_bytes()).unwrap();
+        let mut iter = parser.into_recovering_record_iter(RecoveryConfig::default());
+
+        let error = iter.next().expect("one error").unwrap_err();
+        assert!(matches!(error.error.error, ParserError::Unsupported(_)));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn recovering_elem_iter_passes_gaps_through() {
+        let first = legacy_state(100);
+        let mut input = first.clone();
+        input.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0x01]);
+        input.extend_from_slice(&legacy_state(101));
+        input.extend_from_slice(&legacy_state(102));
+        input.extend_from_slice(&legacy_state(103));
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input));
+        let events = parser
+            .into_recovering_elem_iter(RecoveryConfig::default())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // State-change records yield no elements, so only the gap surfaces.
+        assert_eq!(events.len(), 1);
+        let RecoveryEvent::Gap(gap) = &events[0] else {
+            panic!("expected recovery gap")
+        };
+        assert_eq!(gap.start_offset, first.len() as u64);
+        assert_eq!(gap.end_offset, first.len() as u64 + 5);
     }
 
     #[test]

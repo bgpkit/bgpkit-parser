@@ -4,9 +4,7 @@ use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use bgpkit_parser::{
-    BgpElem, BgpkitParser, Elementor, Filter, Filterable, RecoveryConfig, RecoveryEvent,
-};
+use bgpkit_parser::{BgpElem, BgpkitParser, Elementor, RecoveryConfig, RecoveryEvent, RecoveryGap};
 use clap::{Parser, ValueEnum};
 use ipnet::IpNet;
 
@@ -254,31 +252,48 @@ fn main() {
         opts.format
     };
 
-    let filters = parser.filters().to_vec();
-    let result = if opts.recover {
-        run_records(
+    let recovery_config = RecoveryConfig::default();
+    // Element-level runs (element output or counting only elements) use the elem
+    // iterators, which apply filters per element; everything else stays at the record
+    // level. Counting both (-e -r) iterates records and converts once per record.
+    let use_elem_stream = (opts.elems_count && !opts.records_count)
+        || (!opts.elems_count && !opts.records_count && matches!(opts.level, OutputLevel::Elems));
+
+    let result = match (opts.recover, use_elem_stream) {
+        (true, true) => run_elems(
             parser
-                .into_recovering_record_iter(RecoveryConfig::default())
+                .into_recovering_elem_iter(recovery_config)
                 .map(|event| event.map_err(|error| error.to_string())),
-            &filters,
             output_format,
-            opts.level,
+            opts.elems_count,
+            true,
+        ),
+        (false, true) => run_elems(
+            parser
+                .into_elem_iter()
+                .map(|elem| Ok(RecoveryEvent::Item(elem))),
+            output_format,
+            opts.elems_count,
+            false,
+        ),
+        (true, false) => run_records(
+            parser
+                .into_recovering_record_iter(recovery_config)
+                .map(|event| event.map_err(|error| error.to_string())),
+            output_format,
             opts.elems_count,
             opts.records_count,
             true,
-        )
-    } else {
-        run_records(
+        ),
+        (false, false) => run_records(
             parser
                 .into_record_iter()
                 .map(|record| Ok(RecoveryEvent::Item(record))),
-            &filters,
             output_format,
-            opts.level,
             opts.elems_count,
             opts.records_count,
             false,
-        )
+        ),
     };
     if let Err(error) = result {
         eprintln!("{error}");
@@ -286,11 +301,92 @@ fn main() {
     }
 }
 
+/// Per-gap reporting and end-of-run summary for `--recover`.
+struct RecoveryStats {
+    enabled: bool,
+    gap_count: usize,
+    skipped_bytes: u64,
+}
+
+impl RecoveryStats {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            gap_count: 0,
+            skipped_bytes: 0,
+        }
+    }
+
+    fn observe(&mut self, gap: &RecoveryGap) {
+        self.gap_count += 1;
+        self.skipped_bytes += gap.skipped_bytes();
+        eprintln!(
+            "recovered MRT framing: skipped bytes {}..{} ({} bytes, {:?}, {} confirming records): {}",
+            gap.start_offset,
+            gap.end_offset,
+            gap.skipped_bytes(),
+            gap.evidence,
+            gap.confirmed_records,
+            gap.cause
+        );
+    }
+
+    fn print_summary(&self) {
+        if self.enabled {
+            eprintln!(
+                "recovery summary: {} gaps, {} bytes skipped",
+                self.gap_count, self.skipped_bytes
+            );
+        }
+    }
+}
+
+fn run_elems<I>(
+    events: I,
+    output_format: OutputFormat,
+    count_requested: bool,
+    report_recovery: bool,
+) -> Result<(), String>
+where
+    I: IntoIterator<Item = Result<RecoveryEvent<BgpElem>, String>>,
+{
+    let mut stdout = std::io::stdout();
+    let mut elems_count = 0usize;
+    let mut elem_index = 0usize;
+    let mut stats = RecoveryStats::new(report_recovery);
+    let mut terminal_error = None;
+
+    for event in events {
+        match event {
+            Err(error) => {
+                terminal_error = Some(error);
+                break;
+            }
+            Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
+            Ok(RecoveryEvent::Item(elem)) => {
+                elems_count += 1;
+                if count_requested {
+                    continue;
+                }
+                let output = format_elem(&elem, output_format, elem_index);
+                elem_index += 1;
+                if !write_output(&mut stdout, &output)? {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    if count_requested {
+        println!("total elems: {elems_count}");
+    }
+    stats.print_summary();
+    terminal_error.map_or(Ok(()), Err)
+}
+
 fn run_records<I>(
     events: I,
-    filters: &[Filter],
     output_format: OutputFormat,
-    output_level: OutputLevel,
     elems_count_requested: bool,
     records_count_requested: bool,
     report_recovery: bool,
@@ -302,63 +398,30 @@ where
     let mut elementor = Elementor::new();
     let mut records_count = 0usize;
     let mut elems_count = 0usize;
-    let mut elem_index = 0usize;
-    let mut gap_count = 0usize;
-    let mut skipped_bytes = 0u64;
+    let mut stats = RecoveryStats::new(report_recovery);
+    let mut terminal_error = None;
 
     for event in events {
-        match event? {
-            RecoveryEvent::Gap(gap) => {
-                gap_count += 1;
-                skipped_bytes += gap.skipped_bytes();
-                eprintln!(
-                    "recovered MRT framing: skipped bytes {}..{} ({} bytes, {:?}, {} confirming records): {}",
-                    gap.start_offset,
-                    gap.end_offset,
-                    gap.skipped_bytes(),
-                    gap.evidence,
-                    gap.confirmed_records,
-                    gap.cause
-                );
+        match event {
+            Err(error) => {
+                terminal_error = Some(error);
+                break;
             }
-            RecoveryEvent::Item(record) => {
+            Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
+            Ok(RecoveryEvent::Item(record)) => {
                 records_count += 1;
-                let needs_elems = elems_count_requested
-                    || matches!(output_level, OutputLevel::Elems) && !records_count_requested;
-                let elems = if needs_elems {
-                    let elems = elementor.record_to_elems(record.clone());
-                    if records_count_requested {
-                        elems
-                    } else {
-                        elems
-                            .into_iter()
-                            .filter(|elem| elem.match_filters(filters))
-                            .collect()
-                    }
-                } else {
-                    Vec::new()
-                };
-                elems_count += elems.len();
-
-                if elems_count_requested || records_count_requested {
+                if elems_count_requested {
+                    // Counting both (-e -r): count every element of records that passed
+                    // record-level filtering, matching the historical CLI behavior.
+                    elems_count += elementor.record_to_elems(record).len();
                     continue;
                 }
-                match output_level {
-                    OutputLevel::Elems => {
-                        for elem in elems {
-                            let output = format_elem(&elem, output_format, elem_index);
-                            elem_index += 1;
-                            if !write_output(&mut stdout, &output)? {
-                                return Ok(());
-                            }
-                        }
-                    }
-                    OutputLevel::Records => {
-                        let output = format_record(&record, output_format);
-                        if !write_output(&mut stdout, &output)? {
-                            return Ok(());
-                        }
-                    }
+                if records_count_requested {
+                    continue;
+                }
+                let output = format_record(&record, output_format);
+                if !write_output(&mut stdout, &output)? {
+                    return Ok(());
                 }
             }
         }
@@ -373,10 +436,8 @@ where
         (true, false) => println!("total elems: {elems_count}"),
         (false, false) => {}
     }
-    if report_recovery {
-        eprintln!("recovery summary: {gap_count} gaps, {skipped_bytes} bytes skipped");
-    }
-    Ok(())
+    stats.print_summary();
+    terminal_error.map_or(Ok(()), Err)
 }
 
 fn write_output(stdout: &mut std::io::Stdout, output: &str) -> Result<bool, String> {

@@ -49,7 +49,7 @@ All notable changes to this project will be documented in this file.
 #### Test data
 
 * **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
-* **Opt-in MRT framing recovery**: Added `into_recovering_record_iter` and CLI `--recover` support for salvaging records after damaged legacy Type-5 or BGP4MP framing. Recovery validates a three-record chain, uses exact embedded BGP headers as BGP4MP anchors, and reports every skipped decompressed byte range as a typed gap event.
+* **Opt-in MRT framing recovery**: Added `into_recovering_record_iter`, `into_recovering_elem_iter`, and CLI `--recover` support for salvaging records after damaged MRT framing. Recovery validates a three-record chain, uses exact embedded BGP headers as BGP4MP anchors, and reports every skipped decompressed byte range as a typed gap event. A record of any MRT type whose framing is intact but whose body fails to parse is skipped exactly (`AlignedRecordChain` evidence) when intact records follow its declared boundary, and damage extending to the end of the stream — e.g. a truncated final record — is reported as a terminal gap (`EndOfStream` evidence) instead of an error. Text-dump parsers, which have no MRT record representation, yield an explicit `Unsupported` error.
 
 #### Examples
 
@@ -67,6 +67,7 @@ All notable changes to this project will be documented in this file.
 * **BGP OPEN parameter type 255 rejected**: RFC 9072 reserves type 255 as the extended-length marker; encoding it as a real parameter produced output that round-tripped to a structurally different message.
 * **BGP OPEN optional-parameter encoding**: Encode the Optional Parameters Length as the total byte length required by RFC 4271 instead of the number of parameters. OPEN messages now also use the extended length format from RFC 9072 when requested or required.
 * **Historical Quagga state changes**: Parse BGP4MP state-change records containing Quagga's `Clearing` (7) and `Deleted` (8) FSM states instead of logging an error and dropping the MRT record.
+* **CLI broken-pipe exit status**: the CLI now exits 0 when its stdout consumer closes the pipe early (e.g. `bgpkit-parser updates.gz | head`), matching Unix convention; previous releases exited 1. Other write errors still exit 1.
 
 ### Contributors
 

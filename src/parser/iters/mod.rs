@@ -24,8 +24,8 @@ pub use diagnostic::{DiagnosticEvent, DiagnosticIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
 pub use recovery::{
-    RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent, RecoveryEvidence,
-    RecoveryGap,
+    RecoveringElemIterator, RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent,
+    RecoveryEvidence, RecoveryGap,
 };
 pub use route::{FallibleRouteIterator, RouteIterator};
 pub use update::{
@@ -106,12 +106,23 @@ impl<R> BgpkitParser<R> {
     ///
     /// Recovery never reconstructs a damaged record. It scans for a structurally valid boundary,
     /// confirms a chain of records, emits [`RecoveryEvent::Gap`], and then resumes normal parsing.
-    /// Offsets in recovery events refer to the decompressed MRT byte stream.
+    /// Damage extending to the end of the stream is reported as a terminal gap. Offsets in
+    /// recovery events refer to the decompressed MRT byte stream.
     pub fn into_recovering_record_iter(
         self,
         config: RecoveryConfig,
     ) -> RecoveringRecordIterator<R> {
         RecoveringRecordIterator::new(self, config)
+    }
+
+    /// Creates an opt-in iterator over BGP elements that reports skipped byte ranges while
+    /// recovering MRT framing.
+    ///
+    /// Behaves like [`into_recovering_record_iter`](Self::into_recovering_record_iter) but
+    /// converts each recovered record to [`BgpElem`]s, applying the parser's filters per
+    /// element.
+    pub fn into_recovering_elem_iter(self, config: RecoveryConfig) -> RecoveringElemIterator<R> {
+        RecoveringElemIterator::new(self, config)
     }
 
     /// Creates an iterator over BGP announcements from MRT data.
