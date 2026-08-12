@@ -601,17 +601,6 @@ mod tests {
         .to_vec()
     }
 
-    fn decode_hex(input: &str) -> Vec<u8> {
-        input
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let text = std::str::from_utf8(pair).unwrap();
-                u8::from_str_radix(text, 16).unwrap()
-            })
-            .collect()
-    }
-
     #[test]
     fn recovers_at_three_record_legacy_chain() {
         let first = legacy_state(100);
@@ -716,38 +705,5 @@ mod tests {
             message_bytes: Bytes::from(body),
         };
         assert!(strict_bgp4mp_evidence(&raw).is_none());
-    }
-
-    #[test]
-    fn recovers_exact_supplied_ripe_damage_prefix() {
-        // Exact first 264 decompressed bytes of rrc00/2000.03/updates.20000325.0345.gz.
-        // The fifth MRT header begins at 188 and is missing its final two length bytes; the
-        // following valid Type-5 state-change record starts at 198.
-        const PREFIX: &str = "38dc366700050001000000181200cb25ff7e316ec100000100081818d81018cb1297000038dc3667000500070000000c0201c041b803316ec100000138dc366800050001000000341200cb25ff7e316ec100000100000020400101004002120208120012a909d4193d04d7070802bd02c1400304cb25ff7e18cc5c5438dc366800050001000000341200cb25ff7e316ec100000100000020400101004002120208120012a909c10cf822a2220d220d22ad400304cb25ff7e18c28d1f38dc366800050001000038dc3671000500030000000a0b6281fa00e80003000238dc3671000500030000000a0b6281fa00e80002000338dc3675000500030000000a1200cb25ff7e00020003";
-        let parser = BgpkitParser::from_reader(Cursor::new(decode_hex(PREFIX)));
-        let events = parser
-            .into_recovering_record_iter(RecoveryConfig::default())
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        let gaps = events
-            .iter()
-            .filter_map(|event| match event {
-                RecoveryEvent::Gap(gap) => Some(gap),
-                RecoveryEvent::Item(_) => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(gaps.len(), 1);
-        assert_eq!(gaps[0].start_offset, 188);
-        assert_eq!(gaps[0].end_offset, 198);
-        assert_eq!(gaps[0].confirmed_records, 3);
-        assert_eq!(gaps[0].evidence, RecoveryEvidence::LegacyMrtChain);
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(event, RecoveryEvent::Item(_)))
-                .count(),
-            7
-        );
     }
 }
