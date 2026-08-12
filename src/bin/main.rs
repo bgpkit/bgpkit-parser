@@ -4,7 +4,9 @@ use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use bgpkit_parser::{BgpElem, BgpkitParser, Elementor};
+use bgpkit_parser::{
+    BgpElem, BgpkitParser, Elementor, Filter, Filterable, RecoveryConfig, RecoveryEvent,
+};
 use clap::{Parser, ValueEnum};
 use ipnet::IpNet;
 
@@ -71,6 +73,10 @@ struct Opts {
     /// Count MRT records
     #[clap(short, long)]
     records_count: bool,
+
+    /// Recover after damaged MRT framing and report skipped byte ranges on stderr
+    #[clap(long)]
+    recover: bool,
 
     #[clap(flatten)]
     filters: Filters,
@@ -248,6 +254,22 @@ fn main() {
         opts.format
     };
 
+    if opts.recover {
+        let filters = parser.filters().to_vec();
+        if let Err(error) = run_recovering(
+            parser,
+            &filters,
+            output_format,
+            opts.level,
+            opts.elems_count,
+            opts.records_count,
+        ) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     match (opts.elems_count, opts.records_count) {
         (true, true) => {
             let mut elementor = Elementor::new();
@@ -294,6 +316,95 @@ fn main() {
             }
         }
     }
+}
+
+fn run_recovering<R: std::io::Read>(
+    parser: BgpkitParser<R>,
+    filters: &[Filter],
+    output_format: OutputFormat,
+    output_level: OutputLevel,
+    elems_count_requested: bool,
+    records_count_requested: bool,
+) -> Result<(), String> {
+    let mut stdout = std::io::stdout();
+    let mut elementor = Elementor::new();
+    let mut records_count = 0usize;
+    let mut elems_count = 0usize;
+    let mut elem_index = 0usize;
+    let mut gap_count = 0usize;
+    let mut skipped_bytes = 0u64;
+
+    for event in parser.into_recovering_record_iter(RecoveryConfig::default()) {
+        match event.map_err(|error| error.to_string())? {
+            RecoveryEvent::Gap(gap) => {
+                gap_count += 1;
+                skipped_bytes += gap.skipped_bytes();
+                eprintln!(
+                    "recovered MRT framing: skipped bytes {}..{} ({} bytes, {:?}, {} confirming records): {}",
+                    gap.start_offset,
+                    gap.end_offset,
+                    gap.skipped_bytes(),
+                    gap.evidence,
+                    gap.confirmed_records,
+                    gap.cause
+                );
+            }
+            RecoveryEvent::Item(record) => {
+                records_count += 1;
+                let needs_elems = elems_count_requested
+                    || matches!(output_level, OutputLevel::Elems) && !records_count_requested;
+                let elems = if needs_elems {
+                    elementor
+                        .record_to_elems(record.clone())
+                        .into_iter()
+                        .filter(|elem| elem.match_filters(filters))
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+                elems_count += elems.len();
+
+                if elems_count_requested || records_count_requested {
+                    continue;
+                }
+                match output_level {
+                    OutputLevel::Elems => {
+                        for elem in elems {
+                            let output = format_elem(&elem, output_format, elem_index);
+                            elem_index += 1;
+                            write_recovery_output(&mut stdout, &output)?;
+                        }
+                    }
+                    OutputLevel::Records => {
+                        let output = format_record(&record, output_format);
+                        write_recovery_output(&mut stdout, &output)?;
+                    }
+                }
+            }
+        }
+    }
+
+    match (elems_count_requested, records_count_requested) {
+        (true, true) => {
+            println!("total records: {records_count}");
+            println!("total elems:   {elems_count}");
+        }
+        (false, true) => println!("total records: {records_count}"),
+        (true, false) => println!("total elems: {elems_count}"),
+        (false, false) => {}
+    }
+    eprintln!("recovery summary: {gap_count} gaps, {skipped_bytes} bytes skipped");
+    Ok(())
+}
+
+fn write_recovery_output(stdout: &mut std::io::Stdout, output: &str) -> Result<(), String> {
+    if let Err(error) = writeln!(stdout, "{output}") {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {

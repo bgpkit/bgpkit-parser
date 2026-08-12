@@ -295,6 +295,11 @@ impl BgpkitParser<Box<dyn Read + Send>> {
 }
 
 impl<R> BgpkitParser<R> {
+    /// Return the filters currently configured on this parser.
+    pub fn filters(&self) -> &[Filter] {
+        &self.filters
+    }
+
     pub(crate) fn warn_zebra_compat_once(&mut self) {
         if self.options.show_warnings && !self.options.warned_zebra_compat {
             warn!(

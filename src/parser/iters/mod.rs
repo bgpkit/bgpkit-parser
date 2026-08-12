@@ -14,6 +14,7 @@ pub mod default;
 mod diagnostic;
 pub mod fallible;
 mod raw;
+mod recovery;
 mod route;
 mod update;
 
@@ -22,6 +23,10 @@ pub use default::{ElemIterator, RecordIterator};
 pub use diagnostic::{DiagnosticEvent, DiagnosticIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
+pub use recovery::{
+    RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent, RecoveryEvidence,
+    RecoveryGap,
+};
 pub use route::{FallibleRouteIterator, RouteIterator};
 pub use update::{
     Bgp4MpUpdate, FallibleUpdateIterator, LegacyBgpUpdate, MrtUpdate, TableDumpV2Entry,
@@ -73,6 +78,18 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
         RawRecordIterator::new(self)
+    }
+
+    /// Creates an opt-in iterator that reports skipped byte ranges while recovering MRT framing.
+    ///
+    /// Recovery never reconstructs a damaged record. It scans for a structurally valid boundary,
+    /// confirms a chain of records, emits [`RecoveryEvent::Gap`], and then resumes normal parsing.
+    /// Offsets in recovery events refer to the decompressed MRT byte stream.
+    pub fn into_recovering_record_iter(
+        self,
+        config: RecoveryConfig,
+    ) -> RecoveringRecordIterator<R> {
+        RecoveringRecordIterator::new(self, config)
     }
 
     /// Creates an iterator over BGP announcements from MRT data.

@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 #### Test data
 
 * **Historical RIPE regression fixtures**: Added original RRC00 update and bview gzip files from 1999 and January 2000 as repository-only, offline integration fixtures.
+* **Opt-in MRT framing recovery**: Added `into_recovering_record_iter` and CLI `--recover` support for salvaging records after damaged legacy Type-5 or BGP4MP framing. Recovery validates a three-record chain, uses exact embedded BGP headers as BGP4MP anchors, and reports every skipped decompressed byte range as a typed gap event.
 
 #### Examples
 
