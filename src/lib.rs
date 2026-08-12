@@ -236,6 +236,29 @@ match process_mrt_file("http://example.com/updates.bz2") {
 }
 ```
 
+**Recovering After Damaged MRT Framing**
+
+Recovery is opt-in and never reconstructs a damaged record. It reports the skipped decompressed
+byte range before resuming at a conservatively validated record chain.
+
+```no_run
+use bgpkit_parser::{BgpkitParser, RecoveryConfig, RecoveryEvent};
+
+fn recover(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let parser = BgpkitParser::new(path)?;
+    for event in parser.into_recovering_record_iter(RecoveryConfig::default()) {
+        match event? {
+            RecoveryEvent::Item(record) => println!("{}", record),
+            RecoveryEvent::Gap(gap) => eprintln!(
+                "skipped bytes {}..{}: {}",
+                gap.start_offset, gap.end_offset, gap.cause
+            ),
+        }
+    }
+    Ok(())
+}
+```
+
 ## Advanced Examples
 
 ### Parsing Real-time Data Streams
@@ -477,6 +500,7 @@ Options:
       --pretty                   Pretty-print JSON output
   -e, --elems-count              Count BGP elems
   -r, --records-count            Count MRT records
+      --recover                  Recover after damaged MRT framing and report skipped byte ranges on stderr
   -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
   -f, --filter <FILTERS>         Generic filter expression (key=value or key!=value)
   -p, --prefix <PREFIX>          Filter by network prefix
@@ -520,6 +544,11 @@ bgpkit-parser --json updates.20211001.0000.bz2 > output.json
 ### Count elements efficiently
 ```bash
 bgpkit-parser -e updates.20211001.0000.bz2
+```
+
+### Recover records after damaged framing
+```bash
+bgpkit-parser --recover -e damaged-updates.gz
 ```
 
 ### Cache remote files for faster repeated access

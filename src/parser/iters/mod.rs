@@ -14,6 +14,7 @@ pub mod default;
 mod diagnostic;
 pub mod fallible;
 mod raw;
+mod recovery;
 mod route;
 mod update;
 
@@ -22,6 +23,10 @@ pub use default::{ElemIterator, RecordIterator};
 pub use diagnostic::{DiagnosticEvent, DiagnosticIterator};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
+pub use recovery::{
+    RecoveringElemIterator, RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent,
+    RecoveryEvidence, RecoveryGap,
+};
 pub use route::{FallibleRouteIterator, RouteIterator};
 pub use update::{
     Bgp4MpUpdate, FallibleUpdateIterator, LegacyBgpUpdate, MrtUpdate, TableDumpV2Entry,
@@ -31,10 +36,32 @@ pub use update::{
 use crate::models::BgpElem;
 use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
-use crate::Elementor;
 use crate::RawMrtRecord;
+use crate::{Elementor, Filter, Filterable};
 use std::io::Read;
 use std::path::Path;
+
+#[inline]
+pub(crate) fn record_matches_filters(
+    record: &MrtRecord,
+    filters: &[Filter],
+    elementor: &mut Elementor,
+) -> bool {
+    if filters.is_empty() {
+        return true;
+    }
+    if matches!(
+        &record.message,
+        MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_))
+    ) {
+        let _ = elementor.record_to_elems(record.clone());
+        return true;
+    }
+    elementor
+        .record_to_elems(record.clone())
+        .iter()
+        .any(|element| element.match_filters(filters))
+}
 
 pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
     write_mrt_core_dump_to_path(enabled, bytes, "mrt_core_dump");
@@ -73,6 +100,29 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
         RawRecordIterator::new(self)
+    }
+
+    /// Creates an opt-in iterator that reports skipped byte ranges while recovering MRT framing.
+    ///
+    /// Recovery never reconstructs a damaged record. It scans for a structurally valid boundary,
+    /// confirms a chain of records, emits [`RecoveryEvent::Gap`], and then resumes normal parsing.
+    /// Damage extending to the end of the stream is reported as a terminal gap. Offsets in
+    /// recovery events refer to the decompressed MRT byte stream.
+    pub fn into_recovering_record_iter(
+        self,
+        config: RecoveryConfig,
+    ) -> RecoveringRecordIterator<R> {
+        RecoveringRecordIterator::new(self, config)
+    }
+
+    /// Creates an opt-in iterator over BGP elements that reports skipped byte ranges while
+    /// recovering MRT framing.
+    ///
+    /// Behaves like [`into_recovering_record_iter`](Self::into_recovering_record_iter) but
+    /// converts each recovered record to [`BgpElem`]s, applying the parser's filters per
+    /// element.
+    pub fn into_recovering_elem_iter(self, config: RecoveryConfig) -> RecoveringElemIterator<R> {
+        RecoveringElemIterator::new(self, config)
     }
 
     /// Creates an iterator over BGP announcements from MRT data.

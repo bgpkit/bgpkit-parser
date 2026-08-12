@@ -63,6 +63,17 @@ impl Default for ParserOptions {
     }
 }
 
+impl ParserOptions {
+    pub(crate) fn warn_zebra_compat_once(&mut self) {
+        if self.show_warnings && !self.warned_zebra_compat {
+            warn!(
+                "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
+            );
+            self.warned_zebra_compat = true;
+        }
+    }
+}
+
 #[cfg(feature = "oneio")]
 impl BgpkitParser<Box<dyn Read + Send>> {
     /// Creating a new parser from a object that implements [Read] trait.
@@ -296,12 +307,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
 
 impl<R> BgpkitParser<R> {
     pub(crate) fn warn_zebra_compat_once(&mut self) {
-        if self.options.show_warnings && !self.options.warned_zebra_compat {
-            warn!(
-                "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
-            );
-            self.options.warned_zebra_compat = true;
-        }
+        self.options.warn_zebra_compat_once();
     }
 
     pub fn enable_core_dump(self) -> Self {
