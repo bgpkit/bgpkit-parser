@@ -36,10 +36,32 @@ pub use update::{
 use crate::models::BgpElem;
 use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
-use crate::Elementor;
 use crate::RawMrtRecord;
+use crate::{Elementor, Filter, Filterable};
 use std::io::Read;
 use std::path::Path;
+
+#[inline]
+pub(crate) fn record_matches_filters(
+    record: &MrtRecord,
+    filters: &[Filter],
+    elementor: &mut Elementor,
+) -> bool {
+    if filters.is_empty() {
+        return true;
+    }
+    if matches!(
+        &record.message,
+        MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_))
+    ) {
+        let _ = elementor.record_to_elems(record.clone());
+        return true;
+    }
+    elementor
+        .record_to_elems(record.clone())
+        .iter()
+        .any(|element| element.match_filters(filters))
+}
 
 pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
     write_mrt_core_dump_to_path(enabled, bytes, "mrt_core_dump");

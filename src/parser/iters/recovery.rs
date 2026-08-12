@@ -4,12 +4,12 @@
 //! reconstruct a damaged record: bytes are skipped until a conservatively validated chain of
 //! records is found, and the skipped range is reported as a [`RecoveryEvent::Gap`].
 
-use crate::models::{Bgp4MpType, EntryType, MrtMessage, MrtRecord, TableDumpV2Message};
+use crate::models::{Bgp4MpType, EntryType, MrtRecord};
+use crate::parser::iters::record_matches_filters;
 use crate::parser::mrt::messages::bgp4mp::uses_zebra_compat;
 use crate::parser::mrt::mrt_header::parse_common_header_with_bytes;
 use crate::parser::mrt::mrt_record::parse_mrt_record_with_zebra_compat;
-use crate::parser::{BgpkitParser, Elementor, ParserError, ParserErrorWithBytes};
-use crate::Filterable;
+use crate::parser::{BgpkitParser, Elementor, ParserError, ParserErrorWithBytes, ParserOptions};
 use bytes::Bytes;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Read};
@@ -130,8 +130,7 @@ pub struct RecoveringRecordIterator<R> {
     config: RecoveryConfig,
     filters: Vec<crate::parser::Filter>,
     elementor: Elementor,
-    show_warnings: bool,
-    warned_zebra_compat: bool,
+    options: ParserOptions,
     finished: bool,
 }
 
@@ -142,8 +141,7 @@ impl<R> RecoveringRecordIterator<R> {
             config,
             filters: parser.filters,
             elementor: Elementor::new(),
-            show_warnings: parser.options.show_warnings,
-            warned_zebra_compat: parser.options.warned_zebra_compat,
+            options: parser.options,
             finished: false,
         }
     }
@@ -162,24 +160,11 @@ impl<R: Read> Iterator for RecoveringRecordIterator<R> {
             match parse_mrt_record_with_zebra_compat(&mut self.reader) {
                 Ok((record, used_zebra_compat)) => {
                     self.reader.discard_before_current();
-                    if used_zebra_compat && self.show_warnings && !self.warned_zebra_compat {
-                        log::warn!(
-                            "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
-                        );
-                        self.warned_zebra_compat = true;
+                    if used_zebra_compat {
+                        self.options.warn_zebra_compat_once();
                     }
 
-                    if self.filters.is_empty() {
-                        return Some(Ok(RecoveryEvent::Item(record)));
-                    }
-                    if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) =
-                        &record.message
-                    {
-                        let _ = self.elementor.record_to_elems(record.clone());
-                        return Some(Ok(RecoveryEvent::Item(record)));
-                    }
-                    let elems = self.elementor.record_to_elems(record.clone());
-                    if elems.iter().any(|elem| elem.match_filters(&self.filters)) {
+                    if record_matches_filters(&record, &self.filters, &mut self.elementor) {
                         return Some(Ok(RecoveryEvent::Item(record)));
                     }
                 }
@@ -204,11 +189,30 @@ impl<R: Read> Iterator for RecoveringRecordIterator<R> {
                             evidence,
                             confirmed_records,
                         };
-                        self.reader
-                            .move_to(end_offset)
-                            .expect("accepted recovery offset remains buffered");
-                        self.reader.discard_before_current();
-                        return Some(Ok(RecoveryEvent::Gap(gap)));
+                        match self.reader.move_to(end_offset) {
+                            Ok(true) => {
+                                self.reader.discard_before_current();
+                                return Some(Ok(RecoveryEvent::Gap(gap)));
+                            }
+                            Ok(false) => {
+                                self.finished = true;
+                                return Some(Err(RecoveryError {
+                                    offset: record_start,
+                                    scanned_bytes: end_offset.saturating_sub(record_start),
+                                    error,
+                                }));
+                            }
+                            Err(io_error) => {
+                                self.finished = true;
+                                return Some(Err(RecoveryError {
+                                    offset: record_start,
+                                    scanned_bytes: end_offset.saturating_sub(record_start),
+                                    error: ParserErrorWithBytes::from(ParserError::IoError(
+                                        io_error,
+                                    )),
+                                }));
+                            }
+                        }
                     }
                     Ok(None) => {
                         self.finished = true;
@@ -286,7 +290,7 @@ fn validate_chain<R: Read>(
         let Some(candidate) = read_candidate(reader)? else {
             reader.move_to(record_start)?;
             if confirmed > 0 && reader.at_clean_eof()? {
-                return Ok(Some((evidence.expect("set with first record"), confirmed)));
+                return Ok(evidence.map(|evidence| (evidence, confirmed)));
             }
             return Ok(None);
         };
@@ -298,14 +302,11 @@ fn validate_chain<R: Read>(
         confirmed += 1;
 
         if confirmed < required && reader.at_clean_eof()? {
-            return Ok(Some((evidence.expect("set with first record"), confirmed)));
+            return Ok(evidence.map(|evidence| (evidence, confirmed)));
         }
     }
 
-    Ok(Some((
-        evidence.expect("required is at least one"),
-        confirmed,
-    )))
+    Ok(evidence.map(|evidence| (evidence, confirmed)))
 }
 
 fn read_candidate<R: Read>(reader: &mut ReplayReader<R>) -> io::Result<Option<Candidate>> {
@@ -424,7 +425,7 @@ fn strict_bgp4mp_evidence(raw_record: &crate::RawMrtRecord) -> Option<RecoveryEv
         | Bgp4MpType::MessageAs4Local
         | Bgp4MpType::MessageAs4Addpath
         | Bgp4MpType::MessageLocalAs4Addpath => 8,
-        Bgp4MpType::StateChange | Bgp4MpType::StateChangeAs4 => unreachable!(),
+        Bgp4MpType::StateChange | Bgp4MpType::StateChangeAs4 => return None,
     };
 
     let marker_offset = if uses_zebra_compat(raw_record.common_header.entry_subtype, body) {
@@ -559,7 +560,7 @@ impl<R: Read> Read for ReplayReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Asn, Bgp4MpEnum, Bgp4MpMessage, BgpMessage, CommonHeader};
+    use crate::models::{Asn, Bgp4MpEnum, Bgp4MpMessage, BgpMessage, CommonHeader, MrtMessage};
     use bytes::{BufMut, BytesMut};
     use std::io::Cursor;
     use std::net::{IpAddr, Ipv4Addr};

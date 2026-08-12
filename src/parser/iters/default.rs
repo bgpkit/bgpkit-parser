@@ -3,7 +3,7 @@ Default iterator implementations that skip errors and return successfully parsed
 */
 use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::iters::write_mrt_core_dump;
+use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use log::{error, warn};
@@ -42,24 +42,10 @@ impl<R: Read> Iterator for RecordIterator<R> {
         loop {
             return match self.parser.next_record() {
                 Ok(v) => {
-                    // if None, the reaches EoF.
-                    let filters = &self.parser.filters;
-                    if filters.is_empty() {
+                    if record_matches_filters(&v, &self.parser.filters, &mut self.elementor) {
                         Some(v)
                     } else {
-                        if let MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(
-                            _,
-                        )) = &v.message
-                        {
-                            let _ = self.elementor.record_to_elems(v.clone());
-                            return Some(v);
-                        }
-                        let elems = self.elementor.record_to_elems(v.clone());
-                        if elems.iter().any(|e| e.match_filters(&self.parser.filters)) {
-                            Some(v)
-                        } else {
-                            continue;
-                        }
+                        continue;
                     }
                 }
                 Err(e) => {

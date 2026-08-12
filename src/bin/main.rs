@@ -254,78 +254,50 @@ fn main() {
         opts.format
     };
 
-    if opts.recover {
-        let filters = parser.filters().to_vec();
-        if let Err(error) = run_recovering(
-            parser,
+    let filters = parser.filters().to_vec();
+    let result = if opts.recover {
+        run_records(
+            parser
+                .into_recovering_record_iter(RecoveryConfig::default())
+                .map(|event| event.map_err(|error| error.to_string())),
             &filters,
             output_format,
             opts.level,
             opts.elems_count,
             opts.records_count,
-        ) {
-            eprintln!("{error}");
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    match (opts.elems_count, opts.records_count) {
-        (true, true) => {
-            let mut elementor = Elementor::new();
-            let (mut records_count, mut elems_count) = (0, 0);
-            for record in parser.into_record_iter() {
-                records_count += 1;
-                elems_count += elementor.record_to_elems(record).len();
-            }
-            println!("total records: {records_count}");
-            println!("total elems:   {elems_count}");
-        }
-        (false, true) => {
-            println!("total records: {}", parser.into_record_iter().count());
-        }
-        (true, false) => {
-            println!("total elems: {}", parser.into_elem_iter().count());
-        }
-        (false, false) => {
-            let mut stdout = std::io::stdout();
-
-            match opts.level {
-                OutputLevel::Elems => {
-                    for (index, elem) in parser.into_elem_iter().enumerate() {
-                        let output_str = format_elem(&elem, output_format, index);
-                        if let Err(e) = writeln!(stdout, "{}", output_str) {
-                            if e.kind() != std::io::ErrorKind::BrokenPipe {
-                                eprintln!("{e}");
-                            }
-                            std::process::exit(1);
-                        }
-                    }
-                }
-                OutputLevel::Records => {
-                    for record in parser.into_record_iter() {
-                        let output_str = format_record(&record, output_format);
-                        if let Err(e) = writeln!(stdout, "{}", output_str) {
-                            if e.kind() != std::io::ErrorKind::BrokenPipe {
-                                eprintln!("{e}");
-                            }
-                            std::process::exit(1);
-                        }
-                    }
-                }
-            }
-        }
+            true,
+        )
+    } else {
+        run_records(
+            parser
+                .into_record_iter()
+                .map(|record| Ok(RecoveryEvent::Item(record))),
+            &filters,
+            output_format,
+            opts.level,
+            opts.elems_count,
+            opts.records_count,
+            false,
+        )
+    };
+    if let Err(error) = result {
+        eprintln!("{error}");
+        std::process::exit(1);
     }
 }
 
-fn run_recovering<R: std::io::Read>(
-    parser: BgpkitParser<R>,
+fn run_records<I>(
+    events: I,
     filters: &[Filter],
     output_format: OutputFormat,
     output_level: OutputLevel,
     elems_count_requested: bool,
     records_count_requested: bool,
-) -> Result<(), String> {
+    report_recovery: bool,
+) -> Result<(), String>
+where
+    I: IntoIterator<Item = Result<RecoveryEvent<bgpkit_parser::MrtRecord>, String>>,
+{
     let mut stdout = std::io::stdout();
     let mut elementor = Elementor::new();
     let mut records_count = 0usize;
@@ -334,8 +306,8 @@ fn run_recovering<R: std::io::Read>(
     let mut gap_count = 0usize;
     let mut skipped_bytes = 0u64;
 
-    for event in parser.into_recovering_record_iter(RecoveryConfig::default()) {
-        match event.map_err(|error| error.to_string())? {
+    for event in events {
+        match event? {
             RecoveryEvent::Gap(gap) => {
                 gap_count += 1;
                 skipped_bytes += gap.skipped_bytes();
@@ -354,11 +326,15 @@ fn run_recovering<R: std::io::Read>(
                 let needs_elems = elems_count_requested
                     || matches!(output_level, OutputLevel::Elems) && !records_count_requested;
                 let elems = if needs_elems {
-                    elementor
-                        .record_to_elems(record.clone())
-                        .into_iter()
-                        .filter(|elem| elem.match_filters(filters))
-                        .collect::<Vec<_>>()
+                    let elems = elementor.record_to_elems(record.clone());
+                    if records_count_requested {
+                        elems
+                    } else {
+                        elems
+                            .into_iter()
+                            .filter(|elem| elem.match_filters(filters))
+                            .collect()
+                    }
                 } else {
                     Vec::new()
                 };
@@ -372,12 +348,16 @@ fn run_recovering<R: std::io::Read>(
                         for elem in elems {
                             let output = format_elem(&elem, output_format, elem_index);
                             elem_index += 1;
-                            write_recovery_output(&mut stdout, &output)?;
+                            if !write_output(&mut stdout, &output)? {
+                                return Ok(());
+                            }
                         }
                     }
                     OutputLevel::Records => {
                         let output = format_record(&record, output_format);
-                        write_recovery_output(&mut stdout, &output)?;
+                        if !write_output(&mut stdout, &output)? {
+                            return Ok(());
+                        }
                     }
                 }
             }
@@ -393,18 +373,20 @@ fn run_recovering<R: std::io::Read>(
         (true, false) => println!("total elems: {elems_count}"),
         (false, false) => {}
     }
-    eprintln!("recovery summary: {gap_count} gaps, {skipped_bytes} bytes skipped");
+    if report_recovery {
+        eprintln!("recovery summary: {gap_count} gaps, {skipped_bytes} bytes skipped");
+    }
     Ok(())
 }
 
-fn write_recovery_output(stdout: &mut std::io::Stdout, output: &str) -> Result<(), String> {
+fn write_output(stdout: &mut std::io::Stdout, output: &str) -> Result<bool, String> {
     if let Err(error) = writeln!(stdout, "{output}") {
         if error.kind() == std::io::ErrorKind::BrokenPipe {
-            return Ok(());
+            return Ok(false);
         }
         return Err(error.to_string());
     }
-    Ok(())
+    Ok(true)
 }
 
 fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {
