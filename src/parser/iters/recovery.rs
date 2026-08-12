@@ -88,8 +88,9 @@ pub struct RecoveryGap {
 }
 
 impl RecoveryGap {
+    /// Return the number of skipped bytes, or zero for an invalid inverted range.
     pub const fn skipped_bytes(&self) -> u64 {
-        self.end_offset - self.start_offset
+        self.end_offset.saturating_sub(self.start_offset)
     }
 }
 
@@ -289,9 +290,6 @@ fn validate_chain<R: Read>(
         let record_start = reader.position();
         let Some(candidate) = read_candidate(reader)? else {
             reader.move_to(record_start)?;
-            if confirmed > 0 && reader.at_clean_eof()? {
-                return Ok(evidence.map(|evidence| (evidence, confirmed)));
-            }
             return Ok(None);
         };
         if family.is_some_and(|expected| expected != candidate.family) {
@@ -300,10 +298,6 @@ fn validate_chain<R: Read>(
         family.get_or_insert(candidate.family);
         evidence.get_or_insert(candidate.evidence);
         confirmed += 1;
-
-        if confirmed < required && reader.at_clean_eof()? {
-            return Ok(evidence.map(|evidence| (evidence, confirmed)));
-        }
     }
 
     Ok(evidence.map(|evidence| (evidence, confirmed)))
@@ -528,14 +522,6 @@ impl<R: Read> ReplayReader<R> {
         self.cursor = self.start + (offset - self.base_offset) as usize;
         Ok(true)
     }
-
-    fn at_clean_eof(&mut self) -> io::Result<bool> {
-        let position = self.position();
-        let mut byte = [0u8; 1];
-        let read = self.read(&mut byte)?;
-        self.move_to(position)?;
-        Ok(read == 0)
-    }
 }
 
 impl<R: Read> Read for ReplayReader<R> {
@@ -647,20 +633,30 @@ mod tests {
     }
 
     #[test]
-    fn accepts_short_confirmation_chain_at_clean_eof() {
+    fn rejects_chain_shorter_than_configured_at_clean_eof() {
         let mut input = vec![0xff; 12];
         input.extend_from_slice(&legacy_state(101));
         input.extend_from_slice(&legacy_state(102));
 
         let parser = BgpkitParser::from_reader(Cursor::new(input));
-        let events = parser
+        let result = parser
             .into_recovering_record_iter(RecoveryConfig::default())
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let RecoveryEvent::Gap(gap) = &events[0] else {
-            panic!("expected gap")
+            .next()
+            .expect("one error");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn skipped_bytes_is_zero_for_inverted_range() {
+        let gap = RecoveryGap {
+            start_offset: 10,
+            end_offset: 5,
+            cause: String::new(),
+            evidence: RecoveryEvidence::LegacyMrtChain,
+            confirmed_records: 3,
         };
-        assert_eq!(gap.confirmed_records, 2);
+
+        assert_eq!(gap.skipped_bytes(), 0);
     }
 
     #[test]
