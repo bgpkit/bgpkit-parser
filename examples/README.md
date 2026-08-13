@@ -35,7 +35,6 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 - [bmp_listener.rs](bmp_listener.rs) — Minimal TCP BMP listener that parses incoming BMP Route Monitoring messages and logs them.
 
 ## Attributes and Metadata
-- [bgp_open_role_pcap.rs](bgp_open_role_pcap.rs) — Construct an RFC 9234 Customer-role BGP OPEN with `bgpkit-parser`, encapsulate it in Ethernet/IPv4/TCP headers, and write a checksum-validated classic PCAP fixture.
 - [extended_communities.rs](extended_communities.rs) — Print BGP elements that carry extended, large, or IPv6_extended communities.
 - [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
 - [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty_print the Peer Index Table in JSON.
