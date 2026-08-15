@@ -30,6 +30,18 @@ struct RawBgpOpenHeader {
 
 const _: () = assert!(size_of::<RawBgpOpenHeader>() == 10);
 
+/// On-wire BGP ROUTE-REFRESH fixed body layout (4 bytes, network byte order).
+/// RFC 2918; the reserved byte carries the message subtype per RFC 7313.
+#[derive(IntoBytes, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+struct RawRouteRefreshHeader {
+    afi: U16,
+    subtype: u8,
+    safi: u8,
+}
+
+const _: () = assert!(size_of::<RawRouteRefreshHeader>() == 4);
+
 pub(crate) fn read_and_validate_bgp_marker(data: &mut Bytes) -> Result<(), ParserError> {
     data.has_n_remaining(16)?;
 
@@ -128,7 +140,7 @@ pub fn parse_bgp_message(
                 )));
             }
         }
-        BgpMessageType::UPDATE | BgpMessageType::NOTIFICATION => {
+        BgpMessageType::UPDATE | BgpMessageType::NOTIFICATION | BgpMessageType::ROUTE_REFRESH => {
             // These can be extended messages up to 65535 bytes when capability is negotiated
             // Since we're parsing MRT data, we allow extended lengths
         }
@@ -153,7 +165,47 @@ pub fn parse_bgp_message(
             BgpMessage::Notification(parse_bgp_notification_message(msg_data)?)
         }
         BgpMessageType::KEEPALIVE => BgpMessage::KeepAlive,
+        BgpMessageType::ROUTE_REFRESH => {
+            BgpMessage::RouteRefresh(parse_bgp_route_refresh_message(&mut msg_data)?)
+        }
     })
+}
+
+/// Parse BGP ROUTE-REFRESH message.
+///
+/// RFC 2918 body: AFI (2 bytes), Reserved (1 byte), SAFI (1 byte). RFC 7313
+/// redefines the reserved byte as a message subtype. Any trailing bytes (such
+/// as ORF entries per RFC 5291) are retained raw.
+pub fn parse_bgp_route_refresh_message(
+    input: &mut Bytes,
+) -> Result<BgpRouteRefreshMessage, ParserError> {
+    input.has_n_remaining(4)?;
+    let mut header_bytes = [0u8; 4];
+    input.copy_to_slice(&mut header_bytes);
+    // Single bounds check via zerocopy instead of three sequential cursor reads.
+    let raw = RawRouteRefreshHeader::ref_from_bytes(&header_bytes)
+        .expect("header_bytes is exactly 4 bytes with no alignment requirement");
+
+    Ok(BgpRouteRefreshMessage {
+        afi: raw.afi.get(),
+        subtype: raw.subtype,
+        safi: raw.safi,
+        data: input.split_to(input.remaining()).to_vec(),
+    })
+}
+
+impl BgpRouteRefreshMessage {
+    pub fn encode(&self) -> Bytes {
+        let raw = RawRouteRefreshHeader {
+            afi: U16::new(self.afi),
+            subtype: self.subtype,
+            safi: self.safi,
+        };
+        let mut bytes = BytesMut::with_capacity(4 + self.data.len());
+        bytes.put_slice(raw.as_bytes());
+        bytes.put_slice(&self.data);
+        bytes.freeze()
+    }
 }
 
 /// Parse BGP NOTIFICATION message.
@@ -672,6 +724,7 @@ impl BgpMessage {
             BgpMessage::Update(msg) => (BgpMessageType::UPDATE, msg.encode(asn_len)?),
             BgpMessage::Notification(msg) => (BgpMessageType::NOTIFICATION, msg.encode()),
             BgpMessage::KeepAlive => (BgpMessageType::KEEPALIVE, Bytes::new()),
+            BgpMessage::RouteRefresh(msg) => (BgpMessageType::ROUTE_REFRESH, msg.encode()),
         };
 
         // msg total bytes length = msg bytes + 16 bytes marker + 2 bytes length + 1 byte type
@@ -827,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invlaid_length() {
+    fn test_invalid_length() {
         let bytes = Bytes::from_static(&[
             0x00, 0x00, 0x00, 0x00, // marker
             0x00, 0x00, 0x00, 0x00, // marker
@@ -852,17 +905,100 @@ mod tests {
     }
 
     #[test]
-    fn test_invlaid_type() {
+    fn test_invalid_type() {
         let bytes = Bytes::from_static(&[
             0xFF, 0xFF, 0xFF, 0xFF, // marker (valid RFC 4271)
             0xFF, 0xFF, 0xFF, 0xFF, // marker
             0xFF, 0xFF, 0xFF, 0xFF, // marker
             0xFF, 0xFF, 0xFF, 0xFF, // marker
             0x00, 0x28, // length
-            0x05, // type
+            0x06, // type (unassigned)
         ]);
         let mut data = bytes.clone();
         assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits16).is_err());
+    }
+
+    #[test]
+    fn test_parse_bgp_route_refresh_message() {
+        // BGP portion of MRT record 4978 in
+        // https://data.ris.ripe.net/rrc00/2012.07/updates.20120718.2020.gz
+        let bytes = Bytes::from_static(&[
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0x00, 0x17, // length = 23
+            0x05, // type = ROUTE-REFRESH
+            0x00, 0x01, // AFI = 1 (IPv4)
+            0x00, // reserved / subtype
+            0x01, // SAFI = 1 (unicast)
+        ]);
+        let mut data = bytes.clone();
+        let msg = parse_bgp_message(&mut data, false, &AsnLength::Bits32).unwrap();
+        let refresh = match &msg {
+            BgpMessage::RouteRefresh(refresh) => refresh,
+            _ => panic!("expected RouteRefresh, got {msg:?}"),
+        };
+        assert_eq!(msg.msg_type(), BgpMessageType::ROUTE_REFRESH);
+        assert_eq!(refresh.afi, 1);
+        assert_eq!(refresh.subtype, 0);
+        assert_eq!(refresh.safi, 1);
+        assert!(refresh.data.is_empty());
+        assert_eq!(refresh.afi(), Some(Afi::Ipv4));
+        assert_eq!(refresh.safi(), Some(Safi::Unicast));
+
+        // encoding must roundtrip byte-identically
+        let encoded = msg.encode(AsnLength::Bits32).unwrap();
+        assert_eq!(encoded, bytes);
+    }
+
+    #[test]
+    fn test_parse_bgp_route_refresh_message_with_orf_data() {
+        // RFC 7313 BoRR subtype with trailing ORF bytes; unknown AFI/SAFI values
+        // must be preserved rather than rejected.
+        let bytes = Bytes::from_static(&[
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0x00, 0x1A, // length = 26
+            0x05, // type = ROUTE-REFRESH
+            0x00, 0x19, // AFI = 25 (L2VPN, not in the Afi enum)
+            0x01, // subtype = BoRR
+            0x41, // SAFI = 65 (VPLS, not in the Safi enum)
+            0xDE, 0xAD, 0xBE, // trailing ORF bytes, kept raw
+        ]);
+        let mut data = bytes.clone();
+        let msg = parse_bgp_message(&mut data, false, &AsnLength::Bits32).unwrap();
+        let refresh = match &msg {
+            BgpMessage::RouteRefresh(refresh) => refresh,
+            _ => panic!("expected RouteRefresh, got {msg:?}"),
+        };
+        assert_eq!(refresh.afi, 25);
+        assert_eq!(refresh.subtype, 1);
+        assert_eq!(refresh.safi, 65);
+        assert_eq!(refresh.data, vec![0xDE, 0xAD, 0xBE]);
+        assert_eq!(refresh.afi(), None);
+        assert_eq!(refresh.safi(), None);
+
+        let encoded = msg.encode(AsnLength::Bits32).unwrap();
+        assert_eq!(encoded, bytes);
+    }
+
+    #[test]
+    fn test_parse_bgp_route_refresh_message_truncated() {
+        // body shorter than the 4-byte fixed part must error, not panic
+        let bytes = Bytes::from_static(&[
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0x00, 0x15, // length = 21 (only 2 body bytes)
+            0x05, // type = ROUTE-REFRESH
+            0x00, 0x01, // truncated body
+        ]);
+        let mut data = bytes.clone();
+        assert!(parse_bgp_message(&mut data, false, &AsnLength::Bits32).is_err());
     }
 
     #[test]

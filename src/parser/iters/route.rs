@@ -446,9 +446,10 @@ fn parse_bgp_message_routes(
         BgpMessageType::UPDATE => Ok(RouteRecordIter::Update(parse_bgp_update_routes(
             msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn,
         )?)),
-        BgpMessageType::OPEN | BgpMessageType::NOTIFICATION | BgpMessageType::KEEPALIVE => {
-            Ok(RouteRecordIter::Empty)
-        }
+        BgpMessageType::OPEN
+        | BgpMessageType::NOTIFICATION
+        | BgpMessageType::KEEPALIVE
+        | BgpMessageType::ROUTE_REFRESH => Ok(RouteRecordIter::Empty),
     }
 }
 

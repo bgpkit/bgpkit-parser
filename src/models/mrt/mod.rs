@@ -175,6 +175,7 @@ impl Display for MrtMessage {
                         crate::models::BgpMessage::Update(_) => "UPDATE",
                         crate::models::BgpMessage::Notification(_) => "NOTIFICATION",
                         crate::models::BgpMessage::KeepAlive => "KEEPALIVE",
+                        crate::models::BgpMessage::RouteRefresh(_) => "ROUTE_REFRESH",
                     };
                     write!(f, "BGP4MP|{}|{}|{}", msg.peer_ip, msg.peer_asn, msg_type)
                 }
@@ -191,6 +192,7 @@ impl Display for MrtMessage {
                         crate::models::BgpMessage::KeepAlive => "KEEPALIVE",
                         crate::models::BgpMessage::Open(_) => "OPEN",
                         crate::models::BgpMessage::Notification(_) => "NOTIFICATION",
+                        crate::models::BgpMessage::RouteRefresh(_) => "ROUTE_REFRESH",
                     };
                     write!(f, "BGP|{}|{}|{}", msg.peer_ip, msg.peer_asn, msg_type)
                 }

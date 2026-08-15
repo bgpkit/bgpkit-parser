@@ -17,6 +17,7 @@ exclude = [
     "tests/legacy_ripe_2000.rs",
     "tests/quagga_bgp_states.rs",
     "tests/recovery.rs",
+    "tests/route_refresh.rs",
     "tests/torn_mrt_records.rs",
 ]
 

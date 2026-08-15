@@ -585,7 +585,7 @@ impl Elementor {
 
     /// Convert a [BgpMessage] into an iterator of [BgpElem]s.
     ///
-    /// Returns `None` for non-Update messages (Open, Notification, KeepAlive).
+    /// Returns `None` for non-Update messages (Open, Notification, KeepAlive, RouteRefresh).
     pub fn bgp_to_elems_iter(
         msg: BgpMessage,
         timestamp: f64,
@@ -596,7 +596,10 @@ impl Elementor {
             BgpMessage::Update(msg) => Some(Elementor::bgp_update_to_elems_iter(
                 msg, timestamp, peer_ip, peer_asn,
             )),
-            BgpMessage::Open(_) | BgpMessage::Notification(_) | BgpMessage::KeepAlive => None,
+            BgpMessage::Open(_)
+            | BgpMessage::Notification(_)
+            | BgpMessage::KeepAlive
+            | BgpMessage::RouteRefresh(_) => None,
         }
     }
 

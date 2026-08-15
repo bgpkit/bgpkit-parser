@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 * **`Tlv::length()` and `SubTlv::length()` removed**: both silently saturated at `u16::MAX`; encoders now compute checked lengths internally.
 * **`OptParam` no longer has a `param_len` field**: the field was redundant now that the encoder always derives the wire length from `param_value`, and the parser recomputes it on read. Construct `OptParam` with just `param_type` and `param_value`.
 * **Quagga BGP states**: `BgpState` gains the implementation-specific `Clearing` and `Deleted` variants for wire values 7 and 8. Downstream exhaustive matches must handle the new variants.
+* **ROUTE-REFRESH message variant**: `BgpMessage` gains `RouteRefresh(BgpRouteRefreshMessage)` and `BgpMessageType` gains `ROUTE_REFRESH` for BGP message type 5 (RFC 2918), previously rejected as "Unknown BGP Message Type". Downstream exhaustive matches must handle the new variants.
 
 ### Added
 
@@ -44,6 +45,7 @@ All notable changes to this project will be documented in this file.
 
 * **Early RIPE RIS MRT support**: Parse deprecated MRT Type 5 BGP OPEN, UPDATE, NOTIFY, KEEPALIVE, and STATE_CHANGE records, along with historical TABLE_DUMP v1 records that batch multiple entries and declare their physical length four bytes short. Record iteration preserves each physical TABLE_DUMP batch while element, update, and route iteration expands its entries.
 * **RFC 5543 Traffic Engineering attribute**: Typed parsing and encoding for the BGP Traffic Engineering attribute (type 24) ([#290](https://github.com/bgpkit/bgpkit-parser/issues/290)). Exposes the Switching Capability, Encoding, Reserved, and eight Maximum LSP Bandwidth fields (IEEE-754), and retains switching-capability-specific information as raw bytes with wire-faithful round-trip.
+* **RFC 2918 ROUTE-REFRESH messages**: Parse and encode BGP ROUTE-REFRESH messages (type 5) found in RIS BGP4MP update archives. AFI and SAFI are kept as raw integers so refreshes for address families outside the typed enums still round-trip byte-for-byte; the reserved byte is exposed as the RFC 7313 message subtype and trailing ORF data (RFC 5291) is retained raw. ROUTE-REFRESH records yield no elements.
 * **RFC 10005 Link Bandwidth Extended Community**: Typed parsing and encoding for the BGP Link Bandwidth Extended Community in both transitive (`0x00`) and non-transitive (`0x40`) forms ([#299](https://github.com/bgpkit/bgpkit-parser/issues/299)). Exposes the Global Administrator, bandwidth in bytes per second, and transitivity, and preserves the wire type on encode.
 
 #### Test data

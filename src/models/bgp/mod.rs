@@ -30,6 +30,7 @@ use std::net::Ipv4Addr;
 
 pub type BgpIdentifier = Ipv4Addr;
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
@@ -38,6 +39,7 @@ pub enum BgpMessageType {
     UPDATE = 2,
     NOTIFICATION = 3,
     KEEPALIVE = 4,
+    ROUTE_REFRESH = 5,
 }
 
 // https://tools.ietf.org/html/rfc4271#section-4
@@ -48,6 +50,7 @@ pub enum BgpMessage {
     Update(BgpUpdateMessage),
     Notification(BgpNotificationMessage),
     KeepAlive,
+    RouteRefresh(BgpRouteRefreshMessage),
 }
 
 impl BgpMessage {
@@ -57,7 +60,44 @@ impl BgpMessage {
             BgpMessage::Update(_) => BgpMessageType::UPDATE,
             BgpMessage::Notification(_) => BgpMessageType::NOTIFICATION,
             BgpMessage::KeepAlive => BgpMessageType::KEEPALIVE,
+            BgpMessage::RouteRefresh(_) => BgpMessageType::ROUTE_REFRESH,
         }
+    }
+}
+
+/// BGP ROUTE-REFRESH Message - RFC 2918
+///
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          AFI                  |    Res./Subt. |     SAFI      |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
+///
+/// AFI and SAFI are kept as raw integers so refreshes for address families
+/// outside the [Afi]/[Safi] enums still parse and re-encode byte-for-byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpRouteRefreshMessage {
+    pub afi: u16,
+    /// Reserved in RFC 2918; message subtype in RFC 7313
+    /// (0 = normal route refresh, 1 = BoRR, 2 = EoRR).
+    pub subtype: u8,
+    pub safi: u8,
+    /// Trailing bytes such as ORF entries (RFC 5291), kept raw.
+    pub data: Vec<u8>,
+}
+
+impl BgpRouteRefreshMessage {
+    /// The AFI as a typed [Afi], if it is a known address family.
+    pub fn afi(&self) -> Option<Afi> {
+        Afi::try_from(self.afi).ok()
+    }
+
+    /// The SAFI as a typed [Safi], if it is a known subsequent address family.
+    pub fn safi(&self) -> Option<Safi> {
+        Safi::try_from(self.safi).ok()
     }
 }
 
