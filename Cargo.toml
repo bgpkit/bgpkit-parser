@@ -13,6 +13,7 @@ default-run = "bgpkit-parser"
 readme = "README.md"
 rust-version = "1.87.0"
 exclude = [
+    "tests/fixtures/packetlife/**",
     "tests/fixtures/ripe/**",
     "tests/legacy_ripe_2000.rs",
     "tests/quagga_bgp_states.rs",
@@ -133,6 +134,7 @@ harness = false
 [dev-dependencies]
 regex = "1"
 anyhow = "1"
+bytes = "1.7"
 bgpkit-broker = "0.12"
 env_logger = "0.11"
 kafka = "0.10.0"

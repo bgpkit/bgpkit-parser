@@ -279,6 +279,20 @@ pub enum BgpValidationWarning {
         /// Raw NLRI bytes as they appeared in the UPDATE message
         raw_bytes: Vec<u8>,
     },
+    /// ROUTE-REFRESH message subtype other than 0, 1, or 2 (RFC 7313
+    /// Section 5). A live speaker MUST ignore such a message and SHOULD log
+    /// an error; the parser retains it raw and reports this warning.
+    UnknownRouteRefreshSubtype { subtype: u8 },
+    /// BoRR/EoRR ROUTE-REFRESH message (RFC 7313 subtype 1 or 2) whose body
+    /// is not exactly 4 bytes. On the wire this is a fatal "Invalid Message
+    /// Length" NOTIFICATION when the Enhanced Route Refresh capability was
+    /// negotiated; MRT data carries no session context, so the parser
+    /// retains the message and reports this warning instead.
+    InvalidRouteRefreshLength {
+        subtype: u8,
+        /// Message body length excluding the 19-byte BGP header
+        length: usize,
+    },
 }
 
 impl Display for BgpValidationWarning {
@@ -325,6 +339,12 @@ impl Display for BgpValidationWarning {
             }
             BgpValidationWarning::MalformedNlri { nlri_type, reason, .. } => {
                 write!(f, "Malformed NLRI ({nlri_type}): {reason}")
+            }
+            BgpValidationWarning::UnknownRouteRefreshSubtype { subtype } => {
+                write!(f, "Unknown ROUTE-REFRESH message subtype: {subtype}")
+            }
+            BgpValidationWarning::InvalidRouteRefreshLength { subtype, length } => {
+                write!(f, "Invalid ROUTE-REFRESH message length for subtype {subtype}: body is {length} bytes, expected 4")
             }
         }
     }

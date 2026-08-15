@@ -124,6 +124,7 @@ fn record_validation_warnings(record: &MrtRecord) -> Vec<BgpValidationWarning> {
 fn update_warnings(message: &BgpMessage) -> Vec<BgpValidationWarning> {
     match message {
         BgpMessage::Update(update) => update.attributes.validation_warnings().to_vec(),
+        BgpMessage::RouteRefresh(refresh) => refresh.validation_warnings(),
         _ => Vec::new(),
     }
 }
@@ -187,10 +188,20 @@ mod tests {
 
     fn bgp4mp_update_wire(withdrawn: &[u8], attributes: &[u8], announced: &[u8]) -> Vec<u8> {
         let update_body = update_wire_body(withdrawn, attributes, announced);
+        bgp4mp_message_wire(BgpMessageType::UPDATE, &update_body)
+    }
+
+    fn bgp4mp_route_refresh_wire(subtype: u8, orf_data: &[u8]) -> Vec<u8> {
+        let mut refresh_body = vec![0x00, 0x01, subtype, 0x01];
+        refresh_body.extend_from_slice(orf_data);
+        bgp4mp_message_wire(BgpMessageType::ROUTE_REFRESH, &refresh_body)
+    }
+
+    fn bgp4mp_message_wire(msg_type: BgpMessageType, msg_body: &[u8]) -> Vec<u8> {
         let mut bgp_message = vec![0xff; 16];
-        bgp_message.extend_from_slice(&((19 + update_body.len()) as u16).to_be_bytes());
-        bgp_message.push(BgpMessageType::UPDATE as u8);
-        bgp_message.extend_from_slice(&update_body);
+        bgp_message.extend_from_slice(&((19 + msg_body.len()) as u16).to_be_bytes());
+        bgp_message.push(msg_type as u8);
+        bgp_message.extend_from_slice(msg_body);
 
         let mut body = Vec::new();
         body.extend_from_slice(&64496u32.to_be_bytes());
@@ -239,6 +250,53 @@ mod tests {
                 assert_eq!(raw_record.raw_bytes().as_ref(), wire.as_slice());
             }
             event => panic!("expected validation event, got {event:?}"),
+        }
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn diagnostic_iterator_flags_unknown_route_refresh_subtype() {
+        // RFC 7313 Section 5: subtype other than 0-2 is ignored on the wire
+        let wire = bgp4mp_route_refresh_wire(3, &[]);
+        assert_wire_validation(wire, |warning| {
+            matches!(
+                warning,
+                BgpValidationWarning::UnknownRouteRefreshSubtype { subtype: 3 }
+            )
+        });
+    }
+
+    #[test]
+    fn diagnostic_iterator_flags_borr_with_trailing_data() {
+        // RFC 7313 Section 5: a BoRR/EoRR body must be exactly 4 bytes
+        let wire = bgp4mp_route_refresh_wire(1, &[0xDE, 0xAD]);
+        assert_wire_validation(wire, |warning| {
+            matches!(
+                warning,
+                BgpValidationWarning::InvalidRouteRefreshLength {
+                    subtype: 1,
+                    length: 6
+                }
+            )
+        });
+    }
+
+    #[test]
+    fn diagnostic_iterator_passes_normal_route_refresh_with_orf_data_clean() {
+        // A normal (subtype 0) refresh may carry ORF data (RFC 5291)
+        let wire = bgp4mp_route_refresh_wire(0, &[0x01, 0x80, 0x00, 0x00]);
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire)).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::Record(record) => {
+                assert!(matches!(
+                    record.message,
+                    MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
+                        bgp_message: BgpMessage::RouteRefresh(_),
+                        ..
+                    }))
+                ));
+            }
+            event => panic!("expected clean record event, got {event:?}"),
         }
         assert!(iter.next().is_none());
     }

@@ -8,8 +8,10 @@
 //! from peer AS49065 to RIS AS12654, and used to fail parsing with
 //! "Unknown BGP Message Type".
 
-use bgpkit_parser::models::{Bgp4MpEnum, BgpMessage, MrtMessage};
+use bgpkit_parser::models::{AsnLength, Bgp4MpEnum, BgpMessage, MrtMessage};
+use bgpkit_parser::parser::bgp::parse_bgp_message;
 use bgpkit_parser::BgpkitParser;
+use bytes::Bytes;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -71,4 +73,48 @@ fn parses_route_refresh_record() {
 #[test]
 fn route_refresh_record_yields_no_elems() {
     assert_eq!(parser().into_elem_iter().count(), 0);
+}
+
+/// PacketLife.net capture (see `tests/fixtures/packetlife/README.md`): one TCP
+/// segment carrying a 19-byte KEEPALIVE followed by a 46-byte ROUTE-REFRESH
+/// with an RFC 5291 ORF prefix advertisement.
+const PACKETLIFE_ORF_PCAP: &str =
+    "tests/fixtures/packetlife/bgp_orf_prefix_advertisement.pcapng.cap";
+
+#[test]
+fn parses_orf_prefix_advertisement_from_packetlife_pcap() {
+    let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), PACKETLIFE_ORF_PCAP);
+    let capture = std::fs::read(path).unwrap();
+
+    // The BGP stream starts at the first 16-byte marker inside the single
+    // TCP segment of the capture: KEEPALIVE (19 bytes) + ROUTE-REFRESH (46).
+    let marker_offset = capture
+        .windows(16)
+        .position(|window| window == [0xFF; 16])
+        .unwrap();
+    let wire = &capture[marker_offset..marker_offset + 19 + 46];
+    let mut stream = Bytes::copy_from_slice(wire);
+
+    let keepalive = parse_bgp_message(&mut stream, false, &AsnLength::Bits32).unwrap();
+    assert_eq!(keepalive, BgpMessage::KeepAlive);
+
+    let message = parse_bgp_message(&mut stream, false, &AsnLength::Bits32).unwrap();
+    let refresh = match &message {
+        BgpMessage::RouteRefresh(refresh) => refresh,
+        message => panic!("unexpected BGP message: {message:?}"),
+    };
+    assert_eq!(refresh.afi, 1);
+    assert_eq!(refresh.subtype, 0);
+    assert_eq!(refresh.safi, 1);
+
+    // RFC 5291 ORF payload, retained raw: when-to-refresh IMMEDIATE (1), ORF
+    // type 128 (pre-standard Address Prefix ORF), 19 bytes of entries.
+    assert_eq!(refresh.data.len(), 23);
+    assert_eq!(refresh.data[0], 0x01);
+    assert_eq!(refresh.data[1], 0x80);
+    assert_eq!(u16::from_be_bytes([refresh.data[2], refresh.data[3]]), 19);
+
+    // The ROUTE-REFRESH re-encodes byte-identically to the capture.
+    let encoded = message.encode(AsnLength::Bits32).unwrap();
+    assert_eq!(encoded, &wire[19..]);
 }

@@ -986,6 +986,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_bgp_route_refresh_message_unknown_subtype() {
+        // RFC 7313 defines subtypes 0 (normal), 1 (BoRR), and 2 (EoRR); other
+        // values are unassigned. The parser retains an unknown subtype raw
+        // instead of rejecting the message, so the record round-trips.
+        let bytes = Bytes::from_static(&[
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0xFF, 0xFF, 0xFF, 0xFF, // marker
+            0x00, 0x17, // length = 23
+            0x05, // type = ROUTE-REFRESH
+            0x00, 0x01, // AFI = 1 (IPv4)
+            0x03, // subtype = 3 (unassigned)
+            0x01, // SAFI = 1 (unicast)
+        ]);
+        let mut data = bytes.clone();
+        let msg = parse_bgp_message(&mut data, false, &AsnLength::Bits32).unwrap();
+        let refresh = match &msg {
+            BgpMessage::RouteRefresh(refresh) => refresh,
+            _ => panic!("expected RouteRefresh, got {msg:?}"),
+        };
+        assert_eq!(refresh.afi, 1);
+        assert_eq!(refresh.subtype, 3);
+        assert_eq!(refresh.safi, 1);
+        assert!(refresh.data.is_empty());
+
+        let encoded = msg.encode(AsnLength::Bits32).unwrap();
+        assert_eq!(encoded, bytes);
+    }
+
+    #[test]
     fn test_parse_bgp_route_refresh_message_truncated() {
         // body shorter than the 4-byte fixed part must error, not panic
         let bytes = Bytes::from_static(&[

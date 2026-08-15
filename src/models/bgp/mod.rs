@@ -99,6 +99,34 @@ impl BgpRouteRefreshMessage {
     pub fn safi(&self) -> Option<Safi> {
         Safi::try_from(self.safi).ok()
     }
+
+    /// RFC 7313 Section 5 validation findings for this message.
+    ///
+    /// A subtype other than 0-2 MUST be ignored (and SHOULD be logged) by a
+    /// live speaker, and a BoRR/EoRR message (subtype 1 or 2) whose body is
+    /// not exactly 4 bytes is an "Invalid Message Length" error. Both rules
+    /// only apply when the Enhanced Route Refresh capability was negotiated,
+    /// which MRT data cannot show, so the parser reports them as warnings
+    /// while retaining the message.
+    pub fn validation_warnings(&self) -> Vec<crate::error::BgpValidationWarning> {
+        use crate::error::BgpValidationWarning;
+        let mut warnings = Vec::new();
+        match self.subtype {
+            0 => {}
+            1 | 2 => {
+                if !self.data.is_empty() {
+                    warnings.push(BgpValidationWarning::InvalidRouteRefreshLength {
+                        subtype: self.subtype,
+                        length: 4 + self.data.len(),
+                    });
+                }
+            }
+            subtype => {
+                warnings.push(BgpValidationWarning::UnknownRouteRefreshSubtype { subtype });
+            }
+        }
+        warnings
+    }
 }
 
 /// BGP Open Message
@@ -233,6 +261,44 @@ pub struct BgpNotificationMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::BgpValidationWarning;
+
+    fn route_refresh(subtype: u8, data: Vec<u8>) -> BgpRouteRefreshMessage {
+        BgpRouteRefreshMessage {
+            afi: 1,
+            subtype,
+            safi: 1,
+            data,
+        }
+    }
+
+    #[test]
+    fn test_route_refresh_validation_warnings() {
+        // Normal refreshes carry no findings, with or without ORF data
+        assert!(route_refresh(0, vec![]).validation_warnings().is_empty());
+        assert!(route_refresh(0, vec![0x01])
+            .validation_warnings()
+            .is_empty());
+
+        // BoRR/EoRR with an exactly 4-byte body are clean
+        assert!(route_refresh(1, vec![]).validation_warnings().is_empty());
+        assert!(route_refresh(2, vec![]).validation_warnings().is_empty());
+
+        // BoRR/EoRR with trailing bytes violate the RFC 7313 length rule
+        assert_eq!(
+            route_refresh(2, vec![0xDE, 0xAD, 0xBE]).validation_warnings(),
+            vec![BgpValidationWarning::InvalidRouteRefreshLength {
+                subtype: 2,
+                length: 7
+            }]
+        );
+
+        // Subtypes outside 0-2 are unknown
+        assert_eq!(
+            route_refresh(3, vec![]).validation_warnings(),
+            vec![BgpValidationWarning::UnknownRouteRefreshSubtype { subtype: 3 }]
+        );
+    }
 
     #[test]
     fn test_message_type() {
