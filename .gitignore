@@ -25,6 +25,7 @@ docs/
 !src/wasm/**/*.md
 !tests/fixtures/ripe/**/*.md
 !tests/fixtures/ripe/**/*.gz
+!tests/fixtures/packetlife/**/*.md
 
 # WASM build artifacts
 pkg/

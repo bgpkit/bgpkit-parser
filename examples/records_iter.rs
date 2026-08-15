@@ -23,6 +23,7 @@ fn main() {
                     }
                     BgpMessage::Notification(_) => {}
                     BgpMessage::KeepAlive => {}
+                    BgpMessage::RouteRefresh(_) => {}
                 },
             },
             MrtMessage::LegacyBgp(_) => {}

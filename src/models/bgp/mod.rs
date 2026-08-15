@@ -30,6 +30,7 @@ use std::net::Ipv4Addr;
 
 pub type BgpIdentifier = Ipv4Addr;
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, Copy, Clone, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
@@ -38,6 +39,7 @@ pub enum BgpMessageType {
     UPDATE = 2,
     NOTIFICATION = 3,
     KEEPALIVE = 4,
+    ROUTE_REFRESH = 5,
 }
 
 // https://tools.ietf.org/html/rfc4271#section-4
@@ -48,6 +50,7 @@ pub enum BgpMessage {
     Update(BgpUpdateMessage),
     Notification(BgpNotificationMessage),
     KeepAlive,
+    RouteRefresh(BgpRouteRefreshMessage),
 }
 
 impl BgpMessage {
@@ -57,7 +60,72 @@ impl BgpMessage {
             BgpMessage::Update(_) => BgpMessageType::UPDATE,
             BgpMessage::Notification(_) => BgpMessageType::NOTIFICATION,
             BgpMessage::KeepAlive => BgpMessageType::KEEPALIVE,
+            BgpMessage::RouteRefresh(_) => BgpMessageType::ROUTE_REFRESH,
         }
+    }
+}
+
+/// BGP ROUTE-REFRESH Message - RFC 2918
+///
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///  |          AFI                  |    Res./Subt. |     SAFI      |
+///  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
+///
+/// AFI and SAFI are kept as raw integers so refreshes for address families
+/// outside the [Afi]/[Safi] enums still parse and re-encode byte-for-byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BgpRouteRefreshMessage {
+    pub afi: u16,
+    /// Reserved in RFC 2918; message subtype in RFC 7313
+    /// (0 = normal route refresh, 1 = BoRR, 2 = EoRR).
+    pub subtype: u8,
+    pub safi: u8,
+    /// Trailing bytes such as ORF entries (RFC 5291), kept raw.
+    pub data: Vec<u8>,
+}
+
+impl BgpRouteRefreshMessage {
+    /// The AFI as a typed [Afi], if it is a known address family.
+    pub fn afi(&self) -> Option<Afi> {
+        Afi::try_from(self.afi).ok()
+    }
+
+    /// The SAFI as a typed [Safi], if it is a known subsequent address family.
+    pub fn safi(&self) -> Option<Safi> {
+        Safi::try_from(self.safi).ok()
+    }
+
+    /// RFC 7313 Section 5 validation findings for this message.
+    ///
+    /// A subtype other than 0-2 MUST be ignored (and SHOULD be logged) by a
+    /// live speaker, and a BoRR/EoRR message (subtype 1 or 2) whose body is
+    /// not exactly 4 bytes is an "Invalid Message Length" error. Both rules
+    /// only apply when the Enhanced Route Refresh capability was negotiated,
+    /// which MRT data cannot show, so the parser reports them as warnings
+    /// while retaining the message.
+    pub fn validation_warnings(&self) -> Vec<crate::error::BgpValidationWarning> {
+        use crate::error::BgpValidationWarning;
+        let mut warnings = Vec::new();
+        match self.subtype {
+            0 => {}
+            1 | 2 => {
+                if !self.data.is_empty() {
+                    warnings.push(BgpValidationWarning::InvalidRouteRefreshLength {
+                        subtype: self.subtype,
+                        length: 4 + self.data.len(),
+                    });
+                }
+            }
+            subtype => {
+                warnings.push(BgpValidationWarning::UnknownRouteRefreshSubtype { subtype });
+            }
+        }
+        warnings
     }
 }
 
@@ -193,6 +261,44 @@ pub struct BgpNotificationMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::BgpValidationWarning;
+
+    fn route_refresh(subtype: u8, data: Vec<u8>) -> BgpRouteRefreshMessage {
+        BgpRouteRefreshMessage {
+            afi: 1,
+            subtype,
+            safi: 1,
+            data,
+        }
+    }
+
+    #[test]
+    fn test_route_refresh_validation_warnings() {
+        // Normal refreshes carry no findings, with or without ORF data
+        assert!(route_refresh(0, vec![]).validation_warnings().is_empty());
+        assert!(route_refresh(0, vec![0x01])
+            .validation_warnings()
+            .is_empty());
+
+        // BoRR/EoRR with an exactly 4-byte body are clean
+        assert!(route_refresh(1, vec![]).validation_warnings().is_empty());
+        assert!(route_refresh(2, vec![]).validation_warnings().is_empty());
+
+        // BoRR/EoRR with trailing bytes violate the RFC 7313 length rule
+        assert_eq!(
+            route_refresh(2, vec![0xDE, 0xAD, 0xBE]).validation_warnings(),
+            vec![BgpValidationWarning::InvalidRouteRefreshLength {
+                subtype: 2,
+                length: 7
+            }]
+        );
+
+        // Subtypes outside 0-2 are unknown
+        assert_eq!(
+            route_refresh(3, vec![]).validation_warnings(),
+            vec![BgpValidationWarning::UnknownRouteRefreshSubtype { subtype: 3 }]
+        );
+    }
 
     #[test]
     fn test_message_type() {

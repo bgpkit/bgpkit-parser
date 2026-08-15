@@ -50,6 +50,9 @@ fn prints_earliest_ris_update_statistics() {
                             BgpMessage::Open(_) => opens += 1,
                             BgpMessage::Notification(_) => notifications += 1,
                             BgpMessage::KeepAlive => keepalives += 1,
+                            BgpMessage::RouteRefresh(_) => {
+                                panic!("unexpected ROUTE-REFRESH in legacy fixture")
+                            }
                         }
                     }
                     MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => state_changes += 1,
@@ -190,6 +193,9 @@ fn parses_legacy_open_and_notify_fixture() {
                     assert!(notification.data.is_empty());
                 }
                 BgpMessage::KeepAlive => keepalives += 1,
+                BgpMessage::RouteRefresh(_) => {
+                    panic!("unexpected ROUTE-REFRESH in legacy fixture")
+                }
             },
             MrtMessage::LegacyBgp(LegacyBgp::StateChange(_)) => state_changes += 1,
             message => panic!("unexpected MRT message: {message:?}"),
