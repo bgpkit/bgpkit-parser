@@ -84,7 +84,6 @@ cli = [
     "clap",
     "parser",
     "oneio",
-    "rustls",
     "env_logger",
     "serde",
     "serde_json"
