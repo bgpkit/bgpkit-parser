@@ -249,10 +249,7 @@ match process_mrt_file("http://example.com/updates.bz2") {
 **Recovering After Damaged MRT Framing**
 
 Recovery is opt-in and never reconstructs a damaged record. It reports the skipped decompressed
-byte range before resuming at a conservatively validated record chain. A correctly framed record
-whose body fails to parse is skipped exactly, and damage extending to the end of the stream
-(e.g. a truncated final record) is reported as a terminal gap rather than an error. Use
-`into_recovering_elem_iter` for the same events at the `BgpElem` level.
+byte range before resuming at a conservatively validated record chain.
 
 ```rust
 use bgpkit_parser::{BgpkitParser, RecoveryConfig, RecoveryEvent};

@@ -1,6 +1,6 @@
 [package]
 name = "bgpkit-parser"
-version = "0.19.0"
+version = "0.20.0"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 license = "MIT"
@@ -83,6 +83,8 @@ parser = [
 cli = [
     "clap",
     "parser",
+    "oneio",
+    "rustls",
     "env_logger",
     "serde",
     "serde_json"
