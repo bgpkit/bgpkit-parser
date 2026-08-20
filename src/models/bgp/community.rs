@@ -15,6 +15,7 @@ pub enum MetaCommunity {
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub enum Community {
     NoExport,
     NoAdvertise,
@@ -29,6 +30,7 @@ pub enum Community {
 /// Large community is displayed as `GLOBAL_ADMINISTRATOR:LOCAL_DATA_1:LOCAL_DATA_2`
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct LargeCommunity {
     pub global_admin: u32,
     pub local_data: [u32; 2],
@@ -46,6 +48,7 @@ impl LargeCommunity {
 /// Type definitions of extended communities
 #[derive(Debug, FromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[repr(u8)]
 pub enum ExtendedCommunityType {
     // transitive types
@@ -93,6 +96,7 @@ pub enum ExtendedCommunityType {
 /// ```
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub enum ExtendedCommunity {
     TransitiveTwoOctetAs(TwoOctetAsExtCommunity),
     TransitiveIpv4Addr(Ipv4AddrExtCommunity),
@@ -145,6 +149,7 @@ impl ExtendedCommunity {
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct Ipv6AddrExtCommunity {
     pub community_type: ExtendedCommunityType,
     pub subtype: u8,
@@ -159,6 +164,7 @@ pub struct Ipv6AddrExtCommunity {
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.1>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct TwoOctetAsExtCommunity {
     pub subtype: u8,
     // 2 octet
@@ -172,6 +178,7 @@ pub struct TwoOctetAsExtCommunity {
 /// <https://datatracker.ietf.org/doc/html/rfc5668#section-2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct FourOctetAsExtCommunity {
     pub subtype: u8,
     // 4 octet
@@ -185,6 +192,7 @@ pub struct FourOctetAsExtCommunity {
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.2>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct Ipv4AddrExtCommunity {
     pub subtype: u8,
     // 4 octet
@@ -198,6 +206,7 @@ pub struct Ipv4AddrExtCommunity {
 /// <https://datatracker.ietf.org/doc/html/rfc4360#section-3.3>
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct OpaqueExtCommunity {
     pub subtype: u8,
     // 6 octet
@@ -209,6 +218,7 @@ pub struct OpaqueExtCommunity {
 /// RFC 10005 - subtype 0x04
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct LinkBandwidth {
     /// Global Administrator value (2 octets)
     pub global_admin: u16,
@@ -233,6 +243,7 @@ impl Eq for LinkBandwidth {}
 /// RFC 8955 - subtype 0x06
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct FlowSpecTrafficRate {
     /// AS Number (2 octets)
     pub as_number: u16,
@@ -254,6 +265,7 @@ impl Eq for FlowSpecTrafficRate {}
 /// RFC 8955 - subtype 0x07  
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct FlowSpecTrafficAction {
     /// AS Number (2 octets)
     pub as_number: u16,
@@ -268,6 +280,7 @@ pub struct FlowSpecTrafficAction {
 /// RFC 8955 - subtype 0x09
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct FlowSpecTrafficMarking {
     /// AS Number (2 octets)
     pub as_number: u16,

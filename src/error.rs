@@ -229,6 +229,7 @@ impl From<TryFromPrimitiveError<Safi>> for ParserError {
 /// in minor releases without breaking exhaustive matches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[non_exhaustive]
 pub enum BgpValidationWarning {
     /// Attribute flags conflict with attribute type code (RFC 4271 Section 6.3)

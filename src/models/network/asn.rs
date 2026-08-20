@@ -34,6 +34,7 @@ impl AsnLength {
 #[derive(Clone, Copy, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(as = "u32"))]
 pub struct Asn {
     asn: u32,
     #[cfg_attr(feature = "serde", serde(skip_serializing, default))]
