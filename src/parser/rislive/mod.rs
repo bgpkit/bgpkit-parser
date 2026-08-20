@@ -40,6 +40,9 @@ fn main() {
 */
 use crate::parser::rislive::error::ParserRisliveError;
 pub use crate::parser::rislive::messages::parse_ris_live_message_raw;
+pub use crate::parser::rislive::messages::{
+    parse_ris_live_message_raw_full, RisLiveMeta, RisLiveRawFull,
+};
 use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
 use crate::models::*;

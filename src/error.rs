@@ -228,6 +228,7 @@ impl From<TryFromPrimitiveError<Safi>> for ParserError {
 /// This enum is `#[non_exhaustive]` so that new warning variants can be added
 /// in minor releases without breaking exhaustive matches.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[non_exhaustive]
 pub enum BgpValidationWarning {
     /// Attribute flags conflict with attribute type code (RFC 4271 Section 6.3)
