@@ -164,13 +164,7 @@ mod tests {
     fn valid_attributes() -> Attributes {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([64500]),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([64500])).into());
         attributes
             .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
         attributes

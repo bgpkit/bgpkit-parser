@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Breaking changes
+
+* **`AttributeValue::AsPath` / `AttributeValue::Aggregator` variant split** ([#329](https://github.com/bgpkit/bgpkit-parser/issues/329)): the `is_as4: bool` field conflated the wire attribute type (AS_PATH type 2 vs AS4_PATH type 17; AGGREGATOR type 7 vs AS4_AGGREGATOR type 18) with the AS-number segment width, so building an announcement for a 4-octet session with `is_as4: true` silently emitted AS4_PATH (type 17) — an attribute RFC 6793 §4.2 reserves for 2-octet sessions. The flag is now structural, mirroring `MpReachNlri`/`MpUnreachNlri`:
+
+  | Before | After |
+  | --- | --- |
+  | `AttributeValue::AsPath { path, is_as4: false }` | `AttributeValue::AsPath(path)` |
+  | `AttributeValue::AsPath { path, is_as4: true }` | `AttributeValue::As4Path(path)` |
+  | `AttributeValue::Aggregator { asn, id, is_as4: false }` | `AttributeValue::Aggregator { asn, id }` |
+  | `AttributeValue::Aggregator { asn, id, is_as4: true }` | `AttributeValue::As4Aggregator { asn, id }` |
+
+  To build announcements for a 4-octet session, use `AsPath` (or `path.into()`) and pass `AsnLength::Bits32` to `encode_to`; segments encode as 4-octet automatically. `As4Path` / `As4Aggregator` are for the RFC 6793 2-octet-session fallback and for reproducing captured migration attributes; their values always encode with 4-octet AS numbers. Serde note: the JSON shape of these variants changes from `{"AsPath": {"path": ..., "is_as4": ...}}` to `{"AsPath": [...]}` / `{"As4Path": [...]}`.
+* **`Attributes::as_path()` semantics**: now returns only the AS_PATH (type 2) attribute value. Previously it returned whichever path attribute appeared last — preferring AS4_PATH when both were present, without merging. Use the new `effective_as_path()` for the RFC 6793 §4.2.3 merged path.
+* **Encoding errors instead of silent AS-number truncation** ([#329](https://github.com/bgpkit/bgpkit-parser/issues/329)): encoding an AS number above 65535 into a 2-octet AS_PATH segment or AGGREGATOR now returns `EncodingError::ValueTooLarge` instead of silently writing the low 16 bits (e.g. 400644 → 7428). Substitute `AS_TRANS` (23456) or use `As4Path` / `As4Aggregator` explicitly. AGGREGATOR's AS-number width now follows the session's `asn_len` like AS_PATH, instead of the `Asn` value's internal 2/4-octet flag.
+
+### Added
+
+* **`Attributes::effective_as_path()`**: returns the RFC 6793 §4.2.3 effective AS path — AS_PATH and AS4_PATH merged when both are present, otherwise whichever exists — so callers no longer need to reimplement the merge logic. Also adds `Attributes::as4_path()` for raw access to the type-17 attribute.
+
+### Fixed
+
+* **Elem-to-attributes conversion no longer mislabels 4-octet paths as AS4_PATH**: converting a `BgpElem` back to attributes derived `is_as4` from whether the origin AS number was 4-octet, which re-encoded such paths as type 17 on any session ([#329](https://github.com/bgpkit/bgpkit-parser/issues/329)).
+
 ## v0.20.0 - 2026-08-16
 
 ### Breaking changes

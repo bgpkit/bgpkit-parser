@@ -288,7 +288,9 @@ impl Attributes {
         // Begin searching at the end of the attributes to increase the odds of finding an AS4
         // attribute first.
         self.inner.iter().rev().find_map(|x| match &x.value {
-            AttributeValue::Aggregator { asn, id, .. } => Some((*asn, *id)),
+            AttributeValue::Aggregator { asn, id } | AttributeValue::As4Aggregator { asn, id } => {
+                Some((*asn, *id))
+            }
             _ => None,
         })
     }
@@ -301,13 +303,37 @@ impl Attributes {
     }
 
     // These implementations are horribly inefficient, but they were super easy to write and use
+
+    /// Get the AS_PATH (type 2) attribute value, without merging a
+    /// coexisting AS4_PATH. See [`Attributes::effective_as_path`] for the
+    /// RFC 6793 merged path.
     pub fn as_path(&self) -> Option<&AsPath> {
-        // Begin searching at the end of the attributes to increase the odds of finding an AS4
-        // attribute first.
-        self.inner.iter().rev().find_map(|x| match &x.value {
-            AttributeValue::AsPath { path, .. } => Some(path),
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::AsPath(path) => Some(path),
             _ => None,
         })
+    }
+
+    /// Get the AS4_PATH (type 17) attribute value if present.
+    pub fn as4_path(&self) -> Option<&AsPath> {
+        self.inner.iter().find_map(|x| match &x.value {
+            AttributeValue::As4Path(path) => Some(path),
+            _ => None,
+        })
+    }
+
+    /// Get the effective AS path per RFC 6793 §4.2.3.
+    ///
+    /// When both AS_PATH and AS4_PATH are present (a 2-octet session carrying
+    /// 4-octet AS numbers), the two are merged: the leading ASes come from the
+    /// 2-octet AS_PATH and the trailing ASes from the 4-octet AS4_PATH.
+    /// Otherwise whichever attribute is present is returned as-is.
+    pub fn effective_as_path(&self) -> Option<AsPath> {
+        match (self.as_path(), self.as4_path()) {
+            (None, None) => None,
+            (Some(path), None) | (None, Some(path)) => Some(path.clone()),
+            (Some(path), Some(as4_path)) => Some(AsPath::merge_aspath_as4path(path, as4_path)),
+        }
     }
 
     pub fn get_reachable_nlri(&self) -> Option<&Nlri> {
@@ -675,19 +701,37 @@ pub struct AttrSet {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttributeValue {
     Origin(Origin),
-    AsPath {
-        path: AsPath,
-        is_as4: bool,
-    },
+    /// AS_PATH (type 2), RFC 4271 §4.3.
+    ///
+    /// On encode, the segment width follows the session's `asn_len` passed to
+    /// [`Attribute::encode_to`]: a 4-octet session encodes 4-octet AS
+    /// numbers directly. This is the variant to use when building announcements.
+    AsPath(AsPath),
+    /// AS4_PATH (type 17), RFC 6793 §4.2 — the migration fallback that carries
+    /// the full path with 4-octet AS numbers alongside a 2-octet AS_PATH.
+    ///
+    /// Segments always encode as 4-octet regardless of the session's `asn_len`.
+    /// Only speakers sending 4-octet AS numbers over a 2-octet session should
+    /// emit this attribute; RFC 6793 §4.2 forbids it on 4-octet sessions.
+    As4Path(AsPath),
     NextHop(IpAddr),
     MultiExitDiscriminator(u32),
     LocalPreference(u32),
     OnlyToCustomer(Asn),
     AtomicAggregate,
+    /// AGGREGATOR (type 7), RFC 4271 §4.3.8.
+    ///
+    /// On encode, the AS number width follows the session's `asn_len`.
     Aggregator {
         asn: Asn,
         id: BgpIdentifier,
-        is_as4: bool,
+    },
+    /// AS4_AGGREGATOR (type 18), RFC 6793 — carries the aggregator AS number
+    /// as 4 octets alongside a 2-octet AGGREGATOR. Always encodes the AS
+    /// number as 4 octets.
+    As4Aggregator {
+        asn: Asn,
+        id: BgpIdentifier,
     },
     Communities(Vec<Community>),
     ExtendedCommunities(Vec<ExtendedCommunity>),
@@ -727,13 +771,11 @@ impl From<Origin> for AttributeValue {
     }
 }
 
-/// Defaults to using `AS_PATH` (as opposed to `AS4_PATH`) when choosing attribute type.
+/// Converts to the AS_PATH (type 2) attribute value. Use [`AttributeValue::As4Path`]
+/// explicitly to build the RFC 6793 migration-fallback attribute.
 impl From<AsPath> for AttributeValue {
     fn from(path: AsPath) -> Self {
-        AttributeValue::AsPath {
-            path,
-            is_as4: false,
-        }
+        AttributeValue::AsPath(path)
     }
 }
 
@@ -753,15 +795,15 @@ impl AttributeValue {
     pub fn attr_type(&self) -> AttrType {
         match self {
             AttributeValue::Origin(_) => AttrType::ORIGIN,
-            AttributeValue::AsPath { is_as4: false, .. } => AttrType::AS_PATH,
-            AttributeValue::AsPath { is_as4: true, .. } => AttrType::AS4_PATH,
+            AttributeValue::AsPath(_) => AttrType::AS_PATH,
+            AttributeValue::As4Path(_) => AttrType::AS4_PATH,
             AttributeValue::NextHop(_) => AttrType::NEXT_HOP,
             AttributeValue::MultiExitDiscriminator(_) => AttrType::MULTI_EXIT_DISCRIMINATOR,
             AttributeValue::LocalPreference(_) => AttrType::LOCAL_PREFERENCE,
             AttributeValue::OnlyToCustomer(_) => AttrType::ONLY_TO_CUSTOMER,
             AttributeValue::AtomicAggregate => AttrType::ATOMIC_AGGREGATE,
-            AttributeValue::Aggregator { is_as4: false, .. } => AttrType::AGGREGATOR,
-            AttributeValue::Aggregator { is_as4: true, .. } => AttrType::AS4_AGGREGATOR,
+            AttributeValue::Aggregator { .. } => AttrType::AGGREGATOR,
+            AttributeValue::As4Aggregator { .. } => AttrType::AS4_AGGREGATOR,
             AttributeValue::Communities(_) => AttrType::COMMUNITIES,
             AttributeValue::ExtendedCommunities(_) => AttrType::EXTENDED_COMMUNITIES,
             AttributeValue::Ipv6AddressSpecificExtendedCommunities(_) => {
@@ -802,8 +844,8 @@ impl AttributeValue {
 
         match self {
             AttributeValue::Origin(_) => Some(WellKnownMandatory),
-            AttributeValue::AsPath { is_as4: false, .. } => Some(WellKnownMandatory),
-            AttributeValue::AsPath { is_as4: true, .. } => Some(OptionalTransitive),
+            AttributeValue::AsPath(_) => Some(WellKnownMandatory),
+            AttributeValue::As4Path(_) => Some(OptionalTransitive),
             AttributeValue::NextHop(_) => Some(WellKnownMandatory),
             AttributeValue::MultiExitDiscriminator(_) => Some(OptionalNonTransitive),
             // If we receive this attribute we must be in IBGP so it is required
@@ -811,6 +853,7 @@ impl AttributeValue {
             AttributeValue::OnlyToCustomer(_) => Some(OptionalTransitive),
             AttributeValue::AtomicAggregate => Some(WellKnownDiscretionary),
             AttributeValue::Aggregator { .. } => Some(OptionalTransitive),
+            AttributeValue::As4Aggregator { .. } => Some(OptionalTransitive),
             AttributeValue::Communities(_) => Some(OptionalTransitive),
             AttributeValue::ExtendedCommunities(_) => Some(OptionalTransitive),
             AttributeValue::LargeCommunities(_) => Some(OptionalTransitive),
@@ -893,10 +936,7 @@ mod tests {
     fn test_from_iter_attribute_value_uses_default_flags() {
         let attributes = Attributes::from_iter(vec![
             AttributeValue::Origin(Origin::IGP),
-            AttributeValue::AsPath {
-                path: AsPath::new(),
-                is_as4: false,
-            },
+            AttributeValue::AsPath(AsPath::new()),
         ]);
 
         assert_eq!(
@@ -943,10 +983,7 @@ mod tests {
             flag: AttrFlags::TRANSITIVE,
         });
         attributes.add_attr(Attribute {
-            value: AttributeValue::AsPath {
-                path: AsPath::new(),
-                is_as4: false,
-            },
+            value: AttributeValue::AsPath(AsPath::new()),
             flag: AttrFlags::TRANSITIVE,
         });
         attributes.add_attr(Attribute {
@@ -978,7 +1015,6 @@ mod tests {
             value: AttributeValue::Aggregator {
                 asn: Asn::new_32bit(1),
                 id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
-                is_as4: false,
             },
             flag: AttrFlags::TRANSITIVE,
         });
@@ -1026,13 +1062,7 @@ mod tests {
 
         let aspath = AsPath::new();
         let attr_value = AttributeValue::from(aspath);
-        assert_eq!(
-            attr_value,
-            AttributeValue::AsPath {
-                path: AsPath::new(),
-                is_as4: false
-            }
-        );
+        assert_eq!(attr_value, AttributeValue::AsPath(AsPath::new()));
     }
 
     #[test]
@@ -1042,10 +1072,7 @@ mod tests {
             origin_attr.attr_category(),
             Some(AttributeCategory::WellKnownMandatory)
         );
-        let as_path_attr = AttributeValue::AsPath {
-            path: AsPath::new(),
-            is_as4: false,
-        };
+        let as_path_attr = AttributeValue::AsPath(AsPath::new());
         assert_eq!(
             as_path_attr.attr_category(),
             Some(AttributeCategory::WellKnownMandatory)
@@ -1073,18 +1100,19 @@ mod tests {
 
     #[test]
     fn test_optional_transitive_attrs() {
-        let as_path_attr = AttributeValue::AsPath {
-            path: AsPath::new(),
-            is_as4: true,
-        };
+        let as4_path_attr = AttributeValue::As4Path(AsPath::new());
         assert_eq!(
-            as_path_attr.attr_category(),
+            as4_path_attr.attr_type(),
+            AttrType::AS4_PATH,
+            "AS4_PATH must map to wire type 17"
+        );
+        assert_eq!(
+            as4_path_attr.attr_category(),
             Some(AttributeCategory::OptionalTransitive)
         );
         let aggregator_attr = AttributeValue::Aggregator {
             asn: Asn::new_32bit(1),
             id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
-            is_as4: false,
         };
         assert_eq!(
             aggregator_attr.attr_category(),
@@ -1113,13 +1141,17 @@ mod tests {
             large_communities_attr.attr_category(),
             Some(AttributeCategory::OptionalTransitive)
         );
-        let aggregator_attr = AttributeValue::Aggregator {
+        let as4_aggregator_attr = AttributeValue::As4Aggregator {
             asn: Asn::new_32bit(1),
             id: Ipv4Addr::from_str("0.0.0.0").unwrap(),
-            is_as4: true,
         };
         assert_eq!(
-            aggregator_attr.attr_category(),
+            as4_aggregator_attr.attr_type(),
+            AttrType::AS4_AGGREGATOR,
+            "AS4_AGGREGATOR must map to wire type 18"
+        );
+        assert_eq!(
+            as4_aggregator_attr.attr_category(),
             Some(AttributeCategory::OptionalTransitive)
         );
     }
@@ -1215,10 +1247,7 @@ mod tests {
                 flag: AttrFlags::TRANSITIVE,
             },
             Attribute {
-                value: AttributeValue::AsPath {
-                    path: AsPath::new(),
-                    is_as4: false,
-                },
+                value: AttributeValue::AsPath(AsPath::new()),
                 flag: AttrFlags::TRANSITIVE,
             },
         ]);
@@ -1227,5 +1256,47 @@ mod tests {
         let deserialized: Attributes = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(attributes, deserialized);
+    }
+
+    #[test]
+    fn test_as_path_accessors() {
+        let mut attributes = Attributes::default();
+        assert_eq!(attributes.as_path(), None);
+        assert_eq!(attributes.as4_path(), None);
+        assert_eq!(attributes.effective_as_path(), None);
+
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([23456, 64497])).into());
+        assert_eq!(
+            attributes
+                .as_path()
+                .map(|p| p.to_u32_vec_opt(false).unwrap()),
+            Some(vec![23456, 64497])
+        );
+        assert_eq!(attributes.as4_path(), None);
+        assert_eq!(
+            attributes
+                .effective_as_path()
+                .unwrap()
+                .to_u32_vec_opt(false)
+                .unwrap(),
+            vec![23456, 64497]
+        );
+
+        attributes.add_attr(AttributeValue::As4Path(AsPath::from_sequence([65536, 64497])).into());
+        assert_eq!(
+            attributes
+                .as4_path()
+                .map(|p| p.to_u32_vec_opt(false).unwrap()),
+            Some(vec![65536, 64497])
+        );
+        // RFC 6793 §4.2.3: leading ASes from AS_PATH, trailing ASes from AS4_PATH.
+        assert_eq!(
+            attributes
+                .effective_as_path()
+                .unwrap()
+                .to_u32_vec_opt(false)
+                .unwrap(),
+            vec![65536, 64497]
+        );
     }
 }

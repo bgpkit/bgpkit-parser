@@ -891,13 +891,7 @@ mod tests {
     fn update_record() -> MrtRecord {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([64500, 64501]),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([64500, 64501])).into());
         attributes
             .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
 
@@ -928,13 +922,7 @@ mod tests {
     fn route_attributes(as_path: impl AsRef<[u32]>) -> Attributes {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence(as_path),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence(as_path)).into());
         attributes
             .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
         attributes
@@ -1005,13 +993,7 @@ mod tests {
     fn table_dump_record() -> MrtRecord {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([64500, 64501]),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([64500, 64501])).into());
         attributes
             .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
 
@@ -1039,13 +1021,7 @@ mod tests {
     fn table_dump_ipv6_record() -> MrtRecord {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([64500, 64501]),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([64500, 64501])).into());
 
         MrtRecord {
             common_header: CommonHeader {
@@ -1079,13 +1055,7 @@ mod tests {
 
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([64500, 64501]),
-                is_as4: false,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([64500, 64501])).into());
         attributes
             .add_attr(AttributeValue::NextHop(IpAddr::from_str("192.0.2.254").unwrap()).into());
 
@@ -1401,20 +1371,8 @@ mod tests {
     #[test]
     fn selective_attribute_parser_merges_as4_path() {
         let mut attributes = Attributes::default();
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([23456, 64497]),
-                is_as4: false,
-            }
-            .into(),
-        );
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([65536, 64497]),
-                is_as4: true,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([23456, 64497])).into());
+        attributes.add_attr(AttributeValue::As4Path(AsPath::from_sequence([65536, 64497])).into());
 
         let attrs = parse_route_attributes(
             attributes.encode(AsnLength::Bits16).unwrap(),
@@ -1463,13 +1421,7 @@ mod tests {
     #[test]
     fn selective_attribute_parser_handles_as4_path_without_as_path() {
         let mut attributes = Attributes::default();
-        attributes.add_attr(
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([65536, 64497]),
-                is_as4: true,
-            }
-            .into(),
-        );
+        attributes.add_attr(AttributeValue::As4Path(AsPath::from_sequence([65536, 64497])).into());
 
         let attrs = parse_route_attributes(
             attributes.encode(AsnLength::Bits16).unwrap(),

@@ -158,7 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     AttributeValue::Origin(origin) => {
                         println!("ORIGIN: {:?}", origin);
                     }
-                    AttributeValue::AsPath { path, .. } => {
+                    AttributeValue::AsPath(path) | AttributeValue::As4Path(path) => {
                         println!("AS_PATH: {}", path);
                     }
                     AttributeValue::MpReachNlri(nlri) => {

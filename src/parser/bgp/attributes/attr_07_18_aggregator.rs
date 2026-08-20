@@ -1,3 +1,4 @@
+use crate::error::{check_max, EncodingError};
 use crate::models::*;
 use crate::parser::ReadUtils;
 use crate::ParserError;
@@ -43,17 +44,34 @@ pub fn parse_aggregator(
     Ok((asn, identifier))
 }
 
-pub fn encode_aggregator(asn: &Asn, addr: &IpAddr) -> Bytes {
+pub fn encode_aggregator(
+    asn: &Asn,
+    addr: &IpAddr,
+    asn_len: AsnLength,
+) -> Result<Bytes, EncodingError> {
     let mut bytes = BytesMut::new();
 
-    bytes.extend(asn.encode());
+    match asn_len {
+        AsnLength::Bits32 => bytes.put_u32((*asn).into()),
+        // A 4-octet AS number cannot be carried in 2-octet AGGREGATOR; the
+        // caller must substitute AS_TRANS (23456) or use AS4_AGGREGATOR.
+        AsnLength::Bits16 => {
+            let value: u32 = (*asn).into();
+            check_max(
+                "2-octet AS number in AGGREGATOR",
+                value as usize,
+                u16::MAX as usize,
+            )?;
+            bytes.put_u16(value as u16);
+        }
+    }
     match addr {
         IpAddr::V4(ip) => bytes.put_u32((*ip).into()),
         IpAddr::V6(ip) => {
             bytes.put_u128((*ip).into());
         }
     }
-    bytes.freeze()
+    Ok(bytes.freeze())
 }
 
 #[cfg(test)]
@@ -104,17 +122,32 @@ mod tests {
     fn test_encode_aggregator() {
         let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
         let asn = Asn::new_16bit(258);
-        let bytes = encode_aggregator(&asn, &ipv4.into());
+        let bytes = encode_aggregator(&asn, &ipv4.into(), AsnLength::Bits16).unwrap();
         assert_eq!(bytes, Bytes::from_static(&[1u8, 2, 10, 0, 0, 1]));
 
         let ipv6 = Ipv6Addr::from_str("fc00::1").unwrap();
         let asn = Asn::new_32bit(258);
-        let bytes = encode_aggregator(&asn, &ipv6.into());
+        let bytes = encode_aggregator(&asn, &ipv6.into(), AsnLength::Bits32).unwrap();
         assert_eq!(
             bytes,
             Bytes::from_static(&[
                 0u8, 0, 1, 2, 0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x01
             ])
+        );
+    }
+
+    #[test]
+    fn test_encode_aggregator_rejects_4octet_asn_in_2octet_field() {
+        let ipv4 = Ipv4Addr::from_str("10.0.0.1").unwrap();
+        let asn = Asn::new_32bit(400644);
+        let err = encode_aggregator(&asn, &ipv4.into(), AsnLength::Bits16).unwrap_err();
+        assert_eq!(
+            err,
+            EncodingError::ValueTooLarge {
+                field: "2-octet AS number in AGGREGATOR",
+                actual: 400644,
+                max: 65535,
+            }
         );
     }
 }
