@@ -643,45 +643,47 @@ impl AsPath {
             return aspath.clone();
         }
 
-        let mut as4iter = as4path.segments.iter();
+        // Keep route_len(AS_PATH) - route_len(AS4_PATH) AS numbers from the
+        // leading part of the AS_PATH and prepend them to the AS4_PATH. The
+        // leading count is trimmed across segment boundaries, not per segment:
+        // whole segments are kept while they fit, and the segment straddling
+        // the boundary is cut after the remaining number of AS numbers.
+        let mut leading = aspath.route_len() - as4path.route_len();
         let mut new_segs: Vec<AsPathSegment> = vec![];
-
         for seg in &aspath.segments {
-            match as4iter.next() {
-                None => {
+            if leading == 0 {
+                break;
+            }
+            match seg.route_len() {
+                // Confederation segments contribute no AS numbers to the
+                // route and stay adjacent to the prepended part
+                // (RFC 6793 §4.2.3); empty segments carry no information.
+                0 => new_segs.push(seg.clone()),
+                n if n <= leading => {
                     new_segs.push(seg.clone());
+                    leading -= n;
                 }
-                Some(as4seg_unwrapped) => {
-                    if let (AsPathSegment::AsSequence(seq), AsPathSegment::AsSequence(seq4)) =
-                        (seg, as4seg_unwrapped)
-                    {
-                        let diff_len = seq.len() as i32 - seq4.len() as i32;
-                        match diff_len {
-                            d if d > 0 => {
-                                // 2-byte ASN path is longer than 4-byte ASN path
-                                // we take the leading part of 2-byte ASN path and prepend it to 4-byte ASN path
-                                let mut new_seq: Vec<Asn> = vec![];
-                                new_seq.extend(seq.iter().take(d as usize));
-                                new_seq.extend(seq4);
-                                new_segs.push(AsPathSegment::AsSequence(new_seq.into()));
-                            }
-                            d if d < 0 => {
-                                new_segs.push(AsPathSegment::AsSequence(seq.clone()));
-                            }
-                            _ => {
-                                new_segs.push(AsPathSegment::AsSequence(seq4.clone()));
-                            }
-                        }
-                    } else {
-                        new_segs.push(as4seg_unwrapped.clone());
-                    }
+                _ => {
+                    // Only an AS_SEQUENCE can straddle the boundary: an AS_SET
+                    // counts as a single route ASN and confederation segments
+                    // as none.
+                    let AsPathSegment::AsSequence(v) = seg else {
+                        unreachable!("only an AS_SEQUENCE can exceed the leading count");
+                    };
+                    new_segs.push(AsPathSegment::AsSequence(
+                        v.iter().take(leading).copied().collect(),
+                    ));
+                    leading = 0;
                 }
-            };
+            }
         }
+        new_segs.extend(as4path.segments.iter().cloned());
 
-        AsPath {
+        let mut merged = AsPath {
             segments: new_segs.into(),
-        }
+        };
+        merged.coalesce();
+        merged
     }
 
     /// Iterate through the originating ASNs of this path. This functionality is provided for
@@ -1065,9 +1067,13 @@ mod tests {
         ]);
         let as4path = AsPath::from_sequence([6, 7, 8]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
-        assert_eq!(newpath.segments.len(), 2);
-        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 6, 7, 8]));
-        assert_eq!(newpath.segments[1], AsPathSegment::set([7, 8]));
+        // route_len 5 - 3 = 2 leading AS numbers, then the whole AS4_PATH;
+        // the AS_PATH trailing set is the stale 2-octet mirror and is dropped.
+        assert_eq!(newpath.segments.len(), 1);
+        assert_eq!(
+            newpath.segments[0],
+            AsPathSegment::sequence([1, 2, 6, 7, 8])
+        );
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2]),
@@ -1079,10 +1085,10 @@ mod tests {
             AsPathSegment::set([11, 12]),
         ]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
-        assert_eq!(newpath.segments.len(), 3);
-        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2]));
+        // route_len 5 - 4 = 1 leading AS number cut across segment boundaries.
+        assert_eq!(newpath.segments.len(), 2);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 8, 4, 6]));
         assert_eq!(newpath.segments[1], AsPathSegment::set([11, 12]));
-        assert_eq!(newpath.segments[2], AsPathSegment::set([13, 14]));
 
         let aspath = AsPath::from_segments(vec![
             AsPathSegment::sequence([1, 2, 3]),
@@ -1094,10 +1100,21 @@ mod tests {
             AsPathSegment::set([11, 12]),
         ]);
         let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
-        assert_eq!(newpath.segments.len(), 3);
-        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 7, 8]));
+        // route_len 5 - 3 = 2 leading AS numbers cut across segment boundaries.
+        assert_eq!(newpath.segments.len(), 2);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2, 7, 8]));
         assert_eq!(newpath.segments[1], AsPathSegment::set([11, 12]));
-        assert_eq!(newpath.segments[2], AsPathSegment::set([13, 14]));
+
+        // Misaligned segment boundaries: the leading count must be trimmed
+        // across segments, not aligned per segment pair (PR #330 review).
+        let aspath = AsPath::from_segments(vec![
+            AsPathSegment::sequence([1, 2]),
+            AsPathSegment::sequence([3, 4]),
+        ]);
+        let as4path = AsPath::from_sequence([9, 10]);
+        let newpath = AsPath::merge_aspath_as4path(&aspath, &as4path);
+        assert_eq!(newpath.segments.len(), 1);
+        assert_eq!(newpath.segments[0], AsPathSegment::sequence([1, 2, 9, 10]));
     }
 
     #[test]

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+* **RFC 6793 §4.2.3 AS_PATH/AS4_PATH merge now trims across segment boundaries** ([#330](https://github.com/bgpkit/bgpkit-parser/pull/330)): `AsPath::merge_aspath_as4path` previously aligned the two paths segment-by-segment, producing wrong merges whenever segment boundaries did not line up (e.g. AS_PATH `[1,2] [3,4]` with AS4_PATH `[9,10]` merged to `[9,10] [3,4]` instead of `[1,2] [9,10]`). It now keeps exactly `route_len(AS_PATH) - route_len(AS4_PATH)` AS numbers from the leading part of the AS_PATH and prepends them to the whole AS4_PATH, per the RFC. This also corrects elem-level merged paths, which use the same function.
 * **Elem-to-attributes conversion no longer mislabels 4-octet paths as AS4_PATH**: converting a `BgpElem` back to attributes derived `is_as4` from whether the origin AS number was 4-octet, which re-encoded such paths as type 17 on any session ([#329](https://github.com/bgpkit/bgpkit-parser/issues/329)).
 
 ## v0.20.0 - 2026-08-16
