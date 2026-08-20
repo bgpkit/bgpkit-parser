@@ -712,7 +712,7 @@ pub enum AttributeValue {
     ///
     /// Segments always encode as 4-octet regardless of the session's `asn_len`.
     /// Only speakers sending 4-octet AS numbers over a 2-octet session should
-    /// emit this attribute; RFC 6793 §4.2 forbids it on 4-octet sessions.
+    /// emit this attribute; RFC 6793 §4.1 forbids it on 4-octet sessions.
     As4Path(AsPath),
     NextHop(IpAddr),
     MultiExitDiscriminator(u32),
@@ -1290,6 +1290,19 @@ mod tests {
             Some(vec![65536, 64497])
         );
         // RFC 6793 §4.2.3: leading ASes from AS_PATH, trailing ASes from AS4_PATH.
+        assert_eq!(
+            attributes
+                .effective_as_path()
+                .unwrap()
+                .to_u32_vec_opt(false)
+                .unwrap(),
+            vec![65536, 64497]
+        );
+
+        // An AS4_PATH without an AS_PATH is returned as-is.
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::As4Path(AsPath::from_sequence([65536, 64497])).into());
+        assert_eq!(attributes.as_path(), None);
         assert_eq!(
             attributes
                 .effective_as_path()
