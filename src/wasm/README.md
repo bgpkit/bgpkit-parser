@@ -151,6 +151,69 @@ for (const elem of elems) {
 }
 ```
 
+### 5. RIS Live real-time stream (all platforms)
+
+Subscribe to the [RIPE RIS Live](https://ris-live.ripe.net/manual/) WebSocket
+feed and parse messages as they arrive. Two parsers are available:
+
+- `parseRisLiveMessageJson(message)` — uses RIS Live's JSON-projected UPDATE
+  fields. No subscription options required, but the projection exposes only a
+  subset of BGP path attributes (`path`, `community`, `origin`, `med`,
+  `aggregator`, `announcements`, `withdrawals`).
+- `parseRisLiveMessageRaw(message)` — decodes the hex `data.raw` BGP wire
+  message. Requires subscribing with `socketOptions.includeRaw = true`, and
+  preserves **every** path attribute (large/extended communities, OTC, local
+  pref, originator ID, cluster list, AIGP, raw-retained BGPSEC_PATH/ATTR_SET,
+  ...) plus RFC 7606 validation warnings, in addition to the same elems.
+
+```js
+import { parseRisLiveMessageRaw } from '@bgpkit/parser';
+
+const socket = new WebSocket('ws://ris-live.ripe.net/v1/ws/?client=bgpkit-parser');
+
+socket.onopen = () => {
+  socket.send(JSON.stringify({
+    type: 'ris_subscribe',
+    data: {
+      host: 'rrc21', // one RRC collector, or omit for the full firehose
+      socketOptions: { includeRaw: true },
+    },
+  }));
+};
+
+socket.onmessage = (event) => {
+  try {
+    const { meta, elems, attributes, validationWarnings } =
+      parseRisLiveMessageRaw(event.data);
+    for (const elem of elems) {
+      console.log(meta.host, elem.type, elem.prefix, elem.as_path);
+    }
+    // Full-fidelity attribute list, one entry per UPDATE:
+    // { value: { "<Variant>": payload }, flag: "OPTIONAL | TRANSITIVE" }
+    for (const attr of attributes) {
+      if ('OnlyToCustomer' in attr.value) {
+        console.log('OTC:', attr.value.OnlyToCustomer);
+      }
+    }
+    if (validationWarnings.length > 0) {
+      console.warn('RFC 7606 warnings:', validationWarnings);
+    }
+  } catch {
+    // non-UPDATE or control messages — ignore
+  }
+};
+```
+
+Non-UPDATE messages (`KEEPALIVE`, `OPEN`, `NOTIFICATION`, `RIS_PEER_STATE`)
+return an empty `elems` array from `parseRisLiveMessageJson`; the raw parser
+returns empty `elems`/`attributes` for them. RIS Live control messages
+(`ris_error`, `ris_rrc_list`, `pong`) throw from both parsers — wrap calls in
+`try`/`catch` and skip.
+
+Note: `includeRaw` roughly doubles message size (hex-encoded wire bytes on
+top of the always-present JSON fields); use the JSON parser if you only need
+the projected fields and want minimal bandwidth.
+
 ## Memory Considerations
 
 MRT parsing requires the **entire decompressed file** in memory as a
@@ -175,9 +238,29 @@ BMP and BGP UPDATE messages are small (KB-sized) and have no memory concerns.
 | `parseOpenBmpMessage(data)` | `Uint8Array` | `BmpParsedMessage \| null` | Real-time BMP streams |
 | `parseBmpMessage(data, timestamp)` | `Uint8Array`, `number` | `BmpParsedMessage` | Real-time BMP streams |
 | `parseBgpUpdate(data)` | `Uint8Array` | `BgpElem[]` | Individual BGP messages |
+| `parseRisLiveMessageJson(message)` | `string` | `BgpElem[]` | RIS Live stream (JSON projection) |
+| `parseRisLiveMessageRaw(message)` | `string` | `RisLiveRawFull` | RIS Live stream (full attribute fidelity) |
 | `parseMrtRecords(data)` | `Uint8Array` | `Generator<MrtRecordResult>` | MRT file analysis |
 | `parseMrtRecord(data)` | `Uint8Array` | `MrtRecordResult \| null` | MRT file analysis (low-level) |
 | `resetMrtParser()` | — | `void` | Clear state between MRT files |
+
+### RIS Live result type
+
+`parseRisLiveMessageRaw` returns:
+
+```ts
+interface RisLiveRawFull {
+  meta: RisLiveMeta;                  // host, id, peer, peerAsn, timestamp
+  elems: BgpElem[];                   // same elems as parseRisLiveMessageJson
+  attributes: Attribute[];            // full attribute list of the UPDATE
+  validationWarnings: BgpValidationWarning[]; // RFC 7606 parse findings
+}
+```
+
+Each `Attribute` is `{ value: { "<VariantName>": payload }, flag }` (serde
+external tagging), e.g. `{ "Origin": "IGP" }` or
+`{ "LargeCommunities": [...] }`. See `index.d.ts` and `generated/` in the
+package for the full typed surface.
 
 ### Node.js I/O helpers
 
@@ -272,3 +355,24 @@ To build a single target:
 ```sh
 wasm-pack build --target nodejs --no-default-features --features wasm
 ```
+
+## TypeScript Types
+
+Type definitions live in `src/wasm/js/index.d.ts`. The BGP attribute surface
+(`Attribute`, `AttributeValue`, community types, `Nlri`,
+`BgpValidationWarning`, ...) is **generated** from the Rust models with
+[ts-rs](https://github.com/Aleph-Alpha/ts-rs) into `src/wasm/js/generated/`;
+`BgpElem`, `AsPath`, and `MetaCommunity` are hand-written (their Rust types
+have custom serde impls).
+
+After changing any Rust model that affects the WASM JSON output, regenerate
+and commit both the bindings and the golden fixtures:
+
+```sh
+TS_RS_EXPORT_DIR=src/wasm/js/generated cargo test --features ts-rs,rislive
+```
+
+CI (`wasm-types` job) regenerates both, fails on any diff (drift gate), and
+type-checks the fixtures against the shipped `.d.ts`
+(`src/wasm/test/type-check/`, run `npm install && npm run check` locally).
+
