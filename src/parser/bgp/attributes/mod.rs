@@ -413,23 +413,13 @@ pub fn parse_attributes(
 
         let attr = match attr_type {
             AttrType::ORIGIN => parse_origin(attr_data),
-            AttrType::AS_PATH => {
-                parse_as_path(attr_data, asn_len).map(|path| AttributeValue::AsPath {
-                    path,
-                    is_as4: false,
-                })
-            }
+            AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(AttributeValue::AsPath),
             AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
             AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
             AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
             AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
-            AttrType::AGGREGATOR => {
-                parse_aggregator(attr_data, asn_len).map(|(asn, id)| AttributeValue::Aggregator {
-                    asn,
-                    id,
-                    is_as4: false,
-                })
-            }
+            AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
+                .map(|(asn, id)| AttributeValue::Aggregator { asn, id }),
             AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
             AttrType::CLUSTER_LIST => parse_clusters(attr_data),
             AttrType::MP_REACHABLE_NLRI => {
@@ -438,17 +428,11 @@ pub fn parse_attributes(
             AttrType::MP_UNREACHABLE_NLRI => {
                 parse_nlri(attr_data, &afi, &safi, &prefixes, false, add_path)
             }
-            AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32)
-                .map(|path| AttributeValue::AsPath { path, is_as4: true }),
-            AttrType::AS4_AGGREGATOR => {
-                parse_aggregator(attr_data, &AsnLength::Bits32).map(|(asn, id)| {
-                    AttributeValue::Aggregator {
-                        asn,
-                        id,
-                        is_as4: true,
-                    }
-                })
+            AttrType::AS4_PATH => {
+                parse_as_path(attr_data, &AsnLength::Bits32).map(AttributeValue::As4Path)
             }
+            AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32)
+                .map(|(asn, id)| AttributeValue::As4Aggregator { asn, id }),
 
             // communities
             AttrType::COMMUNITIES => parse_regular_communities(attr_data),
@@ -518,15 +502,14 @@ impl Attribute {
         let write_value = |b: &mut BytesMut| -> Result<(), EncodingError> {
             match &self.value {
                 AttributeValue::Origin(v) => b.put_slice(&encode_origin(v)),
-                AttributeValue::AsPath { path, is_as4 } => {
-                    let four_byte = match is_as4 {
-                        true => AsnLength::Bits32,
-                        false => match asn_len.is_four_byte() {
-                            true => AsnLength::Bits32,
-                            false => AsnLength::Bits16,
-                        },
-                    };
-                    encode_as_path(path, four_byte, b)?;
+                // AS_PATH segment width follows the session's AS number length.
+                AttributeValue::AsPath(path) => {
+                    encode_as_path(path, asn_len, b)?;
+                }
+                // AS4_PATH segments are 4-octet by definition (RFC 6793 §4.2),
+                // independent of the session's AS number length.
+                AttributeValue::As4Path(path) => {
+                    encode_as_path(path, AsnLength::Bits32, b)?;
                 }
                 AttributeValue::NextHop(v) => b.put_slice(&encode_next_hop(v)),
                 AttributeValue::MultiExitDiscriminator(v) => b.put_slice(&encode_med(*v)),
@@ -535,9 +518,14 @@ impl Attribute {
                     b.put_slice(&encode_only_to_customer(v.into()))
                 }
                 AttributeValue::AtomicAggregate => {}
-                AttributeValue::Aggregator { asn, id, is_as4: _ } => {
-                    b.put_slice(&encode_aggregator(asn, &IpAddr::from(*id)))
+                AttributeValue::Aggregator { asn, id } => {
+                    b.put_slice(&encode_aggregator(asn, &IpAddr::from(*id), asn_len)?)
                 }
+                AttributeValue::As4Aggregator { asn, id } => b.put_slice(&encode_aggregator(
+                    asn,
+                    &IpAddr::from(*id),
+                    AsnLength::Bits32,
+                )?),
                 AttributeValue::Communities(v) => b.put_slice(&encode_regular_communities(v)),
                 AttributeValue::ExtendedCommunities(v) => {
                     b.put_slice(&encode_extended_communities(v))
@@ -1042,5 +1030,115 @@ mod tests {
         // Should have multiple warnings but parsing should continue
         let warnings = attributes.validation_warnings();
         assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn test_encode_as_path_attribute_type_selection() {
+        // Regression test for issue #329: an AS_PATH built for a 4-octet
+        // session must encode as attribute type 2 with 4-octet segments, not
+        // as AS4_PATH (type 17).
+        let attrs = Attributes::from_iter(vec![AttributeValue::AsPath(AsPath::from_sequence([
+            400644,
+        ]))]);
+        let buf = attrs.encode(AsnLength::Bits32).unwrap();
+        assert_eq!(buf[1], 2, "attribute type must be AS_PATH (2)");
+        // segment header (type 2, count 1) + one 4-octet ASN
+        assert_eq!(&buf[3..], &[0x02, 0x01, 0x00, 0x06, 0x1D, 0x04]);
+
+        // AS4_PATH always encodes as type 17 with 4-octet segments, even on a
+        // 2-octet session (RFC 6793 §4.2).
+        let attrs = Attributes::from_iter(vec![AttributeValue::As4Path(AsPath::from_sequence([
+            400644,
+        ]))]);
+        let buf = attrs.encode(AsnLength::Bits16).unwrap();
+        assert_eq!(buf[1], 17, "attribute type must be AS4_PATH (17)");
+        assert_eq!(&buf[3..], &[0x02, 0x01, 0x00, 0x06, 0x1D, 0x04]);
+    }
+
+    #[test]
+    fn test_encode_as_path_on_2octet_session() {
+        let attrs = Attributes::from_iter(vec![AttributeValue::AsPath(AsPath::from_sequence([
+            64496, 64497,
+        ]))]);
+        let buf = attrs.encode(AsnLength::Bits16).unwrap();
+        assert_eq!(buf[1], 2);
+        // segment header (type 2, count 2) + two 2-octet ASNs
+        assert_eq!(&buf[3..], &[0x02, 0x02, 0xFB, 0xF0, 0xFB, 0xF1]);
+    }
+
+    #[test]
+    fn test_encode_as_path_rejects_4octet_asn_on_2octet_session() {
+        // A 4-octet AS number that does not fit a 2-octet segment must be an
+        // encoding error, not a silent truncation to its low 16 bits.
+        let attrs = Attributes::from_iter(vec![AttributeValue::AsPath(AsPath::from_sequence([
+            400644,
+        ]))]);
+        let err = attrs.encode(AsnLength::Bits16).unwrap_err();
+        assert_eq!(
+            err,
+            EncodingError::ValueTooLarge {
+                field: "2-octet AS number in AS_PATH segment",
+                actual: 400644,
+                max: 65535,
+            }
+        );
+    }
+
+    #[test]
+    fn test_encode_aggregator_attribute_type_selection() {
+        let attrs = Attributes::from_iter(vec![AttributeValue::As4Aggregator {
+            asn: Asn::new_32bit(400644),
+            id: std::net::Ipv4Addr::new(192, 0, 2, 1),
+        }]);
+        let buf = attrs.encode(AsnLength::Bits16).unwrap();
+        assert_eq!(buf[1], 18, "attribute type must be AS4_AGGREGATOR (18)");
+        assert_eq!(
+            buf.len(),
+            3 + 8,
+            "value must be a 4-octet ASN plus an IPv4 id"
+        );
+    }
+
+    #[test]
+    fn test_encode_aggregator_width_follows_session_not_asn_flag() {
+        // A 4-octet-flagged Asn holding a value that fits 16 bits must encode
+        // as 2 octets on a 2-octet session: the session width decides, not the
+        // Asn's internal flag.
+        let attrs = Attributes::from_iter(vec![AttributeValue::Aggregator {
+            asn: Asn::new_32bit(258),
+            id: std::net::Ipv4Addr::new(10, 0, 0, 1),
+        }]);
+        let buf = attrs.encode(AsnLength::Bits16).unwrap();
+        assert_eq!(buf[1], 7, "attribute type must be AGGREGATOR (7)");
+        assert_eq!(buf.len(), 3 + 6);
+        assert_eq!(&buf[3..], &[0x01, 0x02, 10, 0, 0, 1]);
+    }
+
+    #[test]
+    fn test_parse_attributes_maps_as4_wire_types() {
+        // AS4_PATH (type 17): optional transitive flag 0xC0, one AS_SEQUENCE
+        // segment with the 4-octet ASN 400644.
+        let data = Bytes::from(vec![0xC0, 17, 6, 0x02, 0x01, 0x00, 0x06, 0x1D, 0x04]);
+        let attributes = parse_attributes(data, &AsnLength::Bits16, false, None, None, None)
+            .expect("AS4_PATH must parse");
+        match attributes.get_attr(AttrType::AS4_PATH).unwrap().value {
+            AttributeValue::As4Path(path) => assert_eq!(
+                path.to_u32_vec_opt(false).unwrap(),
+                vec![400644],
+                "AS4_PATH segments must parse as 4-octet regardless of session length"
+            ),
+            other => panic!("expected As4Path variant, got {other:?}"),
+        }
+
+        // AS4_AGGREGATOR (type 18): 4-octet ASN plus an IPv4 id.
+        let data = Bytes::from(vec![0xC0, 18, 8, 0x00, 0x06, 0x1D, 0x04, 192, 0, 2, 1]);
+        let attributes = parse_attributes(data, &AsnLength::Bits16, false, None, None, None)
+            .expect("AS4_AGGREGATOR must parse");
+        match attributes.get_attr(AttrType::AS4_AGGREGATOR).unwrap().value {
+            AttributeValue::As4Aggregator { asn, .. } => {
+                assert_eq!(asn, Asn::new_32bit(400644))
+            }
+            other => panic!("expected As4Aggregator variant, got {other:?}"),
+        }
     }
 }

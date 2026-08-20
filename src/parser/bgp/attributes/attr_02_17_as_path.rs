@@ -70,24 +70,33 @@ pub fn encode_as_path(
         check_max("AS_PATH segment count", asns.len(), u8::MAX as usize)?;
         output.put_u8(segment_type);
         output.put_u8(asns.len() as u8);
-        write_asns(asns, asn_len, output);
+        write_asns(asns, asn_len, output)?;
     }
     Ok(())
 }
 
-fn write_asns(asns: &[Asn], asn_len: AsnLength, output: &mut BytesMut) {
-    match asn_len {
-        AsnLength::Bits16 => {
-            for asn in asns.iter() {
-                output.put_u16(asn.into());
-            }
-        }
-        AsnLength::Bits32 => {
-            for asn in asns.iter() {
-                output.put_u32(asn.into());
+fn write_asns(
+    asns: &[Asn],
+    asn_len: AsnLength,
+    output: &mut BytesMut,
+) -> Result<(), EncodingError> {
+    for asn in asns.iter() {
+        match asn_len {
+            AsnLength::Bits32 => output.put_u32((*asn).into()),
+            // A 4-octet AS number cannot be carried in a 2-octet segment; the
+            // caller must substitute AS_TRANS (23456) or use AS4_PATH.
+            AsnLength::Bits16 => {
+                let value: u32 = (*asn).into();
+                check_max(
+                    "2-octet AS number in AS_PATH segment",
+                    value as usize,
+                    u16::MAX as usize,
+                )?;
+                output.put_u16(value as u16);
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

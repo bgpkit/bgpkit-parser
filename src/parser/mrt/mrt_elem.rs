@@ -103,11 +103,8 @@ fn get_relevant_attributes(
     for attr in attributes {
         match attr {
             AttributeValue::Origin(v) => origin = Some(v),
-            AttributeValue::AsPath {
-                path,
-                is_as4: false,
-            } => as_path = Some(path),
-            AttributeValue::AsPath { path, is_as4: true } => as4_path = Some(path),
+            AttributeValue::AsPath(path) => as_path = Some(path),
+            AttributeValue::As4Path(path) => as4_path = Some(path),
             AttributeValue::NextHop(v) => next_hop = Some(v),
             AttributeValue::MultiExitDiscriminator(v) => med = Some(v),
             AttributeValue::LocalPreference(v) => local_pref = Some(v),
@@ -132,7 +129,9 @@ fn get_relevant_attributes(
                     .map(MetaCommunity::Large)
                     .collect::<Vec<MetaCommunity>>(),
             ),
-            AttributeValue::Aggregator { asn, id, .. } => aggregator = Some((asn, id)),
+            AttributeValue::Aggregator { asn, id } | AttributeValue::As4Aggregator { asn, id } => {
+                aggregator = Some((asn, id))
+            }
             AttributeValue::MpReachNlri(nlri) => announced = Some(nlri),
             AttributeValue::MpUnreachNlri(nlri) => withdrawn = Some(nlri),
             AttributeValue::OnlyToCustomer(o) => otc = Some(o),
@@ -779,14 +778,10 @@ impl From<&BgpElem> for Attributes {
         }
 
         if let Some(v) = value.as_path.as_ref() {
-            let is_as4 = match v.get_origin_opt() {
-                None => true,
-                Some(asn) => asn.is_four_byte(),
-            };
-            values.push(AttributeValue::AsPath {
-                path: v.clone(),
-                is_as4,
-            });
+            // The elem path is the RFC 6793 merged (effective) path, so it
+            // always maps to the plain AS_PATH attribute; the segment width is
+            // decided by the session's `asn_len` at encode time.
+            values.push(AttributeValue::AsPath(v.clone()));
         }
 
         if let Some(v) = value.origin {
@@ -838,7 +833,6 @@ impl From<&BgpElem> for Attributes {
             values.push(AttributeValue::Aggregator {
                 asn: v,
                 id: aggregator_id,
-                is_as4: v.is_four_byte(),
             });
         }
 
@@ -958,10 +952,7 @@ mod tests {
     fn test_get_relevant_attributes() {
         let attributes = vec![
             AttributeValue::Origin(Origin::IGP),
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([65000, 65001, 65002]),
-                is_as4: true,
-            },
+            AttributeValue::As4Path(AsPath::from_sequence([65000, 65001, 65002])),
             AttributeValue::NextHop(IpAddr::from_str("10.0.0.1").unwrap()),
             AttributeValue::MultiExitDiscriminator(100),
             AttributeValue::LocalPreference(200),
@@ -969,7 +960,6 @@ mod tests {
             AttributeValue::Aggregator {
                 asn: Asn::new_32bit(65000),
                 id: Ipv4Addr::from_str("10.0.0.1").unwrap(),
-                is_as4: false,
             },
             AttributeValue::Communities(vec![Community::NoExport]),
             AttributeValue::ExtendedCommunities(vec![ExtendedCommunity::Raw([
@@ -1209,10 +1199,7 @@ mod tests {
 
         let attributes = vec![
             AttributeValue::Origin(Origin::IGP),
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([65000, 65001, 65002]),
-                is_as4: false,
-            },
+            AttributeValue::AsPath(AsPath::from_sequence([65000, 65001, 65002])),
             AttributeValue::NextHop(peer_ip),
         ]
         .into_iter()
@@ -1291,10 +1278,7 @@ mod tests {
 
         let attributes = vec![
             AttributeValue::Origin(Origin::IGP),
-            AttributeValue::AsPath {
-                path: AsPath::from_sequence([65000, 65001, 65002]),
-                is_as4: false,
-            },
+            AttributeValue::AsPath(AsPath::from_sequence([65000, 65001, 65002])),
             AttributeValue::NextHop(peer_ip),
         ]
         .into_iter()

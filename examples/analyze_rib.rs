@@ -71,7 +71,7 @@ fn analyze_update(stats: &mut Stats, update: &BgpUpdateMessage) {
 
 fn analyze_attributes(stats: &mut Stats, attributes: &Attributes) {
     // Use the public APIs to access attributes
-    if let Some(path) = attributes.as_path() {
+    if let Some(path) = attributes.effective_as_path() {
         stats.routes_with_aspath += 1;
         let segment_count = path.segments.len();
         *stats.as_path_segments.entry(segment_count).or_insert(0) += 1;
