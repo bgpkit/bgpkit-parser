@@ -1,0 +1,52 @@
+{
+  "timestamp": 1636245154.8,
+  "type": "ANNOUNCE",
+  "peer_ip": "192.0.2.1",
+  "peer_asn": 64496,
+  "peer_bgp_id": "10.0.0.1",
+  "prefix": "198.51.100.0/24",
+  "next_hop": "192.0.2.1",
+  "as_path": [
+    64496,
+    174,
+    [
+      65001,
+      65002
+    ]
+  ],
+  "origin_asns": [
+    65001,
+    65002
+  ],
+  "origin": "IGP",
+  "local_pref": 100,
+  "med": 0,
+  "communities": [
+    {
+      "Custom": [
+        64512,
+        100
+      ]
+    },
+    {
+      "global_admin": 64512,
+      "local_data": [
+        1,
+        2
+      ]
+    }
+  ],
+  "atomic": false,
+  "aggr_asn": 64512,
+  "aggr_ip": "192.0.2.1",
+  "only_to_customer": 64512,
+  "unknown": [
+    {
+      "code": 99,
+      "bytes": [
+        255
+      ]
+    }
+  ],
+  "deprecated": null
+}

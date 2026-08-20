@@ -1,0 +1,244 @@
+{
+  "meta": {
+    "host": "rrc10",
+    "id": "10-183678-175313836",
+    "peer": "2001:7f8:b:100:1d1:a520:1333:74",
+    "peerAsn": 201333,
+    "timestamp": 1636245154.8
+  },
+  "elems": [
+    {
+      "timestamp": 1636245154.8,
+      "type": "ANNOUNCE",
+      "peer_ip": "2001:7f8:b:100:1d1:a520:1333:74",
+      "peer_asn": 201333,
+      "peer_bgp_id": null,
+      "prefix": "2a0e:97c7::/48",
+      "next_hop": "2001:7f8:b:100:1d1:a520:1333:74",
+      "as_path": [
+        201333,
+        6762,
+        174,
+        20473
+      ],
+      "origin_asns": [
+        20473
+      ],
+      "origin": "IGP",
+      "local_pref": 0,
+      "med": 0,
+      "communities": [
+        {
+          "Custom": [
+            6762,
+            30
+          ]
+        },
+        {
+          "Custom": [
+            6762,
+            14400
+          ]
+        }
+      ],
+      "atomic": false,
+      "aggr_asn": null,
+      "aggr_ip": null,
+      "only_to_customer": null,
+      "unknown": null,
+      "deprecated": null
+    },
+    {
+      "timestamp": 1636245154.8,
+      "type": "ANNOUNCE",
+      "peer_ip": "2001:7f8:b:100:1d1:a520:1333:74",
+      "peer_asn": 201333,
+      "peer_bgp_id": null,
+      "prefix": "2a0e:97c6:fe::/48",
+      "next_hop": "2001:7f8:b:100:1d1:a520:1333:74",
+      "as_path": [
+        201333,
+        6762,
+        174,
+        20473
+      ],
+      "origin_asns": [
+        20473
+      ],
+      "origin": "IGP",
+      "local_pref": 0,
+      "med": 0,
+      "communities": [
+        {
+          "Custom": [
+            6762,
+            30
+          ]
+        },
+        {
+          "Custom": [
+            6762,
+            14400
+          ]
+        }
+      ],
+      "atomic": false,
+      "aggr_asn": null,
+      "aggr_ip": null,
+      "only_to_customer": null,
+      "unknown": null,
+      "deprecated": null
+    },
+    {
+      "timestamp": 1636245154.8,
+      "type": "ANNOUNCE",
+      "peer_ip": "2001:7f8:b:100:1d1:a520:1333:74",
+      "peer_asn": 201333,
+      "peer_bgp_id": null,
+      "prefix": "2a10:cc42:17b7::/48",
+      "next_hop": "2001:7f8:b:100:1d1:a520:1333:74",
+      "as_path": [
+        201333,
+        6762,
+        174,
+        20473
+      ],
+      "origin_asns": [
+        20473
+      ],
+      "origin": "IGP",
+      "local_pref": 0,
+      "med": 0,
+      "communities": [
+        {
+          "Custom": [
+            6762,
+            30
+          ]
+        },
+        {
+          "Custom": [
+            6762,
+            14400
+          ]
+        }
+      ],
+      "atomic": false,
+      "aggr_asn": null,
+      "aggr_ip": null,
+      "only_to_customer": null,
+      "unknown": null,
+      "deprecated": null
+    },
+    {
+      "timestamp": 1636245154.8,
+      "type": "ANNOUNCE",
+      "peer_ip": "2001:7f8:b:100:1d1:a520:1333:74",
+      "peer_asn": 201333,
+      "peer_bgp_id": null,
+      "prefix": "2a10:cc42:1feb::/48",
+      "next_hop": "2001:7f8:b:100:1d1:a520:1333:74",
+      "as_path": [
+        201333,
+        6762,
+        174,
+        20473
+      ],
+      "origin_asns": [
+        20473
+      ],
+      "origin": "IGP",
+      "local_pref": 0,
+      "med": 0,
+      "communities": [
+        {
+          "Custom": [
+            6762,
+            30
+          ]
+        },
+        {
+          "Custom": [
+            6762,
+            14400
+          ]
+        }
+      ],
+      "atomic": false,
+      "aggr_asn": null,
+      "aggr_ip": null,
+      "only_to_customer": null,
+      "unknown": null,
+      "deprecated": null
+    }
+  ],
+  "attributes": [
+    {
+      "value": {
+        "Origin": "IGP"
+      },
+      "flag": "TRANSITIVE"
+    },
+    {
+      "value": {
+        "AsPath": [
+          201333,
+          6762,
+          174,
+          20473
+        ]
+      },
+      "flag": "TRANSITIVE"
+    },
+    {
+      "value": {
+        "MultiExitDiscriminator": 0
+      },
+      "flag": "OPTIONAL"
+    },
+    {
+      "value": {
+        "Communities": [
+          {
+            "Custom": [
+              6762,
+              30
+            ]
+          },
+          {
+            "Custom": [
+              6762,
+              14400
+            ]
+          }
+        ]
+      },
+      "flag": "OPTIONAL | TRANSITIVE"
+    },
+    {
+      "value": {
+        "MpReachNlri": {
+          "afi": "Ipv6",
+          "safi": "Unicast",
+          "next_hop": {
+            "Ipv6LinkLocal": [
+              "2001:7f8:b:100:1d1:a520:1333:74",
+              "fe80::217:a3ff:fefe:2905"
+            ]
+          },
+          "prefixes": [
+            "2a0e:97c7::/48",
+            "2a0e:97c6:fe::/48",
+            "2a10:cc42:17b7::/48",
+            "2a10:cc42:1feb::/48"
+          ],
+          "labeled_prefixes": null,
+          "link_state_nlris": null,
+          "flowspec_nlris": null
+        }
+      },
+      "flag": "OPTIONAL"
+    }
+  ],
+  "validationWarnings": []
+}

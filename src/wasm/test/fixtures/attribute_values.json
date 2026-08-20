@@ -1,0 +1,462 @@
+{
+  "attributes": [
+    {
+      "flag": "TRANSITIVE",
+      "value": {
+        "Origin": "IGP"
+      }
+    },
+    {
+      "flag": "TRANSITIVE",
+      "value": {
+        "AsPath": [
+          64512,
+          174,
+          [
+            65001,
+            65002
+          ]
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "As4Path": [
+          4200000000
+        ]
+      }
+    },
+    {
+      "flag": "TRANSITIVE",
+      "value": {
+        "NextHop": "192.0.2.1"
+      }
+    },
+    {
+      "flag": "OPTIONAL",
+      "value": {
+        "MultiExitDiscriminator": 100
+      }
+    },
+    {
+      "flag": "TRANSITIVE",
+      "value": {
+        "LocalPreference": 200
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "OnlyToCustomer": 64512
+      }
+    },
+    {
+      "flag": "TRANSITIVE",
+      "value": "AtomicAggregate"
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "Aggregator": {
+          "asn": 64512,
+          "id": "192.0.2.1"
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "As4Aggregator": {
+          "asn": 4200000000,
+          "id": "192.0.2.1"
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "Communities": [
+          "NoExport",
+          {
+            "Custom": [
+              64512,
+              100
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "ExtendedCommunities": [
+          {
+            "TransitiveTwoOctetAs": {
+              "global_admin": 64512,
+              "local_admin": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "subtype": 2
+            }
+          },
+          {
+            "NonTransitiveOpaque": {
+              "subtype": 4,
+              "value": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          {
+            "LinkBandwidth": {
+              "bandwidth": 12500000.0,
+              "global_admin": 64512,
+              "transitive": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE | PARTIAL",
+      "value": {
+        "Ipv6AddressSpecificExtendedCommunities": [
+          {
+            "community_type": "NonTransitiveIpv4Addr",
+            "global_admin": "2001:db8::1",
+            "local_admin": [
+              0,
+              1
+            ],
+            "subtype": 2
+          }
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE",
+      "value": {
+        "LargeCommunities": [
+          {
+            "global_admin": 64512,
+            "local_data": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL",
+      "value": {
+        "OriginatorId": "10.0.0.1"
+      }
+    },
+    {
+      "flag": "OPTIONAL",
+      "value": {
+        "Clusters": [
+          167772161,
+          167772162
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL",
+      "value": {
+        "MpReachNlri": {
+          "afi": "Ipv6",
+          "flowspec_nlris": null,
+          "labeled_prefixes": null,
+          "link_state_nlris": null,
+          "next_hop": {
+            "Ipv6LinkLocal": [
+              "2001:db8::1",
+              "fe80::1"
+            ]
+          },
+          "prefixes": [
+            "2001:db8::/32",
+            {
+              "path_id": 7,
+              "prefix": "198.51.100.0/24"
+            }
+          ],
+          "safi": "Unicast"
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL",
+      "value": {
+        "MpUnreachNlri": {
+          "afi": "Ipv6",
+          "flowspec_nlris": null,
+          "labeled_prefixes": null,
+          "link_state_nlris": null,
+          "next_hop": null,
+          "prefixes": [
+            "2001:db8::/32"
+          ],
+          "safi": "Unicast"
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE | PARTIAL",
+      "value": {
+        "Development": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE | PARTIAL",
+      "value": {
+        "Raw": {
+          "bytes": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "code": 22
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE | PARTIAL",
+      "value": {
+        "Deprecated": {
+          "bytes": [
+            10,
+            0,
+            0,
+            1
+          ],
+          "code": 9
+        }
+      }
+    },
+    {
+      "flag": "OPTIONAL | TRANSITIVE | PARTIAL",
+      "value": {
+        "Unknown": {
+          "bytes": [
+            255
+          ],
+          "code": 99
+        }
+      }
+    }
+  ],
+  "values": [
+    {
+      "Origin": "IGP"
+    },
+    {
+      "AsPath": [
+        64512,
+        174,
+        [
+          65001,
+          65002
+        ]
+      ]
+    },
+    {
+      "As4Path": [
+        4200000000
+      ]
+    },
+    {
+      "NextHop": "192.0.2.1"
+    },
+    {
+      "MultiExitDiscriminator": 100
+    },
+    {
+      "LocalPreference": 200
+    },
+    {
+      "OnlyToCustomer": 64512
+    },
+    "AtomicAggregate",
+    {
+      "Aggregator": {
+        "asn": 64512,
+        "id": "192.0.2.1"
+      }
+    },
+    {
+      "As4Aggregator": {
+        "asn": 4200000000,
+        "id": "192.0.2.1"
+      }
+    },
+    {
+      "Communities": [
+        "NoExport",
+        {
+          "Custom": [
+            64512,
+            100
+          ]
+        }
+      ]
+    },
+    {
+      "ExtendedCommunities": [
+        {
+          "TransitiveTwoOctetAs": {
+            "global_admin": 64512,
+            "local_admin": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "subtype": 2
+          }
+        },
+        {
+          "NonTransitiveOpaque": {
+            "subtype": 4,
+            "value": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "LinkBandwidth": {
+            "bandwidth": 12500000.0,
+            "global_admin": 64512,
+            "transitive": true
+          }
+        }
+      ]
+    },
+    {
+      "Ipv6AddressSpecificExtendedCommunities": [
+        {
+          "community_type": "NonTransitiveIpv4Addr",
+          "global_admin": "2001:db8::1",
+          "local_admin": [
+            0,
+            1
+          ],
+          "subtype": 2
+        }
+      ]
+    },
+    {
+      "LargeCommunities": [
+        {
+          "global_admin": 64512,
+          "local_data": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "OriginatorId": "10.0.0.1"
+    },
+    {
+      "Clusters": [
+        167772161,
+        167772162
+      ]
+    },
+    {
+      "MpReachNlri": {
+        "afi": "Ipv6",
+        "flowspec_nlris": null,
+        "labeled_prefixes": null,
+        "link_state_nlris": null,
+        "next_hop": {
+          "Ipv6LinkLocal": [
+            "2001:db8::1",
+            "fe80::1"
+          ]
+        },
+        "prefixes": [
+          "2001:db8::/32",
+          {
+            "path_id": 7,
+            "prefix": "198.51.100.0/24"
+          }
+        ],
+        "safi": "Unicast"
+      }
+    },
+    {
+      "MpUnreachNlri": {
+        "afi": "Ipv6",
+        "flowspec_nlris": null,
+        "labeled_prefixes": null,
+        "link_state_nlris": null,
+        "next_hop": null,
+        "prefixes": [
+          "2001:db8::/32"
+        ],
+        "safi": "Unicast"
+      }
+    },
+    {
+      "Development": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "Raw": {
+        "bytes": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "code": 22
+      }
+    },
+    {
+      "Deprecated": {
+        "bytes": [
+          10,
+          0,
+          0,
+          1
+        ],
+        "code": 9
+      }
+    },
+    {
+      "Unknown": {
+        "bytes": [
+          255
+        ],
+        "code": 99
+      }
+    }
+  ]
+}

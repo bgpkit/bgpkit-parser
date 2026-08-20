@@ -1,0 +1,2 @@
+# the type-check harness needs a committed lock file for npm ci in CI
+!package-lock.json
