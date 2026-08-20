@@ -26,6 +26,25 @@ export function parseBmpMessage(
 export function parseBgpUpdate(data: Uint8Array): BgpElem[];
 
 /**
+ * Parse a RIS Live WebSocket message using its JSON-projected UPDATE fields.
+ * No `includeRaw` subscription option required, but the JSON projection
+ * exposes only a subset of BGP path attributes (path, community, origin, med,
+ * aggregator, announcements, withdrawals).
+ */
+export function parseRisLiveMessageJson(message: string): BgpElem[];
+
+/**
+ * Parse a RIS Live WebSocket message from its hex `data.raw` BGP wire bytes.
+ * Requires a subscription with `socketOptions.includeRaw = true`.
+ *
+ * Preserves every path attribute of the UPDATE (large/extended communities,
+ * OTC, local pref, originator ID, cluster list, AIGP, ...) plus RFC 7606
+ * validation warnings, in addition to the same elems as
+ * `parseRisLiveMessageJson`.
+ */
+export function parseRisLiveMessageRaw(message: string): RisLiveRawFull;
+
+/**
  * Parse a single MRT record from the start of a buffer.
  * Returns null when there are no more records.
  *
@@ -199,3 +218,46 @@ export interface LargeCommunity {
 
 /** Extended community — many variants, treat as opaque JSON object. */
 export type ExtendedCommunity = Record<string, unknown>;
+
+// ── RIS Live types ───────────────────────────────────────────────────
+
+/** Envelope metadata carried by every RIS Live `ris_message`. */
+export interface RisLiveMeta {
+  host: string;
+  id: string;
+  peer: string;
+  peerAsn: number;
+  timestamp: number;
+}
+
+/**
+ * Full-fidelity result of parsing a RIS Live message from `data.raw`.
+ * `elems` match `parseRisLiveMessageJson`; `attributes` additionally keeps
+ * attributes that the elem conversion drops (originator ID, cluster list,
+ * AIGP, BGPSEC_PATH, ATTR_SET, ...).
+ */
+export interface RisLiveRawFull {
+  meta: RisLiveMeta;
+  elems: BgpElem[];
+  attributes: Attributes;
+  validationWarnings: BgpValidationWarning[];
+}
+
+// ── BGP attribute types ──────────────────────────────────────────────
+
+/**
+ * A single BGP path attribute: `{ value: { <Variant>: payload }, flag }`.
+ * `value` is keyed by the serde variant name, e.g. `{ "Origin": "IGP" }` or
+ * `{ "LargeCommunities": [...] }`. Fully-typed variant definitions live in
+ * `./generated` (ts-rs output).
+ */
+export type Attribute = {
+  value: Record<string, unknown>;
+  flag: string;
+};
+
+/** All path attributes of one BGP UPDATE; serializes as an `Attribute[]`. */
+export type Attributes = Attribute[];
+
+/** RFC 7606 validation warning (non-fatal parse finding). */
+export type BgpValidationWarning = Record<string, unknown>;

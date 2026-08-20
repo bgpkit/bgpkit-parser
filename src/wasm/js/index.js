@@ -48,6 +48,35 @@ function parseBgpUpdate(data) {
   return JSON.parse(wasm.parseBgpUpdate(data));
 }
 
+/**
+ * Parse a RIS Live WebSocket message using its JSON-projected UPDATE fields.
+ *
+ * No `includeRaw` subscription option required, but the JSON projection
+ * exposes only a subset of BGP path attributes (path, community, origin,
+ * med, aggregator, announcements, withdrawals).
+ *
+ * @param {string} message - RIS Live WebSocket text payload (`ris_message` envelope)
+ * @returns {object[]} Array of BgpElem objects (empty for non-UPDATE messages)
+ */
+function parseRisLiveMessageJson(message) {
+  return JSON.parse(wasm.parseRisLiveMessageJson(message));
+}
+
+/**
+ * Parse a RIS Live WebSocket message from its hex `data.raw` BGP wire bytes.
+ *
+ * Requires a subscription with `socketOptions.includeRaw = true`. Preserves
+ * every path attribute of the UPDATE (large/extended communities, OTC, local
+ * pref, originator ID, cluster list, AIGP, ...) plus RFC 7606 validation
+ * warnings, in addition to the same elems as parseRisLiveMessageJson().
+ *
+ * @param {string} message - RIS Live WebSocket text payload (`ris_message` envelope)
+ * @returns {{ meta: object, elems: object[], attributes: object[], validationWarnings: object[] }}
+ */
+function parseRisLiveMessageRaw(message) {
+  return JSON.parse(wasm.parseRisLiveMessageRaw(message));
+}
+
 // ── Streaming MRT record parsing ─────────────────────────────────────
 
 // MRT common header: timestamp(4) + type(2) + subtype(2) + length(4) = 12 bytes.
@@ -312,6 +341,8 @@ module.exports = {
   parseOpenBmpMessage,
   parseBmpMessage,
   parseBgpUpdate,
+  parseRisLiveMessageJson,
+  parseRisLiveMessageRaw,
   parseMrtRecords,
   parseMrtRecord,
   resetMrtParser,

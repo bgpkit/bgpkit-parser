@@ -14,12 +14,19 @@ export {
   BmpPeerHeader,
   BgpElem,
   MrtRecordResult,
+  RisLiveMeta,
+  RisLiveRawFull,
+  Attribute,
+  Attributes,
+  BgpValidationWarning,
 } from './index';
 
 export {
   parseOpenBmpMessage,
   parseBmpMessage,
   parseBgpUpdate,
+  parseRisLiveMessageJson,
+  parseRisLiveMessageRaw,
   parseMrtRecord,
   resetMrtParser,
   parseMrtRecords,

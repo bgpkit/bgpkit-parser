@@ -32,3 +32,6 @@ pkg/
 pkg-*/
 node_modules/
 .wrangler/
+
+# test artifact from core-dump parser tests
+mrt_core_dump
