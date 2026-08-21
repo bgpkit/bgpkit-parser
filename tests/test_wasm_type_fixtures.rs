@@ -5,14 +5,16 @@
 //! `git diff`, so any change to the Rust models that alters the serde output
 //! must be accompanied by regenerated fixtures (and, for generated types,
 //! regenerated bindings via `TS_RS_EXPORT_DIR=src/wasm/js/generated cargo
-//! test --features ts-rs`). A companion `tsc` check in
+//! test --features ts-rs,rislive`). A companion `tsc` check in
 //! `src/wasm/test/type-check/` asserts the fixtures type-check against the
 //! shipped `.d.ts` files.
 //!
 //! Run with: `cargo test --features ts-rs,rislive --test test_wasm_type_fixtures`
+#![cfg(feature = "ts-rs")]
 
 use bgpkit_parser::error::BgpValidationWarning;
 use bgpkit_parser::models::*;
+#[cfg(feature = "rislive")]
 use bgpkit_parser::parse_ris_live_message_raw_full;
 use bytes::Bytes;
 use ipnet::IpNet;

@@ -24,6 +24,7 @@ import type {
   AttributeValue,
   BgpElem,
   BgpValidationWarning,
+  Nlri,
   RisLiveRawFull,
 } from '../../js/index';
 
@@ -45,6 +46,18 @@ type Widen<T> = T extends string
         : T extends object
           ? { [K in keyof T]: Widen<T[K]> }
           : T;
+
+/**
+ * Exact top-level key-set equality between the fixture (ground truth from
+ * serde) and the declared type. Plain assignability would silently allow
+ * extra fixture fields — this catches a Rust model gaining or losing a field
+ * without the .d.ts being updated (and vice versa).
+ */
+type ExactKeys<Actual, Declared> = [keyof Actual] extends [keyof Declared]
+  ? [keyof Declared] extends [keyof Actual]
+    ? true
+    : false
+  : false;
 
 // ── Generated attribute surface ──────────────────────────────────────────────
 
@@ -72,6 +85,31 @@ if (asPathAttr === undefined) throw new Error('fixture missing AsPath variant');
 const asPathFromAttr: Widen<AsPathWire> = (asPathAttr as { AsPath: Widen<AsPathWire> }).AsPath;
 
 // ── Hand-written elem surface ────────────────────────────────────────────────
+
+// Exact key-set checks: the fixtures must have precisely the declared fields.
+const _elemAnnounceKeys: ExactKeys<typeof bgpElemAnnounce, Widen<BgpElem>> = true;
+const _elemWithdrawKeys: ExactKeys<typeof bgpElemWithdraw, Widen<BgpElem>> = true;
+const _attrKeys: ExactKeys<
+  (typeof attributeValues.attributes)[number],
+  Widen<Attribute>
+> = true;
+const _risLiveKeys: ExactKeys<typeof risLiveRawFull, Widen<RisLiveRawFull>> = true;
+const _metaKeys: ExactKeys<
+  typeof risLiveRawFull.meta,
+  Widen<RisLiveRawFull['meta']>
+> = true;
+const _nlriKeys: ExactKeys<
+  Extract<(typeof attributeValues.values)[number], { MpReachNlri: unknown }>['MpReachNlri'],
+  Widen<Nlri>
+> = true;
+export const _keyChecks = [
+  _elemAnnounceKeys,
+  _elemWithdrawKeys,
+  _attrKeys,
+  _risLiveKeys,
+  _metaKeys,
+  _nlriKeys,
+];
 
 export const elemAnnounce: Widen<BgpElem> = bgpElemAnnounce;
 export const elemWithdraw: Widen<BgpElem> = bgpElemWithdraw;

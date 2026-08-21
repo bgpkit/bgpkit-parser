@@ -164,7 +164,10 @@ feed and parse messages as they arrive. Two parsers are available:
   message. Requires subscribing with `socketOptions.includeRaw = true`, and
   preserves **every** path attribute (large/extended communities, OTC, local
   pref, originator ID, cluster list, AIGP, raw-retained BGPSEC_PATH/ATTR_SET,
-  ...) plus RFC 7606 validation warnings, in addition to the same elems.
+  ...) plus RFC 7606 validation warnings. `elems` use the same `BgpElem`
+  shape as the JSON parser but are derived from the wire NLRI, so their
+  grouping can differ from RIS's JSON projection (e.g. a multi-prefix
+  MP_REACH yields one elem per prefix here).
 
 ```js
 import { parseRisLiveMessageRaw } from '@bgpkit/parser';
@@ -251,16 +254,17 @@ BMP and BGP UPDATE messages are small (KB-sized) and have no memory concerns.
 ```ts
 interface RisLiveRawFull {
   meta: RisLiveMeta;                  // host, id, peer, peerAsn, timestamp
-  elems: BgpElem[];                   // same elems as parseRisLiveMessageJson
+  elems: BgpElem[];                   // same BgpElem shape as the JSON parser
   attributes: Attribute[];            // full attribute list of the UPDATE
   validationWarnings: BgpValidationWarning[]; // RFC 7606 parse findings
 }
 ```
 
 Each `Attribute` is `{ value: { "<VariantName>": payload }, flag }` (serde
-external tagging), e.g. `{ "Origin": "IGP" }` or
-`{ "LargeCommunities": [...] }`. See `index.d.ts` and `generated/` in the
-package for the full typed surface.
+external tagging) for data-carrying variants, e.g. `{ "Origin": "IGP" }` or
+`{ "LargeCommunities": [...] }`; unit variants serialize as a bare string,
+e.g. `{ "value": "AtomicAggregate", "flag": "..." }`. See `index.d.ts` and
+`generated/` in the package for the full typed surface.
 
 ### Node.js I/O helpers
 

@@ -39,8 +39,10 @@ export function parseRisLiveMessageJson(message: string): BgpElem[];
  *
  * Preserves every path attribute of the UPDATE (large/extended communities,
  * OTC, local pref, originator ID, cluster list, AIGP, ...) plus RFC 7606
- * validation warnings, in addition to the same elems as
- * `parseRisLiveMessageJson`.
+ * validation warnings. `elems` use the same `BgpElem` shape as
+ * `parseRisLiveMessageJson` but are derived from the wire NLRI, so they can
+ * differ from the JSON projection's grouping (e.g. a multi-prefix MP_REACH
+ * yields one elem per prefix here, while RIS's projection may group them).
  */
 export function parseRisLiveMessageRaw(message: string): RisLiveRawFull;
 
@@ -181,6 +183,10 @@ export interface BgpElem {
   aggr_asn: number | null;
   aggr_ip: string | null;
   only_to_customer: number | null;
+  /** Unknown attributes serialized as `{ code, bytes }` entries. */
+  unknown: { code: number; bytes: number[] }[] | null;
+  /** Deprecated attributes serialized as `{ code, bytes }` entries. */
+  deprecated: { code: number; bytes: number[] }[] | null;
 }
 
 // ── AS path types ────────────────────────────────────────────────────
@@ -232,9 +238,10 @@ export interface RisLiveMeta {
 
 /**
  * Full-fidelity result of parsing a RIS Live message from `data.raw`.
- * `elems` match `parseRisLiveMessageJson`; `attributes` additionally keeps
- * attributes that the elem conversion drops (originator ID, cluster list,
- * AIGP, BGPSEC_PATH, ATTR_SET, ...).
+ * `elems` use the same `BgpElem` shape as `parseRisLiveMessageJson` (derived
+ * from the wire NLRI, so grouping may differ); `attributes` additionally
+ * keeps attributes that the elem conversion drops (originator ID, cluster
+ * list, AIGP, BGPSEC_PATH, ATTR_SET, ...).
  */
 export interface RisLiveRawFull {
   meta: RisLiveMeta;

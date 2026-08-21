@@ -463,8 +463,11 @@ pub fn parse_ris_live_message_json_wasm(msg_str: &str) -> Result<String, JsError
 /// AIGP, raw-retained BGPSEC_PATH/ATTR_SET, ...) plus RFC 7606 validation
 /// warnings.
 ///
-/// Returns a JSON object `{ meta, elems, attributes, validationWarnings }`
-/// where `elems` match [`parseRisLiveMessageJson`](parse_ris_live_message_json_wasm).
+/// Returns a JSON object `{ meta, elems, attributes, validationWarnings }`.
+/// `elems` use the same `BgpElem` shape as
+/// [`parseRisLiveMessageJson`](parse_ris_live_message_json_wasm) but are
+/// derived from the wire NLRI, so their grouping may differ from the JSON
+/// projection's.
 /// Throws a JavaScript `Error` on malformed input or when `raw` is missing.
 #[wasm_bindgen(js_name = "parseRisLiveMessageRaw")]
 pub fn parse_ris_live_message_raw_wasm(msg_str: &str) -> Result<String, JsError> {

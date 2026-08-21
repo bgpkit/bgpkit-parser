@@ -28,6 +28,54 @@ function check(cond, msg) {
   }
 }
 
+// Exact top-level key-set equality. These lists mirror index.d.ts; when a
+// Rust change adds/removes a serialized field, the fixture key set changes
+// and these checks force updating both the list and the .d.ts together.
+const ELEM_KEYS = [
+  'timestamp',
+  'type',
+  'peer_ip',
+  'peer_asn',
+  'peer_bgp_id',
+  'prefix',
+  'next_hop',
+  'as_path',
+  'origin_asns',
+  'origin',
+  'local_pref',
+  'med',
+  'communities',
+  'atomic',
+  'aggr_asn',
+  'aggr_ip',
+  'only_to_customer',
+  'unknown',
+  'deprecated',
+];
+const ATTR_KEYS = ['value', 'flag'];
+const RIS_LIVE_KEYS = ['meta', 'elems', 'attributes', 'validationWarnings'];
+const META_KEYS = ['host', 'id', 'peer', 'peerAsn', 'timestamp'];
+
+function expectKeys(obj, expected, label) {
+  const actual = Object.keys(obj).sort().join(',');
+  const want = [...expected].sort().join(',');
+  check(actual === want, `${label} keys: got [${actual}], want [${want}]`);
+}
+
+expectKeys(fixtures.bgp_elem_announce, ELEM_KEYS, 'bgp_elem_announce');
+expectKeys(fixtures.bgp_elem_withdraw, ELEM_KEYS, 'bgp_elem_withdraw');
+for (const [i, elem] of fixtures.ris_live_raw_full.elems.entries()) {
+  expectKeys(elem, ELEM_KEYS, `ris_live elems[${i}]`);
+}
+for (const [i, attr] of fixtures.attribute_values.attributes.entries()) {
+  expectKeys(attr, ATTR_KEYS, `attribute_values.attributes[${i}]`);
+}
+for (const [i, attr] of fixtures.ris_live_raw_full.attributes.entries()) {
+  expectKeys(attr, ATTR_KEYS, `ris_live attributes[${i}]`);
+}
+expectKeys(fixtures.ris_live_raw_full, RIS_LIVE_KEYS, 'ris_live_raw_full');
+expectKeys(fixtures.ris_live_raw_full.meta, META_KEYS, 'ris_live meta');
+
 // Elem type discriminators
 check(fixtures.bgp_elem_announce.type === 'ANNOUNCE', 'announce elem type');
 check(fixtures.bgp_elem_withdraw.type === 'WITHDRAW', 'withdraw elem type');

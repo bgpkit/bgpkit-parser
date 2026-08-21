@@ -13,7 +13,9 @@ import type { Origin } from "./Origin";
  * The `AttributeValue` enum represents different kinds of Attribute values.
  *
  * Serde (and therefore the WASM JSON output) uses default external tagging:
- * each variant serializes as `{ "<VariantName>": payload }`.
+ * data-carrying variants serialize as `{ "<VariantName>": payload }`, while
+ * unit variants (e.g. `AtomicAggregate`) serialize as the bare string
+ * `"<VariantName>"`.
  *
  * Long-tail variants (`LinkState`, `TunnelEncapsulation`, ...) are typed as
  * opaque `Record<string, unknown>` in the generated TypeScript; the common
