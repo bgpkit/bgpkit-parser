@@ -71,7 +71,8 @@ struct Opts {
 
     /// Include each record's raw bytes as hex: a `HEX:` line in text
     /// blocks, a `hex` field in JSON records. Record-level only — implies
-    /// `--level records`; requires `--format text`, `json`, or `json-pretty`.
+    /// `--level records`; requires `--format text`, `json`, or
+    /// `json-pretty`. Count-only runs (-e/-r) ignore this flag.
     #[clap(long)]
     hex: bool,
 
@@ -263,18 +264,21 @@ fn main() {
         opts.format
     };
 
-    if opts.hex
-        && !matches!(
+    // Count-only runs emit no hex, so the flag is ignored there (and the
+    // format/recover constraints do not apply).
+    let counting = opts.elems_count || opts.records_count;
+    if opts.hex && !counting {
+        if !matches!(
             output_format,
             OutputFormat::Json | OutputFormat::JsonPretty | OutputFormat::Text
-        )
-    {
-        eprintln!("Error: --hex requires --format text, json, or json-pretty");
-        std::process::exit(1);
-    }
-    if opts.hex && opts.recover {
-        eprintln!("Error: --hex does not support --recover");
-        std::process::exit(1);
+        ) {
+            eprintln!("Error: --hex requires --format text, json, or json-pretty");
+            std::process::exit(1);
+        }
+        if opts.recover {
+            eprintln!("Error: --hex does not support --recover");
+            std::process::exit(1);
+        }
     }
 
     let recovery_config = RecoveryConfig::default();
@@ -288,14 +292,11 @@ fn main() {
 
     // The hex path always works on original wire bytes from the
     // raw-record pipeline; it cannot share run_records, which holds
-    // parsed records.
-    let result = if opts.hex {
-        run_hex_records(
-            parser.into_filtered_raw_record_iter(),
-            output_format,
-            opts.elems_count,
-            opts.records_count,
-        )
+    // parsed records. Count-only runs emit no hex, so they keep the
+    // normal elem/record counting pipelines and their semantics
+    // (per-elem filtering for -e).
+    let result = if opts.hex && !counting {
+        run_hex_records(parser.into_filtered_raw_record_iter(), output_format)
     } else {
         match (opts.recover, use_elem_stream) {
             (true, true) => run_elems(
@@ -485,24 +486,10 @@ where
 fn run_hex_records(
     records: impl Iterator<Item = bgpkit_parser::RawMrtRecord>,
     output_format: OutputFormat,
-    elems_count_requested: bool,
-    records_count_requested: bool,
 ) -> Result<(), String> {
     let mut stdout = std::io::stdout();
-    let mut elementor = Elementor::new();
-    let mut records_count = 0usize;
-    let mut elems_count = 0usize;
 
     for raw in records {
-        records_count += 1;
-        if elems_count_requested || records_count_requested {
-            if elems_count_requested {
-                if let Ok(record) = raw.parse() {
-                    elems_count += elementor.record_to_elems(record).len();
-                }
-            }
-            continue;
-        }
         let hex = bgpkit_parser::render::hex::encode(raw.raw_bytes().as_ref());
         let record = match raw.parse() {
             Ok(record) => record,
@@ -515,16 +502,6 @@ fn run_hex_records(
         if !write_output(&mut stdout, &output)? {
             return Ok(());
         }
-    }
-
-    match (elems_count_requested, records_count_requested) {
-        (true, true) => {
-            println!("total records: {records_count}");
-            println!("total elems:   {elems_count}");
-        }
-        (false, true) => println!("total records: {records_count}"),
-        (true, false) => println!("total elems: {elems_count}"),
-        (false, false) => {}
     }
     Ok(())
 }

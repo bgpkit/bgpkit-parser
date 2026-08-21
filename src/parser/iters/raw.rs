@@ -108,15 +108,18 @@ pub struct FilteredRawRecordIterator<R> {
     inner: RawRecordIterator<R>,
     elementor: Elementor,
     filters: Vec<Filter>,
+    core_dump: bool,
 }
 
 impl<R> FilteredRawRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         let filters = parser.filters.clone();
+        let core_dump = parser.core_dump;
         FilteredRawRecordIterator {
             inner: RawRecordIterator::new(parser),
             elementor: Elementor::new(),
             filters,
+            core_dump,
         }
     }
 }
@@ -132,9 +135,15 @@ impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
         }
         loop {
             let raw = self.inner.next()?;
+            // Body-parse failures keep the record iterator's diagnostics:
+            // logged and core-dumped when enabled, never silent.
             let record = match raw.clone().parse() {
                 Ok(record) => record,
-                Err(_) => continue, // skip unparseable, like the record iterator
+                Err(error) => {
+                    error!("parser error: {error}");
+                    write_mrt_core_dump(self.core_dump, Some(raw.raw_bytes().to_vec()));
+                    continue;
+                }
             };
             if record_matches_filters(&record, &self.filters, &mut self.elementor) {
                 return Some(raw);
