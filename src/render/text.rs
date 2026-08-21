@@ -14,6 +14,15 @@ use crate::models::*;
 
 const INDENT: &str = "  ";
 
+/// Render a record block with a trailing `HEX:` line carrying the raw
+/// bytes (e.g. from [`crate::render::hex::format_record`]), so the block
+/// can be pasted straight into a byte-level dissector.
+pub fn format_record_with_hex(record: &MrtRecord, hex: &str) -> String {
+    let mut out = format_record(record);
+    out.push_str(&format!("{INDENT}HEX: {hex}\n"));
+    out
+}
+
 /// Render one MRT record as a layered text block.
 ///
 /// Pure function of the record; see the [module docs](self) for scope and
@@ -466,6 +475,15 @@ mod tests {
             AttributeValue::LargeCommunities(vec![LargeCommunity::new(64496, [1, 2])]).into(),
         );
         attributes
+    }
+
+    #[test]
+    fn renders_hex_line_variant() {
+        let text = format_record_with_hex(&update_record(full_attributes()), "deadbeef");
+        assert!(text.trim_end().ends_with("  HEX: deadbeef"));
+        // everything before the HEX line is the plain block
+        let plain = format_record(&update_record(full_attributes()));
+        assert!(text.starts_with(&plain));
     }
 
     #[test]

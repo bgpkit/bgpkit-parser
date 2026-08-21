@@ -69,6 +69,12 @@ struct Opts {
     #[clap(long)]
     psv: bool,
 
+    /// Include each record's raw bytes as hex: a `HEX:` line in text
+    /// blocks, a `hex` field in JSON records. Record-level only — implies
+    /// `--level records`; requires `--format text`, `json`, or `json-pretty`.
+    #[clap(long)]
+    hex: bool,
+
     /// Count BGP elems
     #[clap(short, long)]
     elems_count: bool,
@@ -257,13 +263,24 @@ fn main() {
         opts.format
     };
 
+    if opts.hex
+        && !matches!(
+            output_format,
+            OutputFormat::Json | OutputFormat::JsonPretty | OutputFormat::Text
+        )
+    {
+        eprintln!("Error: --hex requires --format text, json, or json-pretty");
+        std::process::exit(1);
+    }
+
     let recovery_config = RecoveryConfig::default();
     // Element-level runs (element output or counting only elements) use the elem
     // iterators, which apply filters per element; everything else stays at the record
     // level. Counting both (-e -r) iterates records and converts once per record.
     let use_elem_stream = ((opts.elems_count && !opts.records_count)
         || (!opts.elems_count && !opts.records_count && matches!(opts.level, OutputLevel::Elems)))
-        && output_format != OutputFormat::Text;
+        && output_format != OutputFormat::Text
+        && !opts.hex;
 
     let result = match (opts.recover, use_elem_stream) {
         (true, true) => run_elems(
@@ -287,6 +304,7 @@ fn main() {
                 .into_recovering_record_iter(recovery_config)
                 .map(|event| event.map_err(|error| error.to_string())),
             output_format,
+            opts.hex,
             opts.elems_count,
             opts.records_count,
             true,
@@ -296,6 +314,7 @@ fn main() {
                 .into_record_iter()
                 .map(|record| Ok(RecoveryEvent::Item(record))),
             output_format,
+            opts.hex,
             opts.elems_count,
             opts.records_count,
             false,
@@ -393,6 +412,7 @@ where
 fn run_records<I>(
     events: I,
     output_format: OutputFormat,
+    include_hex: bool,
     elems_count_requested: bool,
     records_count_requested: bool,
     report_recovery: bool,
@@ -425,7 +445,7 @@ where
                 if records_count_requested {
                     continue;
                 }
-                let output = format_record(&record, output_format);
+                let output = format_record(&record, output_format, include_hex);
                 if !write_output(&mut stdout, &output)? {
                     return Ok(());
                 }
@@ -480,17 +500,44 @@ fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {
     }
 }
 
-fn format_record(record: &bgpkit_parser::MrtRecord, format: OutputFormat) -> String {
+fn format_record(
+    record: &bgpkit_parser::MrtRecord,
+    format: OutputFormat,
+    include_hex: bool,
+) -> String {
+    // Hex rendering re-encodes the record; records that cannot round-trip
+    // keep their output well-formed and note the failure on stderr.
+    let record_hex = include_hex.then(|| match bgpkit_parser::render::hex::format_record(record) {
+        Ok(hex) => Some(hex),
+        Err(error) => {
+            eprintln!(
+                "warning: record at {} cannot be re-encoded for --hex: {error}",
+                record.common_header.timestamp
+            );
+            None
+        }
+    });
+    let record_hex = record_hex.flatten();
+
     match format {
         OutputFormat::Json => {
-            let val = json!(record);
+            let mut val = json!(record);
+            if let (Some(hex), Some(obj)) = (&record_hex, val.as_object_mut()) {
+                obj.insert("hex".to_string(), json!(hex));
+            }
             val.to_string()
         }
         OutputFormat::JsonPretty => {
-            let val = json!(record);
+            let mut val = json!(record);
+            if let (Some(hex), Some(obj)) = (&record_hex, val.as_object_mut()) {
+                obj.insert("hex".to_string(), json!(hex));
+            }
             serde_json::to_string_pretty(&val).unwrap()
         }
-        OutputFormat::Text => bgpkit_parser::render::text::format_record(record),
+        OutputFormat::Text => match &record_hex {
+            Some(hex) => bgpkit_parser::render::text::format_record_with_hex(record, hex),
+            None => bgpkit_parser::render::text::format_record(record),
+        },
         OutputFormat::Psv | OutputFormat::Default => {
             // Use the Display implementation for MrtRecord
             format!("{}", record)

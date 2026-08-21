@@ -25,4 +25,5 @@ for record in parser.into_record_iter() {
 ```
 */
 
+pub mod hex;
 pub mod text;
