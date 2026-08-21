@@ -5,6 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// An 8-byte value used to distinguish VPN routes with potentially overlapping address spaces
 #[derive(PartialEq, Copy, Clone, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct RouteDistinguisher(pub [u8; 8]);
 
 impl Debug for RouteDistinguisher {
@@ -33,6 +34,7 @@ impl Display for RouteDistinguisher {
 /// RFC 8950 extends this to support VPN next-hops with Route Distinguishers.
 #[derive(PartialEq, Copy, Clone, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub enum NextHopAddress {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),

@@ -393,6 +393,19 @@ pub struct AsPath {
     pub segments: SmallVec<[AsPathSegment; 1]>,
 }
 
+/// TypeScript-only marker describing the wire/serde encoding of [`AsPath`]:
+/// a flat array where numbers are AS_SEQUENCE ASNs, nested arrays are AS_SET
+/// members, and confederation segments fall back to `{ ty, values }` objects.
+/// [`AsPath`] itself has a manual serde impl, so it cannot carry the ts-rs
+/// derive; this marker stands in for it in generated bindings.
+#[cfg(feature = "ts-rs")]
+#[derive(ts_rs::TS)]
+#[ts(
+    export,
+    type = "(number | number[] | { ty: \"AS_SET\" | \"AS_SEQUENCE\" | \"AS_CONFED_SEQUENCE\" | \"AS_CONFED_SET\", values: number[] })[]"
+)]
+pub struct AsPathWire;
+
 // Define iterator type aliases. The storage mechanism and by extension the iterator types may
 // change later, but these types should remain consistent.
 pub type SegmentIter<'a> = std::slice::Iter<'a, AsPathSegment>;

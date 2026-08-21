@@ -20,6 +20,11 @@
 //!   (for incremental/streaming parsing)
 //! - [`resetMrtParser`](reset_mrt_parser) — reset MRT parser state between files
 //! - [`parseBgpUpdate`](parse_bgp_update) — parse a single BGP UPDATE message
+//! - [`parseRisLiveMessageJson`](parse_ris_live_message_json_wasm) — parse a
+//!   RIS Live message using its JSON-projected UPDATE fields
+//! - [`parseRisLiveMessageRaw`](parse_ris_live_message_raw_wasm) — parse a RIS
+//!   Live message from its `data.raw` BGP wire bytes with full attribute
+//!   fidelity
 
 use crate::models::*;
 use crate::parser::bgp::messages::parse_bgp_message;
@@ -28,6 +33,9 @@ use crate::parser::bmp::messages::*;
 use crate::parser::bmp::{parse_bmp_msg, parse_openbmp_header};
 use crate::parser::mrt::mrt_elem::Elementor;
 use crate::parser::mrt::mrt_record::parse_mrt_record;
+use crate::parser::rislive::{
+    parse_ris_live_message, parse_ris_live_message_raw_full, RisLiveRawFull,
+};
 use bytes::Bytes;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
@@ -347,6 +355,19 @@ fn parse_bgp_update_core(data: &[u8]) -> Result<String, String> {
     serde_json::to_string(&elems).map_err(|e| e.to_string())
 }
 
+/// Parse a RIS Live message using its JSON-projected UPDATE fields, returning
+/// a JSON array string of `BgpElem`s.
+fn parse_ris_live_message_json_core(msg_str: &str) -> Result<String, String> {
+    let elems = parse_ris_live_message(msg_str).map_err(|e| e.to_string())?;
+    serde_json::to_string(&elems).map_err(|e| e.to_string())
+}
+
+/// Parse a RIS Live message from its hex `data.raw` BGP wire bytes with full
+/// attribute fidelity, returning a JSON `RisLiveRawFull` string.
+fn parse_ris_live_message_raw_core(msg_str: &str) -> Result<RisLiveRawFull, String> {
+    parse_ris_live_message_raw_full(msg_str).map_err(|e| e.to_string())
+}
+
 // ── Exported WASM functions (thin wrappers) ──────────────────────────────────
 
 /// Parse an OpenBMP-wrapped BMP message as received from the RouteViews Kafka stream.
@@ -416,6 +437,42 @@ pub fn parse_mrt_record_wasm(data: &[u8]) -> Result<String, JsError> {
 #[wasm_bindgen(js_name = "parseBgpUpdate")]
 pub fn parse_bgp_update(data: &[u8]) -> Result<String, JsError> {
     parse_bgp_update_core(data).map_err(|e| JsError::new(&e))
+}
+
+/// Parse a RIS Live WebSocket message using its JSON-projected UPDATE fields.
+///
+/// Expects the full `ris_message` envelope as a string (the WebSocket text
+/// payload). No `includeRaw` subscription option is required, but the JSON
+/// projection exposes only a subset of BGP path attributes — see
+/// [`parseRisLiveMessageRaw`](parse_ris_live_message_raw_wasm) for full
+/// attribute fidelity.
+///
+/// Returns a JSON array of `BgpElem` objects; an empty array for non-UPDATE
+/// messages.
+/// Throws a JavaScript `Error` on malformed input.
+#[wasm_bindgen(js_name = "parseRisLiveMessageJson")]
+pub fn parse_ris_live_message_json_wasm(msg_str: &str) -> Result<String, JsError> {
+    parse_ris_live_message_json_core(msg_str).map_err(|e| JsError::new(&e))
+}
+
+/// Parse a RIS Live WebSocket message from its hex `data.raw` BGP wire bytes.
+///
+/// Requires a subscription with `socketOptions.includeRaw = true`. Unlike the
+/// JSON projection, this preserves every path attribute of the UPDATE
+/// (large/extended communities, OTC, local pref, originator ID, cluster list,
+/// AIGP, raw-retained BGPSEC_PATH/ATTR_SET, ...) plus RFC 7606 validation
+/// warnings.
+///
+/// Returns a JSON object `{ meta, elems, attributes, validationWarnings }`.
+/// `elems` use the same `BgpElem` shape as
+/// [`parseRisLiveMessageJson`](parse_ris_live_message_json_wasm) but are
+/// derived from the wire NLRI, so their grouping may differ from the JSON
+/// projection's.
+/// Throws a JavaScript `Error` on malformed input or when `raw` is missing.
+#[wasm_bindgen(js_name = "parseRisLiveMessageRaw")]
+pub fn parse_ris_live_message_raw_wasm(msg_str: &str) -> Result<String, JsError> {
+    let full = parse_ris_live_message_raw_core(msg_str).map_err(|e| JsError::new(&e))?;
+    serde_json::to_string(&full).map_err(|e| JsError::new(&e.to_string()))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -588,6 +645,81 @@ mod tests {
     fn test_parse_bgp_update_invalid() {
         let result = parse_bgp_update_core(&[0xFF; 16]);
         assert!(result.is_err());
+    }
+
+    /// Real-world RIS Live `ris_message` envelope with both JSON-projected
+    /// fields and `raw` (subscribed with `includeRaw`).
+    const RIS_LIVE_MSG: &str = r#"{
+        "type": "ris_message",
+        "data": {
+            "timestamp": 1636245154.8,
+            "peer": "2001:7f8:b:100:1d1:a520:1333:74",
+            "peer_asn": "201333",
+            "id": "10-183678-175313836",
+            "host": "rrc10",
+            "type": "UPDATE",
+            "path": [201333, 6762, 174, 20473],
+            "community": [[6762, 30], [6762, 14400]],
+            "origin": "igp",
+            "announcements": [
+                {"next_hop": "2001:7f8:b:100:1d1:a520:1333:74", "prefixes": ["2a0e:97c7::/48"]}
+            ],
+            "raw": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0086020000006F4001010040021202040003127500001A6A000000AE00004FF980040400000000C008081A6A001E1A6A3840800E4100020120200107F8000B010001D1A52013330074FE800000000000000217A3FFFEFE290500302A0E97C70000302A0E97C600FE302A10CC4217B7302A10CC421FEB"
+        }
+    }"#;
+
+    #[test]
+    fn test_parse_ris_live_message_json() {
+        let json = parse_ris_live_message_json_core(RIS_LIVE_MSG).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let elems = v.as_array().unwrap();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0]["type"], "ANNOUNCE");
+        assert_eq!(elems[0]["prefix"], "2a0e:97c7::/48");
+        assert_eq!(elems[0]["peer_asn"], 201333);
+    }
+
+    #[test]
+    fn test_parse_ris_live_message_raw() {
+        let json = parse_ris_live_message_raw_core(RIS_LIVE_MSG)
+            .map(|full| serde_json::to_string(&full).unwrap())
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(v["meta"]["host"], "rrc10");
+        assert_eq!(v["meta"]["peerAsn"], 201333);
+        assert_eq!(v["meta"]["timestamp"], 1636245154.8);
+
+        let elems = v["elems"].as_array().unwrap();
+        assert_eq!(elems.len(), 4);
+        assert_eq!(elems[0]["type"], "ANNOUNCE");
+        assert_eq!(elems[0]["prefix"], "2a0e:97c7::/48");
+
+        // Full attribute list, including attributes the elem conversion drops.
+        // Each entry is `{ value: { <VariantName>: ... }, flag }`.
+        let attributes = v["attributes"].as_array().unwrap();
+        assert!(attributes
+            .iter()
+            .any(|a| a["value"].get("Communities").is_some()));
+        assert!(attributes
+            .iter()
+            .any(|a| a["value"].get("MpReachNlri").is_some()));
+
+        assert!(v["validationWarnings"].is_array());
+    }
+
+    #[test]
+    fn test_parse_ris_live_message_raw_missing_raw() {
+        let msg = r#"{"type": "ris_message", "data": {
+            "timestamp": 1636245154.8, "peer": "192.0.2.1", "peer_asn": "64496",
+            "id": "00-192-0-2-1-1", "host": "rrc00", "type": "KEEPALIVE"}}"#;
+        assert!(parse_ris_live_message_raw_core(msg).is_err());
+    }
+
+    #[test]
+    fn test_parse_ris_live_message_raw_malformed_json() {
+        assert!(parse_ris_live_message_raw_core("not json").is_err());
+        assert!(parse_ris_live_message_json_core("not json").is_err());
     }
 
     #[test]

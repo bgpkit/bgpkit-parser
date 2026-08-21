@@ -33,11 +33,13 @@ pub use mrt::*;
 
 #[cfg(feature = "rislive")]
 pub use rislive::messages::{
-    RisLiveClientMessage, RisSubscribe, RisSubscribeSocketOptions, RisSubscribeType,
+    RisLiveClientMessage, RisLiveMeta, RisLiveRawFull, RisSubscribe, RisSubscribeSocketOptions,
+    RisSubscribeType,
 };
 #[cfg(feature = "rislive")]
 pub use rislive::{
     parse_ris_live_message, parse_ris_live_message_json, parse_ris_live_message_raw,
+    parse_ris_live_message_raw_full,
 };
 
 pub struct BgpkitParser<R> {

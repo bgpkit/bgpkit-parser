@@ -61,6 +61,7 @@ bitflags! {
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, FromPrimitive, IntoPrimitive)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[repr(u8)]
 pub enum AttrType {
     RESERVED = 0,
@@ -511,8 +512,11 @@ mod serde_impl {
 /// BGP Attribute struct with attribute value and flag
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct Attribute {
     pub value: AttributeValue,
+    /// Bitflags serialize as a string like `"OPTIONAL | TRANSITIVE"`.
+    #[cfg_attr(feature = "ts-rs", ts(type = "string"))]
     pub flag: AttrFlags,
 }
 
@@ -697,8 +701,19 @@ pub struct AttrSet {
 }
 
 /// The `AttributeValue` enum represents different kinds of Attribute values.
+///
+/// Serde (and therefore the WASM JSON output) uses default external tagging:
+/// data-carrying variants serialize as `{ "<VariantName>": payload }`, while
+/// unit variants (e.g. `AtomicAggregate`) serialize as the bare string
+/// `"<VariantName>"`.
+///
+/// Long-tail variants (`LinkState`, `TunnelEncapsulation`, ...) are typed as
+/// opaque `Record<string, unknown>` in the generated TypeScript; the common
+/// variants are fully typed. `AsPath`/`As4Path` payloads have a custom serde
+/// encoding (flat array of ASNs, nested arrays for AS_SETs), inlined here.
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub enum AttributeValue {
     Origin(Origin),
     /// AS_PATH (type 2), RFC 4271 §4.3.
@@ -706,6 +721,7 @@ pub enum AttributeValue {
     /// On encode, the segment width follows the session's `asn_len` passed to
     /// [`Attribute::encode_to`]: a 4-octet session encodes 4-octet AS
     /// numbers directly. This is the variant to use when building announcements.
+    #[cfg_attr(feature = "ts-rs", ts(as = "AsPathWire"))]
     AsPath(AsPath),
     /// AS4_PATH (type 17), RFC 6793 §4.2 — the migration fallback that carries
     /// the full path with 4-octet AS numbers alongside a 2-octet AS_PATH.
@@ -713,6 +729,7 @@ pub enum AttributeValue {
     /// Segments always encode as 4-octet regardless of the session's `asn_len`.
     /// Only speakers sending 4-octet AS numbers over a 2-octet session should
     /// emit this attribute; RFC 6793 §4.1 forbids it on 4-octet sessions.
+    #[cfg_attr(feature = "ts-rs", ts(as = "AsPathWire"))]
     As4Path(AsPath),
     NextHop(IpAddr),
     MultiExitDiscriminator(u32),
@@ -742,26 +759,35 @@ pub enum AttributeValue {
     MpReachNlri(Nlri),
     MpUnreachNlri(Nlri),
     /// BGP Link-State attribute - RFC 7752
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     LinkState(crate::models::bgp::linkstate::LinkStateAttribute),
     /// BGP Tunnel Encapsulation attribute - RFC 9012
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     TunnelEncapsulation(crate::models::bgp::tunnel_encap::TunnelEncapAttribute),
     /// BGP Traffic Engineering attribute - RFC 5543
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     TrafficEngineering(TrafficEngineering),
     /// BFD Discriminator attribute - RFC 9026
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     BfdDiscriminator(BfdDiscriminatorAttribute),
     /// BGP Prefix-SID attribute - RFC 8669
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     BgpPrefixSid(BgpPrefixSidAttribute),
     /// BIER attribute - RFC 9793
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     Bier(BierAttribute),
     /// SFP attribute - RFC 9015
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     Sfp(SfpAttribute),
     Development(Vec<u8>),
     Raw(AttrRaw),
     Deprecated(AttrRaw),
     Unknown(AttrRaw),
     /// AIGP (Accumulated IGP Metric) attribute - RFC 7311
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     Aigp(Aigp),
     /// ATTR_SET attribute - RFC 6368
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     AttrSet(AttrSet),
 }
 
@@ -890,8 +916,11 @@ impl AttributeValue {
 
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct AttrRaw {
     pub code: u8,
+    /// `bytes::Bytes` has no ts-rs impl; it serializes as a JSON byte array.
+    #[cfg_attr(feature = "ts-rs", ts(type = "number[]"))]
     pub bytes: Bytes,
 }
 

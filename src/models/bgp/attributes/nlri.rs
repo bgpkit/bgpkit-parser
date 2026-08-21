@@ -6,19 +6,28 @@ use std::net::IpAddr;
 /// Network Layer Reachability Information
 #[derive(Debug, PartialEq, Clone, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 pub struct Nlri {
     pub afi: Afi,
     pub safi: Safi,
     pub next_hop: Option<NextHopAddress>,
     /// Traditional IP prefixes for unicast/multicast
     /// Also used for SAFI 4 withdrawals (RFC 8277 withdrawals carry no label semantics)
+    /// [`NetworkPrefix`] has a manual serde impl (string or `{prefix, path_id}`).
+    #[cfg_attr(
+        feature = "ts-rs",
+        ts(type = "(string | { prefix: string; path_id: number })[]")
+    )]
     pub prefixes: Vec<NetworkPrefix>,
     /// MPLS-labeled IP prefixes (SAFI 4 announcements only) - RFC 3107/8277
     /// Withdrawals are routed to `prefixes`, not here
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
     pub labeled_prefixes: Option<Vec<LabeledNetworkPrefix>>,
     /// Link-State NLRI data - RFC 7752
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
     pub link_state_nlris: Option<Vec<crate::models::bgp::linkstate::LinkStateNlri>>,
     /// Flow-Spec NLRI data - RFC 8955/8956
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
     pub flowspec_nlris: Option<Vec<crate::models::bgp::flowspec::FlowSpecNlri>>,
 }
 

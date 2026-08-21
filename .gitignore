@@ -32,3 +32,9 @@ pkg/
 pkg-*/
 node_modules/
 .wrangler/
+
+# test artifact from core-dump parser tests
+mrt_core_dump
+
+# ts-rs default export dir (canonical bindings live in src/wasm/js/generated)
+bindings/

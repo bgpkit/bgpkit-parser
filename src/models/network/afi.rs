@@ -6,6 +6,7 @@ use std::net::IpAddr;
 /// <https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml>
 #[derive(Debug, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[repr(u16)]
 pub enum Afi {
     Ipv4 = 1,
@@ -37,6 +38,7 @@ impl From<IpAddr> for Afi {
 /// - RFC 8950: Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
 #[derive(Debug, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[repr(u8)]
 pub enum Safi {
     Unicast = 1,

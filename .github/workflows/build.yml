@@ -65,6 +65,29 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+  wasm-types:
+    name: WASM TS Types & Fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Regenerate TS bindings and golden fixtures
+        run: >
+          TS_RS_EXPORT_DIR=src/wasm/js/generated cargo test --features ts-rs,rislive
+
+      - name: Verify generated files are up to date
+        run: git diff --exit-code -- src/wasm/js/generated src/wasm/test/fixtures
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Type-check fixtures against shipped definitions
+        working-directory: src/wasm/test/type-check
+        run: |
+          npm ci
+          npm run check
+
   msrv:
     name: Check MSRV
     runs-on: ubuntu-latest

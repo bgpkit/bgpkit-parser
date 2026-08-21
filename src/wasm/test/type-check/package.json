@@ -1,0 +1,12 @@
+{
+  "name": "bgpkit-parser-type-check",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Compile-time conformance check: golden JSON fixtures from the Rust models must type-check against the shipped TypeScript definitions.",
+  "scripts": {
+    "check": "tsc --noEmit && node verify.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

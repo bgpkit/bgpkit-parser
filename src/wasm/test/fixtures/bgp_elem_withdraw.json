@@ -1,0 +1,21 @@
+{
+  "timestamp": 1636245154.8,
+  "type": "WITHDRAW",
+  "peer_ip": "192.0.2.1",
+  "peer_asn": 64496,
+  "peer_bgp_id": null,
+  "prefix": "198.51.100.0/24",
+  "next_hop": null,
+  "as_path": null,
+  "origin_asns": null,
+  "origin": null,
+  "local_pref": null,
+  "med": null,
+  "communities": null,
+  "atomic": false,
+  "aggr_asn": null,
+  "aggr_ip": null,
+  "only_to_customer": null,
+  "unknown": null,
+  "deprecated": null
+}

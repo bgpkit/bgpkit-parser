@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 #[allow(non_camel_case_types)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Hash, Copy, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
 #[repr(u8)]
 pub enum Origin {
     /// Interior Gateway Protocol

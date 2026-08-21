@@ -25,6 +25,14 @@ export function parseBgpUpdate(data) {
   return JSON.parse(wasm.parseBgpUpdate(data));
 }
 
+export function parseRisLiveMessageJson(message) {
+  return JSON.parse(wasm.parseRisLiveMessageJson(message));
+}
+
+export function parseRisLiveMessageRaw(message) {
+  return JSON.parse(wasm.parseRisLiveMessageRaw(message));
+}
+
 // ── Streaming MRT record parsing ─────────────────────────────────────
 
 const MRT_HEADER_LEN = 12;

@@ -1,0 +1,25 @@
+[
+  {
+    "AttributeFlagsError": {
+      "attr_type": "COMMUNITIES",
+      "expected_flags": 192,
+      "actual_flags": 64
+    }
+  },
+  {
+    "MissingWellKnownAttribute": {
+      "attr_type": "ORIGIN"
+    }
+  },
+  {
+    "MalformedNlri": {
+      "nlri_type": "announced",
+      "reason": "invalid prefix length",
+      "raw_bytes": [
+        51,
+        100,
+        24
+      ]
+    }
+  }
+]
