@@ -142,7 +142,7 @@ harness = false
 
 [dev-dependencies]
 # MSRV pin - newer idna_adapter requires rust 1.88
-idna_adapter = "=1.2.2"
+idna_adapter = "=1.2.0"
 regex = "1"
 anyhow = "1"
 bgpkit-broker = "0.12"

@@ -52,12 +52,14 @@ RFCs. Here is a list of them:
  */
 
 mod bgp;
+mod dissection;
 mod err;
 mod mrt;
 mod network;
 pub mod rpki;
 
 pub use bgp::*;
+pub use dissection::*;
 pub use err::BgpModelsError;
 pub use mrt::*;
 pub use network::*;

@@ -1,26 +1,38 @@
 //! Record-level diagnostic iterator for malformed MRT data investigation.
+//!
+//! The iterator yields one event per record with the original raw bytes
+//! always attached, so byte-level inspection (see
+//! [`crate::parser::mrt::dissect`]) is possible for every record, not only
+//! the anomalous ones. `Record` events carry the RFC 7606 validation
+//! findings collected during parsing (empty when the record is clean);
+//! `ParseError` events carry a best-effort partial dissection tree showing
+//! how far the structure could be walked before the failure.
+//!
+//! For full Wireshark-style field trees on every record, upgrade the
+//! iterator with [`DiagnosticIterator::with_dissection`].
 
 use crate::error::{BgpValidationWarning, ParserError};
 use crate::models::*;
+use crate::parser::mrt::dissect::{dissect_mrt_bytes, dissect_mrt_record};
 use crate::parser::mrt::mrt_record::{chunk_mrt_record_with_context, raw_record_uses_zebra_compat};
 use crate::parser::mrt::RawMrtRecord;
 use crate::parser::BgpkitParser;
+use std::collections::HashMap;
 use std::io::Read;
 
 /// A record-level parsing outcome for malformed-data investigation.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum DiagnosticEvent {
-    /// A fully parsed record with no RFC 7606 validation findings.
-    Record(MrtRecord),
-    /// A parsed record with one or more recoverable validation findings.
-    Validation {
+    /// A parsed record, with its raw bytes and any recoverable validation
+    /// findings. An empty `warnings` vector means the record parsed clean.
+    Record {
         /// The parsed MRT record.
         record: MrtRecord,
+        /// The original MRT record bytes and header.
+        raw: RawMrtRecord,
         /// RFC 7606 validation findings in record traversal order.
         warnings: Vec<BgpValidationWarning>,
-        /// The original MRT record bytes and header.
-        raw_record: RawMrtRecord,
     },
     /// A record that could not be fully parsed.
     ParseError {
@@ -30,6 +42,9 @@ pub enum DiagnosticEvent {
         common_header: Option<CommonHeader>,
         /// All bytes consumed for this record, when available.
         raw_bytes: Option<Vec<u8>>,
+        /// Best-effort partial dissection tree: the fields that could be
+        /// walked before the failure, showing where parsing stopped.
+        partial: Option<DissectionNode>,
     },
 }
 
@@ -45,6 +60,19 @@ impl<R> DiagnosticIterator<R> {
             parser,
             terminated: false,
         }
+    }
+
+    /// Upgrade to an iterator that attaches a full dissection tree and
+    /// byte spans to every event.
+    ///
+    /// This is the byte-inspection mode used by field-level tooling: each
+    /// `Record` event gains a [`DissectionNode`] tree over the whole record
+    /// (common header, BGP4MP subheader, embedded BGP message) and its
+    /// warnings become [`SpannedWarning`]s anchored to the bytes they
+    /// concern. Building the tree costs an extra walk per record, so it is
+    /// opt-in and never paid by the lean iterator.
+    pub fn with_dissection(self) -> DissectingDiagnosticIterator<R> {
+        DissectingDiagnosticIterator { inner: self }
     }
 }
 
@@ -70,6 +98,7 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
                 return Some(DiagnosticEvent::ParseError {
                     error: error.error,
                     common_header: error.common_header,
+                    partial: error.bytes.as_deref().map(dissect_mrt_bytes),
                     raw_bytes: error.bytes,
                 });
             }
@@ -79,10 +108,12 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
         let record = match raw_record.clone().parse() {
             Ok(record) => record,
             Err(error) => {
+                let raw_bytes = Some(raw_record.raw_bytes().to_vec());
                 return Some(DiagnosticEvent::ParseError {
                     error,
                     common_header: Some(raw_record.common_header),
-                    raw_bytes: Some(raw_record.raw_bytes().to_vec()),
+                    partial: raw_bytes.as_deref().map(dissect_mrt_bytes),
+                    raw_bytes,
                 });
             }
         };
@@ -91,19 +122,90 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
         }
 
         let warnings = record_validation_warnings(&record);
-        if warnings.is_empty() {
-            Some(DiagnosticEvent::Record(record))
-        } else {
-            Some(DiagnosticEvent::Validation {
-                record,
-                warnings,
-                raw_record,
-            })
-        }
+        Some(DiagnosticEvent::Record {
+            record,
+            raw: raw_record,
+            warnings,
+        })
     }
 }
 
-fn record_validation_warnings(record: &MrtRecord) -> Vec<BgpValidationWarning> {
+/// A record-level diagnostic with a full dissection tree attached.
+#[derive(Debug)]
+// The tree-carrying Record variant is intentionally the largest and the most
+// common outcome; boxing its fields would add indirection to every consumer.
+#[allow(clippy::large_enum_variant)]
+#[non_exhaustive]
+pub enum DissectedDiagnosticEvent {
+    /// A parsed record with its dissection tree and spanned warnings.
+    Record {
+        /// The parsed MRT record.
+        record: MrtRecord,
+        /// The original MRT record bytes and header.
+        raw: RawMrtRecord,
+        /// Validation findings anchored to the byte ranges they concern.
+        warnings: Vec<SpannedWarning>,
+        /// Wireshark-style field tree over the whole record.
+        tree: DissectionNode,
+    },
+    /// A record that could not be fully parsed; `partial` shows how far the
+    /// structure could be walked.
+    ParseError {
+        /// The parsing failure.
+        error: ParserError,
+        /// The MRT common header when framing completed successfully.
+        common_header: Option<CommonHeader>,
+        /// All bytes consumed for this record, when available.
+        raw_bytes: Option<Vec<u8>>,
+        /// Best-effort partial dissection tree.
+        partial: Option<DissectionNode>,
+    },
+}
+
+/// Iterator produced by [`DiagnosticIterator::with_dissection`].
+pub struct DissectingDiagnosticIterator<R> {
+    inner: DiagnosticIterator<R>,
+}
+
+impl<R: Read> Iterator for DissectingDiagnosticIterator<R> {
+    type Item = DissectedDiagnosticEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|event| match event {
+            DiagnosticEvent::Record {
+                record,
+                raw,
+                warnings,
+            } => {
+                let tree = dissect_mrt_record(&raw);
+                let warnings = span_record_warnings(&warnings, &tree);
+                DissectedDiagnosticEvent::Record {
+                    record,
+                    raw,
+                    warnings,
+                    tree,
+                }
+            }
+            DiagnosticEvent::ParseError {
+                error,
+                common_header,
+                raw_bytes,
+                partial,
+            } => DissectedDiagnosticEvent::ParseError {
+                error,
+                common_header,
+                raw_bytes,
+                partial,
+            },
+        })
+    }
+}
+
+/// Collect the RFC 7606 validation findings of an MRT record.
+///
+/// This is the taxonomy walk the [`DiagnosticIterator`] applies per record;
+/// it is public so custom investigation pipelines can reuse it.
+pub fn record_validation_warnings(record: &MrtRecord) -> Vec<BgpValidationWarning> {
     match &record.message {
         MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(message)) => update_warnings(&message.bgp_message),
         MrtMessage::LegacyBgp(LegacyBgp::Message(message)) => update_warnings(&message.bgp_message),
@@ -127,6 +229,86 @@ fn update_warnings(message: &BgpMessage) -> Vec<BgpValidationWarning> {
         BgpMessage::RouteRefresh(refresh) => refresh.validation_warnings(),
         _ => Vec::new(),
     }
+}
+
+/// Anchor validation warnings to the byte ranges they concern.
+///
+/// The parser does not track offsets on its hot path, so spans are
+/// correlated here against the dissection tree: attribute-keyed warnings
+/// point at the matching `bgp.attr.{code}` node (the Nth occurrence for
+/// duplicate attributes), NLRI warnings at the NLRI section, and everything
+/// else falls back to the enclosing section or the whole record.
+pub fn span_record_warnings(
+    warnings: &[BgpValidationWarning],
+    tree: &DissectionNode,
+) -> Vec<SpannedWarning> {
+    let mut duplicate_counts: HashMap<u8, usize> = HashMap::new();
+    warnings
+        .iter()
+        .map(|warning| SpannedWarning {
+            span: locate_warning_span(warning, tree, &mut duplicate_counts),
+            warning: warning.clone(),
+        })
+        .collect()
+}
+
+fn locate_warning_span(
+    warning: &BgpValidationWarning,
+    tree: &DissectionNode,
+    duplicate_counts: &mut HashMap<u8, usize>,
+) -> Span {
+    use BgpValidationWarning as W;
+
+    let attr_span = |code: u8, occurrence: usize| -> Option<Span> {
+        let mut nodes = Vec::new();
+        tree.find_all(&format!("bgp.attr.{code}"), &mut nodes);
+        nodes.get(occurrence).map(|node| node.span())
+    };
+    // Anchor to the attribute occurrence the warning is about. The parser
+    // emits warnings while observing headers in wire order and reports
+    // `DuplicateAttribute` before any other finding for that duplicate
+    // header, so the number of duplicates seen so far is the occurrence
+    // every attribute-keyed warning of that type belongs to.
+    let current_attr_span = |code: u8| -> Option<Span> {
+        let occurrence = duplicate_counts.get(&code).copied().unwrap_or(0);
+        attr_span(code, occurrence)
+    };
+    let section_span = |field: &str| -> Option<Span> { tree.find(field).map(|node| node.span()) };
+
+    let span = match warning {
+        W::AttributeFlagsError { attr_type, .. }
+        | W::AttributeLengthError { attr_type, .. }
+        | W::OptionalAttributeError { attr_type, .. }
+        | W::PartialAttributeError { attr_type, .. } => current_attr_span(u8::from(*attr_type))
+            .or_else(|| section_span("bgp.update.path_attributes")),
+        W::DuplicateAttribute { attr_type } => {
+            let code = u8::from(*attr_type);
+            let count = duplicate_counts.entry(code).or_insert(0);
+            *count += 1;
+            attr_span(code, *count).or_else(|| section_span("bgp.update.path_attributes"))
+        }
+        W::InvalidOriginAttribute { .. } => current_attr_span(1),
+        W::InvalidNextHopAttribute { .. } => current_attr_span(3),
+        W::MalformedAsPath { .. } => current_attr_span(2),
+        W::UnrecognizedWellKnownAttribute { attr_type_code } => current_attr_span(*attr_type_code),
+        W::MissingWellKnownAttribute { .. } | W::MalformedAttributeList { .. } => {
+            section_span("bgp.update.path_attributes")
+        }
+        W::InvalidNetworkField { .. } => {
+            section_span("bgp.update.nlri").or_else(|| section_span("bgp.update.withdrawn_routes"))
+        }
+        W::MalformedNlri { nlri_type, .. } => match *nlri_type {
+            "withdrawn" => section_span("bgp.update.withdrawn_routes"),
+            "announced" => section_span("bgp.update.nlri"),
+            "mp_reach" => current_attr_span(14),
+            "mp_unreach" => current_attr_span(15),
+            _ => None,
+        },
+        W::UnknownRouteRefreshSubtype { .. } | W::InvalidRouteRefreshLength { .. } => {
+            section_span("bgp.route_refresh")
+        }
+    };
+    span.unwrap_or_else(|| tree.span())
 }
 
 #[cfg(test)]
@@ -232,18 +414,14 @@ mod tests {
     ) {
         let mut iter = BgpkitParser::from_reader(Cursor::new(wire.clone())).into_diagnostic_iter();
         match iter.next().unwrap() {
-            DiagnosticEvent::Validation {
-                warnings,
-                raw_record,
-                ..
-            } => {
+            DiagnosticEvent::Record { warnings, raw, .. } => {
                 assert!(
                     warnings.iter().any(expected_warning),
                     "expected validation warning, got {warnings:?}"
                 );
-                assert_eq!(raw_record.raw_bytes().as_ref(), wire.as_slice());
+                assert_eq!(raw.raw_bytes().as_ref(), wire.as_slice());
             }
-            event => panic!("expected validation event, got {event:?}"),
+            event => panic!("expected record event with warnings, got {event:?}"),
         }
         assert!(iter.next().is_none());
     }
@@ -281,7 +459,10 @@ mod tests {
         let wire = bgp4mp_route_refresh_wire(0, &[0x01, 0x80, 0x00, 0x00]);
         let mut iter = BgpkitParser::from_reader(Cursor::new(wire)).into_diagnostic_iter();
         match iter.next().unwrap() {
-            DiagnosticEvent::Record(record) => {
+            DiagnosticEvent::Record {
+                record, warnings, ..
+            } => {
+                assert!(warnings.is_empty());
                 assert!(matches!(
                     record.message,
                     MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(Bgp4MpMessage {
@@ -300,7 +481,15 @@ mod tests {
         let wire = update_record(valid_attributes()).encode().unwrap().to_vec();
         let mut iter = BgpkitParser::from_reader(Cursor::new(wire)).into_diagnostic_iter();
 
-        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record(_))));
+        match iter.next().unwrap() {
+            DiagnosticEvent::Record {
+                record, warnings, ..
+            } => {
+                assert!(warnings.is_empty());
+                assert!(matches!(record.message, MrtMessage::Bgp4Mp(_)));
+            }
+            event => panic!("expected clean record event, got {event:?}"),
+        }
         assert!(iter.next().is_none());
     }
 
@@ -313,10 +502,10 @@ mod tests {
         let mut iter = BgpkitParser::from_reader(Cursor::new(wire.clone())).into_diagnostic_iter();
 
         match iter.next().unwrap() {
-            DiagnosticEvent::Validation {
+            DiagnosticEvent::Record {
                 record,
                 warnings,
-                raw_record,
+                raw,
             } => {
                 assert!(matches!(record.message, MrtMessage::Bgp4Mp(_)));
                 assert!(warnings.iter().any(|warning| {
@@ -327,9 +516,9 @@ mod tests {
                         }
                     )
                 }));
-                assert_eq!(raw_record.raw_bytes().as_ref(), wire.as_slice());
+                assert_eq!(raw.raw_bytes().as_ref(), wire.as_slice());
             }
-            event => panic!("expected validation event, got {event:?}"),
+            event => panic!("expected record event with warnings, got {event:?}"),
         }
     }
 
@@ -359,7 +548,7 @@ mod tests {
             }
             event => panic!("expected parse error event, got {event:?}"),
         }
-        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record(_))));
+        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record { .. })));
         assert!(iter.next().is_none());
     }
 
@@ -387,6 +576,51 @@ mod tests {
             } => {
                 assert_eq!(common_header, Some(header));
                 assert_eq!(raw_bytes.as_deref(), Some(input.as_slice()));
+            }
+            event => panic!("expected parse error event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn diagnostic_iterator_parse_error_carries_partial_tree() {
+        // A BGP4MP record whose UPDATE body is truncated: the partial tree
+        // must still walk the header, subheader, and BGP message header.
+        let mut bgp = vec![0xFF; 16];
+        bgp.extend_from_slice(&21u16.to_be_bytes()); // claims 2 body bytes
+        bgp.push(2);
+        bgp.extend_from_slice(&[0x00]); // only 1 of 2 withdrawn-length bytes
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&64496u32.to_be_bytes());
+        body.extend_from_slice(&64497u32.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&1u16.to_be_bytes());
+        body.extend_from_slice(&[192, 0, 2, 1]);
+        body.extend_from_slice(&[192, 0, 2, 2]);
+        body.extend_from_slice(&bgp);
+
+        let mut wire = CommonHeader {
+            timestamp: 1,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP4MP,
+            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            length: body.len() as u32,
+        }
+        .encode()
+        .to_vec();
+        wire.extend_from_slice(&body);
+
+        match BgpkitParser::from_reader(Cursor::new(wire))
+            .into_diagnostic_iter()
+            .next()
+            .unwrap()
+        {
+            DiagnosticEvent::ParseError { partial, .. } => {
+                let partial = partial.expect("partial tree on parse error");
+                assert!(partial.find("mrt.header.type").is_some());
+                assert!(partial.find("mrt.bgp4mp.peer_asn").is_some());
+                assert!(partial.find("bgp.header.marker").is_some());
+                assert!(partial.find("bgp.update.path_attributes").is_none());
             }
             event => panic!("expected parse error event, got {event:?}"),
         }
@@ -436,10 +670,16 @@ mod tests {
             DiagnosticEvent::ParseError {
                 common_header,
                 raw_bytes,
+                partial,
                 ..
             } => {
-                assert!(common_header.is_none());
+                assert_eq!(common_header, None);
                 assert_eq!(raw_bytes.as_deref(), Some(invalid_header.as_slice()));
+                // The bytes still frame a 12-byte header, so the partial tree
+                // walks the header fields but nothing beyond them.
+                let partial = partial.unwrap();
+                assert!(partial.find("mrt.header.type").is_some());
+                assert!(partial.find("mrt.body").is_none());
             }
             event => panic!("expected parse error event, got {event:?}"),
         }
@@ -454,7 +694,7 @@ mod tests {
 
         assert!(matches!(
             parser.into_diagnostic_iter().next(),
-            Some(DiagnosticEvent::Record(_))
+            Some(DiagnosticEvent::Record { .. })
         ));
     }
 
@@ -471,11 +711,7 @@ mod tests {
 
         let mut iter = BgpkitParser::from_reader(Cursor::new(input)).into_diagnostic_iter();
         match iter.next().unwrap() {
-            DiagnosticEvent::Validation {
-                warnings,
-                raw_record,
-                ..
-            } => {
+            DiagnosticEvent::Record { warnings, raw, .. } => {
                 assert!(warnings.iter().any(|warning| {
                     matches!(
                         warning,
@@ -496,11 +732,11 @@ mod tests {
                         } if raw_bytes == &malformed_nlri
                     )
                 }));
-                assert_eq!(raw_record.raw_bytes().as_ref(), invalid_wire.as_slice());
+                assert_eq!(raw.raw_bytes().as_ref(), invalid_wire.as_slice());
             }
-            event => panic!("expected validation event, got {event:?}"),
+            event => panic!("expected record event with warnings, got {event:?}"),
         }
-        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record(_))));
+        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record { .. })));
         assert!(iter.next().is_none());
     }
 
@@ -610,19 +846,16 @@ mod tests {
             .next()
             .unwrap()
         {
-            DiagnosticEvent::Validation {
-                record,
-                warnings,
-                raw_record,
+            DiagnosticEvent::Record {
+                record, warnings, ..
             } => {
                 assert!(matches!(
                     record.message,
                     MrtMessage::TableDumpMessageBatch(_)
                 ));
                 assert_eq!(warnings.len(), 6);
-                assert_eq!(raw_record.raw_bytes().as_ref(), table_dump_wire.as_slice());
             }
-            event => panic!("expected validation event, got {event:?}"),
+            event => panic!("expected record event, got {event:?}"),
         }
 
         let rib_record = MrtRecord {
@@ -646,24 +879,165 @@ mod tests {
             })),
         };
         let rib_wire = rib_record.encode().unwrap().to_vec();
-        match BgpkitParser::from_reader(Cursor::new(rib_wire.clone()))
+        match BgpkitParser::from_reader(Cursor::new(rib_wire))
             .into_diagnostic_iter()
             .next()
             .unwrap()
         {
-            DiagnosticEvent::Validation {
-                record,
-                warnings,
-                raw_record,
-            } => {
-                assert!(matches!(
-                    record.message,
-                    MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(_))
-                ));
+            DiagnosticEvent::Record { warnings, .. } => {
                 assert_eq!(warnings.len(), 3);
-                assert_eq!(raw_record.raw_bytes().as_ref(), rib_wire.as_slice());
             }
-            event => panic!("expected validation event, got {event:?}"),
+            event => panic!("expected record event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn with_dissection_attaches_tree_and_spans() {
+        // Attribute flags error on ORIGIN: the spanned warning must point at
+        // the first ORIGIN attribute node's byte range.
+        let announced = [0x18, 10, 0, 0];
+        let mut bad_flags = valid_update_attributes_wire();
+        bad_flags[0] = 0x80;
+        let wire = bgp4mp_update_wire(&[], &bad_flags, &announced);
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::Record { warnings, tree, .. } => {
+                // MRT header, BGP4MP subheader, and BGP layers all present
+                assert!(tree.find("mrt.header.type").is_some());
+                assert!(tree.find("mrt.bgp4mp.peer_asn").is_some());
+                assert!(tree.find("bgp.header.type").is_some());
+                assert!(tree.find("bgp.attr.1").is_some());
+
+                let origin = tree.find("bgp.attr.1").unwrap();
+                assert_eq!(warnings.len(), 1);
+                assert!(matches!(
+                    warnings[0].warning,
+                    BgpValidationWarning::AttributeFlagsError { .. }
+                ));
+                assert_eq!(warnings[0].span, origin.span());
+            }
+            event => panic!("expected dissected record event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn with_dissection_anchors_duplicate_to_second_occurrence() {
+        // Two ORIGIN attributes: the duplicate warning and its companion
+        // flags warning both belong to the SECOND occurrence.
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(&[0x40, 0x01, 0x01, 0x00]); // first, clean
+        attrs.extend_from_slice(&[0x80, 0x01, 0x01, 0x00]); // duplicate, bad flags
+        let announced = [0x18, 10, 0, 0];
+        let wire = bgp4mp_update_wire(&[], &attrs, &announced);
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::Record { warnings, tree, .. } => {
+                let mut origins = Vec::new();
+                tree.find_all("bgp.attr.1", &mut origins);
+                assert_eq!(origins.len(), 2, "two ORIGIN attributes on the wire");
+
+                let duplicate = warnings
+                    .iter()
+                    .find(|w| matches!(w.warning, BgpValidationWarning::DuplicateAttribute { .. }))
+                    .expect("duplicate warning");
+                // NTH-occurrence anchoring: the duplicate points at #2
+                assert_eq!(duplicate.span, origins[1].span());
+
+                // The flags error accompanying the duplicate header must
+                // also anchor to the second occurrence, not the first.
+                let flags = warnings
+                    .iter()
+                    .find(|w| matches!(w.warning, BgpValidationWarning::AttributeFlagsError { .. }))
+                    .expect("flags warning");
+                assert_eq!(flags.span, origins[1].span());
+            }
+            event => panic!("expected dissected record event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn with_dissection_passes_through_parse_error_partial() {
+        // A truncated record still yields a ParseError carrying the partial
+        // tree through the dissecting iterator.
+        let header = CommonHeader {
+            timestamp: 3,
+            microsecond_timestamp: None,
+            entry_type: EntryType::TABLE_DUMP,
+            entry_subtype: 0,
+            length: 4,
+        };
+        let mut input = header.encode().to_vec();
+        input.extend_from_slice(&[0xff; 4]);
+        input.extend_from_slice(&update_record(valid_attributes()).encode().unwrap());
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::ParseError { partial, .. } => {
+                assert!(partial.is_some());
+            }
+            event => panic!("expected dissected parse error event, got {event:?}"),
+        }
+        assert!(matches!(
+            iter.next(),
+            Some(DissectedDiagnosticEvent::Record { .. })
+        ));
+    }
+
+    #[test]
+    fn record_validation_warnings_reachable_from_crate_root() {
+        // Regression: the helper must be re-exported, not just declared pub
+        // in a private module. It reports the findings stored on the parsed
+        // attributes, so attach one directly.
+        let record = update_record(valid_attributes());
+        assert!(crate::record_validation_warnings(&record).is_empty());
+
+        let mut attributes = Attributes::default();
+        attributes.add_validation_warning(BgpValidationWarning::MissingWellKnownAttribute {
+            attr_type: AttrType::ORIGIN,
+        });
+        let flagged = update_record(attributes);
+        assert_eq!(crate::record_validation_warnings(&flagged).len(), 1);
+    }
+
+    #[test]
+    fn with_dissection_spans_nlri_warning() {
+        let malformed_nlri = [0xc8, 0x01];
+        let mut body = Vec::new();
+        body.extend_from_slice(&(malformed_nlri.len() as u16).to_be_bytes());
+        body.extend_from_slice(&malformed_nlri);
+        body.extend_from_slice(&(valid_update_attributes_wire().len() as u16).to_be_bytes());
+        body.extend_from_slice(&valid_update_attributes_wire());
+        let wire = bgp4mp_message_wire(BgpMessageType::UPDATE, &body);
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::Record { warnings, tree, .. } => {
+                let withdrawn = tree.find("bgp.update.withdrawn_routes").unwrap();
+                let warning = warnings
+                    .iter()
+                    .find(|w| {
+                        matches!(
+                            w.warning,
+                            BgpValidationWarning::MalformedNlri {
+                                nlri_type: "withdrawn",
+                                ..
+                            }
+                        )
+                    })
+                    .expect("withdrawn NLRI warning");
+                assert_eq!(warning.span, withdrawn.span());
+            }
+            event => panic!("expected dissected record event, got {event:?}"),
         }
     }
 }

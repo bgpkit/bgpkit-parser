@@ -25,14 +25,23 @@
 //! - [`parseRisLiveMessageRaw`](parse_ris_live_message_raw_wasm) — parse a RIS
 //!   Live message from its `data.raw` BGP wire bytes with full attribute
 //!   fidelity
+//! - [`parseBgpUpdateFull`](parse_bgp_update_full) — parse a single BGP UPDATE
+//!   with full attribute fidelity (attributes + validation warnings)
+//! - [`dissectBgpMessage`](dissect_bgp_message_wasm) — Wireshark-style field
+//!   tree with byte spans for a BGP message
+//! - [`dissectMrtRecord`](dissect_mrt_record_wasm) — field tree with byte
+//!   spans for one MRT record (header, BGP4MP subheader, embedded BGP message)
 
+use crate::error::BgpValidationWarning;
 use crate::models::*;
+use crate::parser::bgp::dissect::dissect_bgp_message;
 use crate::parser::bgp::messages::parse_bgp_message;
 use crate::parser::bmp::error::ParserBmpError;
 use crate::parser::bmp::messages::*;
 use crate::parser::bmp::{parse_bmp_msg, parse_openbmp_header};
+use crate::parser::mrt::dissect::dissect_mrt_record;
 use crate::parser::mrt::mrt_elem::Elementor;
-use crate::parser::mrt::mrt_record::parse_mrt_record;
+use crate::parser::mrt::mrt_record::{chunk_mrt_record, parse_mrt_record};
 use crate::parser::rislive::{
     parse_ris_live_message, parse_ris_live_message_raw_full, RisLiveRawFull,
 };
@@ -368,6 +377,82 @@ fn parse_ris_live_message_raw_core(msg_str: &str) -> Result<RisLiveRawFull, Stri
     parse_ris_live_message_raw_full(msg_str).map_err(|e| e.to_string())
 }
 
+/// Full-fidelity result of parsing one BGP UPDATE message.
+#[derive(serde::Serialize)]
+struct BgpUpdateFull {
+    elems: Vec<BgpElem>,
+    attributes: Attributes,
+    #[serde(rename = "validationWarnings")]
+    validation_warnings: Vec<BgpValidationWarning>,
+}
+
+/// Parse a single BGP UPDATE message with full attribute fidelity: elements,
+/// every path attribute (including the ones dropped from the elem
+/// projection), and RFC 7606 validation warnings.
+fn parse_bgp_update_full_core(data: &[u8]) -> Result<String, String> {
+    let mut bytes = Bytes::from(data.to_vec());
+    let msg =
+        parse_bgp_message(&mut bytes, false, &AsnLength::Bits32).map_err(|e| e.to_string())?;
+    let (attributes, validation_warnings) = match &msg {
+        BgpMessage::Update(update) => (
+            update.attributes.clone(),
+            update.attributes.validation_warnings().to_vec(),
+        ),
+        _ => (Attributes::default(), vec![]),
+    };
+    let elems = Elementor::bgp_to_elems(
+        msg,
+        0.0,
+        &IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        &Asn::default(),
+    );
+    let result = BgpUpdateFull {
+        elems,
+        attributes,
+        validation_warnings,
+    };
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+/// Dissect a single BGP message into a Wireshark-style field tree with byte
+/// spans. Best effort: truncated or malformed input yields a partial tree
+/// rather than an error.
+fn dissect_bgp_message_core(data: &[u8], four_byte_asn: bool) -> Result<String, String> {
+    let asn_len = if four_byte_asn {
+        AsnLength::Bits32
+    } else {
+        AsnLength::Bits16
+    };
+    let tree = dissect_bgp_message(data, &asn_len, false);
+    serde_json::to_string(&tree).map_err(|e| e.to_string())
+}
+
+/// Result of dissecting one MRT record: the field tree + bytes consumed.
+#[derive(serde::Serialize)]
+struct DissectMrtResult {
+    tree: DissectionNode,
+    #[serde(rename = "bytesRead")]
+    bytes_read: u32,
+}
+
+/// Dissect one MRT record from the start of `data` into a field tree whose
+/// offsets cover the whole record: common header, BGP4MP subheader, and the
+/// embedded BGP message.
+fn dissect_mrt_record_core(data: &[u8]) -> Result<String, String> {
+    if data.is_empty() {
+        return Ok(String::new());
+    }
+    let mut cursor = Cursor::new(data);
+    let raw = match chunk_mrt_record(&mut cursor) {
+        Ok(raw) => raw,
+        Err(_) => return Ok(String::new()),
+    };
+    let bytes_read = cursor.position() as u32;
+    let tree = dissect_mrt_record(&raw);
+    let result = DissectMrtResult { tree, bytes_read };
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
 // ── Exported WASM functions (thin wrappers) ──────────────────────────────────
 
 /// Parse an OpenBMP-wrapped BMP message as received from the RouteViews Kafka stream.
@@ -473,6 +558,53 @@ pub fn parse_ris_live_message_json_wasm(msg_str: &str) -> Result<String, JsError
 pub fn parse_ris_live_message_raw_wasm(msg_str: &str) -> Result<String, JsError> {
     let full = parse_ris_live_message_raw_core(msg_str).map_err(|e| JsError::new(&e))?;
     serde_json::to_string(&full).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Parse a single BGP UPDATE message with full attribute fidelity.
+///
+/// Returns a JSON object `{ elems, attributes, validationWarnings }`.
+/// `attributes` carries every path attribute of the UPDATE — including the
+/// ones the elem projection drops (originator ID, cluster list, AIGP,
+/// raw-retained BGPSEC_PATH/ATTR_SET, ...) — and `validationWarnings` the
+/// RFC 7606 findings.
+///
+/// Throws a JavaScript `Error` if the message cannot be parsed.
+#[wasm_bindgen(js_name = "parseBgpUpdateFull")]
+pub fn parse_bgp_update_full(data: &[u8]) -> Result<String, JsError> {
+    parse_bgp_update_full_core(data).map_err(|e| JsError::new(&e))
+}
+
+/// Dissect a single BGP message into a Wireshark-style field tree.
+///
+/// Every node of the returned `DissectionNode` tree carries its byte range
+/// (`offset`/`length` relative to the message start), so a frontend can
+/// highlight the bytes behind any protocol field and vice versa. Attribute
+/// values are dissected one level deep (AS_PATH segments, community entries,
+/// MP_REACH structure, fixed u32 fields).
+///
+/// `fourByteAsn` selects 4-octet (the modern default) vs 2-octet AS number
+/// rendering inside AS_PATH/AGGREGATOR.
+///
+/// Dissection is best effort: truncated or malformed input yields a partial
+/// tree showing how far the structure could be walked, never an error.
+#[wasm_bindgen(js_name = "dissectBgpMessage")]
+pub fn dissect_bgp_message_wasm(data: &[u8], four_byte_asn: bool) -> Result<String, JsError> {
+    dissect_bgp_message_core(data, four_byte_asn).map_err(|e| JsError::new(&e))
+}
+
+/// Dissect one MRT record from the start of the given buffer.
+///
+/// Returns a JSON object `{ tree, bytesRead }` where `tree` is a
+/// `DissectionNode` tree whose byte offsets cover the whole record — common
+/// header fields, the BGP4MP subheader, and the embedded BGP message — and
+/// `bytesRead` is the number of bytes the record occupied (slice them off
+/// before the next call, exactly like `parseMrtRecord`).
+///
+/// Returns an empty string when there is no complete record at the front of
+/// the buffer (the JS wrapper converts this to `null`).
+#[wasm_bindgen(js_name = "dissectMrtRecord")]
+pub fn dissect_mrt_record_wasm(data: &[u8]) -> Result<String, JsError> {
+    dissect_mrt_record_core(data).map_err(|e| JsError::new(&e))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -714,6 +846,120 @@ mod tests {
             "timestamp": 1636245154.8, "peer": "192.0.2.1", "peer_asn": "64496",
             "id": "00-192-0-2-1-1", "host": "rrc00", "type": "KEEPALIVE"}}"#;
         assert!(parse_ris_live_message_raw_core(msg).is_err());
+    }
+
+    #[test]
+    fn test_parse_bgp_update_full() {
+        // Extract the raw BGP message from the RIS Live fixture envelope.
+        let v: serde_json::Value = serde_json::from_str(RIS_LIVE_MSG).unwrap();
+        let raw = hex::decode(v["data"]["raw"].as_str().unwrap()).unwrap();
+
+        let json = parse_bgp_update_full_core(&raw).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(!v["elems"].as_array().unwrap().is_empty());
+        // Tier 2 attributes survive: MP_REACH is present in the attribute
+        // list even though the elem projection flattens it.
+        let attributes = v["attributes"].as_array().unwrap();
+        assert!(attributes
+            .iter()
+            .any(|a| a["value"].get("MpReachNlri").is_some()));
+        assert!(attributes
+            .iter()
+            .any(|a| a["value"].get("Communities").is_some()));
+        assert!(v["validationWarnings"].is_array());
+    }
+
+    #[test]
+    fn test_dissect_bgp_message_core_tree() {
+        let v: serde_json::Value = serde_json::from_str(RIS_LIVE_MSG).unwrap();
+        let raw = hex::decode(v["data"]["raw"].as_str().unwrap()).unwrap();
+
+        let json = dissect_bgp_message_core(&raw, true).unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Header fields with absolute offsets
+        assert_eq!(tree["field"], "bgp");
+        assert_eq!(tree["children"][0]["field"], "bgp.header");
+        assert_eq!(tree["children"][0]["children"][0]["offset"], 0);
+        assert_eq!(tree["children"][0]["children"][0]["length"], 16);
+
+        // Attribute nodes present with type-code fields
+        let fields: Vec<&str> = collect_fields(&tree);
+        assert!(fields.contains(&"bgp.attr.2"));
+        assert!(fields.contains(&"bgp.attr.14"));
+        assert!(fields.contains(&"bgp.attr.8"));
+        assert!(fields.contains(&"bgp.attr.mp_reach.next_hop"));
+    }
+
+    #[test]
+    fn test_dissect_bgp_message_core_partial_on_garbage() {
+        // Truncated header still yields a partial tree, not an error
+        let json = dissect_bgp_message_core(&[0xFF; 7], true).unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(tree["field"], "bgp");
+        assert_eq!(
+            tree["children"][0]["label"],
+            "Header (truncated, 7 of 19 bytes)"
+        );
+    }
+
+    #[test]
+    fn test_dissect_mrt_record_core() {
+        // Build one BGP4MP_MESSAGE_AS4 record around the fixture BGP message
+        let v: serde_json::Value = serde_json::from_str(RIS_LIVE_MSG).unwrap();
+        let bgp = hex::decode(v["data"]["raw"].as_str().unwrap()).unwrap();
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&201333u32.to_be_bytes());
+        body.extend_from_slice(&6762u32.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&2u16.to_be_bytes()); // AFI IPv6
+        body.extend_from_slice(&[
+            0x20, 0x01, 0x07, 0xF8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4E,
+        ]); // peer IPv6
+        body.extend_from_slice(&[
+            0x20, 0x01, 0x07, 0xF8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4F,
+        ]); // local IPv6
+        body.extend_from_slice(&bgp);
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1_700_000_000u32.to_be_bytes());
+        wire.extend_from_slice(&16u16.to_be_bytes());
+        wire.extend_from_slice(&4u16.to_be_bytes());
+        wire.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&body);
+
+        let json = dissect_mrt_record_core(&wire).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["bytesRead"], wire.len() as u64);
+
+        let fields: Vec<&str> = collect_fields(&v["tree"]);
+        assert!(fields.contains(&"mrt.header.type"));
+        assert!(fields.contains(&"mrt.bgp4mp.peer_asn"));
+        assert!(fields.contains(&"bgp.header.marker"));
+        assert!(fields.contains(&"bgp.attr.14"));
+
+        // Empty input maps to the null sentinel
+        assert_eq!(dissect_mrt_record_core(&[]).unwrap(), "");
+        // No complete record at the front maps to the null sentinel too
+        assert_eq!(dissect_mrt_record_core(&[0, 0, 0]).unwrap(), "");
+    }
+
+    fn collect_fields(value: &serde_json::Value) -> Vec<&str> {
+        let mut fields = Vec::new();
+        fn walk<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
+            if let Some(field) = value["field"].as_str() {
+                out.push(field);
+            }
+            if let Some(children) = value["children"].as_array() {
+                for child in children {
+                    walk(child, out);
+                }
+            }
+        }
+        walk(value, &mut fields);
+        fields
     }
 
     #[test]

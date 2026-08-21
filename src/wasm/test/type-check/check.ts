@@ -24,15 +24,19 @@ import type {
   AttributeValue,
   BgpElem,
   BgpValidationWarning,
+  DissectionNode,
   Nlri,
   RisLiveRawFull,
+  SpannedWarning,
 } from '../../js/index';
 
 import attributeValues from '../fixtures/attribute_values.json';
 import bgpElemAnnounce from '../fixtures/bgp_elem_announce.json';
 import bgpElemWithdraw from '../fixtures/bgp_elem_withdraw.json';
 import bgpValidationWarnings from '../fixtures/bgp_validation_warnings.json';
+import dissectionNode from '../fixtures/dissection_node.json';
 import risLiveRawFull from '../fixtures/ris_live_raw_full.json';
+import spannedWarnings from '../fixtures/spanned_warnings.json';
 
 /** Recursively widen literal-union leaves so JSON inference can match. */
 type Widen<T> = T extends string
@@ -136,3 +140,24 @@ if (risLiveResult.attributes.length === 0)
 // Attribute flags serialize as strings like "OPTIONAL | TRANSITIVE".
 const flag: string = risLiveResult.attributes[0].flag;
 export const _flag = flag;
+
+// ── Dissection surface ───────────────────────────────────────────────────────
+
+// Exact key-set check on the tree root (children recurse through the
+// declared DissectionNode type).
+const _dissectionKeys: ExactKeys<typeof dissectionNode, Widen<DissectionNode>> = true;
+export const dissection: Widen<DissectionNode> = dissectionNode;
+const _spannedKeys: ExactKeys<
+  (typeof spannedWarnings)[number],
+  Widen<SpannedWarning>
+> = true;
+export const spanned: Widen<SpannedWarning>[] = spannedWarnings;
+
+if (dissection.children.length === 0)
+  throw new Error('dissection fixture has no children');
+const marker = dissection.children.find((c) => c.field === 'bgp.header.marker');
+if (marker === undefined) throw new Error('fixture missing bgp.header.marker');
+if (marker.offset !== 0 || marker.length !== 16)
+  throw new Error('marker span is not [0, 16)');
+if (spanned.length === 0) throw new Error('spanned warnings fixture is empty');
+export const _dissectionChecks = [_dissectionKeys, _spannedKeys];

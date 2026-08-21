@@ -236,3 +236,37 @@ fn write_ris_live_raw_full_fixture() {
     let full = parse_ris_live_message_raw_full(message).unwrap();
     write_fixture("ris_live_raw_full", &full);
 }
+
+#[test]
+fn write_dissection_fixtures() {
+    use bgpkit_parser::parser::bgp::dissect::dissect_bgp_message;
+
+    // Dissect the same real-world UPDATE wire bytes used by the RIS Live
+    // fixtures so the tree has attribute internals (MP_REACH next hop,
+    // community entries, AS_PATH segments) to exercise.
+    let raw = hex::decode(
+        "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0086020000006F4001010040021202040003127500001A6A000000AE00004FF980040400000000C008081A6A001E1A6A3840800E4100020120200107F8000B010001D1A52013330074FE800000000000000217A3FFFEFE290500302A0E97C70000302A0E97C600FE302A10CC4217B7302A10CC421FEB"
+    ).unwrap();
+    let tree = dissect_bgp_message(&raw, &AsnLength::Bits32, false);
+    write_fixture("dissection_node", &tree);
+
+    let spanned = vec![
+        SpannedWarning {
+            span: Span::new(31, 14),
+            warning: BgpValidationWarning::AttributeFlagsError {
+                attr_type: AttrType::AS_PATH,
+                expected_flags: 0x40,
+                actual_flags: 0xc0,
+            },
+        },
+        SpannedWarning {
+            span: Span::new(77, 4),
+            warning: BgpValidationWarning::MalformedNlri {
+                nlri_type: "announced",
+                reason: "invalid prefix length".to_string(),
+                raw_bytes: vec![51, 100, 24],
+            },
+        },
+    ];
+    write_fixture("spanned_warnings", &spanned);
+}

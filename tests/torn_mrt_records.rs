@@ -211,7 +211,7 @@ fn diagnostic_iterator_reports_both_torn_writes() {
     // terminates the iterator by design.
     assert_eq!(events.len(), RECORDS_BEFORE_FIRST_TORN_WRITE + 2);
     for event in &events[..RECORDS_BEFORE_FIRST_TORN_WRITE] {
-        let DiagnosticEvent::Record(record) = event else {
+        let DiagnosticEvent::Record { record, .. } = event else {
             panic!("expected a clean record, got {event:?}");
         };
         assert_eq!(record.common_header.entry_type, EntryType::BGP);
@@ -223,6 +223,7 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         error,
         common_header,
         raw_bytes,
+        ..
     } = &events[RECORDS_BEFORE_FIRST_TORN_WRITE]
     else {
         panic!(
@@ -254,6 +255,7 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         error,
         common_header,
         raw_bytes,
+        ..
     } = &events[RECORDS_BEFORE_FIRST_TORN_WRITE + 1]
     else {
         panic!(

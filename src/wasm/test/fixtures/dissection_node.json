@@ -1,0 +1,350 @@
+{
+  "field": "bgp",
+  "label": "BGP message (134 bytes)",
+  "offset": 0,
+  "length": 134,
+  "children": [
+    {
+      "field": "bgp.header",
+      "label": "Header",
+      "offset": 0,
+      "length": 19,
+      "children": [
+        {
+          "field": "bgp.header.marker",
+          "label": "Marker (all ones)",
+          "offset": 0,
+          "length": 16,
+          "children": []
+        },
+        {
+          "field": "bgp.header.length",
+          "label": "Length: 134",
+          "offset": 16,
+          "length": 2,
+          "children": []
+        },
+        {
+          "field": "bgp.header.type",
+          "label": "Type: UPDATE (2)",
+          "offset": 18,
+          "length": 1,
+          "children": []
+        }
+      ]
+    },
+    {
+      "field": "bgp.update",
+      "label": "UPDATE",
+      "offset": 19,
+      "length": 115,
+      "children": [
+        {
+          "field": "bgp.update.withdrawn_routes.length",
+          "label": "Withdrawn routes length: 0",
+          "offset": 19,
+          "length": 2,
+          "children": []
+        },
+        {
+          "field": "bgp.update.path_attributes.length",
+          "label": "Total path attribute length: 111",
+          "offset": 21,
+          "length": 2,
+          "children": []
+        },
+        {
+          "field": "bgp.update.path_attributes",
+          "label": "Path attributes (111 bytes)",
+          "offset": 23,
+          "length": 111,
+          "children": [
+            {
+              "field": "bgp.attr.1",
+              "label": "ORIGIN (type 1), 1 bytes",
+              "offset": 23,
+              "length": 4,
+              "children": [
+                {
+                  "field": "bgp.attr.flags",
+                  "label": "Flags: 0x40",
+                  "offset": 23,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.type",
+                  "label": "Type: 1 (ORIGIN)",
+                  "offset": 24,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.length",
+                  "label": "Length: 1",
+                  "offset": 25,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.value",
+                  "label": "Value (1 bytes)",
+                  "offset": 26,
+                  "length": 1,
+                  "children": [
+                    {
+                      "field": "bgp.attr.origin",
+                      "label": "Origin: IGP (0)",
+                      "offset": 26,
+                      "length": 1,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "field": "bgp.attr.2",
+              "label": "AS_PATH (type 2), 18 bytes",
+              "offset": 27,
+              "length": 21,
+              "children": [
+                {
+                  "field": "bgp.attr.flags",
+                  "label": "Flags: 0x40",
+                  "offset": 27,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.type",
+                  "label": "Type: 2 (AS_PATH)",
+                  "offset": 28,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.length",
+                  "label": "Length: 18",
+                  "offset": 29,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.value",
+                  "label": "Value (18 bytes)",
+                  "offset": 30,
+                  "length": 18,
+                  "children": [
+                    {
+                      "field": "bgp.attr.as_path.segment",
+                      "label": "AS_SEQUENCE: 201333 6762 174 20473",
+                      "offset": 30,
+                      "length": 18,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "field": "bgp.attr.4",
+              "label": "MULTI_EXIT_DISC (type 4), 4 bytes",
+              "offset": 48,
+              "length": 7,
+              "children": [
+                {
+                  "field": "bgp.attr.flags",
+                  "label": "Flags: 0x80",
+                  "offset": 48,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.type",
+                  "label": "Type: 4 (MULTI_EXIT_DISC)",
+                  "offset": 49,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.length",
+                  "label": "Length: 4",
+                  "offset": 50,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.value",
+                  "label": "Value (4 bytes)",
+                  "offset": 51,
+                  "length": 4,
+                  "children": [
+                    {
+                      "field": "bgp.attr.u32",
+                      "label": "Multi-exit discriminator: 0",
+                      "offset": 51,
+                      "length": 4,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "field": "bgp.attr.8",
+              "label": "COMMUNITIES (type 8), 8 bytes",
+              "offset": 55,
+              "length": 11,
+              "children": [
+                {
+                  "field": "bgp.attr.flags",
+                  "label": "Flags: 0xC0",
+                  "offset": 55,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.type",
+                  "label": "Type: 8 (COMMUNITIES)",
+                  "offset": 56,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.length",
+                  "label": "Length: 8",
+                  "offset": 57,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.value",
+                  "label": "Value (8 bytes)",
+                  "offset": 58,
+                  "length": 8,
+                  "children": [
+                    {
+                      "field": "bgp.attr.communities.entry",
+                      "label": "Community [1]: 6762:30",
+                      "offset": 58,
+                      "length": 4,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.attr.communities.entry",
+                      "label": "Community [2]: 6762:14400",
+                      "offset": 62,
+                      "length": 4,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "field": "bgp.attr.14",
+              "label": "MP_REACH_NLRI (type 14), 65 bytes",
+              "offset": 66,
+              "length": 68,
+              "children": [
+                {
+                  "field": "bgp.attr.flags",
+                  "label": "Flags: 0x80",
+                  "offset": 66,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.type",
+                  "label": "Type: 14 (MP_REACH_NLRI)",
+                  "offset": 67,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.length",
+                  "label": "Length: 65",
+                  "offset": 68,
+                  "length": 1,
+                  "children": []
+                },
+                {
+                  "field": "bgp.attr.value",
+                  "label": "Value (65 bytes)",
+                  "offset": 69,
+                  "length": 65,
+                  "children": [
+                    {
+                      "field": "bgp.attr.mp_reach.afi",
+                      "label": "AFI: 2 (IPv6)",
+                      "offset": 69,
+                      "length": 2,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.attr.mp_reach.safi",
+                      "label": "SAFI: 1",
+                      "offset": 71,
+                      "length": 1,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.attr.mp_reach.next_hop_length",
+                      "label": "Next hop length: 32",
+                      "offset": 72,
+                      "length": 1,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.attr.mp_reach.next_hop",
+                      "label": "Next hop (32 bytes)",
+                      "offset": 73,
+                      "length": 32,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.attr.mp_reach.reserved",
+                      "label": "Reserved",
+                      "offset": 105,
+                      "length": 1,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.nlri.prefix",
+                      "label": "2a0e:97c7::/48",
+                      "offset": 106,
+                      "length": 7,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.nlri.prefix",
+                      "label": "2a0e:97c6:fe::/48",
+                      "offset": 113,
+                      "length": 7,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.nlri.prefix",
+                      "label": "2a10:cc42:17b7::/48",
+                      "offset": 120,
+                      "length": 7,
+                      "children": []
+                    },
+                    {
+                      "field": "bgp.nlri.prefix",
+                      "label": "2a10:cc42:1feb::/48",
+                      "offset": 127,
+                      "length": 7,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

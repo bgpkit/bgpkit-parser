@@ -77,6 +77,42 @@ function parseRisLiveMessageRaw(message) {
   return JSON.parse(wasm.parseRisLiveMessageRaw(message));
 }
 
+/**
+ * Parse a single BGP UPDATE message with full attribute fidelity.
+ *
+ * Like parseBgpUpdate() but additionally returns every path attribute
+ * (including the ones the elem projection drops, e.g. originator ID,
+ * cluster list, AIGP, raw-retained BGPSEC_PATH/ATTR_SET) and RFC 7606
+ * validation warnings.
+ *
+ * @param {Uint8Array} data - Raw BGP message bytes (with header)
+ * @returns {{ elems: object[], attributes: object[], validationWarnings: object[] }}
+ */
+function parseBgpUpdateFull(data) {
+  return JSON.parse(wasm.parseBgpUpdateFull(data));
+}
+
+/**
+ * Dissect a single BGP message into a Wireshark-style field tree.
+ *
+ * Every node of the returned tree carries its byte range (`offset`/`length`
+ * relative to the message start), so a UI can highlight the bytes behind any
+ * protocol field and vice versa. Attribute values are dissected one level
+ * deep (AS_PATH segments, community entries, MP_REACH structure, fixed u32
+ * fields).
+ *
+ * Dissection is best effort: truncated or malformed input yields a partial
+ * tree showing how far the structure could be walked, never an error.
+ *
+ * @param {Uint8Array} data - Raw BGP message bytes (with header)
+ * @param {boolean} [fourByteAsn=true] - 4-octet (modern default) vs 2-octet
+ *   AS number rendering inside AS_PATH/AGGREGATOR
+ * @returns {object} DissectionNode tree
+ */
+function dissectBgpMessage(data, fourByteAsn = true) {
+  return JSON.parse(wasm.dissectBgpMessage(data, fourByteAsn));
+}
+
 // ── Streaming MRT record parsing ─────────────────────────────────────
 
 // MRT common header: timestamp(4) + type(2) + subtype(2) + length(4) = 12 bytes.
@@ -110,6 +146,28 @@ function parseMrtRecord(data) {
   if (size < 0 || size > data.length) return null;
   const recordBytes = data.subarray(0, size);
   const json = wasm.parseMrtRecord(recordBytes);
+  if (!json) return null;
+  const result = JSON.parse(json);
+  result.bytesRead = size;
+  return result;
+}
+
+/**
+ * Dissect one MRT record from the start of the buffer into a field tree.
+ *
+ * The tree's byte offsets cover the whole record: common header fields, the
+ * BGP4MP subheader, and the embedded BGP message. Use `bytesRead` to slice
+ * off the record before dissecting the next one, exactly like
+ * parseMrtRecord().
+ *
+ * @param {Uint8Array} data - Remaining decompressed MRT bytes
+ * @returns {{ tree: object, bytesRead: number } | null}
+ */
+function dissectMrtRecord(data) {
+  const size = mrtRecordSize(data, 0);
+  if (size < 0 || size > data.length) return null;
+  const recordBytes = data.subarray(0, size);
+  const json = wasm.dissectMrtRecord(recordBytes);
   if (!json) return null;
   const result = JSON.parse(json);
   result.bytesRead = size;
@@ -341,10 +399,13 @@ module.exports = {
   parseOpenBmpMessage,
   parseBmpMessage,
   parseBgpUpdate,
+  parseBgpUpdateFull,
+  dissectBgpMessage,
   parseRisLiveMessageJson,
   parseRisLiveMessageRaw,
   parseMrtRecords,
   parseMrtRecord,
+  dissectMrtRecord,
   resetMrtParser,
 
   // Node.js I/O helpers

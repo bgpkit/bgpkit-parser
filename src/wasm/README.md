@@ -241,10 +241,13 @@ BMP and BGP UPDATE messages are small (KB-sized) and have no memory concerns.
 | `parseOpenBmpMessage(data)` | `Uint8Array` | `BmpParsedMessage \| null` | Real-time BMP streams |
 | `parseBmpMessage(data, timestamp)` | `Uint8Array`, `number` | `BmpParsedMessage` | Real-time BMP streams |
 | `parseBgpUpdate(data)` | `Uint8Array` | `BgpElem[]` | Individual BGP messages |
+| `parseBgpUpdateFull(data)` | `Uint8Array` | `BgpUpdateFull` | Individual BGP messages (full attribute fidelity) |
+| `dissectBgpMessage(data, fourByteAsn?)` | `Uint8Array`, `boolean` | `DissectionNode` | Wireshark-style field tree with byte spans |
 | `parseRisLiveMessageJson(message)` | `string` | `BgpElem[]` | RIS Live stream (JSON projection) |
 | `parseRisLiveMessageRaw(message)` | `string` | `RisLiveRawFull` | RIS Live stream (full attribute fidelity) |
 | `parseMrtRecords(data)` | `Uint8Array` | `Generator<MrtRecordResult>` | MRT file analysis |
 | `parseMrtRecord(data)` | `Uint8Array` | `MrtRecordResult \| null` | MRT file analysis (low-level) |
+| `dissectMrtRecord(data)` | `Uint8Array` | `DissectMrtResult \| null` | MRT field tree with byte spans (header, BGP4MP subheader, embedded BGP message) |
 | `resetMrtParser()` | — | `void` | Clear state between MRT files |
 
 ### RIS Live result type
@@ -265,6 +268,30 @@ external tagging) for data-carrying variants, e.g. `{ "Origin": "IGP" }` or
 `{ "LargeCommunities": [...] }`; unit variants serialize as a bare string,
 e.g. `{ "value": "AtomicAggregate", "flag": "..." }`. See `index.d.ts` and
 `generated/` in the package for the full typed surface.
+
+### Dissection types
+
+`dissectBgpMessage` returns a `DissectionNode` tree; `dissectMrtRecord`
+returns `{ tree, bytesRead }` where the tree's byte offsets cover the whole
+record (common header, BGP4MP subheader, embedded BGP message — all in one
+coordinate space):
+
+```ts
+interface DissectionNode {
+  field: string;    // stable dotted path, e.g. "bgp.attr.32" (LARGE_COMMUNITY)
+  label: string;    // human-readable rendering, e.g. "AS_SEQUENCE: 65001 65002"
+  offset: number;   // byte offset into the dissected input
+  length: number;   // byte length of this field
+  children: DissectionNode[];
+}
+```
+
+Attribute values are dissected one level deep (AS_PATH segments, community
+entries of all three families, MP_REACH/MP_UNREACH structure, AIGP TLVs,
+fixed u32 fields). Dissection is best effort: truncated or malformed input
+yields a partial tree showing how far the structure could be walked — the
+basis for a hex-editor UI where editing a byte immediately shows where
+parsing breaks.
 
 ### Node.js I/O helpers
 

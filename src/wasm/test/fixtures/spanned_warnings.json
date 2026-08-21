@@ -1,0 +1,32 @@
+[
+  {
+    "span": {
+      "offset": 31,
+      "length": 14
+    },
+    "warning": {
+      "AttributeFlagsError": {
+        "attr_type": "AS_PATH",
+        "expected_flags": 64,
+        "actual_flags": 192
+      }
+    }
+  },
+  {
+    "span": {
+      "offset": 77,
+      "length": 4
+    },
+    "warning": {
+      "MalformedNlri": {
+        "nlri_type": "announced",
+        "reason": "invalid prefix length",
+        "raw_bytes": [
+          51,
+          100,
+          24
+        ]
+      }
+    }
+  }
+]

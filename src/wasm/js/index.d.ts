@@ -47,6 +47,41 @@ export function parseRisLiveMessageJson(message: string): BgpElem[];
 export function parseRisLiveMessageRaw(message: string): RisLiveRawFull;
 
 /**
+ * Parse a single BGP UPDATE message (with header) with full attribute
+ * fidelity: elements, every path attribute (including the ones the elem
+ * projection drops — originator ID, cluster list, AIGP, raw-retained
+ * BGPSEC_PATH/ATTR_SET, ...), and RFC 7606 validation warnings.
+ */
+export function parseBgpUpdateFull(data: Uint8Array): BgpUpdateFull;
+
+/**
+ * Dissect a single BGP message into a Wireshark-style field tree.
+ *
+ * Every node of the returned tree carries its byte range (`offset`/`length`
+ * relative to the message start), so a UI can highlight the bytes behind any
+ * protocol field and vice versa. Attribute values are dissected one level
+ * deep (AS_PATH segments, community entries, MP_REACH structure, fixed u32
+ * fields). Best effort: truncated input yields a partial tree, not an error.
+ *
+ * @param fourByteAsn 4-octet (modern default) vs 2-octet AS number rendering.
+ */
+export function dissectBgpMessage(
+  data: Uint8Array,
+  fourByteAsn?: boolean
+): DissectionNode;
+
+/**
+ * Dissect one MRT record from the start of a buffer into a field tree whose
+ * offsets cover the whole record: common header, BGP4MP subheader, and the
+ * embedded BGP message. Returns null when no complete record is present.
+ *
+ * Slice off `bytesRead` bytes before the next call to advance.
+ */
+export function dissectMrtRecord(
+  data: Uint8Array
+): DissectMrtResult | null;
+
+/**
  * Parse a single MRT record from the start of a buffer.
  * Returns null when there are no more records.
  *
@@ -71,6 +106,19 @@ export function parseMrtRecords(
 
 export interface MrtRecordResult {
   elems: BgpElem[];
+  bytesRead: number;
+}
+
+/** Full-fidelity result of `parseBgpUpdateFull`. */
+export interface BgpUpdateFull {
+  elems: BgpElem[];
+  attributes: Attributes;
+  validationWarnings: BgpValidationWarning[];
+}
+
+/** Result of `dissectMrtRecord`. */
+export interface DissectMrtResult {
+  tree: DissectionNode;
   bytesRead: number;
 }
 
@@ -258,6 +306,9 @@ export interface RisLiveRawFull {
 // they are up to date. Types with custom serde impls (AsPath, NetworkPrefix,
 // Attributes) stay hand-written here or carry ts(...) overrides in Rust.
 
+export type { DissectionNode } from './generated/DissectionNode';
+export type { Span } from './generated/Span';
+export type { SpannedWarning } from './generated/SpannedWarning';
 export type { Attribute } from './generated/Attribute';
 export type { AttributeValue } from './generated/AttributeValue';
 export type { AsPathWire } from './generated/AsPathWire';
