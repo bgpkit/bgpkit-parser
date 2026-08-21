@@ -483,30 +483,13 @@ where
 /// original wire bytes (never a re-encoding), the block/JSON body from the
 /// parsed record.
 fn run_hex_records(
-    records: impl Iterator<
-        Item = (
-            bgpkit_parser::RawMrtRecord,
-            Option<bgpkit_parser::MrtRecord>,
-        ),
-    >,
+    records: impl Iterator<Item = (bgpkit_parser::RawMrtRecord, bgpkit_parser::MrtRecord)>,
     output_format: OutputFormat,
 ) -> Result<(), String> {
     let mut stdout = std::io::stdout();
 
-    for (raw, parsed) in records {
+    for (raw, record) in records {
         let hex = bgpkit_parser::render::hex::encode(raw.raw_bytes().as_ref());
-        // The iterator parsed the record for filtering when filters are
-        // active; reuse that parse instead of a second pass.
-        let record = match parsed {
-            Some(record) => record,
-            None => match raw.parse() {
-                Ok(record) => record,
-                Err(error) => {
-                    eprintln!("warning: skipping unparseable record: {error}");
-                    continue;
-                }
-            },
-        };
         let output = format_record(&record, output_format, Some(&hex));
         if !write_output(&mut stdout, &output)? {
             return Ok(());

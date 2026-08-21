@@ -108,10 +108,14 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
 ///
 /// The yielded [`RawMrtRecord`]s carry the *original* wire bytes — no
 /// re-encoding is involved — which is what byte-exact outputs (hex dumps,
-/// re-dissection) require. When filters required a parse for matching,
-/// the parsed record is yielded alongside (`Some`), so consumers that
-/// render the record do not need to parse the bytes a second time; the
-/// no-filter fast path skips parsing and yields `None`.
+/// re-dissection) require. Every record body is parsed once inside the
+/// iterator (for filter matching and for uniform error diagnostics), and
+/// the parsed record is yielded alongside so consumers never parse the
+/// bytes twice. Parse failures go through the same variant-aware policy
+/// as [`RecordIterator`](crate::RecordIterator) — warnings honor
+/// `disable_warnings()`, core dumps are written where applicable, and
+/// fatal classes stop the iterator — so this pipeline cannot continue
+/// past errors the record pipeline would stop for.
 ///
 /// Shortened Zebra BGP4MP records are detected and warned about once,
 /// matching the record iterator's data-quality diagnostic.
@@ -142,22 +146,15 @@ impl<R> FilteredRawRecordIterator<R> {
 }
 
 impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
-    type Item = (RawMrtRecord, Option<MrtRecord>);
+    type Item = (RawMrtRecord, MrtRecord);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.filters.is_empty() {
-            // No filtering needed: yield the raw chunks untouched without
-            // paying for a parse.
-            let raw = self.inner.next()?;
-            self.warn_zebra_once(&raw);
-            return Some((raw, None));
-        }
         loop {
             let raw = self.inner.next()?;
             self.warn_zebra_once(&raw);
             // Body-parse failures share the record iterator's
             // variant-aware error policy (warnings vs. errors, core
-            // dumps, stop-after-dump).
+            // dumps, stop-after-dump) — on every path, filtered or not.
             let record = match raw.clone().parse() {
                 Ok(record) => record,
                 Err(error) => {
@@ -171,8 +168,10 @@ impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
                     continue;
                 }
             };
-            if record_matches_filters(&record, &self.filters, &mut self.elementor) {
-                return Some((raw, Some(record)));
+            if self.filters.is_empty()
+                || record_matches_filters(&record, &self.filters, &mut self.elementor)
+            {
+                return Some((raw, record));
             }
         }
     }
@@ -259,15 +258,13 @@ mod filtered_tests {
         let parser = BgpkitParser::from_reader(Cursor::new(input))
             .add_filter("prefix", "198.51.100.0/24")
             .unwrap();
-        let yielded: Vec<(Vec<u8>, bool)> = parser
+        let yielded: Vec<Vec<u8>> = parser
             .into_filtered_raw_record_iter()
-            .map(|(raw, record)| (raw.raw_bytes().to_vec(), record.is_some()))
+            .map(|(raw, _)| raw.raw_bytes().to_vec())
             .collect();
 
         // the keepalive is dropped; the update passes with byte-exact bytes
-        // and its parse carried along (no re-parse needed downstream)
         assert_eq!(yielded.len(), 1);
-        assert_eq!(yielded[0].0, upd);
-        assert!(yielded[0].1);
+        assert_eq!(yielded[0], upd);
     }
 }

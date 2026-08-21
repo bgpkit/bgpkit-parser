@@ -182,9 +182,10 @@ impl<R> BgpkitParser<R> {
     /// while filters are active, and the `PeerIndexTable` always passes).
     /// The yielded records carry their original wire bytes — no
     /// re-encoding — which is what byte-exact consumers (hex output,
-    /// re-dissection) need. When filters required a parse for matching,
-    /// the parsed record is yielded alongside so consumers do not parse
-    /// the bytes twice; the no-filter fast path yields `None` for it.
+    /// re-dissection) need. Every record body is parsed once inside the
+    /// iterator and the parsed record is yielded alongside, so consumers
+    /// do not parse the bytes twice; parse failures follow the same
+    /// variant-aware diagnostics as the record iterator.
     ///
     /// # Example
     /// ```no_run
