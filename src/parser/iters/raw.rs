@@ -12,7 +12,10 @@ warning messages and core dump generation for debugging purposes.
 */
 
 use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
-use crate::{chunk_mrt_record, BgpkitParser, Elementor, Filter, ParserError, RawMrtRecord};
+use crate::parser::mrt::mrt_record::raw_record_uses_zebra_compat;
+use crate::{
+    chunk_mrt_record, BgpkitParser, Elementor, Filter, MrtRecord, ParserError, RawMrtRecord,
+};
 use log::{error, warn};
 use std::io::Read;
 
@@ -103,12 +106,19 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
 ///
 /// The yielded [`RawMrtRecord`]s carry the *original* wire bytes — no
 /// re-encoding is involved — which is what byte-exact outputs (hex dumps,
-/// re-dissection) require.
+/// re-dissection) require. When filters required a parse for matching,
+/// the parsed record is yielded alongside (`Some`), so consumers that
+/// render the record do not need to parse the bytes a second time; the
+/// no-filter fast path skips parsing and yields `None`.
+///
+/// Shortened Zebra BGP4MP records are detected and warned about once,
+/// matching the record iterator's data-quality diagnostic.
 pub struct FilteredRawRecordIterator<R> {
     inner: RawRecordIterator<R>,
     elementor: Elementor,
     filters: Vec<Filter>,
     core_dump: bool,
+    warned_zebra_compat: bool,
 }
 
 impl<R> FilteredRawRecordIterator<R> {
@@ -120,21 +130,34 @@ impl<R> FilteredRawRecordIterator<R> {
             elementor: Elementor::new(),
             filters,
             core_dump,
+            warned_zebra_compat: false,
+        }
+    }
+
+    fn warn_zebra_once(&mut self, raw: &RawMrtRecord) {
+        if !self.warned_zebra_compat && raw_record_uses_zebra_compat(raw) {
+            warn!(
+                "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
+            );
+            self.warned_zebra_compat = true;
         }
     }
 }
 
 impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
-    type Item = RawMrtRecord;
+    type Item = (RawMrtRecord, Option<MrtRecord>);
 
-    fn next(&mut self) -> Option<RawMrtRecord> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.filters.is_empty() {
             // No filtering needed: yield the raw chunks untouched without
             // paying for a parse.
-            return self.inner.next();
+            let raw = self.inner.next()?;
+            self.warn_zebra_once(&raw);
+            return Some((raw, None));
         }
         loop {
             let raw = self.inner.next()?;
+            self.warn_zebra_once(&raw);
             // Body-parse failures keep the record iterator's diagnostics:
             // logged and core-dumped when enabled, never silent.
             let record = match raw.clone().parse() {
@@ -146,7 +169,7 @@ impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
                 }
             };
             if record_matches_filters(&record, &self.filters, &mut self.elementor) {
-                return Some(raw);
+                return Some((raw, Some(record)));
             }
         }
     }
@@ -216,7 +239,7 @@ mod filtered_tests {
         let parser = BgpkitParser::from_reader(Cursor::new(input.clone()));
         let yielded: Vec<Vec<u8>> = parser
             .into_filtered_raw_record_iter()
-            .map(|raw| raw.raw_bytes().to_vec())
+            .map(|(raw, _)| raw.raw_bytes().to_vec())
             .collect();
         assert_eq!(yielded.len(), 2);
         assert_eq!(yielded[0], input[..input.len() - upd.len()].to_vec());
@@ -233,13 +256,15 @@ mod filtered_tests {
         let parser = BgpkitParser::from_reader(Cursor::new(input))
             .add_filter("prefix", "198.51.100.0/24")
             .unwrap();
-        let yielded: Vec<Vec<u8>> = parser
+        let yielded: Vec<(Vec<u8>, bool)> = parser
             .into_filtered_raw_record_iter()
-            .map(|raw| raw.raw_bytes().to_vec())
+            .map(|(raw, record)| (raw.raw_bytes().to_vec(), record.is_some()))
             .collect();
 
         // the keepalive is dropped; the update passes with byte-exact bytes
+        // and its parse carried along (no re-parse needed downstream)
         assert_eq!(yielded.len(), 1);
-        assert_eq!(yielded[0], upd);
+        assert_eq!(yielded[0].0, upd);
+        assert!(yielded[0].1);
     }
 }

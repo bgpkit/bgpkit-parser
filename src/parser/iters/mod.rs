@@ -124,14 +124,16 @@ impl<R> BgpkitParser<R> {
     /// while filters are active, and the `PeerIndexTable` always passes).
     /// The yielded records carry their original wire bytes — no
     /// re-encoding — which is what byte-exact consumers (hex output,
-    /// re-dissection) need.
+    /// re-dissection) need. When filters required a parse for matching,
+    /// the parsed record is yielded alongside so consumers do not parse
+    /// the bytes twice; the no-filter fast path yields `None` for it.
     ///
     /// # Example
     /// ```no_run
     /// use bgpkit_parser::BgpkitParser;
     ///
     /// let parser = BgpkitParser::new("updates.mrt").unwrap();
-    /// for raw in parser.into_filtered_raw_record_iter() {
+    /// for (raw, _) in parser.into_filtered_raw_record_iter() {
     ///     println!("{}", raw.raw_bytes().len());
     /// }
     /// ```

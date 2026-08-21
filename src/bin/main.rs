@@ -287,8 +287,7 @@ fn main() {
     // level. Counting both (-e -r) iterates records and converts once per record.
     let use_elem_stream = ((opts.elems_count && !opts.records_count)
         || (!opts.elems_count && !opts.records_count && matches!(opts.level, OutputLevel::Elems)))
-        && output_format != OutputFormat::Text
-        && !opts.hex;
+        && output_format != OutputFormat::Text;
 
     // The hex path always works on original wire bytes from the
     // raw-record pipeline; it cannot share run_records, which holds
@@ -484,19 +483,29 @@ where
 /// original wire bytes (never a re-encoding), the block/JSON body from the
 /// parsed record.
 fn run_hex_records(
-    records: impl Iterator<Item = bgpkit_parser::RawMrtRecord>,
+    records: impl Iterator<
+        Item = (
+            bgpkit_parser::RawMrtRecord,
+            Option<bgpkit_parser::MrtRecord>,
+        ),
+    >,
     output_format: OutputFormat,
 ) -> Result<(), String> {
     let mut stdout = std::io::stdout();
 
-    for raw in records {
+    for (raw, parsed) in records {
         let hex = bgpkit_parser::render::hex::encode(raw.raw_bytes().as_ref());
-        let record = match raw.parse() {
-            Ok(record) => record,
-            Err(error) => {
-                eprintln!("warning: skipping unparseable record: {error}");
-                continue;
-            }
+        // The iterator parsed the record for filtering when filters are
+        // active; reuse that parse instead of a second pass.
+        let record = match parsed {
+            Some(record) => record,
+            None => match raw.parse() {
+                Ok(record) => record,
+                Err(error) => {
+                    eprintln!("warning: skipping unparseable record: {error}");
+                    continue;
+                }
+            },
         };
         let output = format_record(&record, output_format, Some(&hex));
         if !write_output(&mut stdout, &output)? {
