@@ -904,6 +904,7 @@ pub mod error;
 pub mod models;
 #[cfg(feature = "parser")]
 pub mod parser;
+pub mod render;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

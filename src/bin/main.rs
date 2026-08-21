@@ -9,17 +9,21 @@ use clap::{Parser, ValueEnum};
 use ipnet::IpNet;
 
 /// Output format for the parser
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 enum OutputFormat {
-    /// Default pipe-separated format
+    /// Default pipe-separated format (elem-level)
     #[default]
     Default,
-    /// JSON format (one object per line)
+    /// JSON format (one object per line, elem-level)
     Json,
-    /// Pretty-printed JSON format
+    /// Pretty-printed JSON format (elem-level)
     JsonPretty,
-    /// PSV format with header
+    /// PSV format with header (elem-level)
     Psv,
+    /// Layered human-readable text, one block per MRT record (record-level;
+    /// implies `--level records`, all other formats are elem-level).
+    /// Inspired by bgpdump's human-readable output.
+    Text,
 }
 
 /// Output level granularity
@@ -256,8 +260,9 @@ fn main() {
     // Element-level runs (element output or counting only elements) use the elem
     // iterators, which apply filters per element; everything else stays at the record
     // level. Counting both (-e -r) iterates records and converts once per record.
-    let use_elem_stream = (opts.elems_count && !opts.records_count)
-        || (!opts.elems_count && !opts.records_count && matches!(opts.level, OutputLevel::Elems));
+    let use_elem_stream = ((opts.elems_count && !opts.records_count)
+        || (!opts.elems_count && !opts.records_count && matches!(opts.level, OutputLevel::Elems)))
+        && output_format != OutputFormat::Text;
 
     let result = match (opts.recover, use_elem_stream) {
         (true, true) => run_elems(
@@ -468,6 +473,9 @@ fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {
             }
         }
         OutputFormat::Default => elem.to_string(),
+        // The dispatch above routes text output to the record pipeline;
+        // elem-level text rendering does not exist.
+        OutputFormat::Text => unreachable!("text format renders records, not elems"),
     }
 }
 
@@ -481,6 +489,7 @@ fn format_record(record: &bgpkit_parser::MrtRecord, format: OutputFormat) -> Str
             let val = json!(record);
             serde_json::to_string_pretty(&val).unwrap()
         }
+        OutputFormat::Text => bgpkit_parser::render::text::format_record(record),
         OutputFormat::Psv | OutputFormat::Default => {
             // Use the Display implementation for MrtRecord
             format!("{}", record)
