@@ -272,6 +272,10 @@ fn main() {
         eprintln!("Error: --hex requires --format text, json, or json-pretty");
         std::process::exit(1);
     }
+    if opts.hex && opts.recover {
+        eprintln!("Error: --hex does not support --recover");
+        std::process::exit(1);
+    }
 
     let recovery_config = RecoveryConfig::default();
     // Element-level runs (element output or counting only elements) use the elem
@@ -282,43 +286,53 @@ fn main() {
         && output_format != OutputFormat::Text
         && !opts.hex;
 
-    let result = match (opts.recover, use_elem_stream) {
-        (true, true) => run_elems(
-            parser
-                .into_recovering_elem_iter(recovery_config)
-                .map(|event| event.map_err(|error| error.to_string())),
+    // The hex path always works on original wire bytes from the
+    // raw-record pipeline; it cannot share run_records, which holds
+    // parsed records.
+    let result = if opts.hex {
+        run_hex_records(
+            parser.into_filtered_raw_record_iter(),
             output_format,
-            opts.elems_count,
-            true,
-        ),
-        (false, true) => run_elems(
-            parser
-                .into_elem_iter()
-                .map(|elem| Ok(RecoveryEvent::Item(elem))),
-            output_format,
-            opts.elems_count,
-            false,
-        ),
-        (true, false) => run_records(
-            parser
-                .into_recovering_record_iter(recovery_config)
-                .map(|event| event.map_err(|error| error.to_string())),
-            output_format,
-            opts.hex,
             opts.elems_count,
             opts.records_count,
-            true,
-        ),
-        (false, false) => run_records(
-            parser
-                .into_record_iter()
-                .map(|record| Ok(RecoveryEvent::Item(record))),
-            output_format,
-            opts.hex,
-            opts.elems_count,
-            opts.records_count,
-            false,
-        ),
+        )
+    } else {
+        match (opts.recover, use_elem_stream) {
+            (true, true) => run_elems(
+                parser
+                    .into_recovering_elem_iter(recovery_config)
+                    .map(|event| event.map_err(|error| error.to_string())),
+                output_format,
+                opts.elems_count,
+                true,
+            ),
+            (false, true) => run_elems(
+                parser
+                    .into_elem_iter()
+                    .map(|elem| Ok(RecoveryEvent::Item(elem))),
+                output_format,
+                opts.elems_count,
+                false,
+            ),
+            (true, false) => run_records(
+                parser
+                    .into_recovering_record_iter(recovery_config)
+                    .map(|event| event.map_err(|error| error.to_string())),
+                output_format,
+                opts.elems_count,
+                opts.records_count,
+                true,
+            ),
+            (false, false) => run_records(
+                parser
+                    .into_record_iter()
+                    .map(|record| Ok(RecoveryEvent::Item(record))),
+                output_format,
+                opts.elems_count,
+                opts.records_count,
+                false,
+            ),
+        }
     };
     if let Err(error) = result {
         eprintln!("{error}");
@@ -412,7 +426,6 @@ where
 fn run_records<I>(
     events: I,
     output_format: OutputFormat,
-    include_hex: bool,
     elems_count_requested: bool,
     records_count_requested: bool,
     report_recovery: bool,
@@ -445,7 +458,7 @@ where
                 if records_count_requested {
                     continue;
                 }
-                let output = format_record(&record, output_format, include_hex);
+                let output = format_record(&record, output_format, None);
                 if !write_output(&mut stdout, &output)? {
                     return Ok(());
                 }
@@ -464,6 +477,56 @@ where
     }
     stats.print_summary();
     terminal_error.map_or(Ok(()), Err)
+}
+
+/// Hex-augmented output over the raw-record pipeline: hex comes from the
+/// original wire bytes (never a re-encoding), the block/JSON body from the
+/// parsed record.
+fn run_hex_records(
+    records: impl Iterator<Item = bgpkit_parser::RawMrtRecord>,
+    output_format: OutputFormat,
+    elems_count_requested: bool,
+    records_count_requested: bool,
+) -> Result<(), String> {
+    let mut stdout = std::io::stdout();
+    let mut elementor = Elementor::new();
+    let mut records_count = 0usize;
+    let mut elems_count = 0usize;
+
+    for raw in records {
+        records_count += 1;
+        if elems_count_requested || records_count_requested {
+            if elems_count_requested {
+                if let Ok(record) = raw.parse() {
+                    elems_count += elementor.record_to_elems(record).len();
+                }
+            }
+            continue;
+        }
+        let hex = bgpkit_parser::render::hex::encode(raw.raw_bytes().as_ref());
+        let record = match raw.parse() {
+            Ok(record) => record,
+            Err(error) => {
+                eprintln!("warning: skipping unparseable record: {error}");
+                continue;
+            }
+        };
+        let output = format_record(&record, output_format, Some(&hex));
+        if !write_output(&mut stdout, &output)? {
+            return Ok(());
+        }
+    }
+
+    match (elems_count_requested, records_count_requested) {
+        (true, true) => {
+            println!("total records: {records_count}");
+            println!("total elems:   {elems_count}");
+        }
+        (false, true) => println!("total records: {records_count}"),
+        (true, false) => println!("total elems: {elems_count}"),
+        (false, false) => {}
+    }
+    Ok(())
 }
 
 fn write_output(stdout: &mut std::io::Stdout, output: &str) -> Result<bool, String> {
@@ -503,22 +566,8 @@ fn format_elem(elem: &BgpElem, format: OutputFormat, index: usize) -> String {
 fn format_record(
     record: &bgpkit_parser::MrtRecord,
     format: OutputFormat,
-    include_hex: bool,
+    record_hex: Option<&str>,
 ) -> String {
-    // Hex rendering re-encodes the record; records that cannot round-trip
-    // keep their output well-formed and note the failure on stderr.
-    let record_hex = include_hex.then(|| match bgpkit_parser::render::hex::format_record(record) {
-        Ok(hex) => Some(hex),
-        Err(error) => {
-            eprintln!(
-                "warning: record at {} cannot be re-encoded for --hex: {error}",
-                record.common_header.timestamp
-            );
-            None
-        }
-    });
-    let record_hex = record_hex.flatten();
-
     match format {
         OutputFormat::Json => {
             let mut val = json!(record);
@@ -534,7 +583,7 @@ fn format_record(
             }
             serde_json::to_string_pretty(&val).unwrap()
         }
-        OutputFormat::Text => match &record_hex {
+        OutputFormat::Text => match record_hex {
             Some(hex) => bgpkit_parser::render::text::format_record_with_hex(record, hex),
             None => bgpkit_parser::render::text::format_record(record),
         },

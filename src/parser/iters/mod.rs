@@ -25,7 +25,7 @@ pub use diagnostic::{
     DissectedDiagnosticEvent, DissectingDiagnosticIterator,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
-pub use raw::RawRecordIterator;
+pub use raw::{FilteredRawRecordIterator, RawRecordIterator};
 pub use recovery::{
     RecoveringElemIterator, RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent,
     RecoveryEvidence, RecoveryGap,
@@ -112,6 +112,31 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
         RawRecordIterator::new(self)
+    }
+
+    /// Creates an iterator over raw MRT records with record-level filter
+    /// semantics applied.
+    ///
+    /// Like [`into_raw_record_iter`](Self::into_raw_record_iter), but only
+    /// records passing the parser's filters are yielded (same semantics as
+    /// [`into_record_iter`](Self::into_record_iter): filters match on the
+    /// elem projection, so no-elem records such as KEEPALIVEs are dropped
+    /// while filters are active, and the `PeerIndexTable` always passes).
+    /// The yielded records carry their original wire bytes — no
+    /// re-encoding — which is what byte-exact consumers (hex output,
+    /// re-dissection) need.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let parser = BgpkitParser::new("updates.mrt").unwrap();
+    /// for raw in parser.into_filtered_raw_record_iter() {
+    ///     println!("{}", raw.raw_bytes().len());
+    /// }
+    /// ```
+    pub fn into_filtered_raw_record_iter(self) -> FilteredRawRecordIterator<R> {
+        FilteredRawRecordIterator::new(self)
     }
 
     /// Creates an opt-in iterator that reports skipped byte ranges while recovering MRT framing.

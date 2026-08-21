@@ -11,8 +11,8 @@ when possible and continue processing the remaining data. It also supports confi
 warning messages and core dump generation for debugging purposes.
 */
 
-use crate::parser::iters::write_mrt_core_dump;
-use crate::{chunk_mrt_record, BgpkitParser, ParserError, RawMrtRecord};
+use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
+use crate::{chunk_mrt_record, BgpkitParser, Elementor, Filter, ParserError, RawMrtRecord};
 use log::{error, warn};
 use std::io::Read;
 
@@ -87,5 +87,150 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                 },
             }
         }
+    }
+}
+
+/// Iterator over raw MRT records with record-level filter semantics
+/// applied.
+///
+/// Behaves like [`RawRecordIterator`] for chunking, but only yields the
+/// raw bytes of records that pass the parser's filters under the same
+/// semantics as [`RecordIterator`](crate::RecordIterator): filters match
+/// on the elem projection, so records that produce no elems (KEEPALIVE,
+/// OPEN, NOTIFICATION, state changes) are dropped while filters are
+/// active, and the `PeerIndexTable` always passes through so RIB peer
+/// resolution keeps working.
+///
+/// The yielded [`RawMrtRecord`]s carry the *original* wire bytes — no
+/// re-encoding is involved — which is what byte-exact outputs (hex dumps,
+/// re-dissection) require.
+pub struct FilteredRawRecordIterator<R> {
+    inner: RawRecordIterator<R>,
+    elementor: Elementor,
+    filters: Vec<Filter>,
+}
+
+impl<R> FilteredRawRecordIterator<R> {
+    pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let filters = parser.filters.clone();
+        FilteredRawRecordIterator {
+            inner: RawRecordIterator::new(parser),
+            elementor: Elementor::new(),
+            filters,
+        }
+    }
+}
+
+impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
+    type Item = RawMrtRecord;
+
+    fn next(&mut self) -> Option<RawMrtRecord> {
+        if self.filters.is_empty() {
+            // No filtering needed: yield the raw chunks untouched without
+            // paying for a parse.
+            return self.inner.next();
+        }
+        loop {
+            let raw = self.inner.next()?;
+            let record = match raw.clone().parse() {
+                Ok(record) => record,
+                Err(_) => continue, // skip unparseable, like the record iterator
+            };
+            if record_matches_filters(&record, &self.filters, &mut self.elementor) {
+                return Some(raw);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod filtered_tests {
+    use super::*;
+    use crate::models::*;
+    use std::io::Cursor;
+
+    fn bgp4mp_record(timestamp: u32, bgp_message: BgpMessage) -> Vec<u8> {
+        let body_of = |update: &BgpUpdateMessage| update.encode(AsnLength::Bits32).unwrap();
+        let body = match &bgp_message {
+            BgpMessage::Update(update) => body_of(update),
+            BgpMessage::KeepAlive => Vec::new().into(),
+            _ => unreachable!("test builds updates and keepalives only"),
+        };
+        let mut bgp = vec![0xFF; 16];
+        bgp.extend_from_slice(&((19 + body.len()) as u16).to_be_bytes());
+        bgp.push(bgp_message.msg_type() as u8);
+        bgp.extend_from_slice(&body);
+
+        let mut mrt_body = Vec::new();
+        mrt_body.extend_from_slice(&64496u32.to_be_bytes());
+        mrt_body.extend_from_slice(&64497u32.to_be_bytes());
+        mrt_body.extend_from_slice(&0u16.to_be_bytes());
+        mrt_body.extend_from_slice(&1u16.to_be_bytes());
+        mrt_body.extend_from_slice(&[192, 0, 2, 1]);
+        mrt_body.extend_from_slice(&[192, 0, 2, 2]);
+        mrt_body.extend_from_slice(&bgp);
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&timestamp.to_be_bytes());
+        wire.extend_from_slice(&(EntryType::BGP4MP as u16).to_be_bytes());
+        wire.extend_from_slice(&(Bgp4MpType::MessageAs4 as u16).to_be_bytes());
+        wire.extend_from_slice(&(mrt_body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&mrt_body);
+        wire
+    }
+
+    fn keepalive(timestamp: u32) -> Vec<u8> {
+        bgp4mp_record(timestamp, BgpMessage::KeepAlive)
+    }
+
+    fn update(timestamp: u32) -> Vec<u8> {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        attributes.add_attr(AttributeValue::AsPath(AsPath::from_sequence([65000])).into());
+        attributes.add_attr(AttributeValue::NextHop("192.0.2.254".parse().unwrap()).into());
+        bgp4mp_record(
+            timestamp,
+            BgpMessage::Update(BgpUpdateMessage {
+                withdrawn_prefixes: vec![],
+                attributes,
+                announced_prefixes: vec!["198.51.100.0/24".parse().unwrap()],
+            }),
+        )
+    }
+
+    #[test]
+    fn no_filters_yield_original_bytes_exactly() {
+        let mut input = keepalive(1);
+        let upd = update(2);
+        input.extend_from_slice(&upd);
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input.clone()));
+        let yielded: Vec<Vec<u8>> = parser
+            .into_filtered_raw_record_iter()
+            .map(|raw| raw.raw_bytes().to_vec())
+            .collect();
+        assert_eq!(yielded.len(), 2);
+        assert_eq!(yielded[0], input[..input.len() - upd.len()].to_vec());
+        assert_eq!(yielded[1], upd);
+    }
+
+    #[test]
+    fn filters_drop_no_elem_records_and_preserve_bytes() {
+        let keep = keepalive(1);
+        let upd = update(2);
+        let mut input = keep.clone();
+        input.extend_from_slice(&upd);
+
+        let parser = BgpkitParser::from_reader(Cursor::new(input))
+            .add_filter("prefix", "198.51.100.0/24")
+            .unwrap();
+        let yielded: Vec<Vec<u8>> = parser
+            .into_filtered_raw_record_iter()
+            .map(|raw| raw.raw_bytes().to_vec())
+            .collect();
+
+        // the keepalive is dropped; the update passes with byte-exact bytes
+        assert_eq!(yielded.len(), 1);
+        assert_eq!(yielded[0], upd);
     }
 }
