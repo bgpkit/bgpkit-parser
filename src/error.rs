@@ -68,6 +68,7 @@ impl EncodingError {
         EncodingError::ValueTooLarge { field, actual, max }
     }
 
+    #[cfg(feature = "parser")]
     pub(crate) fn unencodable(field: &'static str, reason: impl Into<String>) -> Self {
         EncodingError::Unencodable {
             field,

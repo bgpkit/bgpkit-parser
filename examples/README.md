@@ -1,66 +1,86 @@
 # Examples
 
-This directory contains runnable examples for bgpkit_parser. They demonstrate basic usage, filtering, batch processing with BGPKIT Broker, real_time streaming, attribute and metadata inspection, error handling, and more. Each entry below links directly to the source so you can browse it on GitHub.
+This directory contains runnable examples for bgpkit_parser. They demonstrate basic usage, filtering, batch processing with BGPKIT Broker, real-time streaming, attribute and metadata inspection, encoding, error handling, and more. Each entry below links directly to the source so you can browse it on GitHub.
 
-## Quickstart and Iteration
+## Quickstart
+
+Start here for the two most common workflows: parse one file into BGP elements, and scan records without full conversion.
+
 - [parse_single_file.rs](parse_single_file.rs) — Download and iterate over a single RouteViews updates file, logging each BGP element (BgpElem).
-- [parse_single_file_parallel.rs](parse_single_file_parallel.rs) — Parse a single compressed RIB in parallel using a raw iterator + worker pool. Downloads to current directory if remote, counts elems, and compares timing with a sequential run. Tunables via env vars: BATCH_SIZE, WORKERS, CHAN_CAP, ELEM_IN_WORKERS, QUIET_ERRORS.
-- [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe-delimited format.
 - [count_elems.rs](count_elems.rs) — Count the total number of BGP elements in a given file.
-- [count_attributes.rs](count_attributes.rs) — Count every BGP path attribute in an MRT file by wire code, including raw-retained unsupported, deprecated, and unassigned codes.
+- [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
+- [display_elems.rs](display_elems.rs) — Print selected fields from each BGP element in a compact, pipe-delimited format.
+
+## Iteration Models
+
+The parser exposes several iterator layers; these examples show when to use which.
+
 - [records_iter.rs](records_iter.rs) — Iterate over raw MRT records and inspect/update messages; includes an example of detecting the Only_To_Customer (OTC) attribute.
 - [update_messages_iter.rs](update_messages_iter.rs) — Iterate over BGP announcements using the intermediate MrtUpdate representation; compares performance with BgpElem iteration and works with both UPDATES files and RIB dumps.
 - [route_level_parsing.rs](route_level_parsing.rs) — Fast scan using `into_route_iter()` when only prefix, AS path, and peer metadata are needed. Skips communities, MED, next-hop for ~10–15% faster updates and ~50–70% faster RIB parsing.
+- [parse_single_file_parallel.rs](parse_single_file_parallel.rs) — Parse a single compressed RIB in parallel using a raw iterator + worker pool. Downloads to current directory if remote, counts elems, and compares timing with a sequential run. Tunables via env vars: BATCH_SIZE, WORKERS, CHAN_CAP, ELEM_IN_WORKERS, QUIET_ERRORS.
 - [parallel_records_to_elem.rs](parallel_records_to_elem.rs) — Compare sequential and multi-threaded raw-record-to-element conversion using a shared immutable `Elementor`.
-- [scan_mrt.rs](scan_mrt.rs) — CLI-style scanner that quickly walks an MRT file, counting raw records, parsed records, or elements without processing them.
+- [cache_reading.rs](cache_reading.rs) — Use the parser's on-disk cache to avoid re-downloading the same remote files when iterating over time ranges.
 - [resumable_http.rs](resumable_http.rs) — Read a remote MRT file with the opt-in HTTP range-request reader and surface unrecoverable read failures through a fallible iterator.
 
-## Filtering and Policy Examples
+## Filtering and Policy
+
 - [filters.rs](filters.rs) — Parse an MRT file and filter by a specific prefix (e.g., 211.98.251.0/24), logging matching announcements.
 - [multiple_filters_or_logic.rs](multiple_filters_or_logic.rs) — Combine multi-value OR filters with negative filters for prefixes, origin ASNs, and peer ASNs.
-- [filter_export_rib.rs](filter_export_rib.rs) — Filter the content of a RIB by origin ASN and re_encode/export to a new RIB file.
 - [find_as_set_messages.rs](find_as_set_messages.rs) — Find announcements containing AS_SET/CONFED_SET segments in AS paths across RIBs retrieved via BGPKIT Broker.
 
-## Batch and Broker Workflows
-- [parse_files_from_broker.rs](parse_files_from_broker.rs) — Use BGPKIT Broker to find data files for a time range and parse them, including a simple origin_ASN filter example.
-- [parse_files_from_broker_parallel.rs](parse_files_from_broker_parallel.rs) — Query BGPKIT Broker then parse multiple files in parallel using Rayon, reporting the total message count.
-- [cache_reading.rs](cache_reading.rs) — Use the parser’s on_disk cache to avoid re_downloading the same remote files when iterating over time ranges.
-- [mrt_filter_archiver.rs](mrt_filter_archiver.rs) — Apply filters while reading updates and archive the filtered stream into a new MRT file; re_parse to verify the output.
+## Encoding and Export
 
-## Real_time Streams (RIS Live, RouteViews Kafka, BMP)
+Construct and serialize BGP/MRT data, including the fallible encoders and the RFC 6793 `AsPath`/`As4Path` variant split.
+
+- [encode_as_path.rs](encode_as_path.rs) — Build announcements with `AttributeValue::AsPath` (type 2) vs `As4Path` (type 17), encode for 4-octet and 2-octet sessions, see `EncodingError::ValueTooLarge` on oversized AS numbers, and reproduce the AS_TRANS migration shape.
+- [filter_export_rib.rs](filter_export_rib.rs) — Filter the content of a RIB by origin ASN and re-encode/export to a new RIB file.
+- [mrt_filter_archiver.rs](mrt_filter_archiver.rs) — Apply filters while reading updates and archive the filtered stream into a new MRT file; re-parse to verify the output.
+- [raw_attributes.rs](raw_attributes.rs) — Construct, inspect, encode, and round-trip typed, raw-retained, deprecated, and unknown path attributes.
+
+## Batch and Broker Workflows
+
+- [parse_files_from_broker.rs](parse_files_from_broker.rs) — Use BGPKIT Broker to find data files for a time range and parse them, including a simple origin-ASN filter example.
+- [parse_files_from_broker_parallel.rs](parse_files_from_broker_parallel.rs) — Query BGPKIT Broker then parse multiple files in parallel using Rayon, reporting the total message count.
+
+## Real-time Streams (RIS Live, RouteViews Kafka, BMP)
+
 - [real_time_ris_live_websocket.rs](real_time_ris_live_websocket.rs) — Connect to RIPE RIS Live over WebSocket (tungstenite), request `includeRaw`, parse raw BGP wire messages, and print elements.
 - [real_time_ris_live_websocket_async.rs](real_time_ris_live_websocket_async.rs) — Async tokio+tungstenite version of the RIS Live WebSocket subscriber using RIS Live's JSON-projected fields, with comments showing how to switch to raw parsing.
+- [ris_live_raw_full.rs](ris_live_raw_full.rs) — Full-fidelity RIS Live raw parsing (`parse_ris_live_message_raw_full`): elements plus every path attribute the elem conversion drops, with RFC 7606 validation warnings. No WebSocket needed; runs on an embedded real message.
 - [real_time_routeviews_kafka_openbmp.rs](real_time_routeviews_kafka_openbmp.rs) — Consume RouteViews Kafka topics (OpenBMP format), parse BMP messages, and print derived elements.
 - [real_time_routeviews_kafka_to_mrt.rs](real_time_routeviews_kafka_to_mrt.rs) — Consume RouteViews Kafka BMP messages and archive them into an MRT file for later analysis.
 - [bmp_listener.rs](bmp_listener.rs) — Minimal TCP BMP listener that parses incoming BMP Route Monitoring messages and logs them.
-
-## Attributes and Metadata
-- [extended_communities.rs](extended_communities.rs) — Print BGP elements that carry extended, large, or IPv6_extended communities.
-- [as4_tally.rs](as4_tally.rs) — Tally AS4_PATH/AS4_AGGREGATOR (RFC 6793) occurrences and attribute the emitting peers, using the distinct `AsPath`/`As4Path` attribute variants with record-level iteration. Useful for spotting 2-byte-only BGP sessions with a collector.
-- [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
-- [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty_print the Peer Index Table in JSON.
-- [only_to_customer.rs](only_to_customer.rs) — Find and display paths bearing the Only_To_Customer (OTC, RFC 9234) attribute.
-- [mrt_debug.rs](mrt_debug.rs) — Print parsed and raw MRT records for debugging, including raw-byte export and re-parsing.
 - [parse_bmp_mpls.rs](parse_bmp_mpls.rs) — Construct and parse a synthetic BMP Route Monitoring message containing MPLS-labeled NLRI (SAFI 4), demonstrating label stack extraction.
 
-## Raw and Unimplemented Attributes
-- [raw_attributes.rs](raw_attributes.rs) — Construct, inspect, encode, and round-trip typed, raw-retained, deprecated, and unknown path attributes.
-- [scan_path_attributes.rs](scan_path_attributes.rs) — Scan selected RouteViews and RIPE RIS archive files from a chosen month for raw-retained, deprecated, and unknown path attributes.
+## Attributes and Metadata
 
-## Error Handling and Robustness
-- [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
+- [count_attributes.rs](count_attributes.rs) — Count every BGP path attribute in an MRT file by wire code, including raw-retained unsupported, deprecated, and unassigned codes.
+- [extended_communities.rs](extended_communities.rs) — Print BGP elements that carry extended, large, or IPv6-extended communities.
+- [as4_tally.rs](as4_tally.rs) — Tally AS4_PATH/AS4_AGGREGATOR (RFC 6793) occurrences and attribute the emitting peers, using the distinct `AsPath`/`As4Path` attribute variants with record-level iteration. Useful for spotting 2-byte-only BGP sessions with a collector.
+- [only_to_customer.rs](only_to_customer.rs) — Find and display paths bearing the Only_To_Customer (OTC, RFC 9234) attribute.
+- [bgp_open_role_pcap.rs](bgp_open_role_pcap.rs) — Construct an RFC 9234 BGP OPEN (role capability) and write it as a classic PCAP Ethernet frame for Wireshark inspection.
+- [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
+- [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty-print the Peer Index Table in JSON.
+- [scan_path_attributes.rs](scan_path_attributes.rs) — Scan selected RouteViews and RIPE RIS archive files from a chosen month for raw-retained, deprecated, and unknown path attributes.
+- [safi_scan.rs](safi_scan.rs) — Scan MRT update files for NLRI AFI/SAFI usage and rare path attributes; complements file-level attribute tallies with SAFI visibility.
+
+## Diagnostics, Dissection, and Error Handling
+
+- [dissect_mrt.rs](dissect_mrt.rs) — Wireshark-style byte-level dissection: render the `DissectionNode` field tree with byte-offset gutters for MRT/BGP records, including a truncated-input demo showing dissectors never fail.
 - [diagnostic_iterator.rs](diagnostic_iterator.rs) — Classify clean records, RFC 7606 validation findings, and fatal parse failures while exporting each finding's raw MRT bytes.
 - [treat_as_withdrawal.rs](treat_as_withdrawal.rs) — Scan MRT files for RFC 7606 validation issues (malformed NLRI, bad attributes) and classify them by error-handling category: attribute discard vs. treat-as-withdrawal.
-
-## Debugging and Analysis
-- [mrt_debug.rs](mrt_debug.rs) — Demonstrate MRT debugging features: debug display for MRT records, raw byte export, and the new `Display` implementation.
-- [analyze_rib.rs](analyze_rib.rs) — Deep-dive RIB analysis: count records, analyze BGP UPDATE attributes, and collect statistics across TableDumpV2 and BGP4MP records.
+- [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
+- [mrt_debug.rs](mrt_debug.rs) — Print parsed and raw MRT records for debugging, including raw-byte export and re-parsing.
 - [extract_problematic_records.rs](extract_problematic_records.rs) — Find and export MRT records that fail to parse for further analysis with other tools.
+- [analyze_rib.rs](analyze_rib.rs) — Deep-dive RIB analysis: count records, analyze BGP UPDATE attributes, and collect statistics across TableDumpV2 and BGP4MP records.
 
 ## RPKI RTR Protocol
+
 - [rtr_client.rs](rtr_client.rs) — Connect to an RTR server (RFC 6810/8210), fetch ROAs, and validate a route announcement (1.1.1.0/24 -> AS13335). Demonstrates RTR PDU parsing and encoding.
 
 ## Standalone and WebAssembly Examples
+
 - [local_only](local_only/README.md) — Minimal standalone project that parses a local MRT file without remote I/O dependencies.
 - [rib_entries_age_study](rib_entries_age_study/README.md) — Standalone two-phase study of RIB entry ages and their distributions.
 - [WASM MRT parser](wasm/parse-mrt-file/README.md) — Experimental Node.js WebAssembly example that emits BGP elements from a local or remote MRT file.
