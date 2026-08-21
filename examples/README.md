@@ -36,6 +36,7 @@ This directory contains runnable examples for bgpkit_parser. They demonstrate ba
 
 ## Attributes and Metadata
 - [extended_communities.rs](extended_communities.rs) — Print BGP elements that carry extended, large, or IPv6_extended communities.
+- [as4_tally.rs](as4_tally.rs) — Tally AS4_PATH/AS4_AGGREGATOR (RFC 6793) occurrences and attribute the emitting peers, using the distinct `AsPath`/`As4Path` attribute variants with record-level iteration. Useful for spotting 2-byte-only BGP sessions with a collector.
 - [deprecated_attributes.rs](deprecated_attributes.rs) — Identify announcements that include deprecated attributes (e.g., attribute 28, BGP Entropy Label Capability) and print them in JSON.
 - [peer_index_table.rs](peer_index_table.rs) — Read a Table Dump v2 RIB and pretty_print the Peer Index Table in JSON.
 - [only_to_customer.rs](only_to_customer.rs) — Find and display paths bearing the Only_To_Customer (OTC, RFC 9234) attribute.
