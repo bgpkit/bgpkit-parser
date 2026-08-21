@@ -1,7 +1,7 @@
 /*!
 Human-readable record rendering.
 
-The [`text`] module renders one [`MrtRecord`] as a layered, indented text
+The [`text`] module renders one [`MrtRecord`](crate::MrtRecord) as a layered, indented text
 block — a full-fidelity transcript of the record: BGP4MP session context,
 withdrawn and announced prefixes, every path attribute, and RFC 7606
 validation warnings. The format is designed around this crate's own models
