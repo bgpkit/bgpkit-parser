@@ -1,12 +1,10 @@
 /*!
 Default iterator implementations that skip errors and return successfully parsed items.
 */
-use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
+use crate::parser::iters::{handle_record_parse_error, record_matches_filters};
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
-use log::{error, warn};
 use std::io::Read;
 
 /*********
@@ -49,52 +47,10 @@ impl<R: Read> Iterator for RecordIterator<R> {
                     }
                 }
                 Err(e) => {
-                    match e.error {
-                        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                            if self.parser.options.show_warnings {
-                                warn!("parser warn: {}", err_str);
-                            }
-                            write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                            continue;
-                        }
-                        ParserError::ParseError(err_str) => {
-                            error!("parser error: {}", err_str);
-                            write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                            if self.parser.core_dump {
-                                None
-                            } else {
-                                continue;
-                            }
-                        }
-                        ParserError::EofExpected => {
-                            // normal end of file
-                            None
-                        }
-                        ParserError::IoError(err) | ParserError::EofError(err) => {
-                            // when reaching IO error, stop iterating
-                            error!("{:?}", err);
-                            write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                            None
-                        }
-                        #[cfg(feature = "oneio")]
-                        ParserError::OneIoError(_) => None,
-                        ParserError::FilterError(_) => {
-                            // this should not happen at this stage
-                            None
-                        }
-                        // Labeled NLRI parsing errors - treat as malformed and skip
-                        ParserError::InvalidLabeledNlriLength
-                        | ParserError::TruncatedLabeledNlri
-                        | ParserError::TruncatedPrefix
-                        | ParserError::MaxLabelStackDepthExceeded
-                        | ParserError::PeerMaxLabelsExceeded
-                        | ParserError::InvalidPrefix => {
-                            if self.parser.options.show_warnings {
-                                warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
-                            }
-                            continue;
-                        }
+                    if handle_record_parse_error(&mut self.parser, e.error, e.bytes) {
+                        continue;
                     }
+                    None
                 }
             };
         }

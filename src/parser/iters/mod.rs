@@ -25,7 +25,7 @@ pub use diagnostic::{
     DissectedDiagnosticEvent, DissectingDiagnosticIterator,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
-pub use raw::RawRecordIterator;
+pub use raw::{FilteredRawRecordIterator, RawRecordIterator};
 pub use recovery::{
     RecoveringElemIterator, RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent,
     RecoveryEvidence, RecoveryGap,
@@ -36,12 +36,13 @@ pub use update::{
     UpdateIterator,
 };
 
+use crate::error::ParserError;
 use crate::models::BgpElem;
 use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
 use crate::RawMrtRecord;
 use crate::{Elementor, Filter, Filterable};
-use log::debug;
+use log::{debug, error, warn};
 use std::io::Read;
 use std::path::Path;
 
@@ -73,6 +74,63 @@ pub(crate) fn record_matches_filters(
         return false;
     }
     elems.iter().any(|element| element.match_filters(filters))
+}
+
+/// Shared body-parse error policy for record-producing iterators.
+///
+/// Mirrors the historical `RecordIterator` behavior: warnings honor
+/// `disable_warnings()`, core dumps are written for recoverable classes,
+/// and a fatal `ParseError` with core dumps enabled stops the iterator so
+/// a later failure cannot overwrite the dump. Returns `true` to continue
+/// iterating, `false` to stop.
+pub(crate) fn handle_record_parse_error<R>(
+    parser: &mut crate::parser::BgpkitParser<R>,
+    error: ParserError,
+    bytes: Option<Vec<u8>>,
+) -> bool {
+    match error {
+        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
+            if parser.options.show_warnings {
+                warn!("parser warn: {}", err_str);
+            }
+            write_mrt_core_dump(parser.core_dump, bytes);
+            true
+        }
+        ParserError::ParseError(err_str) => {
+            error!("parser error: {}", err_str);
+            write_mrt_core_dump(parser.core_dump, bytes);
+            // stop after writing the dump so later failures don't overwrite it
+            !parser.core_dump
+        }
+        ParserError::EofExpected => {
+            // normal end of file
+            false
+        }
+        ParserError::IoError(err) | ParserError::EofError(err) => {
+            // when reaching IO error, stop iterating
+            error!("{:?}", err);
+            write_mrt_core_dump(parser.core_dump, bytes);
+            false
+        }
+        #[cfg(feature = "oneio")]
+        ParserError::OneIoError(_) => false,
+        ParserError::FilterError(_) => {
+            // this should not happen at this stage
+            false
+        }
+        // Labeled NLRI parsing errors - treat as malformed and skip
+        ParserError::InvalidLabeledNlriLength
+        | ParserError::TruncatedLabeledNlri
+        | ParserError::TruncatedPrefix
+        | ParserError::MaxLabelStackDepthExceeded
+        | ParserError::PeerMaxLabelsExceeded
+        | ParserError::InvalidPrefix => {
+            if parser.options.show_warnings {
+                warn!("parser warn: labeled NLRI parsing error: {:?}", error);
+            }
+            true
+        }
+    }
 }
 
 pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
@@ -112,6 +170,34 @@ impl<R> BgpkitParser<R> {
 
     pub fn into_raw_record_iter(self) -> RawRecordIterator<R> {
         RawRecordIterator::new(self)
+    }
+
+    /// Creates an iterator over raw MRT records with record-level filter
+    /// semantics applied.
+    ///
+    /// Like [`into_raw_record_iter`](Self::into_raw_record_iter), but only
+    /// records passing the parser's filters are yielded (same semantics as
+    /// [`into_record_iter`](Self::into_record_iter): filters match on the
+    /// elem projection, so no-elem records such as KEEPALIVEs are dropped
+    /// while filters are active, and the `PeerIndexTable` always passes).
+    /// The yielded records carry their original wire bytes — no
+    /// re-encoding — which is what byte-exact consumers (hex output,
+    /// re-dissection) need. Every record body is parsed once inside the
+    /// iterator and the parsed record is yielded alongside, so consumers
+    /// do not parse the bytes twice; parse failures follow the same
+    /// variant-aware diagnostics as the record iterator.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    ///
+    /// let parser = BgpkitParser::new("updates.mrt").unwrap();
+    /// for (raw, _) in parser.into_filtered_raw_record_iter() {
+    ///     println!("{}", raw.raw_bytes().len());
+    /// }
+    /// ```
+    pub fn into_filtered_raw_record_iter(self) -> FilteredRawRecordIterator<R> {
+        FilteredRawRecordIterator::new(self)
     }
 
     /// Creates an opt-in iterator that reports skipped byte ranges while recovering MRT framing.

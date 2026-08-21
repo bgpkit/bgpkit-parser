@@ -8,6 +8,11 @@ validation warnings. The format is designed around this crate's own models
 (reusing the leaf `Display` implementations), not around any external tool's
 output; it is *inspired by bgpdump's human-readable output*.
 
+The [`hex`] module encodes raw record bytes (as yielded by
+[`BgpkitParser::into_filtered_raw_record_iter`](crate::BgpkitParser::into_filtered_raw_record_iter))
+as single hex strings — the paste format for byte-level dissectors such as
+[wirescope](https://wirescope.labs.bgpkit.com).
+
 Rendering is a pure function of the record: no iterators, no I/O, no
 session state. RIB entries reference peers by their table index because the
 peer table lives in a separate, earlier record.
@@ -25,4 +30,5 @@ for record in parser.into_record_iter() {
 ```
 */
 
+pub mod hex;
 pub mod text;
