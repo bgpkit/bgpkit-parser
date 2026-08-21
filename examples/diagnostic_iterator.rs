@@ -1,7 +1,10 @@
 //! Classify malformed MRT records and export their raw bytes.
 //!
-//! The diagnostic iterator distinguishes clean records, parsed records with
-//! recoverable RFC 7606 validation findings, and fatal parse failures.
+//! The diagnostic iterator reports every record with its raw bytes attached:
+//! clean records have empty warning lists, records with recoverable RFC 7606
+//! validation findings carry them in `warnings`, and fatal parse failures
+//! retain the consumed bytes plus a best-effort partial dissection tree
+//! showing where parsing stopped.
 //!
 //! Run with:
 //! ```bash
@@ -32,25 +35,25 @@ fn main() {
 
     for (index, event) in parser.into_diagnostic_iter().enumerate() {
         match event {
-            DiagnosticEvent::Record(_) => clean += 1,
-            DiagnosticEvent::Validation {
-                warnings,
-                raw_record,
-                ..
-            } => {
-                validation += 1;
-                let path = output_path(&output_dir, index, "validation");
-                save_raw_record(&raw_record, &path);
-                eprintln!(
-                    "record {index}: {} validation finding(s) -> {}",
-                    warnings.len(),
-                    path.display()
-                );
+            DiagnosticEvent::Record { warnings, raw, .. } => {
+                if warnings.is_empty() {
+                    clean += 1;
+                } else {
+                    validation += 1;
+                    let path = output_path(&output_dir, index, "validation");
+                    save_raw_record(&raw, &path);
+                    eprintln!(
+                        "record {index}: {} validation finding(s) -> {}",
+                        warnings.len(),
+                        path.display()
+                    );
+                }
             }
             DiagnosticEvent::ParseError {
                 error,
                 common_header,
                 raw_bytes,
+                ..
             } => {
                 parse_errors += 1;
                 eprintln!("record {index}: {error}");

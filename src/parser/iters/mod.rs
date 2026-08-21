@@ -20,7 +20,10 @@ mod update;
 
 // Re-export all iterator types for convenience
 pub use default::{ElemIterator, RecordIterator};
-pub use diagnostic::{DiagnosticEvent, DiagnosticIterator};
+pub use diagnostic::{
+    span_record_warnings, DiagnosticEvent, DiagnosticIterator, DissectedDiagnosticEvent,
+    DissectingDiagnosticIterator,
+};
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;
 pub use recovery::{
@@ -266,8 +269,11 @@ impl<R> BgpkitParser<R> {
 
     /// Creates an iterator that classifies each MRT record for malformed-data investigation.
     ///
-    /// This iterator emits clean parsed records, recoverable RFC 7606 validation findings, and
-    /// fatal parse errors with available raw-byte context. It ignores parser filters so that
+    /// This iterator emits every record with its raw bytes attached: clean
+    /// records have empty warning lists, records with recoverable RFC 7606
+    /// validation findings carry them in `warnings`, and fatal parse errors
+    /// retain the consumed bytes plus a best-effort partial dissection tree
+    /// showing where parsing stopped. It ignores parser filters so that
     /// malformed records cannot be hidden by element-oriented matching. Text-dump parsers yield
     /// no diagnostic events because they have no MRT record representation.
     ///
@@ -277,10 +283,13 @@ impl<R> BgpkitParser<R> {
     ///
     /// for event in BgpkitParser::new("updates.mrt")?.into_diagnostic_iter() {
     ///     match event {
-    ///         DiagnosticEvent::Record(record) => println!("{record}"),
-    ///         DiagnosticEvent::Validation { warnings, raw_record, .. } => {
-    ///             eprintln!("validation findings: {warnings:?}");
-    ///             raw_record.write_raw_bytes("malformed-record.mrt")?;
+    ///         DiagnosticEvent::Record { record, raw, warnings } => {
+    ///             if warnings.is_empty() {
+    ///                 println!("{record}");
+    ///             } else {
+    ///                 eprintln!("validation findings: {warnings:?}");
+    ///                 raw.write_raw_bytes("malformed-record.mrt")?;
+    ///             }
     ///         }
     ///         DiagnosticEvent::ParseError { error, raw_bytes, .. } => {
     ///             eprintln!("parse error: {error}");

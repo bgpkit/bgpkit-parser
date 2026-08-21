@@ -21,6 +21,14 @@ export function parseRisLiveMessageRaw(message) {
   return JSON.parse(wasm.parseRisLiveMessageRaw(message));
 }
 
+export function parseBgpUpdateFull(data) {
+  return JSON.parse(wasm.parseBgpUpdateFull(data));
+}
+
+export function dissectBgpMessage(data, fourByteAsn = true) {
+  return JSON.parse(wasm.dissectBgpMessage(data, fourByteAsn));
+}
+
 // ── Streaming MRT record parsing ─────────────────────────────────────
 
 const MRT_HEADER_LEN = 12;
@@ -40,6 +48,17 @@ export function parseMrtRecord(data) {
   if (size < 0 || size > data.length) return null;
   const recordBytes = data.subarray(0, size);
   const json = wasm.parseMrtRecord(recordBytes);
+  if (!json) return null;
+  const result = JSON.parse(json);
+  result.bytesRead = size;
+  return result;
+}
+
+export function dissectMrtRecord(data) {
+  const size = mrtRecordSize(data, 0);
+  if (size < 0 || size > data.length) return null;
+  const recordBytes = data.subarray(0, size);
+  const json = wasm.dissectMrtRecord(recordBytes);
   if (!json) return null;
   const result = JSON.parse(json);
   result.bytesRead = size;

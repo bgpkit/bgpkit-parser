@@ -278,6 +278,7 @@ message instead, request `includeRaw` and use `parse_ris_live_message_raw`. The 
 
 ```no_run
 # #[cfg(feature = "rislive")]
+# mod ris_live_example {
 use bgpkit_parser::{parse_ris_live_message_raw, RisLiveClientMessage, RisSubscribe};
 use tungstenite::{connect, Message};
 
@@ -298,7 +299,6 @@ fn main() {
 
     loop {
         let msg = socket.read().expect("Error reading message").to_string();
-#       #[cfg(feature = "rislive")]
         if let Ok(elems) = parse_ris_live_message_raw(msg.as_str()) {
             for elem in elems {
                 println!("{}", elem);
@@ -306,6 +306,7 @@ fn main() {
         }
     }
 }
+# }
 ```
 
 **Parsing OpenBMP Messages From RouteViews Kafka Stream**
