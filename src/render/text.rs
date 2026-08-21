@@ -207,8 +207,11 @@ fn render_update(out: &mut String, update: &BgpUpdateMessage) {
                 .iter()
                 .map(|label| label.value().to_string())
                 .collect();
+            let path_id = labeled
+                .path_id
+                .map_or_else(String::new, |id| format!(" path-id {id}"));
             out.push_str(&format!(
-                "{INDENT}{INDENT}{} labels=[{}]\n",
+                "{INDENT}{INDENT}{} labels=[{}]{path_id}\n",
                 labeled.prefix,
                 labels.join(", ")
             ));
@@ -633,7 +636,7 @@ UPDATE:
                 MplsLabel::try_new(24001).unwrap(),
                 MplsLabel::try_new(16).unwrap(),
             ]),
-            path_id: None,
+            path_id: Some(7),
         };
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
@@ -651,7 +654,7 @@ UPDATE:
         );
         let text = format_record(&update_record(attributes));
         assert!(text.contains("  ANNOUNCED (labeled):\n"));
-        assert!(text.contains("    192.0.2.0/24 labels=[24001, 16]\n"));
+        assert!(text.contains("    192.0.2.0/24 labels=[24001, 16] path-id 7\n"));
         // empty link-state/flowspec collections produce no sections
         assert!(!text.contains("LINK_STATE_NLRI"));
         assert!(!text.contains("FLOWSPEC_NLRI"));
