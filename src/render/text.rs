@@ -161,15 +161,25 @@ fn capability_summary(cap: &Capability) -> String {
 fn render_update(out: &mut String, update: &BgpUpdateMessage) {
     // Withdrawn prefixes: the standard field plus any carried in
     // MP_UNREACH_NLRI, so the transcript never silently drops routes.
+    // Labeled (MPLS) announcements, link-state NLRI, and FlowSpec rules
+    // live in their own MP collections and get dedicated sections.
     let mut withdrawn: Vec<&NetworkPrefix> = update.withdrawn_prefixes.iter().collect();
     let mut announced: Vec<&NetworkPrefix> = update.announced_prefixes.iter().collect();
+    let mut labeled_announced: Vec<&LabeledNetworkPrefix> = Vec::new();
+    let mut link_state_count = 0usize;
+    let mut flowspec_count = 0usize;
     for attr in update.attributes.iter() {
         match attr {
             AttributeValue::MpUnreachNlri(nlri) => {
                 withdrawn.extend(nlri.prefixes.iter());
+                link_state_count += nlri.link_state_nlris.as_ref().map_or(0, Vec::len);
+                flowspec_count += nlri.flowspec_nlris.as_ref().map_or(0, Vec::len);
             }
             AttributeValue::MpReachNlri(nlri) => {
                 announced.extend(nlri.prefixes.iter());
+                labeled_announced.extend(nlri.labeled_prefixes.iter().flatten());
+                link_state_count += nlri.link_state_nlris.as_ref().map_or(0, Vec::len);
+                flowspec_count += nlri.flowspec_nlris.as_ref().map_or(0, Vec::len);
             }
             _ => {}
         }
@@ -186,6 +196,33 @@ fn render_update(out: &mut String, update: &BgpUpdateMessage) {
         for prefix in announced {
             out.push_str(&format!("{INDENT}{INDENT}{prefix}\n"));
         }
+    }
+    if !labeled_announced.is_empty() {
+        // RFC 3107/8277 labeled routes; withdrawals carry no labels and
+        // arrive through the plain prefix lists above.
+        out.push_str(&format!("{INDENT}ANNOUNCED (labeled):\n"));
+        for labeled in labeled_announced {
+            let labels: Vec<String> = labeled
+                .labels
+                .iter()
+                .map(|label| label.value().to_string())
+                .collect();
+            out.push_str(&format!(
+                "{INDENT}{INDENT}{} labels=[{}]\n",
+                labeled.prefix,
+                labels.join(", ")
+            ));
+        }
+    }
+    if link_state_count > 0 {
+        out.push_str(&format!(
+            "{INDENT}LINK_STATE_NLRI: {link_state_count} entries (BGP-LS)\n"
+        ));
+    }
+    if flowspec_count > 0 {
+        out.push_str(&format!(
+            "{INDENT}FLOWSPEC_NLRI: {flowspec_count} rules (RFC 8955)\n"
+        ));
     }
 
     let mut attrs = update.attributes.iter().peekable();
@@ -207,8 +244,9 @@ fn render_update(out: &mut String, update: &BgpUpdateMessage) {
     }
 }
 
-/// One line per attribute; MP reachability is folded into the prefix lists
-/// above and not repeated here.
+/// One line per attribute. The MP prefix lists are folded into the
+/// WITHDRAWN/ANNOUNCED sections above; the attribute summary line (family,
+/// next hop) is retained here.
 fn render_attribute(value: &AttributeValue) -> Option<String> {
     let line = match value {
         AttributeValue::Origin(v) => format!("ORIGIN: {v}"),
@@ -321,9 +359,10 @@ fn render_table_dump_v2(out: &mut String, msg: &TableDumpV2Message) {
         }
         TableDumpV2Message::RibGeneric(rib) => {
             out.push_str(&format!(
-                "RIB_GENERIC: {:?}/{:?} ({} entries)\n",
+                "RIB_GENERIC: {:?}/{:?} PREFIX: {} ({} entries)\n",
                 rib.afi,
                 rib.safi,
+                rib.nlri,
                 rib.rib_entries.len()
             ));
             for entry in &rib.rib_entries {
@@ -343,10 +382,12 @@ fn render_table_dump_v2(out: &mut String, msg: &TableDumpV2Message) {
 fn render_attributes_block(out: &mut String, attributes: &Attributes, depth: usize) {
     let pad = INDENT.repeat(depth + 1);
     let mut iter = attributes.iter().peekable();
-    if iter.peek().is_none() {
-        return;
+    // An empty attribute list can still carry validation findings (RIB
+    // entries run check_mandatory_attributes during parsing), so the
+    // warnings section renders regardless of the attribute count.
+    if iter.peek().is_some() {
+        out.push_str(&format!("{}ATTRIBUTES:\n", INDENT.repeat(depth)));
     }
-    out.push_str(&format!("{}ATTRIBUTES:\n", INDENT.repeat(depth)));
     for attr in iter {
         if let Some(line) = render_attribute(attr) {
             out.push_str(&format!("{pad}{line}\n"));
@@ -580,6 +621,79 @@ UPDATE:
         assert!(text.contains("MY_AS: 64496"));
         assert!(text.contains("MULTIPROTOCOL_EXTENSIONS_FOR_BGP_4: Ipv4/Unicast"));
         assert!(text.contains("SUPPORT_FOR_4_OCTET_AS_NUMBER_CAPABILITY: AS64496"));
+    }
+
+    #[test]
+    fn renders_labeled_linkstate_and_flowspec_sections() {
+        use crate::models::{LabeledNetworkPrefix, MplsLabel};
+
+        let labeled = LabeledNetworkPrefix {
+            prefix: "192.0.2.0/24".parse().unwrap(),
+            labels: smallvec::SmallVec::from_vec(vec![
+                MplsLabel::try_new(24001).unwrap(),
+                MplsLabel::try_new(16).unwrap(),
+            ]),
+            path_id: None,
+        };
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        attributes.add_attr(
+            AttributeValue::MpReachNlri(Nlri {
+                afi: Afi::Ipv4,
+                safi: Safi::MplsLabel,
+                next_hop: Some(NextHopAddress::Ipv4("192.0.2.254".parse().unwrap())),
+                prefixes: vec![],
+                labeled_prefixes: Some(vec![labeled]),
+                link_state_nlris: Some(vec![]),
+                flowspec_nlris: Some(vec![]),
+            })
+            .into(),
+        );
+        let text = format_record(&update_record(attributes));
+        assert!(text.contains("  ANNOUNCED (labeled):\n"));
+        assert!(text.contains("    192.0.2.0/24 labels=[24001, 16]\n"));
+        // empty link-state/flowspec collections produce no sections
+        assert!(!text.contains("LINK_STATE_NLRI"));
+        assert!(!text.contains("FLOWSPEC_NLRI"));
+    }
+
+    #[test]
+    fn renders_rib_warnings_with_empty_attributes() {
+        // RIB parsers run check_mandatory_attributes during parsing, so an
+        // entry can reach the renderer with an empty attribute list but
+        // non-empty findings — the warnings section must render without an
+        // ATTRIBUTES section. (Warnings are attached here directly because
+        // the record is built structurally, not parsed from the wire.)
+        let mut empty_with_warnings = Attributes::default();
+        empty_with_warnings.add_validation_warning(
+            BgpValidationWarning::MissingWellKnownAttribute {
+                attr_type: AttrType::ORIGIN,
+            },
+        );
+        let rib = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 9,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: 2,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv4Unicast,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index: 0,
+                    originated_time: 1,
+                    path_id: None,
+                    attributes: empty_with_warnings,
+                }],
+            })),
+        };
+        let text = format_record(&rib);
+        assert!(text.contains("WARNINGS:"));
+        assert!(text.contains("Missing well-known mandatory attribute: ORIGIN"));
+        assert!(!text.contains("ATTRIBUTES:"));
     }
 
     #[test]

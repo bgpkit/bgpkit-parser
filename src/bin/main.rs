@@ -20,9 +20,10 @@ enum OutputFormat {
     JsonPretty,
     /// PSV format with header (elem-level)
     Psv,
-    /// Layered human-readable text, one block per MRT record (record-level;
-    /// implies `--level records`, all other formats are elem-level).
-    /// Inspired by bgpdump's human-readable output.
+    /// Layered human-readable text, one block per MRT record. Always uses
+    /// record-level output (implies `--level records`); the other formats
+    /// follow `--level` and default to elems. Inspired by bgpdump's
+    /// human-readable output.
     Text,
 }
 

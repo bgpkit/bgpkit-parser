@@ -1,6 +1,7 @@
 //! Behavior of `--format text` building blocks: record-level rendering and
-//! the documented filter semantics (non-UPDATE records are dropped when
-//! filters are active).
+//! the documented filter semantics (records with an empty elem projection —
+//! KEEPALIVE, OPEN, NOTIFICATION, state changes — are dropped when filters
+//! are active; RIB records do produce elems and can match).
 
 use bgpkit_parser::models::*;
 use bgpkit_parser::render::text::format_record;
