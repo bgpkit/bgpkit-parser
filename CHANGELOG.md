@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+* **Layered text output format** (`render::text::format_record`, `--format text`): one human-readable, indented block per MRT record — session context (`TIME`/`TYPE`/`FROM`/`TO`), `UPDATE:` sections with withdrawn/announced prefixes (including those carried in MP_REACH/MP_UNREACH) and every path attribute, `OPEN:` capabilities, session states, RIB entries, the peer table, and full legacy type-5 records. RFC 7606 validation findings render under `WARNINGS:` when present. The format is designed around this crate's own models and `Display` vocabulary — inspired by bgpdump's human-readable output, not byte-compatible with it. Rendering is a pure function of the record. In the CLI, `--format text` always uses record-level output (implies `--level records`); the other formats follow `--level` and default to elems.
+* Record-level filter semantics are now explicit: records that produce no elems (KEEPALIVE, OPEN, NOTIFICATION, state changes) never match elem-oriented filters and are dropped from record iteration while filters are active — a `debug!` line notes each drop.
+
 ## v0.21.0 - 2026-08-21
 
 ### Examples restructure

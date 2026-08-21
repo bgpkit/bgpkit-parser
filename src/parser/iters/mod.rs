@@ -41,6 +41,7 @@ use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
 use crate::RawMrtRecord;
 use crate::{Elementor, Filter, Filterable};
+use log::debug;
 use std::io::Read;
 use std::path::Path;
 
@@ -60,10 +61,18 @@ pub(crate) fn record_matches_filters(
         let _ = elementor.record_to_elems(record.clone());
         return true;
     }
-    elementor
-        .record_to_elems(record.clone())
-        .iter()
-        .any(|element| element.match_filters(filters))
+    // Filters match on the elem projection. Records that produce no elems
+    // (KEEPALIVE, OPEN, NOTIFICATION, state changes) can therefore never
+    // match and are dropped from record iteration while filters are active.
+    let elems = elementor.record_to_elems(record.clone());
+    if elems.is_empty() {
+        debug!(
+            "filters active: record of type {:?} yields no elems and is dropped",
+            record.common_header.entry_type
+        );
+        return false;
+    }
+    elems.iter().any(|element| element.match_filters(filters))
 }
 
 pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {
