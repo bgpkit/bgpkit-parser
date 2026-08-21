@@ -36,12 +36,13 @@ pub use update::{
     UpdateIterator,
 };
 
+use crate::error::ParserError;
 use crate::models::BgpElem;
 use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
 use crate::parser::BgpkitParser;
 use crate::RawMrtRecord;
 use crate::{Elementor, Filter, Filterable};
-use log::debug;
+use log::{debug, error, warn};
 use std::io::Read;
 use std::path::Path;
 
@@ -73,6 +74,63 @@ pub(crate) fn record_matches_filters(
         return false;
     }
     elems.iter().any(|element| element.match_filters(filters))
+}
+
+/// Shared body-parse error policy for record-producing iterators.
+///
+/// Mirrors the historical `RecordIterator` behavior: warnings honor
+/// `disable_warnings()`, core dumps are written for recoverable classes,
+/// and a fatal `ParseError` with core dumps enabled stops the iterator so
+/// a later failure cannot overwrite the dump. Returns `true` to continue
+/// iterating, `false` to stop.
+pub(crate) fn handle_record_parse_error<R>(
+    parser: &mut crate::parser::BgpkitParser<R>,
+    error: ParserError,
+    bytes: Option<Vec<u8>>,
+) -> bool {
+    match error {
+        ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
+            if parser.options.show_warnings {
+                warn!("parser warn: {}", err_str);
+            }
+            write_mrt_core_dump(parser.core_dump, bytes);
+            true
+        }
+        ParserError::ParseError(err_str) => {
+            error!("parser error: {}", err_str);
+            write_mrt_core_dump(parser.core_dump, bytes);
+            // stop after writing the dump so later failures don't overwrite it
+            !parser.core_dump
+        }
+        ParserError::EofExpected => {
+            // normal end of file
+            false
+        }
+        ParserError::IoError(err) | ParserError::EofError(err) => {
+            // when reaching IO error, stop iterating
+            error!("{:?}", err);
+            write_mrt_core_dump(parser.core_dump, bytes);
+            false
+        }
+        #[cfg(feature = "oneio")]
+        ParserError::OneIoError(_) => false,
+        ParserError::FilterError(_) => {
+            // this should not happen at this stage
+            false
+        }
+        // Labeled NLRI parsing errors - treat as malformed and skip
+        ParserError::InvalidLabeledNlriLength
+        | ParserError::TruncatedLabeledNlri
+        | ParserError::TruncatedPrefix
+        | ParserError::MaxLabelStackDepthExceeded
+        | ParserError::PeerMaxLabelsExceeded
+        | ParserError::InvalidPrefix => {
+            if parser.options.show_warnings {
+                warn!("parser warn: labeled NLRI parsing error: {:?}", error);
+            }
+            true
+        }
+    }
 }
 
 pub(crate) fn write_mrt_core_dump(enabled: bool, bytes: Option<Vec<u8>>) {

@@ -11,7 +11,9 @@ when possible and continue processing the remaining data. It also supports confi
 warning messages and core dump generation for debugging purposes.
 */
 
-use crate::parser::iters::{record_matches_filters, write_mrt_core_dump};
+use crate::parser::iters::{
+    handle_record_parse_error, record_matches_filters, write_mrt_core_dump,
+};
 use crate::parser::mrt::mrt_record::raw_record_uses_zebra_compat;
 use crate::{
     chunk_mrt_record, BgpkitParser, Elementor, Filter, MrtRecord, ParserError, RawMrtRecord,
@@ -117,29 +119,24 @@ pub struct FilteredRawRecordIterator<R> {
     inner: RawRecordIterator<R>,
     elementor: Elementor,
     filters: Vec<Filter>,
-    core_dump: bool,
-    warned_zebra_compat: bool,
 }
 
 impl<R> FilteredRawRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         let filters = parser.filters.clone();
-        let core_dump = parser.core_dump;
         FilteredRawRecordIterator {
             inner: RawRecordIterator::new(parser),
             elementor: Elementor::new(),
             filters,
-            core_dump,
-            warned_zebra_compat: false,
         }
     }
 
+    /// Zebra detection delegates to the parser's own warn-once state, so
+    /// `disable_warnings()` is honored and a parser that already warned
+    /// before conversion does not warn again.
     fn warn_zebra_once(&mut self, raw: &RawMrtRecord) {
-        if !self.warned_zebra_compat && raw_record_uses_zebra_compat(raw) {
-            warn!(
-                "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
-            );
-            self.warned_zebra_compat = true;
+        if raw_record_uses_zebra_compat(raw) {
+            self.inner.parser.warn_zebra_compat_once();
         }
     }
 }
@@ -158,13 +155,19 @@ impl<R: Read> Iterator for FilteredRawRecordIterator<R> {
         loop {
             let raw = self.inner.next()?;
             self.warn_zebra_once(&raw);
-            // Body-parse failures keep the record iterator's diagnostics:
-            // logged and core-dumped when enabled, never silent.
+            // Body-parse failures share the record iterator's
+            // variant-aware error policy (warnings vs. errors, core
+            // dumps, stop-after-dump).
             let record = match raw.clone().parse() {
                 Ok(record) => record,
                 Err(error) => {
-                    error!("parser error: {error}");
-                    write_mrt_core_dump(self.core_dump, Some(raw.raw_bytes().to_vec()));
+                    if !handle_record_parse_error(
+                        &mut self.inner.parser,
+                        error,
+                        Some(raw.raw_bytes().to_vec()),
+                    ) {
+                        return None;
+                    }
                     continue;
                 }
             };
