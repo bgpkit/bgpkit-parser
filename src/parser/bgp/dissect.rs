@@ -47,7 +47,7 @@ fn attr_name(code: u8) -> &'static str {
     }
 }
 
-fn read_u16(data: &[u8], pos: usize) -> Option<u16> {
+pub(crate) fn read_u16(data: &[u8], pos: usize) -> Option<u16> {
     let hi = *data.get(pos)?;
     let lo = *data.get(pos + 1)?;
     Some(u16::from_be_bytes([hi, lo]))
@@ -100,14 +100,13 @@ pub(crate) fn dissect_bgp_message_base(
     asn_len: &AsnLength,
     add_path: bool,
 ) -> DissectionNode {
-    let mut root = DissectionNode::new(
-        "bgp",
-        format!("BGP message ({} bytes)", data.len()),
-        base,
-        data.len() as u32,
-    );
-
     if data.len() < 19 {
+        let mut root = DissectionNode::new(
+            "bgp",
+            format!("BGP message (truncated, {} of 19 header bytes)", data.len()),
+            base,
+            data.len() as u32,
+        );
         if !data.is_empty() {
             root.children.push(DissectionNode::new(
                 "bgp.header",
@@ -118,6 +117,25 @@ pub(crate) fn dissect_bgp_message_base(
         }
         return root;
     }
+
+    let length = u16::from_be_bytes([data[16], data[17]]);
+    let msg_type = data[18];
+
+    // RFC 4271: the declared length bounds the message. Trailing buffer
+    // bytes are not message fields; a declaration beyond the available
+    // bytes is noted explicitly and the walk continues over what is
+    // present.
+    let declared_body = (length as usize).saturating_sub(19);
+    let available_body = data.len() - 19;
+    let body_len = declared_body.min(available_body);
+    let message_len = 19 + body_len;
+
+    let mut root = DissectionNode::new(
+        "bgp",
+        format!("BGP message ({message_len} bytes)"),
+        base,
+        message_len as u32,
+    );
 
     let mut header = DissectionNode::new("bgp.header", "Header", base, 19);
     let all_ones = data[..16].iter().all(|b| *b == 0xFF);
@@ -131,14 +149,12 @@ pub(crate) fn dissect_bgp_message_base(
         base,
         16,
     ));
-    let length = u16::from_be_bytes([data[16], data[17]]);
     header.children.push(DissectionNode::new(
         "bgp.header.length",
         format!("Length: {length}"),
         base + 16,
         2,
     ));
-    let msg_type = data[18];
     let type_name = match msg_type {
         1 => "OPEN",
         2 => "UPDATE",
@@ -155,7 +171,19 @@ pub(crate) fn dissect_bgp_message_base(
     ));
     root.children.push(header);
 
-    let body = &data[19..];
+    if declared_body > available_body {
+        root.children.push(DissectionNode::new(
+            "bgp.truncated",
+            format!(
+                "Declared length {length} exceeds the {} available bytes",
+                data.len()
+            ),
+            base + message_len as u32,
+            0,
+        ));
+    }
+
+    let body = &data[19..19 + body_len];
     let body_base = base + 19;
     match msg_type {
         1 => root.children.push(dissect_open(body, body_base)),
@@ -171,6 +199,18 @@ pub(crate) fn dissect_bgp_message_base(
             body_base,
             body.len() as u32,
         )),
+    }
+
+    if available_body > body_len {
+        root.children.push(DissectionNode::new(
+            "bgp.trailing",
+            format!(
+                "Trailing bytes beyond the declared message ({} bytes)",
+                available_body - body_len
+            ),
+            base + message_len as u32,
+            (available_body - body_len) as u32,
+        ));
     }
     root
 }
@@ -418,7 +458,10 @@ fn dissect_attr_value(
             }
         }
         2 | 17 => {
-            // AS_PATH / AS4_PATH: segments of type(1) + count(1) + count*asn
+            // AS_PATH / AS4_PATH: segments of type(1) + count(1) + count*asn.
+            // AS4_PATH (RFC 6793) always carries 4-octet ASNs regardless of
+            // the session's AS width.
+            let asn_size = if code == 17 { 4 } else { asn_size };
             let mut pos = 0usize;
             while pos + 2 <= value.len() {
                 let seg_type = value[pos];
@@ -581,7 +624,22 @@ fn dissect_attr_value(
                     1,
                 ));
                 let mut pos = 4usize;
-                if pos + nh_len <= value.len() && nh_len > 0 {
+                if nh_len > 0 && pos + nh_len > value.len() {
+                    // Truncated next hop: the reserved byte and the NLRI
+                    // cannot be located reliably, so stop walking here.
+                    nodes.push(DissectionNode::new(
+                        "bgp.attr.mp_reach.next_hop",
+                        format!(
+                            "Next hop (truncated: {} of {} bytes)",
+                            value.len() - pos,
+                            nh_len
+                        ),
+                        base + pos as u32,
+                        (value.len() - pos) as u32,
+                    ));
+                    return nodes;
+                }
+                if nh_len > 0 {
                     nodes.push(DissectionNode::new(
                         "bgp.attr.mp_reach.next_hop",
                         format!("Next hop ({} bytes)", nh_len),
@@ -666,7 +724,8 @@ fn dissect_attr_value(
             let mut pos = 0usize;
             while pos + 3 <= value.len() {
                 let tlv_type = value[pos];
-                let tlv_len = read_u16(value, pos + 2).unwrap_or(0) as usize;
+                // RFC 7311: type(1) + length(2, includes the 3-byte header)
+                let tlv_len = read_u16(value, pos + 1).unwrap_or(0) as usize;
                 if tlv_len < 3 || pos + tlv_len > value.len() {
                     break;
                 }
@@ -1263,6 +1322,328 @@ mod tests {
         let truncated = dissect_bgp_message(&[0xFF; 7], &AsnLength::Bits16, false);
         let header = find_node(&truncated, "bgp.header");
         assert!(header.label.contains("truncated"));
+    }
+
+    #[test]
+    fn dissect_attribute_value_zoo() {
+        // One UPDATE exercising every attribute-value walker not covered by
+        // the offset test: aggregator, originator ID, cluster list, MED,
+        // local pref, OTC, ext communities, IPv6 ext communities, AIGP, and
+        // an unknown attribute type.
+        let mut attrs = Vec::new();
+        let push_attr = |attrs: &mut Vec<u8>, flags: u8, code: u8, value: &[u8]| {
+            attrs.push(flags);
+            attrs.push(code);
+            attrs.push(value.len() as u8);
+            attrs.extend_from_slice(value);
+        };
+
+        // ORIGIN = EGP
+        push_attr(&mut attrs, 0x40, 1, &[0x01]);
+        // NEXT_HOP
+        push_attr(&mut attrs, 0x40, 3, &[10, 0, 0, 1]);
+        // MED
+        push_attr(&mut attrs, 0x80, 4, &100u32.to_be_bytes());
+        // LOCAL_PREF
+        push_attr(&mut attrs, 0x40, 5, &200u32.to_be_bytes());
+        // ATOMIC_AGGREGATE (empty value)
+        push_attr(&mut attrs, 0x40, 6, &[]);
+        // AGGREGATOR: 2-octet ASN + router id
+        push_attr(&mut attrs, 0xC0, 7, &[0xFC, 0x80, 1, 2, 3, 4]);
+        // ORIGINATOR_ID
+        push_attr(&mut attrs, 0x80, 9, &[10, 0, 0, 9]);
+        // CLUSTER_LIST: two IDs
+        push_attr(&mut attrs, 0x80, 10, &0xAABBCCDDu32.to_be_bytes());
+        // EXTENDED_COMMUNITIES: two-octet-AS route target + opaque
+        push_attr(
+            &mut attrs,
+            0xC0,
+            16,
+            &[0x00, 0x02, 0xFC, 0x80, 0, 0, 0, 100],
+        );
+        push_attr(&mut attrs, 0xC0, 16, &[0x03, 0x04, 0, 0, 0, 0, 0, 1]);
+        // AS4_AGGREGATOR: 4-octet ASN + router id
+        let as4_aggregator: Vec<u8> =
+            [4200000000u32.to_be_bytes().to_vec(), vec![1, 2, 3, 4]].concat();
+        push_attr(&mut attrs, 0xC0, 18, &as4_aggregator);
+        // IPV6 ext community (20 bytes)
+        push_attr(&mut attrs, 0xC0, 25, &[0x00; 20]);
+        // AIGP: one metric TLV, type 1, length 11 (3 header + 8 metric)
+        push_attr(
+            &mut attrs,
+            0x80,
+            26,
+            &[0x01, 0x00, 0x0B, 0, 0, 0, 0, 0, 0, 0, 100],
+        );
+        // OTC
+        push_attr(&mut attrs, 0xC0, 35, &64512u32.to_be_bytes());
+        // unknown attribute type 99
+        push_attr(&mut attrs, 0x80, 99, &[0xAB, 0xCD]);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(&attrs);
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits16, false);
+
+        assert_eq!(find_node(&tree, "bgp.attr.origin").label, "Origin: EGP (1)");
+        assert_eq!(
+            find_node(&tree, "bgp.attr.next_hop").label,
+            "Next hop: 10.0.0.1"
+        );
+        assert_eq!(
+            find_node(&tree, "bgp.attr.u32").label,
+            "Multi-exit discriminator: 100"
+        );
+        assert_eq!(
+            find_node(&tree, "bgp.attr.aggregator.asn").label,
+            "Aggregator ASN: 64640"
+        );
+        assert_eq!(
+            find_node(&tree, "bgp.attr.aggregator.id").label,
+            "Aggregator router ID: 1.2.3.4"
+        );
+        assert_eq!(
+            find_node(&tree, "bgp.attr.originator_id").label,
+            "Originator ID: 10.0.0.9"
+        );
+        let cluster = find_node(&tree, "bgp.attr.cluster_list.entry");
+        assert!(cluster.label.contains("2864434397"));
+        let mut ext = Vec::new();
+        tree.find_all("bgp.attr.ext_communities.entry", &mut ext);
+        assert_eq!(ext.len(), 2);
+        assert_eq!(
+            ext[0].label,
+            "Extended community [1]: type 0x00 subtype 0x02: 64640:100"
+        );
+        assert!(ext[1].label.contains("type 0x03 subtype 0x04"));
+        assert_eq!(
+            find_node(&tree, "bgp.attr.ipv6_ext_communities.entry").label,
+            "IPv6 extended community [1]"
+        );
+        // AIGP metric TLV: type 1, 11 bytes total (regression: length read
+        // at the byte right after the type)
+        let aigp = find_node(&tree, "bgp.attr.aigp.entry");
+        assert_eq!(aigp.label, "AIGP TLV: type 1, 11 bytes");
+        assert_eq!(
+            (aigp.offset, aigp.length),
+            (find_node(&tree, "bgp.attr.26").offset + 3, 11)
+        );
+        // OTC renders through the u32 walker
+        let mut u32s = Vec::new();
+        tree.find_all("bgp.attr.u32", &mut u32s);
+        assert!(u32s.iter().any(|n| n.label == "Only to customer: 64512"));
+        // unknown type keeps the generic name
+        assert!(find_node(&tree, "bgp.attr.99")
+            .label
+            .starts_with("ATTRIBUTE (type 99)"));
+    }
+
+    #[test]
+    fn dissect_as4_path_uses_four_octet_asns_even_on_16bit_sessions() {
+        // AS4_PATH (type 17) with 4-octet ASNs, dissected with Bits16:
+        // segments must still be walked with 4-octet width (RFC 6793).
+        let value: Vec<u8> = [
+            &[0x02, 0x02][..],
+            &65001u32.to_be_bytes(),
+            &65002u32.to_be_bytes(),
+        ]
+        .concat();
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(&[0x40, 17, value.len() as u8]);
+        attrs.extend_from_slice(&value);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(&attrs);
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits16, false);
+
+        let segment = find_node(&tree, "bgp.attr.as_path.segment");
+        assert_eq!((segment.offset, segment.length), (23 + 3, 10));
+        assert_eq!(segment.label, "AS_SEQUENCE: 65001 65002");
+    }
+
+    #[test]
+    fn dissect_extended_length_attribute() {
+        // Flags with the extended-length bit (0x10) carry a 2-byte length.
+        let mut value = vec![0u8; 300];
+        value[0] = 1; // valid ORIGIN payload size irrelevant; generic walk
+        let mut attrs = Vec::new();
+        attrs.push(0x50); // optional + transitive + extended length
+        attrs.push(99);
+        attrs.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        attrs.extend_from_slice(&value);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(&attrs);
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits16, false);
+
+        let attr = find_node(&tree, "bgp.attr.99");
+        assert_eq!(attr.length, 4 + 300);
+        let length = find_node(&tree, "bgp.attr.length");
+        assert_eq!(length.label, "Length: 300");
+        assert_eq!(length.length, 2);
+    }
+
+    #[test]
+    fn dissect_declared_length_bounds_body() {
+        // KEEPALIVE followed by 5 garbage bytes: the garbage must surface as
+        // a trailing node, not as message fields.
+        let mut wire = bgp_wire(4, &[]);
+        wire.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF, 0x42]);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits16, false);
+
+        assert_eq!(tree.length, 19, "root bounded to the declared message");
+        let trailing = find_node(&tree, "bgp.trailing");
+        assert_eq!((trailing.offset, trailing.length), (19, 5));
+
+        // Declared UPDATE length shorter than the buffer: extra NLRI bytes
+        // beyond the declaration land in trailing, not as fake prefixes.
+        let body = sample_update_body();
+        let mut wire = bgp_wire(2, &body);
+        // shrink the declared length by the 4-byte NLRI
+        let full_len = u16::from_be_bytes([wire[16], wire[17]]);
+        let shorter = full_len - 4;
+        wire[16] = (shorter >> 8) as u8;
+        wire[17] = (shorter & 0xFF) as u8;
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+        assert!(tree.find("bgp.update.nlri").is_none());
+        assert_eq!(find_node(&tree, "bgp.trailing").length, 4);
+
+        // Declaration beyond the available bytes: explicit truncated note.
+        let mut wire = bgp_wire(2, &body);
+        wire.truncate(wire.len() - 10);
+        let inflated = wire.len() as u16 + 20;
+        wire[16] = (inflated >> 8) as u8;
+        wire[17] = (inflated & 0xFF) as u8;
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+        let truncated = find_node(&tree, "bgp.truncated");
+        assert!(truncated.label.contains("exceeds"));
+    }
+
+    #[test]
+    fn dissect_mp_unreach_and_truncated_next_hop() {
+        // MP_UNREACH: AFI/SAFI + withdrawn prefixes
+        let mut value = Vec::new();
+        value.extend_from_slice(&2u16.to_be_bytes()); // AFI IPv6
+        value.push(1); // SAFI
+        value.extend_from_slice(&[32, 0x20, 0x01, 0x0d, 0xb8]); // 2001:db8::/32
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(&[0x80, 15, value.len() as u8]);
+        attrs.extend_from_slice(&value);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(&attrs);
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+
+        assert!(tree.find("bgp.attr.mp_unreach.afi").is_some());
+        let mut prefixes = Vec::new();
+        tree.find_all("bgp.nlri.prefix", &mut prefixes);
+        assert_eq!(prefixes[0].label, "2001:db8::/32");
+
+        // MP_REACH declaring a next hop longer than the value: the walk must
+        // stop at the truncated next-hop node and not fabricate NLRI.
+        let mut value = Vec::new();
+        value.extend_from_slice(&2u16.to_be_bytes());
+        value.push(1);
+        value.push(16); // next hop length: 16...
+        value.extend_from_slice(&[0x20, 0x01]); // ...but only 2 bytes present
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(&[0x80, 14, value.len() as u8]);
+        attrs.extend_from_slice(&value);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(&attrs);
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+
+        let next_hop = find_node(&tree, "bgp.attr.mp_reach.next_hop");
+        assert!(next_hop.label.contains("truncated: 2 of 16"));
+        assert!(tree.find("bgp.attr.mp_reach.reserved").is_none());
+        assert!(tree.find("bgp.nlri.prefix").is_none());
+    }
+
+    #[test]
+    fn dissect_open_extended_params_and_raw_param() {
+        // RFC 9072 extended optional parameters + a non-capability param.
+        let mut caps = Vec::new();
+        caps.extend_from_slice(&[65, 4]);
+        caps.extend_from_slice(&65001u32.to_be_bytes()); // 4-octet AS capability
+                                                         // RFC 9072 extended framing: 2-byte per-parameter lengths
+        let caps_param = [
+            vec![2u8],
+            (caps.len() as u16).to_be_bytes().to_vec(),
+            caps.clone(),
+        ]
+        .concat();
+        let raw_param = [
+            vec![254u8],
+            3u16.to_be_bytes().to_vec(),
+            vec![0xAA, 0xBB, 0xCC],
+        ]
+        .concat();
+        let mut params = Vec::new();
+        params.push(255);
+        let params_len = 3 + caps_param.len() + raw_param.len();
+        params.extend_from_slice(&(params_len as u16).to_be_bytes());
+        params.extend_from_slice(&caps_param);
+        params.extend_from_slice(&raw_param);
+
+        let mut body = Vec::new();
+        body.push(4);
+        body.extend_from_slice(&65001u16.to_be_bytes());
+        body.extend_from_slice(&180u16.to_be_bytes());
+        body.extend_from_slice(&[1, 2, 3, 4]);
+        body.push(0xFF); // non-extended opt len marker for RFC 9072
+        body.extend_from_slice(&params);
+
+        let wire = bgp_wire(1, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits16, false);
+
+        let ext = find_node(&tree, "bgp.open.ext_params_len");
+        assert!(ext.label.contains("RFC 9072"));
+        assert!(tree.find("bgp.open.capability").is_some());
+        let raw = find_node(&tree, "bgp.open.param.value");
+        assert_eq!(raw.length, 3);
+    }
+
+    #[test]
+    fn dissect_truncated_update_sections() {
+        // Withdrawn section declaring more bytes than present
+        let mut body = Vec::new();
+        body.extend_from_slice(&8u16.to_be_bytes()); // 8 declared
+        body.extend_from_slice(&[24, 192, 0, 2]); // 4 present
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+        let wr = find_node(&tree, "bgp.update.withdrawn_routes");
+        assert!(wr.label.contains("truncated: 4 of 8"));
+
+        // Truncated attribute-length field itself: the body ends mid-field
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.push(0x40); // only 1 byte of the 2-byte length field
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+        let alen = find_node(&tree, "bgp.update.path_attributes.length");
+        assert_eq!(alen.label, "Total path attribute length (truncated)");
+
+        // NLRI truncated mid-prefix: the partial prefix byte is dropped
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&[24, 203, 0]); // /24 needs one more octet
+        let wire = bgp_wire(2, &body);
+        let tree = dissect_bgp_message(&wire, &AsnLength::Bits32, false);
+        assert!(tree.find("bgp.nlri.prefix").is_none());
     }
 
     #[test]

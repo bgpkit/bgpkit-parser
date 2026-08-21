@@ -8,14 +8,8 @@
 //! default iterator path and never fails on malformed input.
 
 use crate::models::{AsnLength, DissectionNode};
-use crate::parser::bgp::dissect::dissect_bgp_message_base;
+use crate::parser::bgp::dissect::{dissect_bgp_message_base, read_u16};
 use crate::parser::mrt::RawMrtRecord;
-
-fn read_u16(data: &[u8], pos: usize) -> Option<u16> {
-    let hi = *data.get(pos)?;
-    let lo = *data.get(pos + 1)?;
-    Some(u16::from_be_bytes([hi, lo]))
-}
 
 fn entry_type_name(entry_type: u16) -> &'static str {
     match entry_type {
@@ -69,11 +63,18 @@ pub fn dissect_mrt_bytes(data: &[u8]) -> DissectionNode {
     let sub_type = read_u16(data, 6).unwrap_or(0);
 
     // ET variants (RFC 6396) carry a 4-byte microsecond field after the
-    // standard 12-byte header.
+    // standard 12-byte header. An ET record truncated mid-microsecond field
+    // keeps those bytes in a truncated extended-header node instead of
+    // mislabeling them as message body.
     let is_et = matches!(entry_type, 17 | 33 | 49);
-    let header_len = if is_et && data.len() >= 16 { 16 } else { 12 };
+    let header_len = if is_et { 16 } else { 12 };
 
-    let mut header = DissectionNode::new("mrt.header", "Common header", 0, header_len as u32);
+    let mut header = DissectionNode::new(
+        "mrt.header",
+        "Common header",
+        0,
+        header_len.min(data.len()) as u32,
+    );
     let timestamp = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
     header.children.push(DissectionNode::new(
         "mrt.header.timestamp",
@@ -100,20 +101,34 @@ pub fn dissect_mrt_bytes(data: &[u8]) -> DissectionNode {
         8,
         4,
     ));
-    if header_len == 16 {
-        header.children.push(DissectionNode::new(
-            "mrt.header.microsecond",
-            format!(
-                "Microsecond timestamp: {}",
-                u32::from_be_bytes([data[12], data[13], data[14], data[15]])
-            ),
-            12,
-            4,
-        ));
+    if is_et {
+        if data.len() >= 16 {
+            header.children.push(DissectionNode::new(
+                "mrt.header.microsecond",
+                format!(
+                    "Microsecond timestamp: {}",
+                    u32::from_be_bytes([data[12], data[13], data[14], data[15]])
+                ),
+                12,
+                4,
+            ));
+        } else {
+            header.children.push(DissectionNode::new(
+                "mrt.header.microsecond",
+                format!(
+                    "Microsecond timestamp (truncated: {} of 4 bytes)",
+                    data.len() - 12
+                ),
+                12,
+                (data.len() - 12) as u32,
+            ));
+            root.children.push(header);
+            return root;
+        }
     }
     root.children.push(header);
 
-    let body = &data[header_len.min(data.len())..];
+    let body = &data[header_len..];
     let body_base = header_len as u32;
     if body.is_empty() {
         return root;
@@ -219,6 +234,83 @@ fn dissect_bgp4mp(data: &[u8], base: u32, sub_type: u16) -> DissectionNode {
         return node;
     }
 
+    // Historical Zebra corruption also produced 8-byte state-change records
+    // with only the two 16-bit ASNs and the old/new states (see
+    // `parse_bgp4mp_state_change`); mirror that recognition here.
+    if !is_message && asn_size == 2 && data.len() == 8 {
+        let old_state = read_u16(data, pos).unwrap_or(0);
+        push_field(
+            &mut node,
+            "mrt.bgp4mp.old_state",
+            format!("Old state: {} ({})", old_state, bgp_state_name(old_state)),
+            base + pos as u32,
+            2,
+        );
+        let new_state = read_u16(data, pos + 2).unwrap_or(0);
+        push_field(
+            &mut node,
+            "mrt.bgp4mp.new_state",
+            format!("New state: {} ({})", new_state, bgp_state_name(new_state)),
+            base + pos as u32 + 2,
+            2,
+        );
+        return node;
+    }
+
+    // Shared subheader: interface index, AFI, and peer/local addresses.
+    let Some(pos) = walk_bgp4mp_addresses(&mut node, data, base, pos) else {
+        return node;
+    };
+
+    if is_message {
+        node.children.push(dissect_bgp_message_base(
+            &data[pos..],
+            base + pos as u32,
+            &asn_len,
+            add_path,
+        ));
+    } else {
+        // State change: old/new session states after the addresses
+        if data.len() < pos + 4 {
+            node.children.push(DissectionNode::new(
+                "mrt.bgp4mp.truncated",
+                "Truncated old/new states",
+                base + pos as u32,
+                (data.len() - pos) as u32,
+            ));
+            return node;
+        }
+        let old_state = read_u16(data, pos).unwrap_or(0);
+        push_field(
+            &mut node,
+            "mrt.bgp4mp.old_state",
+            format!("Old state: {} ({})", old_state, bgp_state_name(old_state)),
+            base + pos as u32,
+            2,
+        );
+        let new_state = read_u16(data, pos + 2).unwrap_or(0);
+        push_field(
+            &mut node,
+            "mrt.bgp4mp.new_state",
+            format!("New state: {} ({})", new_state, bgp_state_name(new_state)),
+            base + pos as u32 + 2,
+            2,
+        );
+    }
+
+    node
+}
+
+/// Walk the BGP4MP subheader fields shared by message and state-change
+/// records: interface index, AFI, and the peer/local addresses. Emits a
+/// truncation or unknown-AFI node and returns `None` when the walk cannot
+/// continue; otherwise returns the position after the addresses.
+fn walk_bgp4mp_addresses(
+    node: &mut DissectionNode,
+    data: &[u8],
+    base: u32,
+    mut pos: usize,
+) -> Option<usize> {
     if data.len() < pos + 4 {
         node.children.push(DissectionNode::new(
             "mrt.bgp4mp.truncated",
@@ -226,11 +318,11 @@ fn dissect_bgp4mp(data: &[u8], base: u32, sub_type: u16) -> DissectionNode {
             base + pos as u32,
             (data.len() - pos) as u32,
         ));
-        return node;
+        return None;
     }
     let afi = read_u16(data, pos + 2).unwrap_or(0);
     push_field(
-        &mut node,
+        node,
         "mrt.bgp4mp.interface_index",
         format!("Interface index: {}", read_u16(data, pos).unwrap_or(0)),
         base + pos as u32,
@@ -238,16 +330,9 @@ fn dissect_bgp4mp(data: &[u8], base: u32, sub_type: u16) -> DissectionNode {
     );
     pos += 2;
     push_field(
-        &mut node,
+        node,
         "mrt.bgp4mp.afi",
-        format!(
-            "Address family: {afi} ({})",
-            match afi {
-                1 => "IPv4",
-                2 => "IPv6",
-                _ => "unknown",
-            }
-        ),
+        format!("Address family: {afi} ({})", afi_name(afi)),
         base + pos as u32,
         2,
     );
@@ -262,90 +347,43 @@ fn dissect_bgp4mp(data: &[u8], base: u32, sub_type: u16) -> DissectionNode {
                 base + pos as u32,
                 (data.len() - pos) as u32,
             ));
-            return node;
+            return None;
         }
     };
 
-    if is_message {
-        if data.len() < pos + 2 * addr_len {
-            node.children.push(DissectionNode::new(
-                "mrt.bgp4mp.truncated",
-                "Truncated peer/local addresses",
-                base + pos as u32,
-                (data.len() - pos) as u32,
-            ));
-            return node;
-        }
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.peer_ip",
-            format!("Peer IP: {}", render_ip(&data[pos..pos + addr_len])),
+    if data.len() < pos + 2 * addr_len {
+        node.children.push(DissectionNode::new(
+            "mrt.bgp4mp.truncated",
+            "Truncated peer/local addresses",
             base + pos as u32,
-            addr_len,
-        );
-        pos += addr_len;
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.local_ip",
-            format!("Local IP: {}", render_ip(&data[pos..pos + addr_len])),
-            base + pos as u32,
-            addr_len,
-        );
-        pos += addr_len;
-
-        node.children.push(dissect_bgp_message_base(
-            &data[pos..],
-            base + pos as u32,
-            &asn_len,
-            add_path,
+            (data.len() - pos) as u32,
         ));
-    } else {
-        // State change: addresses, then old/new session states
-        if data.len() < pos + 2 * addr_len + 4 {
-            node.children.push(DissectionNode::new(
-                "mrt.bgp4mp.truncated",
-                "Truncated addresses or states",
-                base + pos as u32,
-                (data.len() - pos) as u32,
-            ));
-            return node;
-        }
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.peer_ip",
-            format!("Peer IP: {}", render_ip(&data[pos..pos + addr_len])),
-            base + pos as u32,
-            addr_len,
-        );
-        pos += addr_len;
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.local_ip",
-            format!("Local IP: {}", render_ip(&data[pos..pos + addr_len])),
-            base + pos as u32,
-            addr_len,
-        );
-        pos += addr_len;
-        let old_state = read_u16(data, pos).unwrap_or(0);
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.old_state",
-            format!("Old state: {} ({})", old_state, bgp_state_name(old_state)),
-            base + pos as u32,
-            2,
-        );
-        pos += 2;
-        let new_state = read_u16(data, pos).unwrap_or(0);
-        push_field(
-            &mut node,
-            "mrt.bgp4mp.new_state",
-            format!("New state: {} ({})", new_state, bgp_state_name(new_state)),
-            base + pos as u32,
-            2,
-        );
+        return None;
     }
+    push_field(
+        node,
+        "mrt.bgp4mp.peer_ip",
+        format!("Peer IP: {}", render_ip(&data[pos..pos + addr_len])),
+        base + pos as u32,
+        addr_len,
+    );
+    pos += addr_len;
+    push_field(
+        node,
+        "mrt.bgp4mp.local_ip",
+        format!("Local IP: {}", render_ip(&data[pos..pos + addr_len])),
+        base + pos as u32,
+        addr_len,
+    );
+    Some(pos + addr_len)
+}
 
-    node
+fn afi_name(afi: u16) -> &'static str {
+    match afi {
+        1 => "IPv4",
+        2 => "IPv6",
+        _ => "unknown",
+    }
 }
 
 fn push_field(node: &mut DissectionNode, field: &str, label: String, offset: u32, len: usize) {
@@ -521,6 +559,123 @@ mod tests {
         let tree = dissect_mrt_bytes(&wire);
         let body = tree.find("mrt.body").unwrap();
         assert_eq!(body.label, "Message body (4 bytes)");
+    }
+
+    #[test]
+    fn dissect_mrt_et_record_microsecond_field() {
+        // BGP4MP_ET (type 17): the 4-byte microsecond field follows the
+        // common header (offset 12), then the BGP4MP subheader at offset 16.
+        let mut bgp = vec![0xFF; 16];
+        bgp.extend_from_slice(&19u16.to_be_bytes());
+        bgp.push(4); // KEEPALIVE
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&64496u32.to_be_bytes()); // peer ASN
+        body.extend_from_slice(&64497u32.to_be_bytes()); // local ASN
+        body.extend_from_slice(&0u16.to_be_bytes()); // interface index
+        body.extend_from_slice(&1u16.to_be_bytes()); // AFI IPv4
+        body.extend_from_slice(&[192, 0, 2, 1]);
+        body.extend_from_slice(&[192, 0, 2, 2]);
+        body.extend_from_slice(&bgp);
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1_700_000_000u32.to_be_bytes());
+        wire.extend_from_slice(&17u16.to_be_bytes());
+        wire.extend_from_slice(&4u16.to_be_bytes()); // MESSAGE_AS4
+        wire.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&123_456u32.to_be_bytes()); // micros at offset 12
+        wire.extend_from_slice(&body);
+
+        let tree = dissect_mrt_bytes(&wire);
+        let micro = tree.find("mrt.header.microsecond").unwrap();
+        assert_eq!((micro.offset, micro.length), (12, 4));
+        assert_eq!(micro.label, "Microsecond timestamp: 123456");
+        // body starts after the 16-byte extended header
+        let peer_asn = tree.find("mrt.bgp4mp.peer_asn").unwrap();
+        assert_eq!(peer_asn.offset, 16);
+        assert!(tree.find("bgp.header.type").is_some());
+    }
+
+    #[test]
+    fn dissect_mrt_et_record_truncated_microsecond() {
+        // ET record cut between 12 and 16 bytes: the partial microsecond
+        // field stays a truncated header node, never body bytes.
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1u32.to_be_bytes());
+        wire.extend_from_slice(&17u16.to_be_bytes());
+        wire.extend_from_slice(&4u16.to_be_bytes());
+        wire.extend_from_slice(&8u32.to_be_bytes());
+        wire.extend_from_slice(&[0xAB, 0xCD]); // 2 of 4 microsecond bytes
+
+        let tree = dissect_mrt_bytes(&wire);
+        let micro = tree.find("mrt.header.microsecond").unwrap();
+        assert_eq!(
+            micro.label,
+            "Microsecond timestamp (truncated: 2 of 4 bytes)"
+        );
+        assert_eq!((micro.offset, micro.length), (12, 2));
+        assert!(
+            tree.find("mrt.bgp4mp").is_none(),
+            "no body walk on truncated ET header"
+        );
+    }
+
+    #[test]
+    fn dissect_mrt_zebra_short_state_change() {
+        // Historical Zebra corruption: 8-byte state-change record with only
+        // the two 16-bit ASNs and old/new states.
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1u32.to_be_bytes());
+        wire.extend_from_slice(&16u16.to_be_bytes());
+        wire.extend_from_slice(&0u16.to_be_bytes()); // STATE_CHANGE
+        wire.extend_from_slice(&8u32.to_be_bytes());
+        wire.extend_from_slice(&64496u16.to_be_bytes());
+        wire.extend_from_slice(&64497u16.to_be_bytes());
+        wire.extend_from_slice(&5u16.to_be_bytes()); // OpenConfirm
+        wire.extend_from_slice(&6u16.to_be_bytes()); // Established
+
+        let tree = dissect_mrt_bytes(&wire);
+        let old_state = tree.find("mrt.bgp4mp.old_state").unwrap();
+        assert_eq!(old_state.label, "Old state: 5 (OpenConfirm)");
+        let new_state = tree.find("mrt.bgp4mp.new_state").unwrap();
+        assert_eq!(new_state.label, "New state: 6 (Established)");
+        assert_eq!(new_state.offset, wire.len() as u32 - 2);
+    }
+
+    #[test]
+    fn dissect_mrt_bgp4mp_ipv6_addresses() {
+        let mut bgp = vec![0xFF; 16];
+        bgp.extend_from_slice(&19u16.to_be_bytes());
+        bgp.push(4); // KEEPALIVE
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&64496u32.to_be_bytes());
+        body.extend_from_slice(&64497u32.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&2u16.to_be_bytes()); // AFI IPv6
+        body.extend_from_slice(&[0x20, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        body.extend_from_slice(&[0x20, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+        body.extend_from_slice(&bgp);
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1u32.to_be_bytes());
+        wire.extend_from_slice(&16u16.to_be_bytes());
+        wire.extend_from_slice(&4u16.to_be_bytes());
+        wire.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&body);
+
+        let tree = dissect_mrt_bytes(&wire);
+        let afi = tree.find("mrt.bgp4mp.afi").unwrap();
+        assert_eq!(afi.label, "Address family: 2 (IPv6)");
+        let peer_ip = tree.find("mrt.bgp4mp.peer_ip").unwrap();
+        assert_eq!(peer_ip.length, 16);
+        assert_eq!(
+            peer_ip.label,
+            "Peer IP: 2001:0000:0000:0000:0000:0000:0000:0001"
+        );
+        // BGP message begins right after both 16-byte addresses
+        let marker = tree.find("bgp.header.marker").unwrap();
+        assert_eq!(marker.offset, 12 + 4 + 4 + 2 + 2 + 32);
     }
 
     #[test]

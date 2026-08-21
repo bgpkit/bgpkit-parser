@@ -21,8 +21,8 @@ mod update;
 // Re-export all iterator types for convenience
 pub use default::{ElemIterator, RecordIterator};
 pub use diagnostic::{
-    span_record_warnings, DiagnosticEvent, DiagnosticIterator, DissectedDiagnosticEvent,
-    DissectingDiagnosticIterator,
+    record_validation_warnings, span_record_warnings, DiagnosticEvent, DiagnosticIterator,
+    DissectedDiagnosticEvent, DissectingDiagnosticIterator,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::RawRecordIterator;

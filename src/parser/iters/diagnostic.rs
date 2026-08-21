@@ -264,13 +264,22 @@ fn locate_warning_span(
         tree.find_all(&format!("bgp.attr.{code}"), &mut nodes);
         nodes.get(occurrence).map(|node| node.span())
     };
+    // Anchor to the attribute occurrence the warning is about. The parser
+    // emits warnings while observing headers in wire order and reports
+    // `DuplicateAttribute` before any other finding for that duplicate
+    // header, so the number of duplicates seen so far is the occurrence
+    // every attribute-keyed warning of that type belongs to.
+    let current_attr_span = |code: u8| -> Option<Span> {
+        let occurrence = duplicate_counts.get(&code).copied().unwrap_or(0);
+        attr_span(code, occurrence)
+    };
     let section_span = |field: &str| -> Option<Span> { tree.find(field).map(|node| node.span()) };
 
     let span = match warning {
         W::AttributeFlagsError { attr_type, .. }
         | W::AttributeLengthError { attr_type, .. }
         | W::OptionalAttributeError { attr_type, .. }
-        | W::PartialAttributeError { attr_type, .. } => attr_span(u8::from(*attr_type), 0)
+        | W::PartialAttributeError { attr_type, .. } => current_attr_span(u8::from(*attr_type))
             .or_else(|| section_span("bgp.update.path_attributes")),
         W::DuplicateAttribute { attr_type } => {
             let code = u8::from(*attr_type);
@@ -278,10 +287,10 @@ fn locate_warning_span(
             *count += 1;
             attr_span(code, *count).or_else(|| section_span("bgp.update.path_attributes"))
         }
-        W::InvalidOriginAttribute { .. } => attr_span(1, 0),
-        W::InvalidNextHopAttribute { .. } => attr_span(3, 0),
-        W::MalformedAsPath { .. } => attr_span(2, 0),
-        W::UnrecognizedWellKnownAttribute { attr_type_code } => attr_span(*attr_type_code, 0),
+        W::InvalidOriginAttribute { .. } => current_attr_span(1),
+        W::InvalidNextHopAttribute { .. } => current_attr_span(3),
+        W::MalformedAsPath { .. } => current_attr_span(2),
+        W::UnrecognizedWellKnownAttribute { attr_type_code } => current_attr_span(*attr_type_code),
         W::MissingWellKnownAttribute { .. } | W::MalformedAttributeList { .. } => {
             section_span("bgp.update.path_attributes")
         }
@@ -291,8 +300,8 @@ fn locate_warning_span(
         W::MalformedNlri { nlri_type, .. } => match *nlri_type {
             "withdrawn" => section_span("bgp.update.withdrawn_routes"),
             "announced" => section_span("bgp.update.nlri"),
-            "mp_reach" => attr_span(14, 0),
-            "mp_unreach" => attr_span(15, 0),
+            "mp_reach" => current_attr_span(14),
+            "mp_unreach" => current_attr_span(15),
             _ => None,
         },
         W::UnknownRouteRefreshSubtype { .. } | W::InvalidRouteRefreshLength { .. } => {
@@ -912,6 +921,90 @@ mod tests {
             }
             event => panic!("expected dissected record event, got {event:?}"),
         }
+    }
+
+    #[test]
+    fn with_dissection_anchors_duplicate_to_second_occurrence() {
+        // Two ORIGIN attributes: the duplicate warning and its companion
+        // flags warning both belong to the SECOND occurrence.
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(&[0x40, 0x01, 0x01, 0x00]); // first, clean
+        attrs.extend_from_slice(&[0x80, 0x01, 0x01, 0x00]); // duplicate, bad flags
+        let announced = [0x18, 10, 0, 0];
+        let wire = bgp4mp_update_wire(&[], &attrs, &announced);
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(wire))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::Record { warnings, tree, .. } => {
+                let mut origins = Vec::new();
+                tree.find_all("bgp.attr.1", &mut origins);
+                assert_eq!(origins.len(), 2, "two ORIGIN attributes on the wire");
+
+                let duplicate = warnings
+                    .iter()
+                    .find(|w| matches!(w.warning, BgpValidationWarning::DuplicateAttribute { .. }))
+                    .expect("duplicate warning");
+                // NTH-occurrence anchoring: the duplicate points at #2
+                assert_eq!(duplicate.span, origins[1].span());
+
+                // The flags error accompanying the duplicate header must
+                // also anchor to the second occurrence, not the first.
+                let flags = warnings
+                    .iter()
+                    .find(|w| matches!(w.warning, BgpValidationWarning::AttributeFlagsError { .. }))
+                    .expect("flags warning");
+                assert_eq!(flags.span, origins[1].span());
+            }
+            event => panic!("expected dissected record event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn with_dissection_passes_through_parse_error_partial() {
+        // A truncated record still yields a ParseError carrying the partial
+        // tree through the dissecting iterator.
+        let header = CommonHeader {
+            timestamp: 3,
+            microsecond_timestamp: None,
+            entry_type: EntryType::TABLE_DUMP,
+            entry_subtype: 0,
+            length: 4,
+        };
+        let mut input = header.encode().to_vec();
+        input.extend_from_slice(&[0xff; 4]);
+        input.extend_from_slice(&update_record(valid_attributes()).encode().unwrap());
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input))
+            .into_diagnostic_iter()
+            .with_dissection();
+        match iter.next().unwrap() {
+            DissectedDiagnosticEvent::ParseError { partial, .. } => {
+                assert!(partial.is_some());
+            }
+            event => panic!("expected dissected parse error event, got {event:?}"),
+        }
+        assert!(matches!(
+            iter.next(),
+            Some(DissectedDiagnosticEvent::Record { .. })
+        ));
+    }
+
+    #[test]
+    fn record_validation_warnings_reachable_from_crate_root() {
+        // Regression: the helper must be re-exported, not just declared pub
+        // in a private module. It reports the findings stored on the parsed
+        // attributes, so attach one directly.
+        let record = update_record(valid_attributes());
+        assert!(crate::record_validation_warnings(&record).is_empty());
+
+        let mut attributes = Attributes::default();
+        attributes.add_validation_warning(BgpValidationWarning::MissingWellKnownAttribute {
+            attr_type: AttrType::ORIGIN,
+        });
+        let flagged = update_record(attributes);
+        assert_eq!(crate::record_validation_warnings(&flagged).len(), 1);
     }
 
     #[test]
