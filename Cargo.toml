@@ -172,6 +172,10 @@ name = "real_time_ris_live_websocket"
 required-features = ["rislive"]
 
 [[example]]
+name = "ris_live_raw_full"
+required-features = ["rislive"]
+
+[[example]]
 name = "real_time_ris_live_websocket_async"
 required-features = ["rislive"]
 
