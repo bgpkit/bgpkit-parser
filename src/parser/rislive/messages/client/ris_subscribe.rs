@@ -10,6 +10,10 @@ pub enum RisSubscribeType {
     OPEN,
     NOTIFICATION,
     KEEPALIVE,
+    /// Subscribe requests use `RIS_PEER_STATE` because that is what the server
+    /// accepts.
+    ///
+    /// The resulting messages will have `"type":"STATE"` (see [`RisMessageEnum::RIS_PEER_STATE`](crate::rislive::messages::RisMessageEnum)).
     RIS_PEER_STATE,
 }
 
