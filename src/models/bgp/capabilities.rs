@@ -724,8 +724,8 @@ mod tests {
 
     #[test]
     fn test_reserved_for_experimental() {
-        let experimental_ranges = [239..=254];
-        for code in <[_; 1]>::into_iter(experimental_ranges).flatten() {
+        let experimental_range = 239..=254;
+        for code in experimental_range {
             let ty = BgpCapabilityType::from(code);
             assert_eq!(ty, BgpCapabilityType::Unknown(code));
             assert!(ty.is_reserved_for_experimental_use());
