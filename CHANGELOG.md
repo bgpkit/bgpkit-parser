@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 * **MSRV raised to Rust 1.88** ([#338](https://github.com/bgpkit/bgpkit-parser/pull/338)): `rust-version` in `Cargo.toml` is now 1.88.0. The `idna_adapter` dev-dependency pin is removed as it is no longer needed.
 
+### Dependencies
+
+* **Updated `oneio` dependency from 0.25 to 0.26** ([#338](https://github.com/bgpkit/bgpkit-parser/pull/338)): clears the suppaftp advisory ([RUSTSEC-2026-0271](https://rustsec.org/advisories/RUSTSEC-2026-0271.html)) that `cargo audit` reported via oneio 0.25's lockfile entry.
+
 ### Added
 
 * **Layered text output format** (`render::text::format_record`, `--format text`): one human-readable, indented block per MRT record — session context (`TIME`/`TYPE`/`FROM`/`TO`), `UPDATE:` sections with withdrawn/announced prefixes (including those carried in MP_REACH/MP_UNREACH) and every path attribute, `OPEN:` capabilities, session states, RIB entries, the peer table, and full legacy type-5 records. RFC 7606 validation findings render under `WARNINGS:` when present. The format is designed around this crate's own models and `Display` vocabulary — inspired by bgpdump's human-readable output, not byte-compatible with it. Rendering is a pure function of the record. In the CLI, `--format text` always uses record-level output (implies `--level records`); the other formats follow `--level` and default to elems.
