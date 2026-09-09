@@ -11,7 +11,7 @@ keywords = ["bgp", "bgpkit", "mrt"]
 categories = ["network-programming"]
 default-run = "bgpkit-parser"
 readme = "README.md"
-rust-version = "1.87.0"
+rust-version = "1.88.0"
 exclude = [
     "tests/fixtures/packetlife/**",
     "tests/fixtures/ripe/**",
@@ -56,7 +56,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 bytes = { version = "1.7" }
 zerocopy = { version = "0.8", features = ["derive"], optional = true }
 hex = { version = "0.4.3", optional = true } # bmp/openbmp parsing
-oneio = { version = "0.25", default-features = false, features = ["http", "gz", "bz", "zstd"], optional = true }
+oneio = { version = "0.26", default-features = false, features = ["http", "gz", "bz", "zstd"], optional = true }
 regex = { version = "1", optional = true } # used in parser filter
 chrono = { version = "0.4.38", optional = true } # parser filter
 serde_json = { version = "1.0", optional = true } # RIS Live parsing
@@ -141,8 +141,6 @@ name = "bench_main"
 harness = false
 
 [dev-dependencies]
-# MSRV pin - newer idna_adapter requires rust 1.88
-idna_adapter = "=1.2.0"
 regex = "1"
 anyhow = "1"
 bgpkit-broker = "0.12"

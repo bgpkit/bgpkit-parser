@@ -60,6 +60,14 @@ pub enum RisMessageEnum {
     /// RIS Peer State message
     ///
     /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-RIS_PEER_STATE.schema.json>
+    ///
+    /// The live stream sends this message with `"type":"STATE"`, not `RIS_PEER_STATE` as documented
+    /// in the documentation and schema.
+    ///
+    /// Serialise to `STATE` and accept `RIS_PEER_STATE` when deserialising.
+    ///
+    /// TODO: re-validate the documentation state on/after January 2027
+    #[serde(rename = "STATE", alias = "RIS_PEER_STATE")]
     RIS_PEER_STATE { state: String },
 }
 
@@ -151,6 +159,31 @@ mod tests {
         {"timestamp":1568365292.84,"peer":"192.0.2.1","peer_asn":"64496","id":"00-192-0-2-0-180513","host":"rrc00","type":"RIS_PEER_STATE","state":"connected"}
 "#;
         let _msg: RisMessage = serde_json::from_str(msg_str).unwrap();
+    }
+
+    #[test]
+    fn test_peer_state_change_msg_state_alias() {
+        // The live stream sends "type":"STATE" instead of "RIS_PEER_STATE"
+        let fixtures = [
+            r#"{"type":"ris_message","data":{"timestamp":1788948301.310,"peer":"2001:7f8:13::a503:4927:1","peer_asn":"34927","id":"2001:7f8:13::a503:4927:1-01a085a0c5fe0002","host":"rrc03.ripe.net","type":"STATE","state":"connected"}}"#,
+            r#"{"type":"ris_message","data":{"timestamp":1788948302.310,"peer":"2001:7f8:13::a503:4927:1","peer_asn":"34927","id":"2001:7f8:13::a503:4927:1-01a085a0c9e60009","host":"rrc03.ripe.net","type":"STATE","state":"down"}}"#,
+        ];
+        for (fixture, expected_state) in fixtures.iter().zip(["connected", "down"]) {
+            let msg: RisLiveMessage = serde_json::from_str(fixture).unwrap();
+            let RisLiveMessage::RisMessage(msg) = msg else {
+                panic!("incorrect message type");
+            };
+            match &msg.msg {
+                Some(RisMessageEnum::RIS_PEER_STATE { state }) => {
+                    assert_eq!(state, expected_state);
+                }
+                other => panic!("incorrect message type: {:?}", other),
+            }
+            // serializes back as "STATE", not "RIS_PEER_STATE"
+            let serialized = serde_json::to_string(&msg).unwrap();
+            assert!(serialized.contains(r#""type":"STATE""#));
+            assert!(!serialized.contains("RIS_PEER_STATE"));
+        }
     }
 
     #[test]
