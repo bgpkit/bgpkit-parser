@@ -192,6 +192,3 @@ required-features = ["cli"]
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
 pkg-fmt = "tgz"
-
-
-[lints.clippy]

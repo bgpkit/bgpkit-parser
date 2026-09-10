@@ -12,13 +12,9 @@ All notable changes to this project will be documented in this file.
 
 * **`--color auto|always|never` for `--format text`**: colors session keys, section headers, prefixes, and next-hop values with ANSI accents that follow the terminal theme. `auto` (the default) colors only when stdout is a terminal; `NO_COLOR` disables coloring and `CLICOLOR_FORCE` forces it. Library callers opt in with `render::text::Style::ansi()` plus the new `format_record_with_style` / `format_record_with_hex_and_style`; `format_record` and the unstyled output are unchanged, since styling is a post-pass over the rendered block.
 
-### Fixed
-
-* **A routing table dump with an unsupported address family returns an error instead of panicking**: the IPv4/IPv6-only route iterator now yields `ParserError::Unsupported` for any other family, and `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises.
-
 ### Changed
 
-* **Internal cleanups, no behavior change**: the MP next-hop encoder (`encode_mp_next_hop`) is shared by the `NEXT_HOP` and MP_REACH encoders instead of being duplicated, `AsPathSegment` hashing skips the sort when a set is already ordered, and both the crate-wide `uninlined_format_args` allow and a module-wide `#![allow(unused)]` are removed.
+* **Internal cleanups, no behavior change**: the MP next-hop encoder (`encode_mp_next_hop`) is shared by the `NEXT_HOP` and MP_REACH encoders instead of being duplicated, `AsPathSegment` hashing skips the sort when a set is already ordered, `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises, the invariant `unreachable!()` arms state their invariant, and both the crate-wide `uninlined_format_args` allow and a module-wide `#![allow(unused)]` are removed.
 * **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.
 
 ## v0.22.0 - 2026-09-10
