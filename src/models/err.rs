@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum BgpModelsError {
     PrefixParsingError(String),
     NextHopParsingError(String),

@@ -111,7 +111,9 @@ pub fn parse_link_state_nlri(
     }
 
     let nlri = if is_reachable {
-        Nlri::new_link_state_reachable(next_hop.map(|nh| nh.addr()), safi, nlri_list)
+        // an MP_REACH next hop can carry an RFC 2545 global + link-local pair; the NLRI keeps the
+        // global half, as the MRT/raw and RIS Live elem paths do
+        Nlri::new_link_state_reachable(next_hop.map(|nh| nh.global_addr()), safi, nlri_list)
     } else {
         Nlri::new_link_state_unreachable(safi, nlri_list)
     };
@@ -521,6 +523,25 @@ mod tests {
             }
             _ => panic!("Expected IPv4 prefix"),
         }
+    }
+
+    #[test]
+    fn test_link_state_next_hop_resolves_pair_by_scope() {
+        // RFC 2545 pair in reverse wire order: the NLRI must carry the global address, not the
+        // link-local address that arrives first
+        let global: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+
+        let nlri = parse_link_state_nlri(
+            Bytes::new(),
+            Afi::LinkState,
+            Safi::LinkState,
+            Some(NextHopAddress::Ipv6LinkLocal(link_local, global)),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(nlri.next_hop_addr(), std::net::IpAddr::V6(global));
     }
 
     #[test]
