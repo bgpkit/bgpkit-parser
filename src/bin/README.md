@@ -1,101 +1,48 @@
-# BGPKIT Parser Cli
+# bgpkit-parser CLI
 
-`bgpkit-parser-cli` is a simple commandline tool interface for `bgpkit-parser`.
+`bgpkit-parser` is a simple CLI tool for parsing MRT/BGP/BMP files, built from this crate with
+`--features cli`. The crate README documents the library API and CLI examples in full; this file
+records the current option set.
 
 ## Usage
 
-```
-➜  cli git:(cli) ✗ bgpkit-parser-cli 0.1.0
-
-Mingwei Zhang <mingwei@bgpkit.com>
-
-bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files
-
-USAGE:
-    bgpkit-parser-cli [FLAGS] [OPTIONS] <FILE>
-
-FLAGS:
-    -e, --elems-count      Count BGP elems
-    -h, --help             Prints help information
-        --json             Output as JSON objects
-        --pretty           Pretty-print JSON output
-    -r, --records-count    Count MRT records
-    -V, --version          Prints version information
-
-OPTIONS:
-    -a, --as-path <as-path>          Filter by AS path regex string
-    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
-    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
-    -o, --origin-asn <origin-asn>    Filter by origin AS Number
-    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
-    -j, --peer-ip <peer-ip>          Filter by peer IP address
-    -p, --prefix <prefix>            Filter by network prefix
-    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
-```
-
-## Examples
-
-### Parse local file
-
-```
-bgpkit-parser-cli /tmp/update-example.gz |tail
-A|1637437799|185.1.8.65|60924|186.233.208.0/22|60924 6939 57463 271253 271253 264556 262873 262793|IGP|185.1.8.63|0|0|60924:6 60924:150 60924:502 60924:2002|NAG||
-A|1637437799|185.1.8.65|60924|186.233.208.0/21|60924 6939 57463 271253 271253 264556 262873 262793|IGP|185.1.8.63|0|0|60924:6 60924:150 60924:502 60924:2002|NAG||
-A|1637437799|185.1.8.65|60924|143.137.53.0/24|60924 6939 57463 271253 271253 264556 262873 264031|IGP|185.1.8.63|0|0|60924:6 60924:150 60924:502 60924:2002|NAG||
-A|1637437799|2001:7f8:73::edfc:0:2|60924|2607:fdf0:5e54::/48|60924 59605 6453 1299 13807 8008|IGP||0|0|60924:6 60924:150 60924:502 60924:2002|NAG||
-...
-```
-
-### Parse remote file
-
-```
-bgpkit-parser-cli http://archive.routeviews.org/route-views.bdix/bgpdata/2021.11/UPDATES/updates.20211127.1900.bz2 |tail
-A|1638040499.820021|103.151.196.1|140684|103.139.144.0/24|58689 139192|IGP|103.151.196.177|0|0||NAG||
-A|1638040499.842529|103.151.196.1|140684|103.139.144.0/24|58689 139192|IGP|103.151.196.88|0|0||NAG||
-A|1638040499.842567|103.151.196.5|140684|103.139.144.0/24|58689 139192|IGP|103.151.196.88|0|0||NAG||
-A|1638040500.212436|103.151.196.1|140684|103.139.144.0/24|58689 139192|IGP|103.151.196.177|0|0||NAG||
-...
-```
-
-### Count file's MRT records and BGP messages
-
-```
-bgpkit-parser-cli http://archive.routeviews.org/route-views.bdix/bgpdata/2021.11/UPDATES/updates.20211127.1900.bz2 -e -r
-total records: 15678
-total elems:   15722
-```
-
-### Use filters
-
-Available filters are:
 ```text
-    -a, --as-path <as-path>          Filter by AS path regex string
-    -m, --elem-type <elem-type>      Filter by elem type: announce (a) or withdraw (w)
-    -o, --origin-asn <origin-asn>    Filter by origin AS Number
-    -J, --peer-asn <peer-asn>        Filter by peer IP ASN
-    -j, --peer-ip <peer-ip>          Filter by peer IP address
-    -p, --prefix <prefix>            Filter by network prefix
-    -t, --start-ts <start-ts>        Filter by start unix timestamp inclusive
-    -T, --end-ts <end-ts>            Filter by end unix timestamp inclusive
+MRT/BGP/BMP data processing library
+
+Usage: bgpkit-parser [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  File path to a MRT file, local or remote
+
+Options:
+  -c, --cache-dir <CACHE_DIR>    Set the cache directory for caching remote files
+  -F, --format <FORMAT>          Output format: default, json, json-pretty, psv, text [default: default]
+  -L, --level <LEVEL>            Output level: elems (per-prefix) or records (MRT records) [default: elems]
+      --json                     Output as JSON objects (shorthand for --format json)
+      --pretty                   Pretty-print JSON output (shorthand for --format json-pretty)
+      --psv                      Output as full PSV entries with header (shorthand for --format psv)
+      --hex                      Include each record's raw bytes as hex (record-level output only)
+      --color <COLOR>            Colorize --format text output: auto, always, never [default: auto]
+  -e, --elems-count              Count BGP elems
+  -r, --records-count            Count MRT records
+      --recover                  Recover after damaged MRT framing and report skipped byte ranges on stderr
+  -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
+  -f, --filter <FILTERS>         Generic filter expression (key=value or key!=value)
+  -p, --prefix <PREFIX>          Filter by network prefix
+  -s, --include-super            Include super-prefix when filtering
+  -S, --include-sub              Include sub-prefix when filtering
+  -4, --ipv4-only                Filter by IPv4 only
+  -6, --ipv6-only                Filter by IPv6 only
+  -j, --peer-ip <PEER_IP>        Filter by peer IP address
+  -J, --peer-asn <PEER_ASN>      Filter by peer ASN
+  -m, --elem-type <ELEM_TYPE>    Filter by elem type: announce (a) or withdraw (w)
+  -t, --start-ts <START_TS>      Filter by start unix timestamp inclusive
+  -T, --end-ts <END_TS>          Filter by end unix timestamp inclusive
+  -a, --as-path <AS_PATH>        Filter by AS path regex string
+  -C, --community <COMMUNITY>    Filter by community regular expression
+  -h, --help                     Print help
+  -V, --version                  Print version
 ```
 
-For example, filter by peer IP address:
-```
-bgpkit-parser-cli http://archive.routeviews.org/route-views.bdix/bgpdata/2021.11/UPDATES/updates.20211127.1900.bz2 --peer-ip 103.151.196.1
-A|1638039600.519347|103.151.196.1|140684|103.139.144.0/24|58689 139192|IGP|103.151.196.177|0|0||NAG||
-A|1638039600.570541|103.151.196.1|140684|103.139.144.0/24|134146 134146 134146 134146 58689 139192|IGP|103.151.196.183|0|4||NAG||
-W|1638039600.588036|103.151.196.1|140684|103.139.144.0/24|||||||||
-A|1638039600.635757|103.151.196.1|140684|103.139.144.0/24|134146 134146 134146 134146 23956 58689 139192|IGP|103.151.196.183|0|4||NAG||
-...
-```
-
-Multiple filters can be used to construct a combination of filters.
-For example, filter by peer IP address and keep only the withdraws:
-```
-bgpkit-parser-cli http://archive.routeviews.org/route-views.bdix/bgpdata/2021.11/UPDATES/updates.20211127.1900.bz2 --peer-ip 103.151.196.1 --elem-type w |head
-W|1638039600.588036|103.151.196.1|140684|103.139.144.0/24|||||||||
-W|1638039600.909854|103.151.196.1|140684|103.139.144.0/24|||||||||
-W|1638039601.908543|103.151.196.1|140684|103.139.144.0/24|||||||||
-W|1638039602.266345|103.151.196.1|140684|103.139.144.0/24|||||||||
-...
-```
+Run `bgpkit-parser --help` for the complete option descriptions, and see the crate README for
+worked examples (local and remote files, counting, filtering).

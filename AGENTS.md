@@ -10,6 +10,9 @@ Key features defined in `Cargo.toml`:
 - `cli` — command-line interface (clap, env_logger, serde, serde_json)
 - `rislive` — RIS Live WebSocket support (serde, serde_json, hex)
 - `serde` — serialization support
+- `local` — local-file parsing helpers
+- `wasm` — WebAssembly bindings
+- `ts-rs` — TypeScript type generation for the WASM bindings
 - `native-tls` / `rustls` — TLS backend selection
 - `xz` / `lz` — optional compression algorithms
 
@@ -64,7 +67,7 @@ cargo fmt -- --check
 
 ## Pre-push Checks
 
-The repository has a `.git/hooks/pre-push` script that runs automatically on every push. It performs three checks in order:
+A `.git/hooks/pre-push` script performs three checks in order. It is a local hook: it is not versioned in this repository (a fresh clone only has `.git/hooks/pre-push.sample`), pull-request CI does not run the README check (only the release workflow does, at tag time), so run these commands yourself before pushing changes that touch `src/lib.rs`:
 
 1. **Formatting**: `cargo fmt --check`
 2. **README sync**: `cargo readme > TMP_README.md && diff -b TMP_README.md README.md`

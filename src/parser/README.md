@@ -23,8 +23,8 @@ flowchart TB
     TableDumpMessage --> PathAttributes & AnnouncedPrefixes
 
     subgraph "TableDumpV2 message"
-        TableDumpV2 --> PeerIndexTable & RibAfiEntries
-        TableDumpV2 -.not implemented.-> RibGeneric & GeoPeerTable
+        TableDumpV2 --> PeerIndexTable & RibAfiEntries & GeoPeerTable
+        TableDumpV2 -.not implemented.-> RibGeneric
         RibAfiEntries --> RibEntry
     end
     RibEntry --> PathAttributes & AnnouncedPrefixes
@@ -68,8 +68,8 @@ flowchart LR
     subgraph "Parsing a TableDump message"
         MrtRecord --> MrtMessage & CommonHeader
         MrtMessage --> TableDumpV2
-        TableDumpV2 --> PeerIndexTable & RibAfiEntries 
-        TableDumpV2 -.not implemented.-> RibGeneric & GeoPeerTable
+        TableDumpV2 --> PeerIndexTable & RibAfiEntries & GeoPeerTable
+        TableDumpV2 -.not implemented.-> RibGeneric
         RibAfiEntries --> RibEntry
         RibEntry --> PathAttributes & AnnouncedPrefixes
     end
