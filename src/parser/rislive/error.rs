@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParserRisliveError {
     IncorrectJson(String),
     IncorrectRawBytes,
@@ -13,6 +14,10 @@ pub enum ParserRisliveError {
     ElemIncorrectAggregator(String),
     ElemIncorrectPrefix(String),
     ElemIncorrectIp(String),
+    /// A frame declared a message type this crate decodes, but its body did not deserialize
+    /// into that type. The flattened `RisMessage::msg` `Option` hides such failures as `None`,
+    /// so without this error the frame's elems would be dropped without a trace.
+    UnparsedMessageBody(String),
 }
 
 impl Display for ParserRisliveError {
@@ -44,6 +49,9 @@ impl Display for ParserRisliveError {
             }
             ParserRisliveError::ElemEndOfRibPrefix => {
                 write!(f, "found 'eor' (End of RIB) prefix")
+            }
+            ParserRisliveError::UnparsedMessageBody(msg) => {
+                write!(f, "message body failed to deserialize: {msg}")
             }
         }
     }
@@ -100,6 +108,13 @@ mod tests {
 
         let err = ParserRisliveError::ElemEndOfRibPrefix;
         assert_eq!(err.to_string(), "found 'eor' (End of RIB) prefix");
+
+        let err =
+            ParserRisliveError::UnparsedMessageBody("UPDATE: missing field `path`".to_string());
+        assert_eq!(
+            err.to_string(),
+            "message body failed to deserialize: UPDATE: missing field `path`"
+        );
     }
     #[test]
     fn test_ris_live_error_debug() {
@@ -129,5 +144,8 @@ mod tests {
 
         let err = ParserRisliveError::ElemEndOfRibPrefix;
         assert_eq!(format!("{err:?}"), "ElemEndOfRibPrefix");
+
+        let err = ParserRisliveError::UnparsedMessageBody("UPDATE: test".to_string());
+        assert_eq!(format!("{err:?}"), "UnparsedMessageBody(\"UPDATE: test\")");
     }
 }

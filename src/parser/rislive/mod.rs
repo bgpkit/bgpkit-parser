@@ -87,11 +87,54 @@ fn parse_prefix(prefix_str: &str) -> Result<IpNet, ParserRisliveError> {
     Ok(p)
 }
 
+/// Message types this crate decodes, as RIS Live spells them in the body's `type` field.
+///
+/// Frames that declare one of these must produce a body. Keep in sync with [`RisMessageEnum`]:
+/// a missing entry only costs the loud failure for that type, never a wrong result.
+const DECODED_MESSAGE_TYPES: [&str; 6] = [
+    "UPDATE",
+    "KEEPALIVE",
+    "OPEN",
+    "NOTIFICATION",
+    "STATE",
+    "RIS_PEER_STATE",
+];
+
+/// Explain a `RisMessage::msg` that came out `None` although the frame declares a decoded
+/// message type.
+///
+/// The flattened `Option<RisMessageEnum>` reports a body-level deserialisation failure as
+/// `None`, so the caller sees an empty frame and loses every route it carried. Re-deserialising
+/// the body here keeps the underlying reason.
+fn unparsed_body_error(msg_str: &str) -> Option<ParserRisliveError> {
+    #[derive(serde::Deserialize)]
+    struct Envelope {
+        data: Option<serde_json::Value>,
+    }
+
+    let envelope: Envelope = serde_json::from_str(msg_str).ok()?;
+    let data = envelope.data?;
+    let message_type = data.get("type")?.as_str()?.to_string();
+    if !DECODED_MESSAGE_TYPES.contains(&message_type.as_str()) {
+        // a message type this crate does not decode yet: nothing was lost
+        return None;
+    }
+
+    serde_json::from_value::<RisMessageEnum>(data)
+        .err()
+        .map(|e| ParserRisliveError::UnparsedMessageBody(format!("{message_type}: {e}")))
+}
+
 /// Parse one RIS Live message using RIS Live's JSON-projected UPDATE fields.
 ///
 /// This parser is convenient and does not require `socketOptions.includeRaw`, but RIS Live's JSON
 /// schema exposes only a subset of BGP path attributes. Use [`parse_ris_live_message_raw`] when you
 /// need attributes that are only present in the raw BGP message.
+///
+/// A frame that declares a message type this crate decodes but whose body fails to deserialize
+/// returns [`ParserRisliveError::UnparsedMessageBody`] rather than no elems: callers streaming
+/// frames should log and skip it, and can fall back to [`parse_ris_live_message_raw`], which reads
+/// the `raw` bytes instead of the projection.
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg_string = msg_str.to_string();
 
@@ -108,6 +151,11 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
             // thus for now will be ignored.
 
             if ris_msg.msg.is_none() {
+                // `msg` is flattened, so a body-level deserialisation failure arrives here as
+                // `None`: indistinguishable from a frame without a body, and silently empty.
+                if let Some(err) = unparsed_body_error(msg_str) {
+                    return Err(err);
+                }
                 return Ok(vec![]);
             }
 
@@ -331,6 +379,58 @@ mod tests {
                 Err(ParserRisliveError::ElemIncorrectIp(value)) => assert_eq!(value, bad),
                 other => panic!("expected ElemIncorrectIp for {bad:?}, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn test_unparsed_body_is_an_error_not_empty_elems() {
+        // A frame that declares a message type this crate decodes must produce a body: the
+        // flattened `Option` reports a body-level deserialisation failure as `None`, which used
+        // to come back as `Ok(vec![])` with every route in the frame silently dropped.
+        let broken_bodies = [
+            (
+                "UPDATE",
+                r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-1","host":"rrc01.ripe.net","type":"UPDATE","path":[207841,6939],"med":"high","announcements":[{"next_hop":"2001:db8::1","prefixes":["2001:db8::/32"]}]}}"#,
+            ),
+            (
+                "OPEN",
+                r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-2","host":"rrc01.ripe.net","type":"OPEN"}}"#,
+            ),
+            (
+                "NOTIFICATION",
+                r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-3","host":"rrc01.ripe.net","type":"NOTIFICATION","notification":"code 6"}}"#,
+            ),
+            (
+                "STATE",
+                r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-4","host":"rrc01.ripe.net","type":"STATE","state":7}}"#,
+            ),
+        ];
+        for (message_type, frame) in broken_bodies {
+            let err = parse_ris_live_message(frame).unwrap_err();
+            assert!(
+                matches!(&err, ParserRisliveError::UnparsedMessageBody(_)),
+                "expected UnparsedMessageBody for {message_type}, got {err:?}"
+            );
+            assert!(
+                err.to_string().starts_with(&format!(
+                    "message body failed to deserialize: {message_type}: "
+                )),
+                "reason should name the declared type: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_undecoded_frames_still_yield_no_elems() {
+        // nothing is lost for a message type this crate does not decode, or for an empty
+        // UPDATE: those keep returning no elems rather than erroring
+        for frame in [
+            r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-5","host":"rrc01.ripe.net","type":"SOMETHING_NEW","payload":{}}}"#,
+            r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::1","peer_asn":"207841","id":"x-6","host":"rrc01.ripe.net","type":"UPDATE","path":[],"announcements":[],"withdrawals":[]}}"#,
+            r#"{"type":"ris_error","data":{"message":"client too slow"}}"#,
+        ] {
+            let elems = parse_ris_live_message(frame).unwrap();
+            assert!(elems.is_empty(), "expected no elems for {frame}");
         }
     }
 
