@@ -112,6 +112,11 @@ const SECTION_LABELS: [&str; 17] = [
 const NEXT_HOP_LABELS: [&str; 2] = ["NEXT_HOP", "MP_REACH_NLRI"];
 /// Properties whose value is a prefix (table-dump RIB entries label it instead of listing it).
 const PREFIX_LABELS: [&str; 1] = ["PREFIX"];
+/// Properties rendered without a value.
+const BARE_LABELS: [&str; 1] = ["ATOMIC_AGGREGATE"];
+/// Property names that carry a space; matched by prefix because the type number varies.
+const SPACED_LABEL_PREFIXES: [&str; 3] =
+    ["RAW ATTRIBUTE (type", "DEPRECATED (type", "UNKNOWN (type"];
 
 /// Render one MRT record as a layered text block, styled for a terminal.
 ///
@@ -190,12 +195,18 @@ fn colorize(plain: &str) -> String {
                 Some(format!(
                     "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_NEXT_HOP}{value}{ANSI_RESET}"
                 ))
-            } else if !label.contains(' ') {
+            } else if !label.contains(' ')
+                || SPACED_LABEL_PREFIXES
+                    .iter()
+                    .any(|prefix| label.starts_with(prefix))
+            {
                 Some(format!("{ANSI_LABEL}{label}:{ANSI_RESET} {value}"))
             } else {
                 // a sentence (e.g. a validation warning), not an identifier
                 None
             }
+        } else if BARE_LABELS.contains(&trimmed) {
+            Some(format!("{ANSI_LABEL}{trimmed}{ANSI_RESET}"))
         } else {
             None
         };
@@ -824,6 +835,19 @@ UPDATE:
         assert!(styled.contains(&format!(
             "{ANSI_LABEL}PREFIX:{ANSI_RESET} {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET}\n"
         )));
+    }
+
+    #[test]
+    fn style_accents_bare_and_spaced_property_labels() {
+        let plain = "UPDATE:\n  ATTRIBUTES:\n    ATOMIC_AGGREGATE\n    RAW ATTRIBUTE (type 99): 4 bytes\n    Duplicate attribute: ORIGIN\n";
+        let styled = colorize(plain);
+        assert!(styled.contains(&format!("{ANSI_LABEL}ATOMIC_AGGREGATE{ANSI_RESET}")));
+        assert!(styled.contains(&format!(
+            "{ANSI_LABEL}RAW ATTRIBUTE (type 99):{ANSI_RESET} 4 bytes"
+        )));
+        // validation warnings are prose, not identifiers: still untouched
+        assert!(styled.contains("    Duplicate attribute: ORIGIN\n"));
+        assert_eq!(strip_sgr(&styled), plain);
     }
 
     #[test]
