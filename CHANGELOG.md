@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
-* **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError { kind, message }` and `UnknownMessageType(u8)` variants. Exhaustive matches on the enum need a new arm.
+* **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError { kind, message }` and `UnknownMessageType(u8)` variants. Downstream matches on the enum now need a wildcard arm: `#[non_exhaustive]` means the two new variants cannot be covered by adding arms alone.
 
 ### Added
 
