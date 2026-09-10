@@ -14,6 +14,7 @@ pub use raw_bytes::{
     RisLiveRawFull,
 };
 pub use ris_error::RisError;
+pub use ris_message::Announcement;
 pub use ris_message::RisMessage;
 pub use ris_message::RisMessageEnum;
 pub use ris_rrc_list::RisRrcList;

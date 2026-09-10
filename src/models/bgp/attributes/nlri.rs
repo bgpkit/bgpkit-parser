@@ -62,12 +62,13 @@ impl Nlri {
         self.next_hop.is_some()
     }
 
-    /// Get the address of the next hop indicated by this NLRI.
+    /// Get the address of the next hop indicated by this NLRI, resolving
+    /// RFC 2545 pairs by scope via [`NextHopAddress::global_addr`].
     ///
     /// Panics if used on a unreachable NLRI message (ie. there is no next hop).
     pub const fn next_hop_addr(&self) -> IpAddr {
         match self.next_hop {
-            Some(next_hop) => next_hop.addr(),
+            Some(next_hop) => next_hop.global_addr(),
             None => panic!("unreachable NLRI"),
         }
     }

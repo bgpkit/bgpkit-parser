@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug)]
 pub enum BgpModelsError {
     PrefixParsingError(String),
+    NextHopParsingError(String),
 }
 
 impl Display for BgpModelsError {
@@ -12,6 +13,9 @@ impl Display for BgpModelsError {
         match self {
             BgpModelsError::PrefixParsingError(msg) => {
                 write!(f, "cannot convert str to IP prefix: {msg}")
+            }
+            BgpModelsError::NextHopParsingError(msg) => {
+                write!(f, "cannot convert str to next hop: {msg}")
             }
         }
     }

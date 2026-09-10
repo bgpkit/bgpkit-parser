@@ -84,10 +84,20 @@ pub struct Notification {
 /// Update message announcement content
 ///
 /// Schema: <https://ris-live.ripe.net/schemas/v1/ris_message-UPDATE.schema.json>
+///
+/// RIS Live projects the MP_REACH_NLRI next-hop field verbatim, so an RFC 2545
+/// global + link-local pair arrives as one comma-joined string
+/// (`"next_hop": "2001:db8::1,fe80::1"`). The value is kept verbatim, like
+/// `prefixes`, so deserialisation cannot fail on it and re-serialisation is
+/// byte-for-byte. Parse it with [`NextHopAddress`]'s `FromStr` and resolve
+/// pairs via [`NextHopAddress::global_addr`], as
+/// [`parse_ris_live_message`](crate::parser::rislive::parse_ris_live_message)
+/// does.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Announcement {
-    #[serde(with = "as_str")]
-    pub next_hop: IpAddr,
+    /// Next hop as projected by RIS Live: one address, or a comma-joined
+    /// global + link-local pair (RFC 2545).
+    pub next_hop: String,
     pub prefixes: Vec<String>,
 }
 
@@ -119,8 +129,10 @@ mod as_str {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::rislive::messages::ris_message::RisMessage;
+    use crate::models::NextHopAddress;
+    use crate::parser::rislive::messages::ris_message::{Announcement, RisMessage};
     use crate::rislive::messages::{RisLiveMessage, RisMessageEnum};
+    use std::net::IpAddr;
 
     #[test]
     fn test_deserialize_update() {
@@ -183,6 +195,58 @@ mod tests {
             let serialized = serde_json::to_string(&msg).unwrap();
             assert!(serialized.contains(r#""type":"STATE""#));
             assert!(!serialized.contains("RIS_PEER_STATE"));
+        }
+    }
+
+    #[test]
+    fn test_deserialize_update_with_link_local_next_hop() {
+        // A v6 IXP peer that includes a link-local address in MP_REACH_NLRI:
+        // RIS Live comma-joins both addresses into one `next_hop` string.
+        let msg_str = r#"{"type":"ris_message","data":{"timestamp":1789019601.670,"peer":"2001:7f8:4::3:2be1:1","peer_asn":"207841","id":"2001:7f8:4::3:2be1:1-01a089e0bb060006","host":"rrc01.ripe.net","type":"UPDATE","path":[207841,6939],"community":[],"origin":"IGP","announcements":[{"next_hop":"2001:7f8:4::3:2be1:1,fe80::3efd:feff:feee:62ca","prefixes":["2a12:3fc6::/48"]}],"withdrawals":[]}}"#;
+
+        let RisLiveMessage::RisMessage(msg) = serde_json::from_str(msg_str).unwrap() else {
+            panic!("incorrect message type");
+        };
+        // The whole message must survive: the flattened `Option` turns any
+        // body deserialisation error into a silently typeless message.
+        let Some(RisMessageEnum::UPDATE { announcements, .. }) = msg.msg else {
+            panic!("expected an UPDATE, got {:?}", msg.msg);
+        };
+
+        let announcements = announcements.unwrap();
+        assert_eq!(announcements.len(), 1);
+        assert_eq!(
+            announcements[0].next_hop,
+            "2001:7f8:4::3:2be1:1,fe80::3efd:feff:feee:62ca"
+        );
+        assert_eq!(announcements[0].prefixes, vec!["2a12:3fc6::/48"]);
+
+        // the comma-joined pair parses into a scope-resolvable next hop
+        let next_hop: NextHopAddress = announcements[0].next_hop.parse().unwrap();
+        assert_eq!(
+            next_hop.global_addr(),
+            "2001:7f8:4::3:2be1:1".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            next_hop.link_local_addr(),
+            Some("fe80::3efd:feff:feee:62ca".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_announcement_round_trip() {
+        // verbatim `next_hop`: every form, including a reversed pair,
+        // re-serialises byte-for-byte
+        for next_hop in [
+            "2001:db8::1,fe80::1",
+            "fe80::1,2001:db8::1",
+            "2001:db8::1",
+            "fe80::1",
+            "192.0.2.1",
+        ] {
+            let json = format!(r#"{{"next_hop":"{next_hop}","prefixes":["2001:db8::/32"]}}"#);
+            let announcement: Announcement = serde_json::from_str(&json).unwrap();
+            assert_eq!(serde_json::to_string(&announcement).unwrap(), json);
         }
     }
 
