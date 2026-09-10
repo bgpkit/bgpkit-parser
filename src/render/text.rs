@@ -1,7 +1,7 @@
 //! Layered text rendering of MRT records.
 //!
 //! One record becomes one indented block: session context
-//! (`TIME`/`TYPE`/`FROM`/`TO`), then the message body — `UPDATE:` sections
+//! (`TIME`/`TYPE`/`PEER`/`LOCAL`), then the message body — `UPDATE:` sections
 //! for withdrawn/announced prefixes and every path attribute, `OPEN:`
 //! capabilities, session states, RIB entries, or the peer table. RFC 7606
 //! validation findings appear under `WARNINGS:` when present.
@@ -61,13 +61,13 @@ fn render_legacy_bgp(out: &mut String, msg: &LegacyBgp) {
     match msg {
         LegacyBgp::Message(m) => {
             out.push_str(&format!(
-                "FROM: {} AS{}\nTO: {} AS{}\n",
+                "PEER: {} AS{}\nLOCAL: {} AS{}\n",
                 m.peer_ip, m.peer_asn, m.local_ip, m.local_asn
             ));
             render_bgp_message(out, &m.bgp_message);
         }
         LegacyBgp::StateChange(m) => {
-            out.push_str(&format!("FROM: {} AS{}\n", m.peer_ip, m.peer_asn));
+            out.push_str(&format!("PEER: {} AS{}\n", m.peer_ip, m.peer_asn));
             out.push_str("STATE_CHANGE:\n");
             out.push_str(&format!(
                 "{INDENT}OLD_STATE: {:?}\n{INDENT}NEW_STATE: {:?}\n",
@@ -88,7 +88,7 @@ fn render_bgp4mp(out: &mut String, msg: &Bgp4MpEnum) {
     match msg {
         Bgp4MpEnum::StateChange(m) => {
             out.push_str(&format!(
-                "FROM: {} AS{}\nTO: {} AS{}\n",
+                "PEER: {} AS{}\nLOCAL: {} AS{}\n",
                 m.peer_ip, m.peer_asn, m.local_addr, m.local_asn
             ));
             out.push_str("STATE_CHANGE:\n");
@@ -99,7 +99,7 @@ fn render_bgp4mp(out: &mut String, msg: &Bgp4MpEnum) {
         }
         Bgp4MpEnum::Message(m) => {
             out.push_str(&format!(
-                "FROM: {} AS{}\nTO: {} AS{}\n",
+                "PEER: {} AS{}\nLOCAL: {} AS{}\n",
                 m.peer_ip, m.peer_asn, m.local_ip, m.local_asn
             ));
             render_bgp_message(out, &m.bgp_message);
@@ -492,8 +492,8 @@ mod tests {
         let expected = "\
 TIME: 1666542810.970000
 TYPE: BGP4MP/MessageAs4
-FROM: 192.0.2.1 AS64496
-TO: 192.0.2.2 AS64497
+PEER: 192.0.2.1 AS64496
+LOCAL: 192.0.2.2 AS64497
 UPDATE:
   WITHDRAWN:
     203.0.113.0/24
@@ -569,6 +569,8 @@ UPDATE:
             })),
         };
         let text = format_record(&state);
+        assert!(text.contains("PEER: 192.0.2.1 AS64496"));
+        assert!(text.contains("LOCAL: 192.0.2.2 AS64497"));
         assert!(text.contains("STATE_CHANGE:"));
         assert!(text.contains("OLD_STATE: Idle"));
         assert!(text.contains("NEW_STATE: Established"));
@@ -736,8 +738,8 @@ UPDATE:
             })),
         };
         let text = format_record(&legacy);
-        assert!(text.contains("FROM: 195.211.222.254 AS5409"));
-        assert!(text.contains("TO: 193.0.0.1 AS12654"));
+        assert!(text.contains("PEER: 195.211.222.254 AS5409"));
+        assert!(text.contains("LOCAL: 193.0.0.1 AS12654"));
         assert!(text.contains("KEEPALIVE:"));
 
         let state = MrtRecord {
@@ -756,6 +758,9 @@ UPDATE:
             })),
         };
         let text = format_record(&state);
+        assert!(text.contains("PEER: 195.211.222.254 AS5409"));
+        // a legacy state change carries only the peer endpoint
+        assert!(!text.contains("LOCAL:"));
         assert!(text.contains("STATE_CHANGE:"));
         assert!(text.contains("OLD_STATE: Established"));
         assert!(text.contains("NEW_STATE: Idle"));

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+* **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.
+
 ## v0.22.0 - 2026-09-10
 
 ### Breaking changes
