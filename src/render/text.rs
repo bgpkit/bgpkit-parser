@@ -110,6 +110,8 @@ const SECTION_LABELS: [&str; 17] = [
 ];
 /// Properties whose value is a next hop.
 const NEXT_HOP_LABELS: [&str; 2] = ["NEXT_HOP", "MP_REACH_NLRI"];
+/// Properties whose value is a prefix (table-dump RIB entries label it instead of listing it).
+const PREFIX_LABELS: [&str; 1] = ["PREFIX"];
 
 /// Render one MRT record as a layered text block, styled for a terminal.
 ///
@@ -166,7 +168,24 @@ fn colorize(plain: &str) -> String {
                 };
                 Some(format!("{accent}{label}:{ANSI_RESET}"))
             } else if SECTION_LABELS.contains(&label) {
-                Some(format!("{ANSI_SECTION}{label}:{ANSI_RESET} {value}"))
+                // RIB_AFI/RIB_GENERIC summaries carry `PREFIX: <prefix>` inside the heading
+                Some(match value.split_once("PREFIX: ") {
+                    Some((head, tail)) => {
+                        let (prefix, rest) = tail.split_once(' ').unwrap_or((tail, ""));
+                        let rest = match rest.is_empty() {
+                            true => String::new(),
+                            false => format!(" {rest}"),
+                        };
+                        format!(
+                            "{ANSI_SECTION}{label}:{ANSI_RESET} {head}PREFIX: {ANSI_PREFIX}{prefix}{ANSI_RESET}{rest}"
+                        )
+                    }
+                    None => format!("{ANSI_SECTION}{label}:{ANSI_RESET} {value}"),
+                })
+            } else if PREFIX_LABELS.contains(&label) {
+                Some(format!(
+                    "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_PREFIX}{value}{ANSI_RESET}"
+                ))
             } else if NEXT_HOP_LABELS.contains(&label) {
                 Some(format!(
                     "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_NEXT_HOP}{value}{ANSI_RESET}"
@@ -748,6 +767,62 @@ UPDATE:
         assert!(styled.contains(&format!("{ANSI_LABEL}ORIGIN:{ANSI_RESET} IGP")));
         assert!(styled.contains(&format!(
             "{ANSI_LABEL}MP_REACH_NLRI:{ANSI_RESET} {ANSI_NEXT_HOP}Ipv6/Unicast next-hop 2001:db8::1,fe80::1{ANSI_RESET}"
+        )));
+    }
+
+    #[test]
+    fn style_accents_table_dump_prefixes() {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        let rib = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 6,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: 2,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv4Unicast,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index: 0,
+                    originated_time: 1_666_542_000,
+                    path_id: None,
+                    attributes,
+                }],
+            })),
+        };
+        let styled = format_record_with_style(&rib, Style::ansi());
+        // the RIB_AFI summary embeds the prefix in its heading line
+        assert!(styled.contains(&format!(
+            "PREFIX: {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET} (1 entries)"
+        )));
+
+        // a legacy type-5 RIB entry labels the prefix instead of listing it
+        let entry = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 6,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP,
+                entry_subtype: 12,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpMessage(TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                status: 1,
+                originated_time: 1_666_542_000,
+                peer_ip: IpAddr::from_str("192.0.2.1").unwrap(),
+                peer_asn: Asn::new_16bit(64496),
+                attributes: Attributes::default(),
+            }),
+        };
+        let styled = format_record_with_style(&entry, Style::ansi());
+        assert!(styled.contains(&format!(
+            "{ANSI_LABEL}PREFIX:{ANSI_RESET} {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET}\n"
         )));
     }
 
