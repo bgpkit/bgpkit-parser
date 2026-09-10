@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+* **`--color auto|always|never` for `--format text`**: colors session keys, section headers, prefixes, and next-hop values with ANSI accents that follow the terminal theme. `auto` (the default) colors only when stdout is a terminal; `NO_COLOR` disables coloring and `CLICOLOR_FORCE` forces it. Library callers opt in with `render::text::Style::ansi()` plus the new `format_record_with_style` / `format_record_with_hex_and_style`; `format_record` and the unstyled output are unchanged, since styling is a post-pass over the rendered block.
+
 ### Changed
 
 * **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.

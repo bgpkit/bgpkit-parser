@@ -1,9 +1,10 @@
 use itertools::Itertools;
 use serde_json::json;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+use bgpkit_parser::render::text::Style;
 use bgpkit_parser::{BgpElem, BgpkitParser, Elementor, RecoveryConfig, RecoveryEvent, RecoveryGap};
 use clap::{Parser, ValueEnum};
 use ipnet::IpNet;
@@ -35,6 +36,18 @@ enum OutputLevel {
     Elems,
     /// Output MRT records
     Records,
+}
+
+/// When to colorize `--format text` output
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+enum ColorChoice {
+    /// Color only when stdout is a terminal (default)
+    #[default]
+    Auto,
+    /// Color even when output is piped or redirected
+    Always,
+    /// Never color, even on a terminal
+    Never,
 }
 
 /// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
@@ -75,6 +88,12 @@ struct Opts {
     /// `json-pretty`. Count-only runs (-e/-r) ignore this flag.
     #[clap(long)]
     hex: bool,
+
+    /// Colorize `--format text` output: `auto` colors only when stdout is a
+    /// terminal, `NO_COLOR` disables coloring, and `CLICOLOR_FORCE` forces it.
+    /// The other formats are never colored.
+    #[clap(long, value_enum, default_value = "auto")]
+    color: ColorChoice,
 
     /// Count BGP elems
     #[clap(short, long)]
@@ -281,6 +300,12 @@ fn main() {
         }
     }
 
+    let style = if resolve_color(opts.color, std::io::stdout().is_terminal()) {
+        Style::ansi()
+    } else {
+        Style::plain()
+    };
+
     let recovery_config = RecoveryConfig::default();
     // Element-level runs (element output or counting only elements) use the elem
     // iterators, which apply filters per element; everything else stays at the record
@@ -295,7 +320,7 @@ fn main() {
     // normal elem/record counting pipelines and their semantics
     // (per-elem filtering for -e).
     let result = if opts.hex && !counting {
-        run_hex_records(parser.into_filtered_raw_record_iter(), output_format)
+        run_hex_records(parser.into_filtered_raw_record_iter(), output_format, style)
     } else {
         match (opts.recover, use_elem_stream) {
             (true, true) => run_elems(
@@ -319,6 +344,7 @@ fn main() {
                     .into_recovering_record_iter(recovery_config)
                     .map(|event| event.map_err(|error| error.to_string())),
                 output_format,
+                style,
                 opts.elems_count,
                 opts.records_count,
                 true,
@@ -328,6 +354,7 @@ fn main() {
                     .into_record_iter()
                     .map(|record| Ok(RecoveryEvent::Item(record))),
                 output_format,
+                style,
                 opts.elems_count,
                 opts.records_count,
                 false,
@@ -426,6 +453,7 @@ where
 fn run_records<I>(
     events: I,
     output_format: OutputFormat,
+    style: Style,
     elems_count_requested: bool,
     records_count_requested: bool,
     report_recovery: bool,
@@ -458,7 +486,7 @@ where
                 if records_count_requested {
                     continue;
                 }
-                let output = format_record(&record, output_format, None);
+                let output = format_record(&record, output_format, None, style);
                 if !write_output(&mut stdout, &output)? {
                     return Ok(());
                 }
@@ -485,12 +513,13 @@ where
 fn run_hex_records(
     records: impl Iterator<Item = (bgpkit_parser::RawMrtRecord, bgpkit_parser::MrtRecord)>,
     output_format: OutputFormat,
+    style: Style,
 ) -> Result<(), String> {
     let mut stdout = std::io::stdout();
 
     for (raw, record) in records {
         let hex = bgpkit_parser::render::hex::encode(raw.raw_bytes().as_ref());
-        let output = format_record(&record, output_format, Some(&hex));
+        let output = format_record(&record, output_format, Some(&hex), style);
         if !write_output(&mut stdout, &output)? {
             return Ok(());
         }
@@ -536,6 +565,7 @@ fn format_record(
     record: &bgpkit_parser::MrtRecord,
     format: OutputFormat,
     record_hex: Option<&str>,
+    style: Style,
 ) -> String {
     match format {
         OutputFormat::Json => {
@@ -553,8 +583,10 @@ fn format_record(
             serde_json::to_string_pretty(&val).unwrap()
         }
         OutputFormat::Text => match record_hex {
-            Some(hex) => bgpkit_parser::render::text::format_record_with_hex(record, hex),
-            None => bgpkit_parser::render::text::format_record(record),
+            Some(hex) => {
+                bgpkit_parser::render::text::format_record_with_hex_and_style(record, hex, style)
+            }
+            None => bgpkit_parser::render::text::format_record_with_style(record, style),
         },
         OutputFormat::Psv | OutputFormat::Default => {
             // Use the Display implementation for MrtRecord
@@ -614,5 +646,52 @@ fn parse_filter_expression(expr: &str) -> Result<(String, String), String> {
         Ok((key.to_string(), value.to_string()))
     } else {
         Err("filter expression must contain '=' or '!=' (e.g., 'origin_asn=13335' or 'origin_asn!=13335')".to_string())
+    }
+}
+
+/// Resolve `--color` against stdout and the `NO_COLOR` / `CLICOLOR_FORCE`
+/// conventions.
+fn resolve_color(choice: ColorChoice, stdout_is_terminal: bool) -> bool {
+    match choice {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => auto_color(
+            stdout_is_terminal,
+            std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty()),
+            std::env::var_os("CLICOLOR_FORCE")
+                .is_some_and(|value| !value.is_empty() && value != "0"),
+        ),
+    }
+}
+
+/// The `auto` policy, split from the environment lookup so it can be tested
+/// directly.
+fn auto_color(stdout_is_terminal: bool, no_color: bool, clicolor_force: bool) -> bool {
+    if no_color {
+        false
+    } else if clicolor_force {
+        true
+    } else {
+        stdout_is_terminal
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_color_choices_are_honored() {
+        assert!(resolve_color(ColorChoice::Always, false));
+        assert!(!resolve_color(ColorChoice::Never, true));
+    }
+
+    #[test]
+    fn auto_color_follows_the_conventions() {
+        // NO_COLOR wins, CLICOLOR_FORCE forces color, otherwise stdout decides
+        assert!(!auto_color(true, true, true));
+        assert!(auto_color(false, false, true));
+        assert!(auto_color(true, false, false));
+        assert!(!auto_color(false, false, false));
     }
 }
