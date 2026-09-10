@@ -9,6 +9,10 @@
 //! The layout is our own (built from this crate's `Display` vocabulary);
 //! inspired by bgpdump's human-readable output, not byte-compatible with
 //! it.
+//!
+//! [`Style::ansi`] adds terminal colors for labels, section headers,
+//! prefixes, and next hops; the plain blocks are unchanged by it, since
+//! styling is a post-pass over the rendered text rather than part of it.
 
 use crate::models::*;
 
@@ -51,6 +55,185 @@ pub fn format_record(record: &MrtRecord) -> String {
             }
         }
         MrtMessage::TableDumpV2Message(msg) => render_table_dump_v2(&mut out, msg),
+    }
+    out
+}
+
+/// ANSI styling for the text format.
+///
+/// Accents are drawn from the basic ANSI set (bold where noted) instead of fixed RGB values, so
+/// they follow the reader's terminal theme and stay legible on light and dark backgrounds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Style {
+    ansi: bool,
+}
+
+impl Style {
+    /// Plain text, no escape sequences (the default).
+    pub const fn plain() -> Self {
+        Self { ansi: false }
+    }
+
+    /// ANSI SGR accents, for a terminal.
+    pub const fn ansi() -> Self {
+        Self { ansi: true }
+    }
+}
+
+const ANSI_LABEL: &str = "\x1b[1;34m";
+const ANSI_SECTION: &str = "\x1b[1;35m";
+const ANSI_PREFIX: &str = "\x1b[32m";
+const ANSI_NEXT_HOP: &str = "\x1b[33m";
+const ANSI_RESET: &str = "\x1b[0m";
+
+/// Headers whose indented lines are prefix lists.
+const PREFIX_SECTIONS: [&str; 3] = ["WITHDRAWN", "ANNOUNCED", "ANNOUNCED (labeled)"];
+/// Headers rendered in the section accent; every other `NAME: value` line is a property.
+const SECTION_LABELS: [&str; 17] = [
+    "UPDATE",
+    "OPEN",
+    "KEEPALIVE",
+    "NOTIFICATION",
+    "ROUTE_REFRESH",
+    "STATE_CHANGE",
+    "ATTRIBUTES",
+    "WARNINGS",
+    "CAPABILITIES",
+    "LINK_STATE_NLRI",
+    "FLOWSPEC_NLRI",
+    "TABLE_DUMP",
+    "PEER_INDEX_TABLE",
+    "GEO_PEER_TABLE",
+    "RIB_ENTRY",
+    "RIB_AFI",
+    "RIB_GENERIC",
+];
+/// Properties whose value is a next hop.
+const NEXT_HOP_LABELS: [&str; 2] = ["NEXT_HOP", "MP_REACH_NLRI"];
+/// Properties whose value is a prefix (table-dump RIB entries label it instead of listing it).
+const PREFIX_LABELS: [&str; 1] = ["PREFIX"];
+/// Properties rendered without a value.
+const BARE_LABELS: [&str; 1] = ["ATOMIC_AGGREGATE"];
+/// Property names that carry a space; matched by prefix because the type number varies.
+const SPACED_LABEL_PREFIXES: [&str; 3] =
+    ["RAW ATTRIBUTE (type", "DEPRECATED (type", "UNKNOWN (type"];
+
+/// Render one MRT record as a layered text block, styled for a terminal.
+///
+/// Styling is applied to the block [`format_record`] produces, so the text itself (and the
+/// unstyled output) is unaffected.
+pub fn format_record_with_style(record: &MrtRecord, style: Style) -> String {
+    let plain = format_record(record);
+    if style.ansi {
+        colorize(&plain)
+    } else {
+        plain
+    }
+}
+
+/// Render a record block with a trailing `HEX:` line (see [`format_record_with_hex`]),
+/// styled for a terminal.
+pub fn format_record_with_hex_and_style(record: &MrtRecord, hex: &str, style: Style) -> String {
+    let plain = format_record_with_hex(record, hex);
+    if style.ansi {
+        colorize(&plain)
+    } else {
+        plain
+    }
+}
+
+/// Accent the labels, section headers, prefixes and next hops of a plain block.
+///
+/// A line that matches nothing is copied through untouched, so a newly added line can only lose
+/// its accent, never gain broken output.
+fn colorize(plain: &str) -> String {
+    let mut out = String::with_capacity(plain.len() + plain.len() / 4);
+    let mut prefix_section = false;
+    for line in plain.split_inclusive('\n') {
+        let (content, newline) = match line.strip_suffix('\n') {
+            Some(content) => (content, "\n"),
+            None => (line, ""),
+        };
+        let trimmed = content.trim_start();
+        let indent = content.len() - trimmed.len();
+        let painted = if trimmed.is_empty() {
+            None
+        } else if indent >= 4 && prefix_section {
+            // a bare prefix, optionally followed by `labels=[...]` / `path-id` metadata;
+            // only the prefix itself is a route. (Colons inside IPv6 addresses rule out
+            // splitting on the label separator here.)
+            let (prefix, rest) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+            let rest = match rest.is_empty() {
+                true => String::new(),
+                false => format!(" {rest}"),
+            };
+            Some(format!("{ANSI_PREFIX}{prefix}{ANSI_RESET}{rest}"))
+        } else if let Some((label, value)) = trimmed.split_once(':') {
+            let label = label.trim_end();
+            let value = value.strip_prefix(' ').unwrap_or(value);
+            if value.is_empty() {
+                prefix_section = PREFIX_SECTIONS.contains(&label);
+                let accent = if prefix_section || SECTION_LABELS.contains(&label) {
+                    ANSI_SECTION
+                } else {
+                    ANSI_LABEL
+                };
+                Some(format!("{accent}{label}:{ANSI_RESET}"))
+            } else if SECTION_LABELS.contains(&label) {
+                // RIB_AFI/RIB_GENERIC summaries carry `PREFIX: <prefix>` inside the heading
+                Some(match value.split_once("PREFIX: ") {
+                    Some((head, tail)) => {
+                        let (prefix, rest) = tail.split_once(' ').unwrap_or((tail, ""));
+                        let rest = match rest.is_empty() {
+                            true => String::new(),
+                            false => format!(" {rest}"),
+                        };
+                        format!(
+                            "{ANSI_SECTION}{label}:{ANSI_RESET} {head}PREFIX: {ANSI_PREFIX}{prefix}{ANSI_RESET}{rest}"
+                        )
+                    }
+                    None => format!("{ANSI_SECTION}{label}:{ANSI_RESET} {value}"),
+                })
+            } else if PREFIX_LABELS.contains(&label) {
+                Some(format!(
+                    "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_PREFIX}{value}{ANSI_RESET}"
+                ))
+            } else if NEXT_HOP_LABELS.contains(&label) {
+                // `MP_REACH_NLRI` renders `<afi>/<safi> next-hop <addr>`; only the address
+                // is a next hop, and a family without one stays plain. `NEXT_HOP` values are
+                // the address alone.
+                Some(match value.split_once(" next-hop ") {
+                    Some((family, address)) => format!(
+                        "{ANSI_LABEL}{label}:{ANSI_RESET} {family} next-hop {ANSI_NEXT_HOP}{address}{ANSI_RESET}"
+                    ),
+                    None if label == "NEXT_HOP" => {
+                        format!("{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_NEXT_HOP}{value}{ANSI_RESET}")
+                    }
+                    None => format!("{ANSI_LABEL}{label}:{ANSI_RESET} {value}"),
+                })
+            } else if !label.contains(' ')
+                || SPACED_LABEL_PREFIXES
+                    .iter()
+                    .any(|prefix| label.starts_with(prefix))
+            {
+                Some(format!("{ANSI_LABEL}{label}:{ANSI_RESET} {value}"))
+            } else {
+                // a sentence (e.g. a validation warning), not an identifier
+                None
+            }
+        } else if BARE_LABELS.contains(&trimmed) {
+            Some(format!("{ANSI_LABEL}{trimmed}{ANSI_RESET}"))
+        } else {
+            None
+        };
+        match painted {
+            Some(painted) => {
+                out.push_str(&" ".repeat(indent));
+                out.push_str(&painted);
+            }
+            None => out.push_str(content),
+        }
+        out.push_str(newline);
     }
     out
 }
@@ -545,6 +728,163 @@ UPDATE:
         let text = format_record(&update_record(attributes));
         assert!(text.contains("    198.51.100.0/24\n    2001:db8::/32\n"));
         assert!(text.contains("MP_REACH_NLRI: Ipv6/Unicast next-hop 2001:db8::1"));
+    }
+
+    /// Strip ANSI SGR sequences, to compare styled output with its plain form.
+    fn strip_sgr(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find('\x1b') {
+            out.push_str(&rest[..start]);
+            match rest[start..].find('m') {
+                Some(end) => rest = &rest[start + end + 1..],
+                None => return out,
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn style_plain_is_byte_identical() {
+        let record = update_record(full_attributes());
+        assert_eq!(
+            format_record_with_style(&record, Style::plain()),
+            format_record(&record)
+        );
+        assert_eq!(
+            format_record_with_hex_and_style(&record, "deadbeef", Style::plain()),
+            format_record_with_hex(&record, "deadbeef")
+        );
+    }
+
+    #[test]
+    fn style_accents_labels_sections_prefixes_and_next_hops() {
+        let mut attributes = full_attributes();
+        attributes.add_attr(
+            AttributeValue::MpReachNlri(Nlri {
+                afi: Afi::Ipv6,
+                safi: Safi::Unicast,
+                // a comma-joined RFC 2545 pair, as RIS Live projects it
+                next_hop: Some(NextHopAddress::Ipv6LinkLocal(
+                    "2001:db8::1".parse().unwrap(),
+                    "fe80::1".parse().unwrap(),
+                )),
+                prefixes: vec![NetworkPrefix::from_str("2001:db8:1::/48").unwrap()],
+                labeled_prefixes: None,
+                link_state_nlris: None,
+                flowspec_nlris: None,
+            })
+            .into(),
+        );
+        let record = update_record(attributes);
+        let plain = format_record(&record);
+        let styled = format_record_with_style(&record, Style::ansi());
+
+        // styling wraps spans, it never rewrites the text
+        assert_ne!(styled, plain);
+        assert_eq!(strip_sgr(&styled), plain);
+
+        assert!(styled.contains(&format!("{ANSI_LABEL}TIME:{ANSI_RESET} 1666542810.970000")));
+        assert!(styled.contains(&format!("{ANSI_LABEL}PEER:{ANSI_RESET} 192.0.2.1 AS64496")));
+        assert!(styled.contains(&format!("{ANSI_SECTION}UPDATE:{ANSI_RESET}")));
+        assert!(styled.contains(&format!("{ANSI_SECTION}ANNOUNCED:{ANSI_RESET}")));
+        assert!(styled.contains(&format!("{ANSI_SECTION}ATTRIBUTES:{ANSI_RESET}")));
+        assert!(styled.contains(&format!("    {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET}")));
+        assert!(styled.contains(&format!("{ANSI_LABEL}ORIGIN:{ANSI_RESET} IGP")));
+        assert!(styled.contains(&format!(
+            "{ANSI_LABEL}MP_REACH_NLRI:{ANSI_RESET} Ipv6/Unicast next-hop {ANSI_NEXT_HOP}2001:db8::1,fe80::1{ANSI_RESET}"
+        )));
+    }
+
+    #[test]
+    fn style_accents_table_dump_prefixes() {
+        let mut attributes = Attributes::default();
+        attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
+        let rib = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 6,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP_V2,
+                entry_subtype: 2,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(RibAfiEntries {
+                rib_type: TableDumpV2Type::RibIpv4Unicast,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                rib_entries: vec![RibEntry {
+                    peer_index: 0,
+                    originated_time: 1_666_542_000,
+                    path_id: None,
+                    attributes,
+                }],
+            })),
+        };
+        let styled = format_record_with_style(&rib, Style::ansi());
+        // the RIB_AFI summary embeds the prefix in its heading line
+        assert!(styled.contains(&format!(
+            "PREFIX: {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET} (1 entries)"
+        )));
+
+        // a legacy type-5 RIB entry labels the prefix instead of listing it
+        let entry = MrtRecord {
+            common_header: CommonHeader {
+                timestamp: 6,
+                microsecond_timestamp: None,
+                entry_type: EntryType::TABLE_DUMP,
+                entry_subtype: 12,
+                length: 0,
+            },
+            message: MrtMessage::TableDumpMessage(TableDumpMessage {
+                view_number: 0,
+                sequence_number: 1,
+                prefix: NetworkPrefix::from_str("198.51.100.0/24").unwrap(),
+                status: 1,
+                originated_time: 1_666_542_000,
+                peer_ip: IpAddr::from_str("192.0.2.1").unwrap(),
+                peer_asn: Asn::new_16bit(64496),
+                attributes: Attributes::default(),
+            }),
+        };
+        let styled = format_record_with_style(&entry, Style::ansi());
+        assert!(styled.contains(&format!(
+            "{ANSI_LABEL}PREFIX:{ANSI_RESET} {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET}\n"
+        )));
+    }
+
+    #[test]
+    fn style_accents_bare_and_spaced_property_labels() {
+        let plain = "UPDATE:\n  ATTRIBUTES:\n    ATOMIC_AGGREGATE\n    RAW ATTRIBUTE (type 99): 4 bytes\n    Duplicate attribute: ORIGIN\n";
+        let styled = colorize(plain);
+        assert!(styled.contains(&format!("{ANSI_LABEL}ATOMIC_AGGREGATE{ANSI_RESET}")));
+        assert!(styled.contains(&format!(
+            "{ANSI_LABEL}RAW ATTRIBUTE (type 99):{ANSI_RESET} 4 bytes"
+        )));
+        // validation warnings are prose, not identifiers: still untouched
+        assert!(styled.contains("    Duplicate attribute: ORIGIN\n"));
+        assert_eq!(strip_sgr(&styled), plain);
+    }
+
+    #[test]
+    fn style_accents_only_the_prefix_in_labeled_entries() {
+        let plain = "UPDATE:\n  ANNOUNCED (labeled):\n    2001:db8::/32 labels=[16] path-id 3\n";
+        let styled = colorize(plain);
+        assert!(styled.contains(&format!(
+            "    {ANSI_PREFIX}2001:db8::/32{ANSI_RESET} labels=[16] path-id 3"
+        )));
+        assert_eq!(strip_sgr(&styled), plain);
+    }
+
+    #[test]
+    fn style_leaves_sentence_lines_plain() {
+        let mut attributes = full_attributes();
+        attributes.add_validation_warning(BgpValidationWarning::DuplicateAttribute {
+            attr_type: AttrType::ORIGIN,
+        });
+        let styled = format_record_with_style(&update_record(attributes), Style::ansi());
+        // a warning is a sentence, not an identifier: no accent, no escape sequences
+        assert!(styled.contains("    Duplicate attribute: ORIGIN\n"));
     }
 
     #[test]
