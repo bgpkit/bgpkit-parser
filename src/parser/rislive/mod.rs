@@ -47,7 +47,7 @@ use crate::parser::rislive::messages::{RisLiveMessage, RisMessageEnum};
 
 use crate::models::*;
 use ipnet::IpNet;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 pub mod error;
 pub mod messages;
@@ -60,6 +60,15 @@ macro_rules! unwrap_or_return {
             Err(_) => return Err(ParserRisliveError::IncorrectJson($msg_string)),
         }
     };
+}
+
+/// Parse a RIS Live next-hop string — one address or a comma-joined RFC 2545
+/// pair — into its scope-resolved global address.
+fn parse_next_hop(next_hop: String) -> Result<IpAddr, ParserRisliveError> {
+    match next_hop.parse::<NextHopAddress>() {
+        Ok(addr) => Ok(addr.global_addr()),
+        Err(_) => Err(ParserRisliveError::ElemIncorrectIp(next_hop)),
+    }
 }
 
 /// parse prefix string into IpNet
@@ -168,6 +177,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                     // parser announcements
                     if let Some(announcements) = announcements {
                         for announcement in announcements {
+                            let next_hop = parse_next_hop(announcement.next_hop)?;
                             for prefix in &announcement.prefixes {
                                 let p = parse_prefix(prefix.as_str())?;
                                 elems.push(BgpElem {
@@ -180,7 +190,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
                                         prefix: p,
                                         path_id: None,
                                     },
-                                    next_hop: Some(announcement.next_hop),
+                                    next_hop: Some(next_hop),
                                     as_path: path.clone(),
                                     origin_asns: None,
                                     origin: bgp_origin,
@@ -298,6 +308,30 @@ mod tests {
         let elems = parse_ris_live_message(msg_str).unwrap();
         assert_eq!(elems.len(), 1);
         assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    }
+
+    #[test]
+    fn test_comma_joined_next_hop_resolves_by_scope() {
+        // reversed RFC 2545 pair: the global address is still the next hop
+        let msg_str = r#"{"type": "ris_message","data":{"timestamp":1636247118.76,"peer":"2001:7f8:24::82","peer_asn":"58299","id":"20-5761-238131559","host":"rrc20","type":"UPDATE","path":[58299,49981,397666],"origin":"igp","announcements":[{"next_hop":"fe80::768e:f8ff:fea6:b2c4,2001:7f8:24::82","prefixes":["2602:fd9e:f00::/40"]}]}}"#;
+        let elems = parse_ris_live_message(msg_str).unwrap();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].next_hop, Some("2001:7f8:24::82".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_incorrect_next_hop() {
+        // a loud error, like bad origins/aggregators/prefixes — not a
+        // silently dropped UPDATE
+        for bad in ["fe80::1%eth0", "2001:db8::1,fe80::1,fe80::2", ""] {
+            let msg_str = format!(
+                r#"{{"type": "ris_message","data":{{"timestamp":1636247118.76,"peer":"2001:7f8:24::82","peer_asn":"58299","id":"20-5761-238131559","host":"rrc20","type":"UPDATE","path":[58299,49981],"origin":"igp","announcements":[{{"next_hop":"{bad}","prefixes":["2602:fd9e:f00::/40"]}}]}}}}"#
+            );
+            match parse_ris_live_message(&msg_str) {
+                Err(ParserRisliveError::ElemIncorrectIp(value)) => assert_eq!(value, bad),
+                other => panic!("expected ElemIncorrectIp for {bad:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]

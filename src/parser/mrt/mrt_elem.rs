@@ -165,16 +165,9 @@ fn get_relevant_attributes(
 
     // If the next_hop is not set, we try to get it from the announced NLRI.
     let next_hop = next_hop.or_else(|| {
-        announced.as_ref().and_then(|v| {
-            v.next_hop.as_ref().map(|h| match h {
-                NextHopAddress::Ipv4(v) => IpAddr::from(*v),
-                NextHopAddress::Ipv6(v) => IpAddr::from(*v),
-                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(*v),
-                // RFC 8950: VPN next hops - return the IPv6 address part
-                NextHopAddress::VpnIpv6(_, v) => IpAddr::from(*v),
-                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => IpAddr::from(*v),
-            })
-        })
+        announced
+            .as_ref()
+            .and_then(|v| v.next_hop.as_ref().map(NextHopAddress::global_addr))
     });
 
     (
@@ -230,15 +223,7 @@ fn rib_entry_to_elem(prefix: NetworkPrefix, peer: &Peer, entry: RibEntry) -> Bgp
 
     let next_hop = match next_hop {
         Some(v) => Some(v),
-        None => announced.and_then(|v| {
-            v.next_hop.map(|h| match h {
-                NextHopAddress::Ipv4(v) => IpAddr::from(v),
-                NextHopAddress::Ipv6(v) => IpAddr::from(v),
-                NextHopAddress::Ipv6LinkLocal(v, _) => IpAddr::from(v),
-                NextHopAddress::VpnIpv6(_, v) => IpAddr::from(v),
-                NextHopAddress::VpnIpv6LinkLocal(_, v, _, _) => IpAddr::from(v),
-            })
-        }),
+        None => announced.and_then(|v| v.next_hop.as_ref().map(NextHopAddress::global_addr)),
     };
 
     let origin_asns = path
