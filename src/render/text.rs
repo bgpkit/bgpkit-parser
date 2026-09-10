@@ -159,8 +159,15 @@ fn colorize(plain: &str) -> String {
         let painted = if trimmed.is_empty() {
             None
         } else if indent >= 4 && prefix_section {
-            // prefix entries only; they carry colons of their own inside IPv6 addresses
-            Some(format!("{ANSI_PREFIX}{trimmed}{ANSI_RESET}"))
+            // a bare prefix, optionally followed by `labels=[...]` / `path-id` metadata;
+            // only the prefix itself is a route. (Colons inside IPv6 addresses rule out
+            // splitting on the label separator here.)
+            let (prefix, rest) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+            let rest = match rest.is_empty() {
+                true => String::new(),
+                false => format!(" {rest}"),
+            };
+            Some(format!("{ANSI_PREFIX}{prefix}{ANSI_RESET}{rest}"))
         } else if let Some((label, value)) = trimmed.split_once(':') {
             let label = label.trim_end();
             let value = value.strip_prefix(' ').unwrap_or(value);
@@ -192,9 +199,18 @@ fn colorize(plain: &str) -> String {
                     "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_PREFIX}{value}{ANSI_RESET}"
                 ))
             } else if NEXT_HOP_LABELS.contains(&label) {
-                Some(format!(
-                    "{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_NEXT_HOP}{value}{ANSI_RESET}"
-                ))
+                // `MP_REACH_NLRI` renders `<afi>/<safi> next-hop <addr>`; only the address
+                // is a next hop, and a family without one stays plain. `NEXT_HOP` values are
+                // the address alone.
+                Some(match value.split_once(" next-hop ") {
+                    Some((family, address)) => format!(
+                        "{ANSI_LABEL}{label}:{ANSI_RESET} {family} next-hop {ANSI_NEXT_HOP}{address}{ANSI_RESET}"
+                    ),
+                    None if label == "NEXT_HOP" => {
+                        format!("{ANSI_LABEL}{label}:{ANSI_RESET} {ANSI_NEXT_HOP}{value}{ANSI_RESET}")
+                    }
+                    None => format!("{ANSI_LABEL}{label}:{ANSI_RESET} {value}"),
+                })
             } else if !label.contains(' ')
                 || SPACED_LABEL_PREFIXES
                     .iter()
@@ -847,6 +863,16 @@ UPDATE:
         )));
         // validation warnings are prose, not identifiers: still untouched
         assert!(styled.contains("    Duplicate attribute: ORIGIN\n"));
+        assert_eq!(strip_sgr(&styled), plain);
+    }
+
+    #[test]
+    fn style_accents_only_the_prefix_in_labeled_entries() {
+        let plain = "UPDATE:\n  ANNOUNCED (labeled):\n    2001:db8::/32 labels=[16] path-id 3\n";
+        let styled = colorize(plain);
+        assert!(styled.contains(&format!(
+            "    {ANSI_PREFIX}2001:db8::/32{ANSI_RESET} labels=[16] path-id 3"
+        )));
         assert_eq!(strip_sgr(&styled), plain);
     }
 
