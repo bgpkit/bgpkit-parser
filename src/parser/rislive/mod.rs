@@ -105,20 +105,14 @@ const DECODED_MESSAGE_TYPES: [&str; 6] = [
 ///
 /// The flattened `Option<RisMessageEnum>` reports a body-level deserialisation failure as
 /// `None`, so the caller sees an empty frame and loses every route it carried. Re-deserialising
-/// the body here both detects that case and keeps the underlying reason.
+/// the body here keeps the underlying reason.
 fn unparsed_body_error(msg_str: &str) -> Option<ParserRisliveError> {
     #[derive(serde::Deserialize)]
     struct Envelope {
-        #[serde(rename = "type")]
-        envelope_type: Option<String>,
         data: Option<serde_json::Value>,
     }
 
     let envelope: Envelope = serde_json::from_str(msg_str).ok()?;
-    if envelope.envelope_type.as_deref() != Some("ris_message") {
-        // other envelope types carry no elems by design
-        return None;
-    }
     let data = envelope.data?;
     let message_type = data.get("type")?.as_str()?.to_string();
     if !DECODED_MESSAGE_TYPES.contains(&message_type.as_str()) {
@@ -126,13 +120,9 @@ fn unparsed_body_error(msg_str: &str) -> Option<ParserRisliveError> {
         return None;
     }
 
-    let reason = match serde_json::from_value::<RisMessageEnum>(data) {
-        Ok(_) => "the body parsed but was not kept".to_string(),
-        Err(e) => e.to_string(),
-    };
-    Some(ParserRisliveError::UnparsedMessageBody(format!(
-        "{message_type}: {reason}"
-    )))
+    serde_json::from_value::<RisMessageEnum>(data)
+        .err()
+        .map(|e| ParserRisliveError::UnparsedMessageBody(format!("{message_type}: {e}")))
 }
 
 /// Parse one RIS Live message using RIS Live's JSON-projected UPDATE fields.
@@ -140,6 +130,11 @@ fn unparsed_body_error(msg_str: &str) -> Option<ParserRisliveError> {
 /// This parser is convenient and does not require `socketOptions.includeRaw`, but RIS Live's JSON
 /// schema exposes only a subset of BGP path attributes. Use [`parse_ris_live_message_raw`] when you
 /// need attributes that are only present in the raw BGP message.
+///
+/// A frame that declares a message type this crate decodes but whose body fails to deserialize
+/// returns [`ParserRisliveError::UnparsedMessageBody`] rather than no elems: callers streaming
+/// frames should log and skip it, and can fall back to [`parse_ris_live_message_raw`], which reads
+/// the `raw` bytes instead of the projection.
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
     let msg_string = msg_str.to_string();
 
@@ -411,13 +406,17 @@ mod tests {
             ),
         ];
         for (message_type, frame) in broken_bodies {
-            match parse_ris_live_message(frame) {
-                Err(ParserRisliveError::UnparsedMessageBody(msg)) => assert!(
-                    msg.starts_with(&format!("{message_type}: ")),
-                    "reason should name the declared type: {msg}"
-                ),
-                other => panic!("expected UnparsedMessageBody for {message_type}, got {other:?}"),
-            }
+            let err = parse_ris_live_message(frame).unwrap_err();
+            assert!(
+                matches!(&err, ParserRisliveError::UnparsedMessageBody(_)),
+                "expected UnparsedMessageBody for {message_type}, got {err:?}"
+            );
+            assert!(
+                err.to_string().starts_with(&format!(
+                    "message body failed to deserialize: {message_type}: "
+                )),
+                "reason should name the declared type: {err}"
+            );
         }
     }
 
