@@ -24,6 +24,8 @@
 | BGP Prefix-SID           | [RFC8669][rfc8669] | 40    | Yes       |
 | SFP Attribute            | [RFC9015][rfc9015] | 37    | Yes       |
 | BIER                     | [RFC9793][rfc9793] | 41    | Yes       |
+| Tunnel Encapsulation     | [RFC9012][rfc9012] | 23    | Yes       |
+| BGP Link-State           | [RFC7752][rfc7752] | 29    | Yes       |
 
 ## Known Limitations
 
@@ -31,7 +33,6 @@
 |---------------------------------|-------------------------------|-----------|-----------------------------|----------------------------------|
 | ATTR_SET                        | [RFC6368][rfc6368]            | 128       | Raw-retained / model only  | Structured nested parser not yet implemented |
 | PMSI_TUNNEL                     | [RFC6514][rfc6514]            | 22        | Raw-retained              | Structured parser not implemented |
-| IPv6_EXT_COMMUNITIES            | [RFC5701][rfc5701]            | 25        | ✅ Implemented            | Listed in main table above       |
 | PE_DISTINGUISHER_LABELS         | [RFC6514][rfc6514]            | 27        | Raw-retained              | Structured parser not implemented |
 | BGPSEC_PATH                     | [RFC8205][rfc8205]            | 33        | Raw-retained              | Structured parser not implemented |
 
@@ -52,7 +53,9 @@
 [rfc7311]: https://datatracker.ietf.org/doc/html/rfc7311
 [rfc8092]: https://datatracker.ietf.org/doc/html/rfc8092
 [rfc8205]: https://datatracker.ietf.org/doc/html/rfc8205
+[rfc7752]: https://datatracker.ietf.org/doc/html/rfc7752
 [rfc8669]: https://datatracker.ietf.org/doc/html/rfc8669
+[rfc9012]: https://datatracker.ietf.org/doc/html/rfc9012
 [rfc9015]: https://datatracker.ietf.org/doc/html/rfc9015
 [rfc9026]: https://datatracker.ietf.org/doc/html/rfc9026
 [rfc9234]: https://datatracker.ietf.org/doc/html/rfc9234

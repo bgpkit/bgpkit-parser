@@ -5,6 +5,13 @@ This module contains different iterator implementations for parsing BGP data:
 - `default`: Standard iterators that skip errors (RecordIterator, ElemIterator)
 - `fallible`: Fallible iterators that return Results (FallibleRecordIterator, FallibleElemIterator)
 - `update`: Iterators for BGP UPDATE messages (UpdateIterator, FallibleUpdateIterator)
+- `route`: Route-level iterators (RouteIterator, FallibleRouteIterator)
+- `recovery`: Iterators that survive damaged MRT framing (RecoveringRecordIterator,
+  RecoveringElemIterator, RecoveryEvent)
+- `diagnostic`: Per-record dissection and validation reporting (DiagnosticIterator,
+  DissectingDiagnosticIterator)
+- `raw`: Raw MRT records with their original bytes (RawRecordIterator,
+  FilteredRawRecordIterator)
 
 It also contains the trait implementations that enable BgpkitParser to be used with
 Rust's iterator syntax.

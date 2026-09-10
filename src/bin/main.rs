@@ -50,7 +50,7 @@ enum ColorChoice {
     Never,
 }
 
-/// bgpkit-parser-cli is a simple cli tool that allow parsing of individual MRT files.
+/// bgpkit-parser is a simple CLI tool for parsing MRT/BGP/BMP files.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Opts {
@@ -169,7 +169,7 @@ struct Filters {
     #[clap(short = 'a', long)]
     as_path: Option<String>,
 
-    /// Filter by AS path regex string
+    /// Filter by community string (e.g. 64512:100 or no-export)
     #[clap(short = 'C', long)]
     community: Option<String>,
 }
