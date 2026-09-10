@@ -229,7 +229,13 @@ impl Hash for AsPathSegment {
             AsPathSegment::AsSet(x) | AsPathSegment::ConfedSet(x) => x,
         };
 
-        // FIXME: Once is_sorted is stabilized, call it first to determine if sorting is required
+        // Most sets arrive in ascending order (the AS_SET wire form is written that way),
+        // so only copy and sort when the order actually differs.
+        if set.is_sorted() {
+            Asn::hash_slice(set, state);
+            return;
+        }
+
         if set.len() <= 32 {
             let mut buffer = [Asn::new_32bit(0); 32];
             set.iter()
@@ -1054,7 +1060,9 @@ mod serde_impl {
 mod tests {
     use crate::models::*;
     use itertools::Itertools;
+    use std::collections::hash_map::DefaultHasher;
     use std::collections::HashSet;
+    use std::hash::{Hash, Hasher};
 
     #[test]
     fn test_aspath_as4path_merge() {
@@ -1376,6 +1384,25 @@ mod tests {
 
         let hashset = std::iter::once(path_segment).collect::<HashSet<_>>();
         assert!(hashset.contains(&path_segment2));
+    }
+
+    #[test]
+    fn test_set_hashing_is_order_independent() {
+        fn hash_of(segment: &AsPathSegment) -> u64 {
+            let mut hasher = DefaultHasher::new();
+            segment.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        // sets hash by sorted contents, whichever path the implementation takes
+        let sorted = AsPathSegment::set([1, 2, 3]);
+        let unsorted = AsPathSegment::set([3, 1, 2]);
+        assert_eq!(hash_of(&sorted), hash_of(&unsorted));
+
+        // ... including the heap fallback for sets larger than the stack buffer
+        let big_sorted = AsPathSegment::set((1u32..40).collect::<Vec<_>>());
+        let big_unsorted = AsPathSegment::set((1u32..40).rev().collect::<Vec<_>>());
+        assert_eq!(hash_of(&big_sorted), hash_of(&big_unsorted));
     }
 
     #[test]

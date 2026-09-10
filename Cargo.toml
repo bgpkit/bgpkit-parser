@@ -195,4 +195,3 @@ pkg-fmt = "tgz"
 
 
 [lints.clippy]
-uninlined_format_args = "allow"

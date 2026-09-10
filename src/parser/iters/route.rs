@@ -258,7 +258,12 @@ impl RouteTableDumpIter {
         let prefix = match self.afi {
             Afi::Ipv4 => self.data.read_ipv4_prefix().map(IpNet::V4),
             Afi::Ipv6 => self.data.read_ipv6_prefix().map(IpNet::V6),
-            Afi::LinkState => unreachable!(),
+            Afi::LinkState => {
+                return Err(ParserError::Unsupported(format!(
+                    "route table dump for {:?} is not supported",
+                    self.afi
+                )))
+            }
         }?;
         let _status = self.data.read_u8()?;
         let originated_time = self.data.read_u32()? as f64;

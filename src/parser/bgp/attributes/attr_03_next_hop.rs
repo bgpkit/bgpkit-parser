@@ -69,7 +69,6 @@ pub fn encode_next_hop(addr: &IpAddr) -> Bytes {
     }
 }
 
-#[allow(unused_variables, dead_code)]
 pub fn encode_mp_next_hop(n: &NextHopAddress) -> Bytes {
     match n {
         NextHopAddress::Ipv4(n) => Bytes::from(n.octets().to_vec()),
