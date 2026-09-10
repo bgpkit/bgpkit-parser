@@ -169,7 +169,7 @@ struct Filters {
     #[clap(short = 'a', long)]
     as_path: Option<String>,
 
-    /// Filter by community string (e.g. 64512:100 or no-export)
+    /// Filter by community regular expression (e.g. 64512:100 or no-export)
     #[clap(short = 'C', long)]
     community: Option<String>,
 }

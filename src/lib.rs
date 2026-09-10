@@ -519,7 +519,7 @@ Options:
   -t, --start-ts <START_TS>      Filter by start unix timestamp inclusive
   -T, --end-ts <END_TS>          Filter by end unix timestamp inclusive
   -a, --as-path <AS_PATH>        Filter by AS path regex string
-  -C, --community <COMMUNITY>    Filter by community string
+  -C, --community <COMMUNITY>    Filter by community regular expression
   -h, --help                     Print help
   -V, --version                  Print version
 ```

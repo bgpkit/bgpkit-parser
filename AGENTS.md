@@ -67,7 +67,7 @@ cargo fmt -- --check
 
 ## Pre-push Checks
 
-A `.git/hooks/pre-push` script performs three checks in order. It is a local hook: it is not versioned in this repository (a fresh clone only has `.git/hooks/pre-push.sample`) and CI does not run the README check, so run these commands yourself before pushing changes that touch `src/lib.rs`:
+A `.git/hooks/pre-push` script performs three checks in order. It is a local hook: it is not versioned in this repository (a fresh clone only has `.git/hooks/pre-push.sample`), pull-request CI does not run the README check (only the release workflow does, at tag time), so run these commands yourself before pushing changes that touch `src/lib.rs`:
 
 1. **Formatting**: `cargo fmt --check`
 2. **README sync**: `cargo readme > TMP_README.md && diff -b TMP_README.md README.md`
