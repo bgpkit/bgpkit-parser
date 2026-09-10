@@ -793,7 +793,7 @@ UPDATE:
         assert!(styled.contains(&format!("    {ANSI_PREFIX}198.51.100.0/24{ANSI_RESET}")));
         assert!(styled.contains(&format!("{ANSI_LABEL}ORIGIN:{ANSI_RESET} IGP")));
         assert!(styled.contains(&format!(
-            "{ANSI_LABEL}MP_REACH_NLRI:{ANSI_RESET} {ANSI_NEXT_HOP}Ipv6/Unicast next-hop 2001:db8::1,fe80::1{ANSI_RESET}"
+            "{ANSI_LABEL}MP_REACH_NLRI:{ANSI_RESET} Ipv6/Unicast next-hop {ANSI_NEXT_HOP}2001:db8::1,fe80::1{ANSI_RESET}"
         )));
     }
 
