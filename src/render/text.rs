@@ -569,6 +569,8 @@ UPDATE:
             })),
         };
         let text = format_record(&state);
+        assert!(text.contains("PEER: 192.0.2.1 AS64496"));
+        assert!(text.contains("LOCAL: 192.0.2.2 AS64497"));
         assert!(text.contains("STATE_CHANGE:"));
         assert!(text.contains("OLD_STATE: Idle"));
         assert!(text.contains("NEW_STATE: Established"));
@@ -756,6 +758,9 @@ UPDATE:
             })),
         };
         let text = format_record(&state);
+        assert!(text.contains("PEER: 195.211.222.254 AS5409"));
+        // a legacy state change carries only the peer endpoint
+        assert!(!text.contains("LOCAL:"));
         assert!(text.contains("STATE_CHANGE:"));
         assert!(text.contains("OLD_STATE: Established"));
         assert!(text.contains("NEW_STATE: Idle"));
