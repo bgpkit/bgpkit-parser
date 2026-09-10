@@ -18,8 +18,13 @@ pub enum ParserBmpError {
     CorruptedBmpMessage,
     CorruptedBgpMessage(String),
     TruncatedBmpMessage,
-    /// Reading BMP framing or a message body failed; carries the source error.
-    IoError(String),
+    /// Reading BMP framing or a message body failed. Carries the `ErrorKind` and the
+    /// source message; the `io::Error` itself cannot be stored because this enum is
+    /// `Clone` and `Eq`, which `io::Error` is not.
+    IoError {
+        kind: std::io::ErrorKind,
+        message: String,
+    },
     /// A message type value this crate does not know; carries the raw value.
     UnknownMessageType(u8),
 }
@@ -48,8 +53,8 @@ impl Display for ParserBmpError {
             ParserBmpError::CorruptedBgpMessage(s) => {
                 write!(f, "Corrupted BGP message: {}", s)
             }
-            ParserBmpError::IoError(s) => {
-                write!(f, "BMP read error: {}", s)
+            ParserBmpError::IoError { kind, message } => {
+                write!(f, "BMP read error ({:?}): {}", kind, message)
             }
             ParserBmpError::UnknownMessageType(value) => {
                 write!(f, "Unknown BMP message type: {}", value)
@@ -62,7 +67,10 @@ impl Error for ParserBmpError {}
 
 impl From<std::io::Error> for ParserBmpError {
     fn from(e: std::io::Error) -> Self {
-        ParserBmpError::IoError(e.to_string())
+        ParserBmpError::IoError {
+            kind: e.kind(),
+            message: e.to_string(),
+        }
     }
 }
 
@@ -143,8 +151,12 @@ mod tests {
             "Unknown TLV value"
         );
         assert_eq!(
-            ParserBmpError::IoError("unexpected eof".to_string()).to_string(),
-            "BMP read error: unexpected eof"
+            ParserBmpError::IoError {
+                kind: std::io::ErrorKind::UnexpectedEof,
+                message: "unexpected eof".to_string(),
+            }
+            .to_string(),
+            "BMP read error (UnexpectedEof): unexpected eof"
         );
         assert_eq!(
             ParserBmpError::UnknownMessageType(7).to_string(),
@@ -156,7 +168,10 @@ mod tests {
     fn test_error_conversions() {
         assert_eq!(
             ParserBmpError::from(std::io::Error::other("test")),
-            ParserBmpError::IoError("test".to_string())
+            ParserBmpError::IoError {
+                kind: std::io::ErrorKind::Other,
+                message: "test".to_string(),
+            }
         );
         assert_eq!(
             ParserBmpError::from(ParserError::ParseError("test".to_string())),

@@ -6,11 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
-* **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError(String)` and `UnknownMessageType(u8)` variants. Exhaustive matches on the enum need a new arm.
+* **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError { kind, message }` and `UnknownMessageType(u8)` variants. Exhaustive matches on the enum need a new arm.
 
 ### Added
 
 * **`--color auto|always|never` for `--format text`**: colors session keys, section headers, prefixes, and next-hop values with ANSI accents that follow the terminal theme. `auto` (the default) colors only when stdout is a terminal; `NO_COLOR` disables coloring and `CLICOLOR_FORCE` forces it. Library callers opt in with `render::text::Style::ansi()` plus the new `format_record_with_style` / `format_record_with_hex_and_style`; `format_record` and the unstyled output are unchanged, since styling is a post-pass over the rendered block.
+
+### Fixed
+
+* **A routing table dump with an unsupported address family returns an error instead of panicking**: the IPv4/IPv6-only route iterator now yields `ParserError::Unsupported` for any other family, and `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises.
 
 ### Changed
 
@@ -40,7 +44,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-* **A routing table dump with an unsupported address family returns an error instead of panicking**: the IPv4/IPv6-only route iterator now yields `ParserError::Unsupported` for any other family, and `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises.
 * **RIS Live link-local next hops no longer drop UPDATEs** ([#339](https://github.com/bgpkit/bgpkit-parser/pull/339)): an RFC 2545 global + link-local pair arrives as one comma-joined string (`"next_hop": "2001:db8::1,fe80::1"`), which failed `IpAddr` deserialisation; because `RisMessage::msg` is a flattened `Option`, the error surfaced as `msg: None` and the frame's announcements and withdrawals were silently discarded — ~20% of UPDATE frames (15,706 of 77,075 in a 20-second full-feed capture on 2026-09-10). `next_hop` is now kept verbatim; `parse_ris_live_message` resolves pairs by scope and returns `ElemIncorrectIp` for unparseable values instead of silently returning no elems. Regression fixtures with captured frames live in `tests/fixtures/rislive/`; `tests/rislive_frames.rs` also cross-checks the JSON and raw-bytes parsers against each other.
 * **Two-address next hops resolve by scope in elem conversion** ([#339](https://github.com/bgpkit/bgpkit-parser/pull/339)): the MRT/raw path took the first address of an `Ipv6LinkLocal`/`VpnIpv6LinkLocal` next hop positionally, so a pair with the link-local address first yielded `fe80::`. The MRT/raw path, the RIS Live JSON path, and `Nlri::next_hop_addr()` now share `NextHopAddress::global_addr()`.
 * **BGP-LS next hops resolve RFC 2545 pairs by scope** ([#340](https://github.com/bgpkit/bgpkit-parser/pull/340)): `parse_link_state_nlri` took the first address of an `Ipv6LinkLocal`/`VpnIpv6LinkLocal` next hop positionally, so a reversed pair put the link-local address in the BGP-LS NLRI; it now uses `NextHopAddress::global_addr()`, matching the other elem conversion paths.
