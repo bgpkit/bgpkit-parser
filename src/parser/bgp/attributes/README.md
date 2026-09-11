@@ -26,6 +26,7 @@
 | BIER                     | [RFC9793][rfc9793] | 41    | Yes       |
 | Tunnel Encapsulation     | [RFC9012][rfc9012] | 23    | Yes       |
 | BGP Link-State           | [RFC7752][rfc7752] | 29    | Yes       |
+| BGP Domain Path          | [RFC10039][rfc10039] | 36    | Yes       |
 
 ## Known Limitations
 
@@ -60,4 +61,5 @@
 [rfc9026]: https://datatracker.ietf.org/doc/html/rfc9026
 [rfc9234]: https://datatracker.ietf.org/doc/html/rfc9234
 [rfc9793]: https://datatracker.ietf.org/doc/html/rfc9793
+[rfc10039]: https://datatracker.ietf.org/doc/html/rfc10039
 [iana-bgp]: https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml

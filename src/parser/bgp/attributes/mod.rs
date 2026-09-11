@@ -15,6 +15,7 @@ mod attr_26_aigp;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
 mod attr_35_otc;
+mod attr_36_domain_path;
 mod attr_37_sfp;
 mod attr_38_bfd_discriminator;
 mod attr_40_bgp_prefix_sid;
@@ -64,6 +65,7 @@ use crate::parser::bgp::attributes::attr_32_large_communities::{
 use crate::parser::bgp::attributes::attr_35_otc::{
     encode_only_to_customer, parse_only_to_customer,
 };
+use crate::parser::bgp::attributes::attr_36_domain_path::{encode_domain_path, parse_domain_path};
 use crate::parser::bgp::attributes::attr_37_sfp::{encode_sfp, parse_sfp};
 use crate::parser::bgp::attributes::attr_38_bfd_discriminator::{
     encode_bfd_discriminator, parse_bfd_discriminator,
@@ -100,7 +102,8 @@ fn validate_attribute_flags(
         | AttrType::EXTENDED_COMMUNITIES
         | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
         | AttrType::LARGE_COMMUNITIES
-        | AttrType::ONLY_TO_CUSTOMER => AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE,
+        | AttrType::ONLY_TO_CUSTOMER
+        | AttrType::BGP_DOMAIN_PATH => AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE,
         // LOCAL_PREFERENCE is well-known mandatory for IBGP
         AttrType::LOCAL_PREFERENCE => AttrFlags::TRANSITIVE,
         // Unknown or development attributes
@@ -453,6 +456,7 @@ pub fn parse_attributes(
             AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
             AttrType::TRAFFIC_ENGINEERING => parse_traffic_engineering(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
+            AttrType::BGP_DOMAIN_PATH => parse_domain_path(attr_data),
             AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
             AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
             AttrType::BGP_PREFIX_SID => parse_bgp_prefix_sid(attr_data),
@@ -555,6 +559,7 @@ impl Attribute {
                     encode_tunnel_encapsulation_attribute(v, b)?
                 }
                 AttributeValue::TrafficEngineering(v) => encode_traffic_engineering(v, b)?,
+                AttributeValue::DomainPath(v) => encode_domain_path(v, b)?,
                 AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v, b)?,
                 AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v, b)?,
                 AttributeValue::Bier(v) => encode_bier(v, b)?,
@@ -962,6 +967,15 @@ mod tests {
                 "BIER",
             ),
             (vec![0xc0, 0x25, 0x05, 0x7f, 0x00, 0x02, 0xde, 0xad], "SFP"),
+            (
+                vec![
+                    0xc0, 0x24, 0x0f, // BGP Domain Path, 15-octet value
+                    0x02, // segment: 2 domains
+                    0x00, 0x00, 0x00, 0x0A, 0x00, 0x02, 0x80, // ASN 10 / 2 / 128
+                    0x00, 0x00, 0x00, 0x0B, 0x00, 0x03, 0x46, // ASN 11 / 3 / 70
+                ],
+                "BGP Domain Path",
+            ),
         ];
 
         for (wire, name) in cases {
@@ -973,7 +987,8 @@ mod tests {
                 ("BFD Discriminator", AttributeValue::BfdDiscriminator(_))
                 | ("BGP Prefix-SID", AttributeValue::BgpPrefixSid(_))
                 | ("BIER", AttributeValue::Bier(_))
-                | ("SFP", AttributeValue::Sfp(_)) => {}
+                | ("SFP", AttributeValue::Sfp(_))
+                | ("BGP Domain Path", AttributeValue::DomainPath(_)) => {}
                 (_, value) => panic!("unexpected value for {name}: {value:?}"),
             }
             assert_eq!(

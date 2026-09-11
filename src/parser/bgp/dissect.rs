@@ -39,6 +39,7 @@ fn attr_name(code: u8) -> &'static str {
         32 => "LARGE_COMMUNITY",
         33 => "BGPSEC_PATH",
         35 => "ONLY_TO_CUSTOMER",
+        36 => "BGP_DOMAIN_PATH",
         37 => "SFP",
         38 => "BFD_DISCRIMINATOR",
         40 => "BGP_PREFIX_SID",

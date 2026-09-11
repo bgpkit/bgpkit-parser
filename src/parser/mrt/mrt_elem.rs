@@ -135,6 +135,7 @@ fn get_relevant_attributes(
             | AttributeValue::TunnelEncapsulation(_)
             | AttributeValue::TrafficEngineering(_)
             | AttributeValue::Aigp(_)
+            | AttributeValue::DomainPath(_)
             | AttributeValue::BfdDiscriminator(_)
             | AttributeValue::BgpPrefixSid(_)
             | AttributeValue::Bier(_)
