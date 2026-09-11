@@ -1,17 +1,12 @@
-#![allow(unused)]
 //! This module handles converting MRT records into individual per-prefix BGP elements.
 //!
 //! Each MRT record may contain reachability information for multiple prefixes. This module breaks
 //! down MRT records into corresponding BGP elements, and thus allowing users to more conveniently
 //! process BGP information on a per-prefix basis.
 use crate::models::*;
-use crate::parser::bgp::messages::parse_bgp_update_message;
 use crate::ParserError;
 use crate::ParserError::ParseError;
-use bytes::Bytes;
-use itertools::Itertools;
-use log::{error, warn};
-use std::collections::HashMap;
+use log::error;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -55,16 +50,6 @@ impl Display for ElemError {
 impl std::error::Error for ElemError {}
 
 // use macro_rules! <name of macro>{<Body>}
-macro_rules! get_attr_value {
-    ($a:tt, $b:expr) => {
-        if let Attribute::$a(x) = $b {
-            Some(x)
-        } else {
-            None
-        }
-    };
-}
-
 #[allow(clippy::type_complexity)]
 fn get_relevant_attributes(
     attributes: Attributes,
@@ -670,7 +655,9 @@ impl Elementor {
     pub fn record_to_elems(&mut self, record: MrtRecord) -> Vec<BgpElem> {
         match record.message {
             MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) => {
-                self.set_peer_table(record);
+                if let Err(e) = self.set_peer_table(record) {
+                    error!("{}", e);
+                }
                 vec![]
             }
             _ => match self.record_to_elems_iter(record) {
@@ -846,6 +833,7 @@ impl From<&BgpElem> for Attributes {
 mod tests {
     use super::*;
     use crate::BgpkitParser;
+    use bytes::Bytes;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 

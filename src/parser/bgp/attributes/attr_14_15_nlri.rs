@@ -1,7 +1,7 @@
 use crate::encoder::sink::put_u8_len_slice;
 use crate::error::EncodingError;
 use crate::models::*;
-use crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop;
+use crate::parser::bgp::attributes::attr_03_next_hop::{encode_mp_next_hop, parse_mp_next_hop};
 use crate::parser::bgp::attributes::attr_29_linkstate::parse_link_state_nlri;
 use crate::parser::{parse_nlri_list, ReadUtils};
 use crate::ParserError;
@@ -168,30 +168,8 @@ pub fn encode_nlri(
         if !reachable {
             warn!("NLRI next hop should not be set for unreachable NLRI (encoding NLRI)");
         }
-        // encode next hop
-        let next_hop_bytes = match next_hop {
-            NextHopAddress::Ipv4(ip) => ip.octets().to_vec(),
-            NextHopAddress::Ipv6(ip) => ip.octets().to_vec(),
-            NextHopAddress::Ipv6LinkLocal(ip1, ip2) => {
-                let mut ip_bytes = ip1.octets().to_vec();
-                ip_bytes.extend_from_slice(&ip2.octets());
-                ip_bytes
-            }
-            // RFC 8950: VPN-IPv6 next hop (24 bytes)
-            NextHopAddress::VpnIpv6(rd, ip) => {
-                let mut ip_bytes = rd.0.to_vec(); // 8 bytes RD
-                ip_bytes.extend_from_slice(&ip.octets()); // 16 bytes IPv6
-                ip_bytes
-            }
-            // RFC 8950: VPN-IPv6 next hop with link-local (48 bytes)
-            NextHopAddress::VpnIpv6LinkLocal(rd1, ip1, rd2, ip2) => {
-                let mut ip_bytes = rd1.0.to_vec(); // 8 bytes RD1
-                ip_bytes.extend_from_slice(&ip1.octets()); // 16 bytes IPv6
-                ip_bytes.extend_from_slice(&rd2.0); // 8 bytes RD2
-                ip_bytes.extend_from_slice(&ip2.octets()); // 16 bytes IPv6 link-local
-                ip_bytes
-            }
-        };
+        // encode next hop (shared with the NEXT_HOP attribute encoder)
+        let next_hop_bytes = encode_mp_next_hop(next_hop);
         // all next-hop encodings are fixed-size (4..=48 bytes), so this cannot fail
         put_u8_len_slice(bytes, "MP NLRI next hop length", &next_hop_bytes)?;
     }

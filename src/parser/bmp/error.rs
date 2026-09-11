@@ -9,6 +9,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq, Clone, Eq)]
+#[non_exhaustive]
 pub enum ParserBmpError {
     InvalidOpenBmpHeader,
     UnsupportedOpenBmpMessage,
@@ -17,6 +18,15 @@ pub enum ParserBmpError {
     CorruptedBmpMessage,
     CorruptedBgpMessage(String),
     TruncatedBmpMessage,
+    /// Reading BMP framing or a message body failed. Carries the `ErrorKind` and the
+    /// source message; the `io::Error` itself cannot be stored because this enum is
+    /// `Clone` and `Eq`, which `io::Error` is not.
+    IoError {
+        kind: std::io::ErrorKind,
+        message: String,
+    },
+    /// A message type value this crate does not know; carries the raw value.
+    UnknownMessageType(u8),
 }
 
 impl Display for ParserBmpError {
@@ -43,16 +53,24 @@ impl Display for ParserBmpError {
             ParserBmpError::CorruptedBgpMessage(s) => {
                 write!(f, "Corrupted BGP message: {}", s)
             }
+            ParserBmpError::IoError { kind, message } => {
+                write!(f, "BMP read error ({:?}): {}", kind, message)
+            }
+            ParserBmpError::UnknownMessageType(value) => {
+                write!(f, "Unknown BMP message type: {}", value)
+            }
         }
     }
 }
 
 impl Error for ParserBmpError {}
 
-// TODO: These conversions make the error difficult to debug as they drop all of the error context
 impl From<std::io::Error> for ParserBmpError {
-    fn from(_: std::io::Error) -> Self {
-        ParserBmpError::InvalidOpenBmpHeader
+    fn from(e: std::io::Error) -> Self {
+        ParserBmpError::IoError {
+            kind: e.kind(),
+            message: e.to_string(),
+        }
     }
 }
 
@@ -63,8 +81,8 @@ impl From<ParserError> for ParserBmpError {
 }
 
 impl From<TryFromPrimitiveError<BmpMsgType>> for ParserBmpError {
-    fn from(_: TryFromPrimitiveError<BmpMsgType>) -> Self {
-        ParserBmpError::InvalidOpenBmpHeader
+    fn from(e: TryFromPrimitiveError<BmpMsgType>) -> Self {
+        ParserBmpError::UnknownMessageType(e.number)
     }
 }
 
@@ -132,13 +150,28 @@ mod tests {
             ParserBmpError::UnknownTlvValue.to_string(),
             "Unknown TLV value"
         );
+        assert_eq!(
+            ParserBmpError::IoError {
+                kind: std::io::ErrorKind::UnexpectedEof,
+                message: "unexpected eof".to_string(),
+            }
+            .to_string(),
+            "BMP read error (UnexpectedEof): unexpected eof"
+        );
+        assert_eq!(
+            ParserBmpError::UnknownMessageType(7).to_string(),
+            "Unknown BMP message type: 7"
+        );
     }
 
     #[test]
     fn test_error_conversions() {
         assert_eq!(
             ParserBmpError::from(std::io::Error::other("test")),
-            ParserBmpError::InvalidOpenBmpHeader
+            ParserBmpError::IoError {
+                kind: std::io::ErrorKind::Other,
+                message: "test".to_string(),
+            }
         );
         assert_eq!(
             ParserBmpError::from(ParserError::ParseError("test".to_string())),
@@ -146,7 +179,7 @@ mod tests {
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<BmpMsgType>::new(0)),
-            ParserBmpError::InvalidOpenBmpHeader
+            ParserBmpError::UnknownMessageType(0)
         );
         assert_eq!(
             ParserBmpError::from(TryFromPrimitiveError::<BmpPeerType>::new(0)),

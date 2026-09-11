@@ -134,7 +134,7 @@ pub fn parse_bgp_message(
                     match msg_type {
                         BgpMessageType::OPEN => "OPEN",
                         BgpMessageType::KEEPALIVE => "KEEPALIVE",
-                        _ => unreachable!(),
+                        _ => unreachable!("only OPEN and KEEPALIVE take this length check"),
                     },
                     length
                 )));
