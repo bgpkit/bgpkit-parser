@@ -213,6 +213,35 @@ impl Attributes {
         }
     }
 
+    /// RFC 10039 §4 does not allow D-PATH on classic IPv4 unicast NLRI, which an UPDATE can
+    /// carry next to an IPVPN/EVPN MP_REACH_NLRI announcement. The UPDATE parser calls this
+    /// once the NLRI fields are parsed, because the attribute-level check cannot see them.
+    pub(crate) fn check_domain_path_with_classic_nlri(&mut self, has_classic_nlri: bool) {
+        if !has_classic_nlri {
+            return;
+        }
+
+        let has_domain_path = self
+            .inner
+            .iter()
+            .any(|attribute| matches!(attribute.value, AttributeValue::DomainPath(_)));
+        let already_reported = self.validation_warnings.iter().any(|warning| {
+            matches!(
+                warning,
+                BgpValidationWarning::OptionalAttributeError { attr_type, .. }
+                    if *attr_type == AttrType::BGP_DOMAIN_PATH
+            )
+        });
+        if !has_domain_path || already_reported {
+            return;
+        }
+
+        self.add_validation_warning(BgpValidationWarning::OptionalAttributeError {
+            attr_type: AttrType::BGP_DOMAIN_PATH,
+            reason: "D-PATH is only valid on IPVPN or EVPN routes, this UPDATE also carries classic IPv4 unicast NLRI (AFI 1, SAFI 1): RFC 10039 §4 requires treat-as-withdraw".to_string(),
+        });
+    }
+
     /// Add a validation warning to the attributes
     pub fn add_validation_warning(&mut self, warning: BgpValidationWarning) {
         self.validation_warnings.push(warning);

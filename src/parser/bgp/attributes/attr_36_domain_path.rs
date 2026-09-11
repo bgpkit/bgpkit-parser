@@ -297,6 +297,16 @@ mod tests {
         bytes
     }
 
+    /// An MP_UNREACH_NLRI attribute carrying the given value bytes.
+    fn mp_unreach(value: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x80, 0x0f, value.len() as u8];
+        bytes.extend_from_slice(value);
+        bytes
+    }
+
+    /// IPv4 next hop, no NLRI: an IPVPN (AFI 1, SAFI 128) MP_REACH value.
+    const IPVPN_REACH: [u8; 9] = [0x00, 0x01, 0x80, 0x04, 0xc0, 0x00, 0x02, 0x01, 0x00];
+
     fn family_warning(attributes: &Attributes) -> Option<String> {
         attributes
             .validation_warnings()
@@ -399,5 +409,76 @@ mod tests {
         .unwrap();
 
         assert!(family_warning(&attributes).is_none());
+    }
+
+    #[test]
+    fn test_domain_path_with_mpls_vpn_on_a_non_ip_afi_is_flagged() {
+        // IPVPN is IPv4/IPv6 with SAFI 128; the same SAFI under another AFI is not IPVPN
+        let attributes = super::super::parse_attributes(
+            Bytes::from(DPATH.to_vec()),
+            &AsnLength::Bits16,
+            false,
+            Some(Afi::LinkState),
+            Some(Safi::MplsVpn),
+            None,
+        )
+        .unwrap();
+
+        assert!(family_warning(&attributes).is_some());
+    }
+
+    #[test]
+    fn test_domain_path_with_isf_announcement_and_unicast_withdrawal_is_not_flagged() {
+        // the announced family decides: a unicast withdrawal next to an IPVPN announcement
+        // must not produce a finding, in either attribute order
+        let reach = mp_reach(&IPVPN_REACH);
+        let unreach = mp_unreach(&[0x00, 0x01, 0x01]); // AFI IPv4, SAFI unicast
+
+        for (first, second) in [(&reach, &unreach), (&unreach, &reach)] {
+            let mut wire = DPATH.to_vec();
+            wire.extend_from_slice(first);
+            wire.extend_from_slice(second);
+            let attributes = super::super::parse_attributes(
+                Bytes::from(wire),
+                &AsnLength::Bits16,
+                false,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            assert!(
+                attributes
+                    .inner
+                    .iter()
+                    .any(|a| matches!(a.value, AttributeValue::MpReachNlri(_))),
+                "the IPVPN MP_REACH must decode for this test to mean anything"
+            );
+            assert!(family_warning(&attributes).is_none());
+        }
+    }
+
+    #[test]
+    fn test_domain_path_with_classic_nlri_beside_ipvpn_announcement_is_flagged() {
+        // an UPDATE may announce IPVPN routes through MP_REACH and classic IPv4 unicast NLRI,
+        // which the attribute-level check cannot see
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&[0x00, 0x00]); // withdrawn routes length
+        let mut attributes = DPATH.to_vec();
+        attributes.extend(mp_reach(&IPVPN_REACH));
+        wire.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        wire.extend_from_slice(&attributes);
+        wire.extend_from_slice(&[0x18, 0xc0, 0x00, 0x02]); // classic NLRI: 192.0.2.0/24
+
+        let update = crate::parser::bgp::messages::parse_bgp_update_message(
+            Bytes::from(wire),
+            false,
+            &AsnLength::Bits16,
+        )
+        .unwrap();
+
+        assert_eq!(update.announced_prefixes.len(), 1);
+        assert!(family_warning(&update.attributes).is_some());
     }
 }
