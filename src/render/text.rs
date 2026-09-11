@@ -489,6 +489,7 @@ fn render_attribute(value: &AttributeValue) -> Option<String> {
         }
         AttributeValue::Aigp(v) => format!("AIGP: {v:?}"),
         AttributeValue::BfdDiscriminator(v) => format!("BFD_DISCRIMINATOR: {v:?}"),
+        AttributeValue::DomainPath(v) => format!("BGP_DOMAIN_PATH: {v:?}"),
         AttributeValue::TrafficEngineering(v) => format!("TRAFFIC_ENGINEERING: {v:?}"),
         AttributeValue::TunnelEncapsulation(v) => format!("TUNNEL_ENCAPSULATION: {v:?}"),
         AttributeValue::LinkState(v) => format!("BGP_LS: {v:?}"),

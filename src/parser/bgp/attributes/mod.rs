@@ -15,6 +15,7 @@ mod attr_26_aigp;
 mod attr_29_linkstate;
 mod attr_32_large_communities;
 mod attr_35_otc;
+mod attr_36_domain_path;
 mod attr_37_sfp;
 mod attr_38_bfd_discriminator;
 mod attr_40_bgp_prefix_sid;
@@ -64,6 +65,7 @@ use crate::parser::bgp::attributes::attr_32_large_communities::{
 use crate::parser::bgp::attributes::attr_35_otc::{
     encode_only_to_customer, parse_only_to_customer,
 };
+use crate::parser::bgp::attributes::attr_36_domain_path::{encode_domain_path, parse_domain_path};
 use crate::parser::bgp::attributes::attr_37_sfp::{encode_sfp, parse_sfp};
 use crate::parser::bgp::attributes::attr_38_bfd_discriminator::{
     encode_bfd_discriminator, parse_bfd_discriminator,
@@ -100,7 +102,8 @@ fn validate_attribute_flags(
         | AttrType::EXTENDED_COMMUNITIES
         | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
         | AttrType::LARGE_COMMUNITIES
-        | AttrType::ONLY_TO_CUSTOMER => AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE,
+        | AttrType::ONLY_TO_CUSTOMER
+        | AttrType::BGP_DOMAIN_PATH => AttrFlags::OPTIONAL | AttrFlags::TRANSITIVE,
         // LOCAL_PREFERENCE is well-known mandatory for IBGP
         AttrType::LOCAL_PREFERENCE => AttrFlags::TRANSITIVE,
         // Unknown or development attributes
@@ -319,6 +322,117 @@ fn validate_attribute_length(
     }
 }
 
+/// Whether RFC 10039 §4 allows the D-PATH attribute on routes of this family: IPVPN, which is
+/// IPv4 or IPv6 with SAFI 128, and EVPN, which is AFI 25 with SAFI 70.
+fn is_domain_path_family(afi: u16, safi: u8) -> bool {
+    matches!((afi, safi), (1 | 2, 128) | (25, 70))
+}
+
+/// The AFI/SAFI header an MP_REACH_NLRI attribute value starts with, when it is long enough to
+/// carry one. The header identifies the family even when the rest did not decode.
+fn mp_reach_family(bytes: &[u8]) -> Option<(u16, u8)> {
+    match bytes.len() >= 3 {
+        true => Some((u16::from_be_bytes([bytes[0], bytes[1]]), bytes[2])),
+        false => None,
+    }
+}
+
+/// The route families a D-PATH-carrying message carries, as far as the caller can tell.
+#[derive(Debug, Clone, Copy, Default)]
+struct DomainPathFamilies {
+    /// Family the caller already knows, e.g. a RIB entry from its record header.
+    declared: Option<(u16, u8)>,
+    /// Family of the routes an MP_REACH_NLRI announces, decoded or read off its header.
+    announced: Option<(u16, u8)>,
+    /// Classic IPv4 unicast NLRI, which the UPDATE parser adds once it has parsed them.
+    classic_ipv4: bool,
+}
+
+impl DomainPathFamilies {
+    /// The families visible in an attribute set on its own, before any NLRI is parsed. An
+    /// MP_UNREACH_NLRI announces nothing, so it says nothing about the family here. An
+    /// MP_REACH_NLRI whose NLRI did not decode still identifies its family through the AFI/SAFI
+    /// header it starts with, which is enough to judge it.
+    fn from_attributes(attributes: &[Attribute], declared: Option<(u16, u8)>) -> Self {
+        let announced = attributes
+            .iter()
+            .find_map(|attribute| match &attribute.value {
+                AttributeValue::MpReachNlri(nlri) => Some((nlri.afi as u16, nlri.safi as u8)),
+                _ => None,
+            })
+            .or_else(|| {
+                attributes
+                    .iter()
+                    .find_map(|attribute| match &attribute.value {
+                        AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
+                            if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI) =>
+                        {
+                            mp_reach_family(&raw.bytes)
+                        }
+                        _ => None,
+                    })
+            });
+
+        DomainPathFamilies {
+            declared,
+            announced,
+            classic_ipv4: false,
+        }
+    }
+
+    /// Describe a carried family that RFC 10039 §4 does not allow D-PATH on, if there is one.
+    ///
+    /// The rule is about the routes a message carries, so a decoded announcement decides the
+    /// answer and a withdrawal never introduces one. A family this attribute set does not
+    /// reveal stays unknown: the UPDATE parser reports classic IPv4 unicast NLRI once it has
+    /// parsed them, and a caller that knows the family up front passes it in.
+    fn disallowed(&self) -> Option<String> {
+        let declared = self
+            .declared
+            .filter(|(afi, safi)| !is_domain_path_family(*afi, *safi));
+        if let Some((afi, safi)) = declared {
+            return Some(describe_family(afi, safi, "declared"));
+        }
+
+        if let Some((afi, safi)) = self
+            .announced
+            .filter(|(afi, safi)| !is_domain_path_family(*afi, *safi))
+        {
+            return Some(describe_family(afi, safi, "announced"));
+        }
+
+        if self.classic_ipv4 {
+            return Some("classic IPv4 unicast NLRI (AFI 1, SAFI 1)".to_string());
+        }
+
+        None
+    }
+}
+
+fn describe_family(afi: u16, safi: u8, source: &str) -> String {
+    match (afi, safi) {
+        // a mismatched EVPN SAFI is worth naming, since EVPN is AFI 25 with SAFI 70
+        (_, 70) if afi != 25 => {
+            format!("{source} AFI {afi} routes with SAFI 70 (EVPN requires AFI 25)")
+        }
+        _ => format!("{source} AFI {afi} routes with SAFI {safi}"),
+    }
+}
+
+/// RFC 10039 §4 limits D-PATH to UPDATEs that carry IPVPN or EVPN routes and requires the
+/// treat-as-withdraw action for any other family, so report the finding when a carried family
+/// is known to be something else.
+fn domain_path_family_warning(families: DomainPathFamilies) -> Option<BgpValidationWarning> {
+    families.disallowed().map(|family| {
+        BgpValidationWarning::OptionalAttributeError {
+            attr_type: AttrType::BGP_DOMAIN_PATH,
+            reason: format!(
+                "D-PATH is only valid on IPVPN (AFI 1/2, SAFI 128) or EVPN (AFI 25, SAFI 70) routes, this UPDATE carries {family}: RFC 10039 §4 requires treat-as-withdraw"
+            ),
+        }
+    })
+}
+
 /// Parse BGP attributes given a slice of u8 and some options.
 ///
 /// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
@@ -453,6 +567,7 @@ pub fn parse_attributes(
             AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
             AttrType::TRAFFIC_ENGINEERING => parse_traffic_engineering(attr_data),
             AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
+            AttrType::BGP_DOMAIN_PATH => parse_domain_path(attr_data),
             AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
             AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
             AttrType::BGP_PREFIX_SID => parse_bgp_prefix_sid(attr_data),
@@ -481,7 +596,18 @@ pub fn parse_attributes(
         };
     }
 
-    let (validation_warnings, attr_mask) = validation.finish();
+    let (mut validation_warnings, attr_mask) = validation.finish();
+    if attributes
+        .iter()
+        .any(|attribute| matches!(attribute.value, AttributeValue::DomainPath(_)))
+    {
+        let declared = afi.zip(safi).map(|(afi, safi)| (afi as u16, safi as u8));
+        let families = DomainPathFamilies::from_attributes(&attributes, declared);
+        if let Some(warning) = domain_path_family_warning(families) {
+            validation_warnings.push(warning);
+        }
+    }
+
     Ok(Attributes {
         inner: attributes,
         validation_warnings,
@@ -555,6 +681,7 @@ impl Attribute {
                     encode_tunnel_encapsulation_attribute(v, b)?
                 }
                 AttributeValue::TrafficEngineering(v) => encode_traffic_engineering(v, b)?,
+                AttributeValue::DomainPath(v) => encode_domain_path(v, b)?,
                 AttributeValue::BfdDiscriminator(v) => encode_bfd_discriminator(v, b)?,
                 AttributeValue::BgpPrefixSid(v) => encode_bgp_prefix_sid(v, b)?,
                 AttributeValue::Bier(v) => encode_bier(v, b)?,
@@ -962,6 +1089,15 @@ mod tests {
                 "BIER",
             ),
             (vec![0xc0, 0x25, 0x05, 0x7f, 0x00, 0x02, 0xde, 0xad], "SFP"),
+            (
+                vec![
+                    0xc0, 0x24, 0x0f, // BGP Domain Path, 15-octet value
+                    0x02, // segment: 2 domains
+                    0x00, 0x00, 0x00, 0x0A, 0x00, 0x02, 0x80, // ASN 10 / 2 / 128
+                    0x00, 0x00, 0x00, 0x0B, 0x00, 0x03, 0x46, // ASN 11 / 3 / 70
+                ],
+                "BGP Domain Path",
+            ),
         ];
 
         for (wire, name) in cases {
@@ -973,7 +1109,8 @@ mod tests {
                 ("BFD Discriminator", AttributeValue::BfdDiscriminator(_))
                 | ("BGP Prefix-SID", AttributeValue::BgpPrefixSid(_))
                 | ("BIER", AttributeValue::Bier(_))
-                | ("SFP", AttributeValue::Sfp(_)) => {}
+                | ("SFP", AttributeValue::Sfp(_))
+                | ("BGP Domain Path", AttributeValue::DomainPath(_)) => {}
                 (_, value) => panic!("unexpected value for {name}: {value:?}"),
             }
             assert_eq!(

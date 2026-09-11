@@ -143,9 +143,16 @@ fn parse_table_dump_entry(
     data.has_n_remaining(attribute_length)?;
     let attr_data_slice = data.split_to(attribute_length);
 
-    // for TABLE_DUMP type, the AS number length is always 2-byte.
-    let mut attributes =
-        parse_attributes(attr_data_slice, &AsnLength::Bits16, false, None, None, None)?;
+    // for TABLE_DUMP type, the AS number length is always 2-byte. The element type already
+    // fixed the family: IPv4 (subtype 1) or IPv6 (subtype 2), both unicast.
+    let mut attributes = parse_attributes(
+        attr_data_slice,
+        &AsnLength::Bits16,
+        false,
+        Some(*afi),
+        Some(Safi::Unicast),
+        None,
+    )?;
 
     // validate mandatory attributes (TABLE_DUMP is always an announcement)
     attributes.check_mandatory_attributes(true, *afi == Afi::Ipv4);
@@ -485,5 +492,37 @@ mod tests {
         assert!(!needs_legacy_length_correction(1, &wire));
         assert!(needs_legacy_length_correction(1, &wire[..wire.len() - 4]));
         assert!(!needs_legacy_length_correction(1, &wire[..wire.len() - 3]));
+    }
+    #[test]
+    fn test_table_dump_entry_domain_path_is_validated_against_its_family() {
+        // TABLE_DUMP v1 entries are IPv4 or IPv6 unicast, so a D-PATH on one is invalid
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_be_bytes()); // view number
+        data.extend_from_slice(&0u16.to_be_bytes()); // sequence number
+        data.extend_from_slice(&[192, 0, 2, 0]); // prefix address 192.0.2.0
+        data.push(24); // prefix length
+        data.push(1); // status
+        data.extend_from_slice(&0u32.to_be_bytes()); // originated time
+        data.extend_from_slice(&[10, 0, 0, 1]); // peer address
+        data.extend_from_slice(&65001u16.to_be_bytes()); // peer ASN
+        let attributes = [
+            0xc0, 0x24, 0x08, 0x01, 0x00, 0x00, 0xfd, 0xe8, 0x00, 0x01, 0x46,
+        ];
+        data.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        data.extend_from_slice(&attributes);
+
+        let message = parse_table_dump_message(1, Bytes::from(data)).unwrap();
+
+        assert!(message
+            .attributes
+            .validation_warnings()
+            .iter()
+            .any(|warning| {
+                matches!(
+                    warning,
+                    crate::error::BgpValidationWarning::OptionalAttributeError { attr_type, .. }
+                        if *attr_type == crate::models::AttrType::BGP_DOMAIN_PATH
+                )
+            }));
     }
 }

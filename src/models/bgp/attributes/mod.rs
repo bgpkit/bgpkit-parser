@@ -93,6 +93,7 @@ pub enum AttrType {
     LARGE_COMMUNITIES = 32,
     BGPSEC_PATH = 33,
     ONLY_TO_CUSTOMER = 35,
+    BGP_DOMAIN_PATH = 36,
     SFP_ATTRIBUTE = 37,
     BFD_DISCRIMINATOR = 38,
     BGP_PREFIX_SID = 40,
@@ -210,6 +211,35 @@ impl Attributes {
                     attr_type: AttrType::NEXT_HOP,
                 });
         }
+    }
+
+    /// RFC 10039 §4 does not allow D-PATH on classic IPv4 unicast NLRI, which an UPDATE can
+    /// carry next to an IPVPN/EVPN MP_REACH_NLRI announcement. The UPDATE parser calls this
+    /// once the NLRI fields are parsed, because the attribute-level check cannot see them.
+    pub(crate) fn check_domain_path_with_classic_nlri(&mut self, has_classic_nlri: bool) {
+        if !has_classic_nlri {
+            return;
+        }
+
+        let has_domain_path = self
+            .inner
+            .iter()
+            .any(|attribute| matches!(attribute.value, AttributeValue::DomainPath(_)));
+        let already_reported = self.validation_warnings.iter().any(|warning| {
+            matches!(
+                warning,
+                BgpValidationWarning::OptionalAttributeError { attr_type, .. }
+                    if *attr_type == AttrType::BGP_DOMAIN_PATH
+            )
+        });
+        if !has_domain_path || already_reported {
+            return;
+        }
+
+        self.add_validation_warning(BgpValidationWarning::OptionalAttributeError {
+            attr_type: AttrType::BGP_DOMAIN_PATH,
+            reason: "D-PATH is only valid on IPVPN or EVPN routes, this UPDATE also carries classic IPv4 unicast NLRI (AFI 1, SAFI 1): RFC 10039 §4 requires treat-as-withdraw".to_string(),
+        });
     }
 
     /// Add a validation warning to the attributes
@@ -645,6 +675,40 @@ pub struct SfpAttribute {
     pub tlvs: Vec<RawTlv8Ext>,
 }
 
+/// BGP Domain Path (D-PATH) Attribute - RFC 10039
+///
+/// Optional transitive attribute listing the sequence of domains through
+/// which an EVPN/IPVPN inter-subnet forwarding route has passed.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DomainPathAttribute {
+    pub segments: Vec<DomainPathSegment>,
+}
+
+/// One domain segment of a BGP Domain Path (D-PATH) attribute - RFC 10039
+///
+/// RFC 10039 §4 requires every segment to contain at least one domain.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DomainPathSegment {
+    pub domains: Vec<DomainPathDomain>,
+}
+
+/// One domain of a BGP Domain Path (D-PATH) attribute - RFC 10039
+///
+/// The Global/Local Administrator pair forms the 6-octet DOMAIN-ID; RFC 10039
+/// §4 recommends reporting both parts as opaque unsigned integers.
+#[derive(Debug, PartialEq, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DomainPathDomain {
+    /// 4-octet Global Administrator (opaque; MAY carry an ASN or IPv4 address).
+    pub global_admin: u32,
+    /// 2-octet Local Administrator (opaque).
+    pub local_admin: u16,
+    /// 1-octet ISF_SAFI_TYPE (0 = gateway PE local ISF route, 70 = EVPN, 128 = IPVPN).
+    pub isf_safi_type: u8,
+}
+
 /// BGP Traffic Engineering Attribute - RFC 5543
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -779,6 +843,9 @@ pub enum AttributeValue {
     /// SFP attribute - RFC 9015
     #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
     Sfp(SfpAttribute),
+    /// BGP Domain Path (D-PATH) attribute - RFC 10039
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>"))]
+    DomainPath(DomainPathAttribute),
     Development(Vec<u8>),
     Raw(AttrRaw),
     Deprecated(AttrRaw),
@@ -847,6 +914,7 @@ impl AttributeValue {
             AttributeValue::BgpPrefixSid(_) => AttrType::BGP_PREFIX_SID,
             AttributeValue::Bier(_) => AttrType::BIER,
             AttributeValue::Sfp(_) => AttrType::SFP_ATTRIBUTE,
+            AttributeValue::DomainPath(_) => AttrType::BGP_DOMAIN_PATH,
             AttributeValue::Development(_) => AttrType::DEVELOPMENT,
             AttributeValue::Raw(x) | AttributeValue::Deprecated(x) | AttributeValue::Unknown(x) => {
                 x.attr_type()
@@ -894,6 +962,7 @@ impl AttributeValue {
             AttributeValue::BgpPrefixSid(_) => Some(OptionalTransitive),
             AttributeValue::Bier(_) => Some(OptionalTransitive),
             AttributeValue::Sfp(_) => Some(OptionalTransitive),
+            AttributeValue::DomainPath(_) => Some(OptionalTransitive),
             AttributeValue::AttrSet(_) => Some(OptionalTransitive),
             _ => None,
         }
@@ -1210,6 +1279,11 @@ mod tests {
         // SFP (RFC 9015): Optional Transitive
         assert_eq!(
             AttributeValue::Sfp(SfpAttribute { tlvs: vec![] }).attr_category(),
+            Some(AttributeCategory::OptionalTransitive)
+        );
+        // BGP Domain Path (RFC 10039): Optional Transitive
+        assert_eq!(
+            AttributeValue::DomainPath(DomainPathAttribute { segments: vec![] }).attr_category(),
             Some(AttributeCategory::OptionalTransitive)
         );
     }
