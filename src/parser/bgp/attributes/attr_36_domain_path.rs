@@ -391,9 +391,34 @@ mod tests {
     }
 
     #[test]
-    fn test_domain_path_with_undecodable_mp_reach_is_not_flagged() {
-        // EVPN (SAFI 70) has no typed NLRI yet, so its MP_REACH falls back to raw bytes and
-        // the family cannot be judged: no family warning, only the MP_REACH parse finding
+    fn test_domain_path_with_evpn_mp_reach_is_not_flagged() {
+        // EVPN is AFI 25 with SAFI 70: the NLRI do not decode yet, but the header still
+        // identifies a family D-PATH is allowed on
+        let mut wire = DPATH.to_vec();
+        wire.extend(mp_reach(&[
+            0x00, 0x19, // AFI: L2VPN (25)
+            0x46, // SAFI: EVPN (70)
+            0x10, // next hop length: 16
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, // reserved
+        ]));
+        let attributes = super::super::parse_attributes(
+            Bytes::from(wire),
+            &AsnLength::Bits16,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(family_warning(&attributes).is_none());
+    }
+
+    #[test]
+    fn test_domain_path_with_mismatched_evpn_safi_is_flagged() {
+        // SAFI 70 is EVPN only together with AFI 25, so this combination stays unsupported
+        // even though the MP_REACH attribute itself does not decode
         let mut wire = DPATH.to_vec();
         wire.extend(mp_reach(&[
             0x00, 0x02, // AFI: IPv6
@@ -412,7 +437,8 @@ mod tests {
         )
         .unwrap();
 
-        assert!(family_warning(&attributes).is_none());
+        let reason = family_warning(&attributes).expect("a mismatched EVPN SAFI must be reported");
+        assert!(reason.contains("SAFI 70"), "{reason}");
     }
 
     #[test]

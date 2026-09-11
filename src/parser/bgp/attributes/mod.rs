@@ -322,38 +322,55 @@ fn validate_attribute_length(
     }
 }
 
-/// Parse BGP attributes given a slice of u8 and some options.
-///
-/// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
-/// the slice is the total byte length of the attributes section of the message.
 /// Whether RFC 10039 §4 allows the D-PATH attribute on routes of this family: IPVPN, which is
-/// IPv4 or IPv6 with SAFI 128. EVPN (SAFI 70) cannot be recognised here because this crate has
-/// no typed EVPN NLRI, so an EVPN UPDATE keeps its MP_REACH attribute raw and its family stays
-/// unknown rather than being guessed at.
-fn is_domain_path_family(afi: Afi, safi: u8) -> bool {
-    safi == Safi::MplsVpn as u8 && matches!(afi, Afi::Ipv4 | Afi::Ipv6)
+/// IPv4 or IPv6 with SAFI 128, and EVPN, which is AFI 25 with SAFI 70.
+fn is_domain_path_family(afi: u16, safi: u8) -> bool {
+    matches!((afi, safi), (1 | 2, 128) | (25, 70))
+}
+
+/// The AFI/SAFI header an MP_REACH_NLRI attribute value starts with, when it is long enough to
+/// carry one. The header identifies the family even when the rest did not decode.
+fn mp_reach_family(bytes: &[u8]) -> Option<(u16, u8)> {
+    match bytes.len() >= 3 {
+        true => Some((u16::from_be_bytes([bytes[0], bytes[1]]), bytes[2])),
+        false => None,
+    }
 }
 
 /// The route families a D-PATH-carrying message carries, as far as the caller can tell.
 #[derive(Debug, Clone, Copy, Default)]
 struct DomainPathFamilies {
     /// Family the caller already knows, e.g. a RIB entry from its record header.
-    declared: Option<(Afi, u8)>,
-    /// Family of the routes an MP_REACH_NLRI announces, when that attribute decoded.
-    announced: Option<(Afi, u8)>,
+    declared: Option<(u16, u8)>,
+    /// Family of the routes an MP_REACH_NLRI announces, decoded or read off its header.
+    announced: Option<(u16, u8)>,
     /// Classic IPv4 unicast NLRI, which the UPDATE parser adds once it has parsed them.
     classic_ipv4: bool,
 }
 
 impl DomainPathFamilies {
     /// The families visible in an attribute set on its own, before any NLRI is parsed. An
-    /// MP_UNREACH_NLRI announces nothing, so it says nothing about the family here.
-    fn from_attributes(attributes: &[Attribute], declared: Option<(Afi, u8)>) -> Self {
+    /// MP_UNREACH_NLRI announces nothing, so it says nothing about the family here. An
+    /// MP_REACH_NLRI whose NLRI did not decode still identifies its family through the AFI/SAFI
+    /// header it starts with, which is enough to judge it.
+    fn from_attributes(attributes: &[Attribute], declared: Option<(u16, u8)>) -> Self {
         let announced = attributes
             .iter()
             .find_map(|attribute| match &attribute.value {
-                AttributeValue::MpReachNlri(nlri) => Some((nlri.afi, nlri.safi as u8)),
+                AttributeValue::MpReachNlri(nlri) => Some((nlri.afi as u16, nlri.safi as u8)),
                 _ => None,
+            })
+            .or_else(|| {
+                attributes
+                    .iter()
+                    .find_map(|attribute| match &attribute.value {
+                        AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
+                            if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI) =>
+                        {
+                            mp_reach_family(&raw.bytes)
+                        }
+                        _ => None,
+                    })
             });
 
         DomainPathFamilies {
@@ -392,8 +409,14 @@ impl DomainPathFamilies {
     }
 }
 
-fn describe_family(afi: Afi, safi: u8, source: &str) -> String {
-    format!("{source} {afi:?} routes with SAFI {safi}")
+fn describe_family(afi: u16, safi: u8, source: &str) -> String {
+    match (afi, safi) {
+        // a mismatched EVPN SAFI is worth naming, since EVPN is AFI 25 with SAFI 70
+        (_, 70) if afi != 25 => {
+            format!("{source} AFI {afi} routes with SAFI 70 (EVPN requires AFI 25)")
+        }
+        _ => format!("{source} AFI {afi} routes with SAFI {safi}"),
+    }
 }
 
 /// RFC 10039 §4 limits D-PATH to UPDATEs that carry IPVPN or EVPN routes and requires the
@@ -410,6 +433,10 @@ fn domain_path_family_warning(families: DomainPathFamilies) -> Option<BgpValidat
     })
 }
 
+/// Parse BGP attributes given a slice of u8 and some options.
+///
+/// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
+/// the slice is the total byte length of the attributes section of the message.
 pub fn parse_attributes(
     mut data: Bytes,
     asn_len: &AsnLength,
@@ -574,7 +601,7 @@ pub fn parse_attributes(
         .iter()
         .any(|attribute| matches!(attribute.value, AttributeValue::DomainPath(_)))
     {
-        let declared = afi.zip(safi).map(|(afi, safi)| (afi, safi as u8));
+        let declared = afi.zip(safi).map(|(afi, safi)| (afi as u16, safi as u8));
         let families = DomainPathFamilies::from_attributes(&attributes, declared);
         if let Some(warning) = domain_path_family_warning(families) {
             validation_warnings.push(warning);
