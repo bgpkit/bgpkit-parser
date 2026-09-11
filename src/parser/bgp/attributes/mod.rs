@@ -326,6 +326,79 @@ fn validate_attribute_length(
 ///
 /// The `data: &[u8]` contains the entirety of the attributes bytes, therefore the size of
 /// the slice is the total byte length of the attributes section of the message.
+/// SAFI values on which RFC 10039 permits the D-PATH attribute: EVPN (70) and IPVPN (128).
+/// EVPN has no typed NLRI in this crate, so its value is spelled out rather than named.
+const DOMAIN_PATH_SAFIS: [u8; 2] = [70, Safi::MplsVpn as u8];
+
+/// The route family of a D-PATH-carrying message, as far as this crate can tell.
+enum DomainPathFamily {
+    /// A decoded or caller-supplied SAFI.
+    Safi(u8),
+    /// An MP_REACH/MP_UNREACH attribute is present but could not be decoded (EVPN SAFI 70
+    /// has no typed NLRI yet), so the family is unknown and no judgement is possible.
+    Unknown,
+}
+
+/// Resolve the family of the message that carries these attributes.
+///
+/// `safi` is set by callers that already know the family (RIB entries carry it in the record
+/// header); otherwise it comes from the MP_REACH/MP_UNREACH attribute in this set, and a set
+/// with no MP attribute at all is a plain IPv4 unicast UPDATE.
+fn domain_path_family(attributes: &[Attribute], safi: Option<Safi>) -> DomainPathFamily {
+    if let Some(safi) = safi {
+        return DomainPathFamily::Safi(safi as u8);
+    }
+
+    let mut family = None;
+    let mut undecodable = false;
+    for attribute in attributes {
+        match &attribute.value {
+            AttributeValue::MpReachNlri(nlri) | AttributeValue::MpUnreachNlri(nlri) => {
+                family = Some(nlri.safi as u8);
+            }
+            AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
+                if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI)
+                    || raw.code == u8::from(AttrType::MP_UNREACHABLE_NLRI) =>
+            {
+                undecodable = true;
+            }
+            _ => {}
+        }
+    }
+
+    match (family, undecodable) {
+        (Some(safi), _) => DomainPathFamily::Safi(safi),
+        (None, true) => DomainPathFamily::Unknown,
+        (None, false) => DomainPathFamily::Safi(Safi::Unicast as u8),
+    }
+}
+
+/// RFC 10039 §4 limits D-PATH to UPDATEs that carry IPVPN or EVPN routes and requires the
+/// treat-as-withdraw action for any other family, so report the finding when the family is
+/// known to be something else.
+fn domain_path_family_warning(
+    attributes: &[Attribute],
+    safi: Option<Safi>,
+) -> Option<BgpValidationWarning> {
+    let has_domain_path = attributes
+        .iter()
+        .any(|attribute| matches!(attribute.value, AttributeValue::DomainPath(_)));
+    if !has_domain_path {
+        return None;
+    }
+
+    match domain_path_family(attributes, safi) {
+        DomainPathFamily::Safi(safi) if DOMAIN_PATH_SAFIS.contains(&safi) => None,
+        DomainPathFamily::Safi(safi) => Some(BgpValidationWarning::OptionalAttributeError {
+            attr_type: AttrType::BGP_DOMAIN_PATH,
+            reason: format!(
+                "D-PATH is only valid on EVPN (SAFI 70) or IPVPN (SAFI 128) routes, this UPDATE carries SAFI {safi}: RFC 10039 §4 requires treat-as-withdraw"
+            ),
+        }),
+        DomainPathFamily::Unknown => None,
+    }
+}
+
 pub fn parse_attributes(
     mut data: Bytes,
     asn_len: &AsnLength,
@@ -485,7 +558,11 @@ pub fn parse_attributes(
         };
     }
 
-    let (validation_warnings, attr_mask) = validation.finish();
+    let (mut validation_warnings, attr_mask) = validation.finish();
+    if let Some(warning) = domain_path_family_warning(&attributes, safi) {
+        validation_warnings.push(warning);
+    }
+
     Ok(Attributes {
         inner: attributes,
         validation_warnings,

@@ -280,4 +280,124 @@ mod tests {
             Bytes::from(wire)
         );
     }
+
+    /// A well-formed D-PATH: one segment, one domain (ASN 65000, local 1, EVPN).
+    const DPATH: [u8; 11] = [
+        0xc0, 0x24, 0x08, // optional transitive, type 36, length 8
+        0x01, // domain segment length: 1 domain
+        0x00, 0x00, 0xFD, 0xE8, // Global Administrator: ASN 65000
+        0x00, 0x01, // Local Administrator: 1
+        0x46, // ISF_SAFI_TYPE: 70 (EVPN)
+    ];
+
+    /// An MP_REACH_NLRI attribute carrying the given value bytes.
+    fn mp_reach(value: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x80, 0x0e, value.len() as u8];
+        bytes.extend_from_slice(value);
+        bytes
+    }
+
+    fn family_warning(attributes: &Attributes) -> Option<String> {
+        attributes
+            .validation_warnings()
+            .iter()
+            .find_map(|warning| match warning {
+                BgpValidationWarning::OptionalAttributeError { attr_type, reason }
+                    if *attr_type == AttrType::BGP_DOMAIN_PATH
+                        && reason.contains("treat-as-withdraw") =>
+                {
+                    Some(reason.clone())
+                }
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn test_domain_path_on_ipv4_unicast_update_is_flagged() {
+        // no MP attribute at all: a plain IPv4 unicast UPDATE, which RFC 10039 §4 does not allow
+        let attributes = super::super::parse_attributes(
+            Bytes::from(DPATH.to_vec()),
+            &AsnLength::Bits16,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            attributes.inner[0].value,
+            AttributeValue::DomainPath(_)
+        ));
+        let reason = family_warning(&attributes).expect("expected a D-PATH family warning");
+        assert!(
+            reason.contains("SAFI 1"),
+            "reason should name the family: {reason}"
+        );
+    }
+
+    #[test]
+    fn test_domain_path_with_unicast_mp_reach_is_flagged() {
+        // an IPv4 unicast MP_REACH is decoded, so the family is known and not IPVPN/EVPN
+        let mut wire = DPATH.to_vec();
+        wire.extend(mp_reach(&[
+            0x00, 0x01, // AFI: IPv4
+            0x01, // SAFI: unicast
+            0x04, // next hop length
+            0xc0, 0x00, 0x02, 0x01, // next hop: 192.0.2.1
+            0x00, // reserved
+            0x18, 0xc0, 0x00, 0x02, // NLRI: 192.0.2.0/24
+        ]));
+        let attributes = super::super::parse_attributes(
+            Bytes::from(wire),
+            &AsnLength::Bits16,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(family_warning(&attributes).is_some());
+    }
+
+    #[test]
+    fn test_domain_path_on_ipvpn_is_allowed() {
+        let attributes = super::super::parse_attributes(
+            Bytes::from(DPATH.to_vec()),
+            &AsnLength::Bits16,
+            false,
+            Some(Afi::Ipv4),
+            Some(Safi::MplsVpn),
+            None,
+        )
+        .unwrap();
+
+        assert!(family_warning(&attributes).is_none());
+    }
+
+    #[test]
+    fn test_domain_path_with_undecodable_mp_reach_is_not_flagged() {
+        // EVPN (SAFI 70) has no typed NLRI yet, so its MP_REACH falls back to raw bytes and
+        // the family cannot be judged: no family warning, only the MP_REACH parse finding
+        let mut wire = DPATH.to_vec();
+        wire.extend(mp_reach(&[
+            0x00, 0x02, // AFI: IPv6
+            0x46, // SAFI: EVPN (70)
+            0x10, // next hop length: 16
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, // reserved
+        ]));
+        let attributes = super::super::parse_attributes(
+            Bytes::from(wire),
+            &AsnLength::Bits16,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(family_warning(&attributes).is_none());
+    }
 }
