@@ -290,6 +290,17 @@ mod tests {
         0x46, // ISF_SAFI_TYPE: 70 (EVPN)
     ];
 
+    /// A BGP UPDATE body carrying the given attribute bytes, announced NLRI, and withdrawn NLRI.
+    fn update_bytes(attributes: &[u8], announced: &[u8], withdrawn: &[u8]) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&(withdrawn.len() as u16).to_be_bytes());
+        wire.extend_from_slice(withdrawn);
+        wire.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        wire.extend_from_slice(attributes);
+        wire.extend_from_slice(announced);
+        wire
+    }
+
     /// An MP_REACH_NLRI attribute carrying the given value bytes.
     fn mp_reach(value: &[u8]) -> Vec<u8> {
         let mut bytes = vec![0x80, 0x0e, value.len() as u8];
@@ -323,8 +334,9 @@ mod tests {
     }
 
     #[test]
-    fn test_domain_path_on_ipv4_unicast_update_is_flagged() {
-        // no MP attribute at all: a plain IPv4 unicast UPDATE, which RFC 10039 §4 does not allow
+    fn test_domain_path_without_family_context_is_not_flagged() {
+        // an attribute set on its own does not reveal the family: IPv4 unicast NLRI are parsed
+        // after the attributes, and the UPDATE parser reports them once it has seen them
         let attributes = super::super::parse_attributes(
             Bytes::from(DPATH.to_vec()),
             &AsnLength::Bits16,
@@ -335,15 +347,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(
-            attributes.inner[0].value,
-            AttributeValue::DomainPath(_)
-        ));
-        let reason = family_warning(&attributes).expect("expected a D-PATH family warning");
-        assert!(
-            reason.contains("SAFI 1"),
-            "reason should name the family: {reason}"
-        );
+        assert!(family_warning(&attributes).is_none());
     }
 
     #[test]
@@ -463,16 +467,11 @@ mod tests {
     fn test_domain_path_with_classic_nlri_beside_ipvpn_announcement_is_flagged() {
         // an UPDATE may announce IPVPN routes through MP_REACH and classic IPv4 unicast NLRI,
         // which the attribute-level check cannot see
-        let mut wire = Vec::new();
-        wire.extend_from_slice(&[0x00, 0x00]); // withdrawn routes length
         let mut attributes = DPATH.to_vec();
         attributes.extend(mp_reach(&IPVPN_REACH));
-        wire.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
-        wire.extend_from_slice(&attributes);
-        wire.extend_from_slice(&[0x18, 0xc0, 0x00, 0x02]); // classic NLRI: 192.0.2.0/24
 
         let update = crate::parser::bgp::messages::parse_bgp_update_message(
-            Bytes::from(wire),
+            Bytes::from(update_bytes(&attributes, &[0x18, 0xc0, 0x00, 0x02], &[])),
             false,
             &AsnLength::Bits16,
         )
@@ -480,5 +479,33 @@ mod tests {
 
         assert_eq!(update.announced_prefixes.len(), 1);
         assert!(family_warning(&update.attributes).is_some());
+    }
+
+    #[test]
+    fn test_domain_path_with_classic_announcement_is_flagged() {
+        let update = crate::parser::bgp::messages::parse_bgp_update_message(
+            Bytes::from(update_bytes(&DPATH, &[0x18, 0xc0, 0x00, 0x02], &[])),
+            false,
+            &AsnLength::Bits16,
+        )
+        .unwrap();
+
+        assert_eq!(update.announced_prefixes.len(), 1);
+        assert!(family_warning(&update.attributes).is_some());
+    }
+
+    #[test]
+    fn test_domain_path_with_classic_withdrawal_only_is_not_flagged() {
+        // withdrawals carry no attributes of the routes they remove, so a D-PATH next to them
+        // is not evidence of a non-ISF announcement
+        let update = crate::parser::bgp::messages::parse_bgp_update_message(
+            Bytes::from(update_bytes(&DPATH, &[], &[0x18, 0xc0, 0x00, 0x02])),
+            false,
+            &AsnLength::Bits16,
+        )
+        .unwrap();
+
+        assert_eq!(update.withdrawn_prefixes.len(), 1);
+        assert!(family_warning(&update.attributes).is_none());
     }
 }

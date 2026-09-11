@@ -341,52 +341,34 @@ struct DomainPathFamilies {
     declared: Option<(Afi, u8)>,
     /// Family of the routes an MP_REACH_NLRI announces, when that attribute decoded.
     announced: Option<(Afi, u8)>,
-    /// A withdrawal-only message that withdraws IPVPN routes.
-    withdrawn_isf_only: bool,
     /// Classic IPv4 unicast NLRI, which the UPDATE parser adds once it has parsed them.
     classic_ipv4: bool,
-    /// An MP_REACH_NLRI/MP_UNREACH_NLRI attribute is present but did not decode, so the routes
-    /// it describes cannot be judged.
-    undecodable_mp: bool,
 }
 
 impl DomainPathFamilies {
-    /// The families visible in an attribute set on its own, before any NLRI is parsed.
+    /// The families visible in an attribute set on its own, before any NLRI is parsed. An
+    /// MP_UNREACH_NLRI announces nothing, so it says nothing about the family here.
     fn from_attributes(attributes: &[Attribute], declared: Option<(Afi, u8)>) -> Self {
-        let mut families = DomainPathFamilies {
+        let announced = attributes
+            .iter()
+            .find_map(|attribute| match &attribute.value {
+                AttributeValue::MpReachNlri(nlri) => Some((nlri.afi, nlri.safi as u8)),
+                _ => None,
+            });
+
+        DomainPathFamilies {
             declared,
-            ..Default::default()
-        };
-
-        for attribute in attributes {
-            match &attribute.value {
-                AttributeValue::MpReachNlri(nlri) => {
-                    families.announced = Some((nlri.afi, nlri.safi as u8));
-                }
-                AttributeValue::MpUnreachNlri(nlri) => {
-                    // a withdrawal says nothing about what the message announces, so it only
-                    // keeps a pure-withdrawal message from being read as classic unicast
-                    families.withdrawn_isf_only = is_domain_path_family(nlri.afi, nlri.safi as u8);
-                }
-                AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
-                    if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI)
-                        || raw.code == u8::from(AttrType::MP_UNREACHABLE_NLRI) =>
-                {
-                    families.undecodable_mp = true;
-                }
-                _ => {}
-            }
+            announced,
+            classic_ipv4: false,
         }
-
-        families
     }
 
     /// Describe a carried family that RFC 10039 §4 does not allow D-PATH on, if there is one.
     ///
-    /// The rule is about the routes an UPDATE carries, so a decoded announcement decides the
-    /// answer; withdrawals never introduce one. When nothing decoded and no classic NLRI is
-    /// present, the message is treated as plain IPv4 unicast unless an undecodable MP
-    /// attribute or an ISF withdrawal leaves it unknown.
+    /// The rule is about the routes a message carries, so a decoded announcement decides the
+    /// answer and a withdrawal never introduces one. A family this attribute set does not
+    /// reveal stays unknown: the UPDATE parser reports classic IPv4 unicast NLRI once it has
+    /// parsed them, and a caller that knows the family up front passes it in.
     fn disallowed(&self) -> Option<String> {
         let declared = self
             .declared
@@ -406,14 +388,7 @@ impl DomainPathFamilies {
             return Some("classic IPv4 unicast NLRI (AFI 1, SAFI 1)".to_string());
         }
 
-        let nothing_known = self.declared.is_none()
-            && self.announced.is_none()
-            && !self.undecodable_mp
-            && !self.withdrawn_isf_only;
-        match nothing_known {
-            true => Some("plain IPv4 unicast (AFI 1, SAFI 1)".to_string()),
-            false => None,
-        }
+        None
     }
 }
 

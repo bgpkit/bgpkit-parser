@@ -630,10 +630,9 @@ pub fn parse_bgp_update_message(
         announced_bytes_present || attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
     let has_standard_nlri = announced_bytes_present;
     attributes.check_mandatory_attributes(is_announcement, has_standard_nlri);
-    // classic NLRI and MP_REACH can appear in the same UPDATE, and D-PATH belongs to neither
-    // a classic announcement nor a classic withdrawal (RFC 10039 §4)
-    attributes
-        .check_domain_path_with_classic_nlri(has_standard_nlri || !withdrawn_prefixes.is_empty());
+    // classic announcement NLRI and MP_REACH can appear in the same UPDATE, and D-PATH is
+    // allowed on neither (RFC 10039 §4); withdrawals carry no such attributes to judge
+    attributes.check_domain_path_with_classic_nlri(has_standard_nlri);
 
     // Attach NLRI parse warnings (RFC 7606 §5.3 treat-as-withdrawal evidence)
     if let Some(w) = withdrawn_nlri_error {
