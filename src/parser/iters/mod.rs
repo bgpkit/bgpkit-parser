@@ -338,10 +338,10 @@ impl<R> BgpkitParser<R> {
     /// fields are supported; `community` filters do not match route elements.
     ///
     /// With [RFC 7606 error handling](Self::enable_rfc7606_error_handling), the route iterator
-    /// judges UPDATEs as a minimal BGP speaker that recognizes only ORIGIN, AS_PATH, NEXT_HOP,
-    /// LOCAL_PREF, ATOMIC_AGGREGATE, MP_REACH_NLRI, MP_UNREACH_NLRI and AS4_PATH. Other
-    /// attributes are ignored as unrecognized optional attributes, so a malformed COMMUNITIES,
-    /// for example, withdraws the routes in the element iterator but not here.
+    /// checks every attribute header like the element iterators do, but parses only the values
+    /// of ORIGIN, AS_PATH, AS4_PATH, MP_REACH_NLRI and MP_UNREACH_NLRI. A value error in any
+    /// other attribute, such as a truncated D-PATH, goes unnoticed: the route iterator may keep
+    /// routes the element iterators withdraw, never the reverse.
     pub fn into_route_iter(self) -> RouteIterator<R> {
         RouteIterator::new(self)
     }

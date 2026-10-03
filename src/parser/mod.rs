@@ -372,8 +372,8 @@ impl<R> BgpkitParser<R> {
 
     /// Sets how UPDATE messages with validation findings become elements in the element and
     /// route iterators, and in record filtering. See
-    /// [`Elementor::with_error_handling`] for what each mode does. The route iterator judges
-    /// only the attributes a minimal BGP speaker recognizes; see
+    /// [`Elementor::with_error_handling`] for what each mode does. The route iterator skips the
+    /// value checks of attributes it does not parse; see
     /// [`into_route_iter`](Self::into_route_iter).
     ///
     /// Records themselves are unchanged:

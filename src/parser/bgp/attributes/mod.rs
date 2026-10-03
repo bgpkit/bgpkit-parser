@@ -214,19 +214,6 @@ impl AttributeValidationState {
         flags.contains(AttrFlags::PARTIAL)
     }
 
-    /// Header of an attribute the caller does not recognize, for a speaker that implements only
-    /// some attributes. RFC 4271 §5 has it ignore an unrecognized optional attribute, so only a
-    /// clear optional bit is a finding (RFC 4271 §6.3).
-    pub(crate) fn observe_unrecognized_header(&mut self, raw_attr_type: u8, flags: AttrFlags) {
-        self.set_attr(raw_attr_type);
-        if !flags.contains(AttrFlags::OPTIONAL) {
-            self.warnings
-                .push(BgpValidationWarning::UnrecognizedWellKnownAttribute {
-                    attr_type_code: raw_attr_type,
-                });
-        }
-    }
-
     /// RFC 7606 §4: an attribute whose length runs past the end of the attribute list.
     pub(crate) fn observe_attribute_overrun(
         &mut self,

@@ -261,11 +261,10 @@ Element output is unchanged unless you opt in with `enable_rfc7606_error_handlin
 
 RIB dump entries are converted as before. The CLI flag is `--rfc7606`.
 
-The route iterator (`into_route_iter`) stays a cheap, selective parser under this mode: it judges
-UPDATEs as a minimal BGP speaker that recognizes only the well-known attributes, MP_REACH_NLRI,
-MP_UNREACH_NLRI and AS4_PATH, and ignores the rest as unrecognized optional attributes. A
-malformed COMMUNITIES therefore withdraws routes in the element iterator but not in the route
-iterator.
+The route iterator (`into_route_iter`) stays a cheap, selective parser under this mode: it checks
+every attribute header like the element iterators do, but parses only the values of ORIGIN,
+AS_PATH, AS4_PATH, MP_REACH_NLRI and MP_UNREACH_NLRI. It can miss a value error in another
+attribute, so it may keep routes the element iterators withdraw, never the reverse.
 
 ```no_run
 use bgpkit_parser::BgpkitParser;

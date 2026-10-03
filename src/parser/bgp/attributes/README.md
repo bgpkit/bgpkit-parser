@@ -44,9 +44,9 @@ router takes: **discard** the attribute, **treat-as-withdraw** (TAW) every route
 **reset** the session (or disable the AFI/SAFI). `malformed_attribute_approach` in
 `src/models/bgp/error_handling.rs` encodes this table; `BgpUpdateMessage::error_handling_approach`
 combines an UPDATE's findings, and `BgpkitParser::enable_rfc7606_error_handling` applies the result
-to elements. The route iterator judges only ORIGIN, AS_PATH, NEXT_HOP, LOCAL_PREF, ATOMIC_AGGREGATE,
-MP_REACH_NLRI, MP_UNREACH_NLRI and AS4_PATH, as a minimal speaker that ignores the rest as
-unrecognized optional attributes.
+to elements. The route iterator checks every attribute header but parses only the values of ORIGIN,
+AS_PATH, AS4_PATH, MP_REACH_NLRI and MP_UNREACH_NLRI, so it can miss value errors in other
+attributes.
 
 MRT data does not record the session type, so the table assumes **eBGP**, which is how route
 collectors peer. Three attributes would be treat-as-withdraw from an iBGP peer instead.

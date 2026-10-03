@@ -36,34 +36,8 @@ struct RouteAttributeContext<'a> {
     prefixes: Option<&'a [NetworkPrefix]>,
     is_announcement: Option<bool>,
     has_standard_nlri: bool,
-    /// Judge the attributes as the minimal RFC 7606 speaker described at
-    /// [`minimal_speaker_recognizes`].
+    /// Judge the attributes for RFC 7606 error handling; see [`parse_route_attributes`].
     judge: bool,
-}
-
-/// The attributes the route iterator recognizes under RFC 7606 error handling.
-///
-/// The route iterator acts as a minimal BGP speaker: it recognizes the well-known attributes,
-/// which RFC 4271 §5 requires every speaker to recognize, plus the attributes routes are built
-/// from: MP_REACH_NLRI and MP_UNREACH_NLRI for multiprotocol routes, and AS4_PATH for the AS path
-/// of 2-octet sessions. Every other attribute is handled like an unrecognized optional attribute,
-/// which RFC 4271 §5 has a speaker ignore, so it is not judged. Only a clear optional bit on an
-/// attribute outside this set is a finding (RFC 4271 §6.3).
-///
-/// The element iterators judge every attribute this crate parses, so the two can disagree: a
-/// malformed COMMUNITIES withdraws the routes there and is ignored here.
-fn minimal_speaker_recognizes(attr_type: AttrType) -> bool {
-    matches!(
-        attr_type,
-        AttrType::ORIGIN
-            | AttrType::AS_PATH
-            | AttrType::NEXT_HOP
-            | AttrType::LOCAL_PREFERENCE
-            | AttrType::ATOMIC_AGGREGATE
-            | AttrType::MP_REACHABLE_NLRI
-            | AttrType::MP_UNREACHABLE_NLRI
-            | AttrType::AS4_PATH
-    )
 }
 
 fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<Arc<AsPath>> {
@@ -75,6 +49,15 @@ fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<Ar
     path.map(Arc::new)
 }
 
+/// Parse the attributes routes are built from: AS_PATH, AS4_PATH, MP_REACH_NLRI and
+/// MP_UNREACH_NLRI.
+///
+/// When `ctx.judge` is set, the attributes are also judged for RFC 7606 error handling. Every
+/// attribute header gets the same checks as in the full attribute parser (flags, lengths,
+/// duplicates, unrecognized well-known attributes), but only the values of ORIGIN and of the
+/// attributes above are parsed. Value errors in any other attribute go unnoticed, so the verdict
+/// is never stronger than the element iterators': the route iterator may keep routes they
+/// withdraw, never the reverse.
 fn parse_route_attributes(
     mut data: Bytes,
     asn_len: &AsnLength,
@@ -100,14 +83,8 @@ fn parse_route_attributes(
         };
         let attr_type = AttrType::from(raw_attr_type);
         has_attrs_other_than_mp_unreach |= attr_type != AttrType::MP_UNREACHABLE_NLRI;
-        let partial = match (judge, minimal_speaker_recognizes(attr_type)) {
-            (false, _) => false,
-            (true, true) => validation.observe_header(raw_attr_type, attr_type, flags, attr_length),
-            (true, false) => {
-                validation.observe_unrecognized_header(raw_attr_type, flags);
-                false
-            }
-        };
+        let partial =
+            judge && validation.observe_header(raw_attr_type, attr_type, flags, attr_length);
 
         if data.remaining() < attr_length {
             if judge {
@@ -133,8 +110,8 @@ fn parse_route_attributes(
             ))
         .then(|| attr_data.clone());
         let result = match attr_type {
-            // ORIGIN is the only recognized fixed-size attribute with a value to check; the
-            // length rules cover NEXT_HOP, LOCAL_PREF and ATOMIC_AGGREGATE
+            // ORIGIN's value is cheap to check; the header length rules cover the other
+            // fixed-size attributes
             AttrType::ORIGIN if judge => parse_origin(attr_data).map(|_| ()),
             AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(|path| {
                 if judge {

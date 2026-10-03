@@ -751,8 +751,7 @@ fn test_malformed_update_reencodes_byte_identically() {
 }
 
 /// The route iterator yields the projection of the element iterator, for
-/// UPDATEs whose findings concern only attributes the route iterator's minimal
-/// speaker recognizes.
+/// UPDATEs without value errors in attributes the route iterator does not parse.
 fn assert_routes_match_elems(update_body: &[u8], rfc7606: bool) {
     let record = bgp4mp_update_record(update_body);
     let parser = |bytes: Vec<u8>| {
@@ -791,8 +790,16 @@ fn test_route_iterator_matches_elems_under_rfc7606() {
     as4.extend_from_slice(&[0x40, 0x03, 0x04, 1, 2, 3, 4]);
     as4.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00]); // AS4_PATH [0]
 
+    // header-level findings on attributes the route iterator does not parse
+    let mut short_communities = build_valid_attrs();
+    short_communities.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 1, 0, 1, 0, 2]);
+    let mut well_known_communities = build_valid_attrs();
+    well_known_communities.extend_from_slice(&[0x40, 0x08, 0x04, 0, 1, 0, 1]);
+
     let bodies = [
         build_update_body(&[], &build_valid_attrs(), &two_prefixes()),
+        build_update_body(&[], &short_communities, &two_prefixes()),
+        build_update_body(&[], &well_known_communities, &two_prefixes()),
         build_update_body(&[], &attrs_with_origin(3), &two_prefixes()),
         build_update_body(&[], &discard, &two_prefixes()),
         build_update_body(&[], &reset, &valid_nlri_prefix()),
@@ -803,13 +810,11 @@ fn test_route_iterator_matches_elems_under_rfc7606() {
         assert_routes_match_elems(body, true);
     }
     // a malformed AS4_PATH is discarded, so the route keeps the AS_PATH alone
-    let routes: Vec<BgpRouteElem> =
-        bgpkit_parser::BgpkitParser::from_reader(Cursor::new(bgp4mp_update_record(&bodies[5])))
-            .enable_rfc7606_error_handling()
-            .into_route_iter()
-            .collect();
     assert_eq!(
-        routes[0].as_path.as_deref().map(|p| p.to_string()),
+        routes_of(&bodies[7])[0]
+            .as_path
+            .as_deref()
+            .map(|p| p.to_string()),
         Some("23456".to_string())
     );
 }
@@ -822,12 +827,11 @@ fn routes_of(update_body: &[u8]) -> Vec<BgpRouteElem> {
 }
 
 #[test]
-fn test_route_iterator_ignores_attributes_a_minimal_speaker_does_not_recognize() {
-    // malformed COMMUNITIES and AGGREGATOR: the element iterator judges them,
-    // the route iterator's minimal speaker ignores them as unrecognized optional
+fn test_route_iterator_misses_value_errors_in_attributes_it_does_not_parse() {
+    // a D-PATH whose value is too short (RFC 10039 §4): its header is fine, so
+    // only the element iterator, which parses the value, withdraws the routes
     let mut attrs = build_valid_attrs();
-    attrs.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 1, 0, 1, 0, 2]);
-    attrs.extend_from_slice(&[0xc0, 0x07, 0x07, 0, 0, 0xfd, 0xe8, 10, 0, 0]);
+    attrs.extend_from_slice(&[0xc0, 0x24, 0x02, 0x00, 0x00]);
     let body = build_update_body(&[], &attrs, &two_prefixes());
 
     assert!(elems_of(&body, true)
@@ -838,15 +842,25 @@ fn test_route_iterator_ignores_attributes_a_minimal_speaker_does_not_recognize()
     assert!(routes
         .iter()
         .all(|r| r.elem_type == ElemType::ANNOUNCE && r.as_path.is_some()));
+}
 
-    // an attribute outside the recognized set without the optional bit is an
-    // unrecognized well-known attribute: session reset (RFC 4271 §6.3)
+#[test]
+fn test_route_iterator_judges_headers_of_attributes_it_does_not_parse() {
+    // COMMUNITIES without the optional bit is a known attribute with wrong
+    // flags: treat-as-withdraw in both iterators, not a session reset
     let mut attrs = build_valid_attrs();
     attrs.extend_from_slice(&[0x40, 0x08, 0x04, 0, 1, 0, 1]);
     let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
     let routes = routes_of(&body);
     assert_eq!(routes.len(), 1);
-    assert_eq!(routes[0].elem_type, ElemType::RESET);
+    assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
+
+    // an unknown code without the optional bit is a session reset in both
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0x40, 0xc8, 0x00]);
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+    assert_eq!(routes_of(&body)[0].elem_type, ElemType::RESET);
+    assert_eq!(elems_of(&body, true)[0].elem_type, ElemType::RESET);
 }
 
 #[test]
