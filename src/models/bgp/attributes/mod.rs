@@ -144,8 +144,25 @@ pub struct Attributes {
     pub(crate) inner: Vec<Attribute>,
     /// RFC 7606 validation warnings collected during parsing
     pub(crate) validation_warnings: Vec<BgpValidationWarning>,
-    /// Bitmask of seen attributes to allow O(1) checks. Fits in 4 u64s.
-    pub(crate) attr_mask: [u64; 4],
+    /// Attribute type codes present, to allow O(1) checks.
+    pub(crate) attr_mask: AttrCodeSet,
+}
+
+/// Set of attribute type codes, as a 256-bit mask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct AttrCodeSet([u64; 4]);
+
+impl AttrCodeSet {
+    /// Adds `code`, returning whether it was absent.
+    pub(crate) fn insert(&mut self, code: u8) -> bool {
+        let absent = !self.contains(code);
+        self.0[(code / 64) as usize] |= 1u64 << (code % 64);
+        absent
+    }
+
+    pub(crate) fn contains(&self, code: u8) -> bool {
+        self.0[(code / 64) as usize] & (1u64 << (code % 64)) != 0
+    }
 }
 
 impl std::fmt::Debug for Attributes {
@@ -159,8 +176,7 @@ impl std::fmt::Debug for Attributes {
 
 impl Attributes {
     pub fn has_attr(&self, ty: AttrType) -> bool {
-        let attr = u8::from(ty);
-        (self.attr_mask[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
+        self.attr_mask.contains(u8::from(ty))
     }
 
     pub fn get_attr(&self, ty: AttrType) -> Option<Attribute> {
@@ -171,8 +187,7 @@ impl Attributes {
     }
 
     pub fn add_attr(&mut self, attr: Attribute) {
-        let ty = attr.value.attr_code();
-        self.attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
+        self.attr_mask.insert(attr.value.attr_code());
         self.inner.push(attr);
     }
 
@@ -433,11 +448,10 @@ impl Iterator for MetaCommunitiesIter<'_> {
     }
 }
 
-fn compute_mask(inner: &[Attribute]) -> [u64; 4] {
-    let mut attr_mask = [0; 4];
+fn compute_mask(inner: &[Attribute]) -> AttrCodeSet {
+    let mut attr_mask = AttrCodeSet::default();
     for attr in inner {
-        let ty = attr.value.attr_code();
-        attr_mask[(ty / 64) as usize] |= 1u64 << (ty % 64);
+        attr_mask.insert(attr.value.attr_code());
     }
     attr_mask
 }

@@ -102,6 +102,10 @@ fn parse_route_attributes(
         }
 
         let attr_data = data.split_to(attr_length);
+        // RFC 7606 §3(g): a repeated attribute is discarded, as the element iterators do
+        if judge && validation.is_repeat() {
+            continue;
+        }
         // findings on these attributes carry their bytes; cloning `Bytes` is a refcount bump
         let raw_bytes = (judge
             && matches!(
@@ -116,19 +120,14 @@ fn parse_route_attributes(
             AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(|path| {
                 if judge {
                     validation.observe_as_path(&path);
-                    // RFC 7606 §3(g): only the first occurrence counts
-                    as_path.get_or_insert(path);
-                } else {
-                    as_path = Some(path);
                 }
+                as_path = Some(path);
             }),
             AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32).map(|path| {
                 if judge {
                     validation.observe_as4_path(&path);
-                    as4_path.get_or_insert(path);
-                } else {
-                    as4_path = Some(path);
                 }
+                as4_path = Some(path);
             }),
             AttrType::MP_REACHABLE_NLRI => parse_nlri(
                 attr_data,
@@ -180,18 +179,14 @@ fn parse_route_attributes(
             .unwrap_or(ctx.has_standard_nlri || has_mp_reach);
         validation.check_mandatory_attributes(is_announcement, ctx.has_standard_nlri);
         let (warnings, _) = validation.finish();
-        approach = strongest_approach(&warnings).map(|approach| {
-            escalate_without_reachability(
-                approach,
-                ctx.has_standard_nlri || has_mp_reach,
-                has_attrs_other_than_mp_unreach,
-            )
-        });
-        // RFC 6793 §6: a malformed AS4_PATH is discarded
-        if warnings
-            .iter()
-            .any(|w| w.attr_type() == Some(AttrType::AS4_PATH))
-        {
+        approach = update_approach(
+            &warnings,
+            ctx.has_standard_nlri || has_mp_reach,
+            has_attrs_other_than_mp_unreach,
+        );
+        // attribute discard, as the element iterators apply it; repeats were skipped above.
+        // Only AS4_PATH matters here: any other finding on the attributes above withdraws.
+        if !DiscardPlan::from_warnings(&warnings).keeps(u8::from(AttrType::AS4_PATH), false) {
             as4_path = None;
         }
     }
@@ -507,11 +502,10 @@ fn parse_bgp_update_routes(
         true => Some(ErrorHandlingApproach::SessionReset),
         false => attributes.approach,
     };
-    let announced_as = match approach {
-        Some(approach) if approach >= ErrorHandlingApproach::AfiSafiDisable => ElemType::RESET,
-        Some(approach) if approach.withdraws_routes() => ElemType::WITHDRAW,
-        _ => ElemType::ANNOUNCE,
-    };
+    let announced_as = approach.map_or(
+        ElemType::ANNOUNCE,
+        ErrorHandlingApproach::announced_elem_type,
+    );
 
     Ok(RouteUpdateIter {
         timestamp,

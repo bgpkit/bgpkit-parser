@@ -160,27 +160,29 @@ fn is_raw_retained_attr(attr_type: AttrType) -> bool {
 
 pub(crate) struct AttributeValidationState {
     warnings: Vec<BgpValidationWarning>,
-    attr_mask: [u64; 4],
+    attr_mask: AttrCodeSet,
+    /// Whether the attribute last passed to [`observe_header`](Self::observe_header) repeats an
+    /// earlier one.
+    repeat: bool,
 }
 
 impl AttributeValidationState {
     pub(crate) fn new() -> Self {
         Self {
             warnings: Vec::new(),
-            attr_mask: [0; 4],
+            attr_mask: AttrCodeSet::default(),
+            repeat: false,
         }
     }
 
-    fn has_raw_attr(&self, attr: u8) -> bool {
-        (self.attr_mask[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
-    }
-
     pub(crate) fn has_attr(&self, attr_type: AttrType) -> bool {
-        self.has_raw_attr(u8::from(attr_type))
+        self.attr_mask.contains(u8::from(attr_type))
     }
 
-    fn set_attr(&mut self, attr: u8) {
-        self.attr_mask[(attr / 64) as usize] |= 1u64 << (attr % 64);
+    /// Whether the current attribute repeats an earlier one. RFC 7606 §3(g) discards every
+    /// repeat, so the `observe_*` methods record no finding about it.
+    pub(crate) fn is_repeat(&self) -> bool {
+        self.repeat
     }
 
     pub(crate) fn observe_header(
@@ -190,11 +192,12 @@ impl AttributeValidationState {
         flags: AttrFlags,
         length: usize,
     ) -> bool {
-        if self.has_raw_attr(raw_attr_type) {
+        self.repeat = !self.attr_mask.insert(raw_attr_type);
+        if self.repeat {
             self.warnings
                 .push(BgpValidationWarning::DuplicateAttribute { attr_type });
+            return flags.contains(AttrFlags::PARTIAL);
         }
-        self.set_attr(raw_attr_type);
 
         // RFC 4271 §6.3: an attribute this parser does not recognize must be optional. A
         // deprecated code point is recognized, so it is not reported here.
@@ -255,6 +258,9 @@ impl AttributeValidationState {
         error: &ParserError,
         raw_bytes: &[u8],
     ) {
+        if self.repeat {
+            return;
+        }
         let reason = error.to_string();
         match attr_type {
             // RFC 7606 §5.3: the error handling of MP_REACH_NLRI and MP_UNREACH_NLRI follows
@@ -306,6 +312,9 @@ impl AttributeValidationState {
     /// AS_PATH segments without ASNs. The typed value is kept, so output that does not apply
     /// RFC 7606 error handling is unchanged.
     pub(crate) fn observe_value(&mut self, value: &AttributeValue) {
+        if self.repeat {
+            return;
+        }
         match value {
             AttributeValue::AsPath(path) => self.observe_as_path(path),
             AttributeValue::As4Path(path) => self.observe_as4_path(path),
@@ -324,6 +333,9 @@ impl AttributeValidationState {
 
     /// RFC 7606 §7.2 and RFC 7607 §2 checks on a parsed AS_PATH.
     pub(crate) fn observe_as_path(&mut self, path: &AsPath) {
+        if self.repeat {
+            return;
+        }
         if let Some(reason) = as_path_problem(path) {
             self.warnings
                 .push(BgpValidationWarning::MalformedAsPath { reason });
@@ -332,6 +344,9 @@ impl AttributeValidationState {
 
     /// RFC 7607 §2 and empty-segment checks on a parsed AS4_PATH, which RFC 6793 §6 discards.
     pub(crate) fn observe_as4_path(&mut self, path: &AsPath) {
+        if self.repeat {
+            return;
+        }
         if let Some(reason) = as_path_problem(path) {
             self.warnings
                 .push(BgpValidationWarning::OptionalAttributeError {
@@ -373,7 +388,7 @@ impl AttributeValidationState {
         }
     }
 
-    pub(crate) fn finish(self) -> (Vec<BgpValidationWarning>, [u64; 4]) {
+    pub(crate) fn finish(self) -> (Vec<BgpValidationWarning>, AttrCodeSet) {
         (self.warnings, self.attr_mask)
     }
 }
@@ -470,15 +485,6 @@ fn is_domain_path_family(afi: u16, safi: u8) -> bool {
     matches!((afi, safi), (1 | 2, 128) | (25, 70))
 }
 
-/// The AFI/SAFI header an MP_REACH_NLRI attribute value starts with, when it is long enough to
-/// carry one. The header identifies the family even when the rest did not decode.
-fn mp_reach_family(bytes: &[u8]) -> Option<(u16, u8)> {
-    match bytes.len() >= 3 {
-        true => Some((u16::from_be_bytes([bytes[0], bytes[1]]), bytes[2])),
-        false => None,
-    }
-}
-
 /// The route families a D-PATH-carrying message carries, as far as the caller can tell.
 #[derive(Debug, Clone, Copy, Default)]
 struct DomainPathFamilies {
@@ -509,7 +515,7 @@ impl DomainPathFamilies {
                         AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
                             if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI) =>
                         {
-                            mp_reach_family(&raw.bytes)
+                            mp_nlri_family(&raw.bytes)
                         }
                         _ => None,
                     })

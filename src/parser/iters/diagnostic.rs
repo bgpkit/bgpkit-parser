@@ -964,8 +964,8 @@ mod tests {
 
     #[test]
     fn with_dissection_anchors_duplicate_to_second_occurrence() {
-        // Two ORIGIN attributes: the duplicate warning and its companion
-        // flags warning both belong to the SECOND occurrence.
+        // Two ORIGIN attributes: the duplicate warning belongs to the SECOND
+        // occurrence.
         let mut attrs = Vec::new();
         attrs.extend_from_slice(&[0x40, 0x01, 0x01, 0x00]); // first, clean
         attrs.extend_from_slice(&[0x80, 0x01, 0x01, 0x00]); // duplicate, bad flags
@@ -988,13 +988,12 @@ mod tests {
                 // NTH-occurrence anchoring: the duplicate points at #2
                 assert_eq!(duplicate.span, origins[1].span());
 
-                // The flags error accompanying the duplicate header must
-                // also anchor to the second occurrence, not the first.
-                let flags = warnings
-                    .iter()
-                    .find(|w| matches!(w.warning, BgpValidationWarning::AttributeFlagsError { .. }))
-                    .expect("flags warning");
-                assert_eq!(flags.span, origins[1].span());
+                // RFC 7606 §3(g) discards the repeat, so its bad flags are
+                // not reported against the valid first ORIGIN.
+                assert!(!warnings.iter().any(|w| matches!(
+                    w.warning,
+                    BgpValidationWarning::AttributeFlagsError { .. }
+                )));
             }
             event => panic!("expected dissected record event, got {event:?}"),
         }

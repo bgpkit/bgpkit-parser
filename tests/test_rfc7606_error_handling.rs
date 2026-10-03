@@ -613,7 +613,7 @@ fn test_attribute_discard_mode_keeps_routes_and_drops_attributes() {
     attrs.extend_from_slice(&[0xc0, 0x08, 0x04, 0, 2, 0, 2]); // repeated COMMUNITIES 2:2
     let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
 
-    // as encoded: the malformed values show up and the last COMMUNITIES wins
+    // as encoded: the malformed values show up and both COMMUNITIES are kept
     let elems = elems_of(&body, false);
     assert_eq!(elems.len(), 1);
     assert!(elems[0].atomic);
@@ -642,6 +642,44 @@ fn test_attribute_discard_mode_keeps_routes_and_drops_attributes() {
         "the first COMMUNITIES is kept (RFC 7606 §3(g))"
     );
     assert_eq!(elem.next_hop.unwrap().to_string(), "1.2.3.4");
+}
+
+#[test]
+fn test_malformed_repeat_does_not_affect_the_first_occurrence() {
+    // RFC 7606 §3(g): a repeat is discarded whatever it holds, so a malformed
+    // repeat neither withdraws the routes nor takes the valid first copy with it
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x04, 0, 1, 0, 1]); // COMMUNITIES 1:1
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 2, 0, 2, 0, 2]); // COMMUNITIES, 6 bytes
+    attrs.extend_from_slice(&[0xc0, 0x07, 0x08, 0, 0, 0xfd, 0xe8, 10, 0, 0, 1]); // AGGREGATOR
+    attrs.extend_from_slice(&[0xc0, 0x07, 0x07, 0, 0, 0xfd, 0xe9, 10, 0, 0]); // AGGREGATOR, 7 bytes
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    let update =
+        parse_bgp_update_message(Bytes::from(body.clone()), false, &AsnLength::Bits32).unwrap();
+    assert!(update
+        .attributes
+        .validation_warnings()
+        .iter()
+        .all(|w| matches!(w, BgpValidationWarning::DuplicateAttribute { .. })));
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    let elem = &elems[0];
+    assert_eq!(elem.elem_type, ElemType::ANNOUNCE);
+    assert_eq!(
+        elem.error_handling,
+        Some(ErrorHandlingApproach::AttributeDiscard)
+    );
+    assert_eq!(
+        elem.communities,
+        Some(vec![MetaCommunity::Plain(Community::Custom(
+            Asn::new_32bit(1),
+            1
+        ))])
+    );
+    assert_eq!(elem.aggr_asn, Some(Asn::new_32bit(65000)));
+    assert_routes_match_elems(&body, true);
 }
 
 #[test]
@@ -690,6 +728,27 @@ fn test_repeated_mp_reach_is_session_reset() {
     assert!(!elems.is_empty());
     assert!(elems.iter().all(|e| e.elem_type == ElemType::RESET
         && e.error_handling == Some(ErrorHandlingApproach::SessionReset)));
+}
+
+#[test]
+fn test_repeated_mp_reach_counts_only_the_first() {
+    // the repeat announces 2001:db8:1::/48; both iterators report only the
+    // first MP_REACH_NLRI's 2001:db8::/32
+    let mut repeat = ipv6_mp_reach();
+    let len = repeat.len();
+    repeat[len - 5..].copy_from_slice(&[48, 0x20, 0x01, 0x0d, 0xb8]);
+    repeat.extend_from_slice(&[0x00, 0x01]);
+    repeat[2] += 2;
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x00];
+    attrs.extend_from_slice(&ipv6_mp_reach());
+    attrs.extend_from_slice(&repeat);
+    let body = build_update_body(&[], &attrs, &[]);
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].prefix.to_string(), "2001:db8::/32");
+    assert_eq!(elems[0].elem_type, ElemType::RESET);
+    assert_routes_match_elems(&body, true);
 }
 
 #[test]
@@ -816,6 +875,25 @@ fn test_route_iterator_matches_elems_under_rfc7606() {
             .as_deref()
             .map(|p| p.to_string()),
         Some("23456".to_string())
+    );
+}
+
+#[test]
+fn test_repeated_as4_path_keeps_the_first_in_both_iterators() {
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00];
+    attrs.extend_from_slice(&[0x40, 0x02, 0x06, 0x02, 0x01, 0x00, 0x00, 0x5b, 0xa0]); // AS_TRANS
+    attrs.extend_from_slice(&[0x40, 0x03, 0x04, 1, 2, 3, 4]);
+    attrs.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0x34, 0x17]); // [13335]
+    attrs.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0xfb, 0xf4]); // [64500]
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    assert_routes_match_elems(&body, true);
+    assert_eq!(
+        routes_of(&body)[0]
+            .as_path
+            .as_deref()
+            .map(|p| p.to_string()),
+        Some("13335".to_string())
     );
 }
 

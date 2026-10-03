@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+* **Repeated attributes report only `DuplicateAttribute`**: RFC 7606 §3(g) discards every repeat of an attribute, so flag, length and value errors in a repeat are no longer reported, and no longer withdraw the routes or discard the valid first copy.
 * **`examples/treat_as_withdrawal.rs` uses the library classification**: the example's own Junos-style classifier is replaced by `error_handling_approach()` and `enable_rfc7606_error_handling()`.
 * **Internal cleanups, no behavior change**: the MP next-hop encoder (`encode_mp_next_hop`) is shared by the `NEXT_HOP` and MP_REACH encoders instead of being duplicated, `AsPathSegment` hashing skips the sort when a set is already ordered, `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises, the invariant `unreachable!()` arms state their invariant, and both the crate-wide `uninlined_format_args` allow and a module-wide `#![allow(unused)]` are removed.
 * **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.

@@ -789,7 +789,8 @@ impl Elementor {
             Some(approach) if approach.withdraws_routes() => {
                 return withdrawn_update_elems_iter(msg, timestamp, peer_ip, peer_asn, approach);
             }
-            Some(_) => discard_malformed_attributes(&mut msg.attributes),
+            Some(_) => DiscardPlan::from_warnings(&msg.attributes.validation_warnings)
+                .apply(&mut msg.attributes),
             None => {}
         }
 
@@ -858,23 +859,11 @@ impl Elementor {
     }
 }
 
-/// RFC 7606 attribute discard: drop the malformed attributes, and every occurrence of a repeated
-/// attribute after the first (RFC 7606 §3(g)).
-fn discard_malformed_attributes(attributes: &mut Attributes) {
-    let plan = DiscardPlan::from_warnings(&attributes.validation_warnings);
-    let mut seen = AttrCodeSet::default();
-    attributes.inner.retain(|attribute| {
-        let code = attribute.value.attr_code();
-        let keep = plan.keeps(code, seen.contains(code));
-        seen.insert(code);
-        keep
-    });
-}
-
 /// RFC 7606 treat-as-withdraw and stronger: no announced route is installed, so every announced
 /// prefix becomes a `WITHDRAW` element, or a `RESET` element when the approach is AFI/SAFI disable
 /// or session reset. The path attributes describe routes that are not installed, so no element
-/// carries them.
+/// carries them. As in the route iterator, only the first MP_REACH_NLRI and MP_UNREACH_NLRI
+/// count (RFC 7606 §3(g)).
 fn withdrawn_update_elems_iter(
     msg: BgpUpdateMessage,
     timestamp: f64,
@@ -884,7 +873,11 @@ fn withdrawn_update_elems_iter(
 ) -> BgpUpdateElemIter {
     let mut nlri_announced = Vec::new();
     let mut nlri_withdrawn = Vec::new();
+    let mut seen = AttrCodeSet::default();
     for attribute in msg.attributes.inner {
+        if !seen.insert(attribute.value.attr_code()) {
+            continue;
+        }
         match attribute.value {
             AttributeValue::MpReachNlri(nlri) => nlri_announced.extend(nlri.prefixes),
             AttributeValue::MpUnreachNlri(nlri) => nlri_withdrawn.extend(nlri.prefixes),
@@ -913,11 +906,7 @@ fn withdrawn_update_elems_iter(
         announced: msg.announced_prefixes.into_iter().chain(nlri_announced),
         withdrawn: msg.withdrawn_prefixes.into_iter().chain(nlri_withdrawn),
         in_withdrawn_phase: false,
-        announced_as: if approach >= ErrorHandlingApproach::AfiSafiDisable {
-            ElemType::RESET
-        } else {
-            ElemType::WITHDRAW
-        },
+        announced_as: approach.announced_elem_type(),
         error_handling: Some(approach),
     }
 }
@@ -972,7 +961,8 @@ impl From<&BgpElem> for Attributes {
         let mut attributes = Attributes::default();
         let prefix = value.prefix;
 
-        if value.elem_type == ElemType::WITHDRAW {
+        // RESET elems are routes RFC 7606 forbids installing, so they encode as withdrawals too
+        if !value.elem_type.is_announce() {
             values.push(AttributeValue::MpUnreachNlri(Nlri::new_unreachable(prefix)));
             attributes.extend(values);
             return attributes;
@@ -1158,6 +1148,18 @@ mod tests {
         let _attributes = Attributes::from(&elem);
         elem.elem_type = ElemType::WITHDRAW;
         let _attributes = Attributes::from(&elem);
+    }
+
+    #[test]
+    fn test_reset_elem_converts_to_withdrawal() {
+        let elem = BgpElem {
+            elem_type: ElemType::RESET,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            ..Default::default()
+        };
+        let attributes = Attributes::from(&elem);
+        assert!(attributes.has_attr(AttrType::MP_UNREACHABLE_NLRI));
+        assert!(!attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
     }
 
     #[test]

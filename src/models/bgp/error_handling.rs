@@ -20,7 +20,7 @@
 //! assumes **eBGP** and uses "attribute discard" for those three attributes.
 
 use crate::error::BgpValidationWarning;
-use crate::models::{Afi, AttrType, Attributes, BgpUpdateMessage, Safi};
+use crate::models::{Afi, AttrCodeSet, AttrType, Attributes, BgpUpdateMessage, ElemType, Safi};
 
 /// The action RFC 7606 §2 prescribes for an UPDATE message error.
 ///
@@ -49,6 +49,18 @@ impl ErrorHandlingApproach {
     /// and every stronger approach.
     pub fn withdraws_routes(&self) -> bool {
         *self >= ErrorHandlingApproach::TreatAsWithdraw
+    }
+
+    /// The element type of a prefix the UPDATE announces: `ANNOUNCE` for attribute discard,
+    /// `WITHDRAW` for treat-as-withdraw, `RESET` for AFI/SAFI disable and session reset.
+    pub(crate) fn announced_elem_type(self) -> ElemType {
+        match self {
+            ErrorHandlingApproach::AttributeDiscard => ElemType::ANNOUNCE,
+            ErrorHandlingApproach::TreatAsWithdraw => ElemType::WITHDRAW,
+            ErrorHandlingApproach::AfiSafiDisable | ErrorHandlingApproach::SessionReset => {
+                ElemType::RESET
+            }
+        }
     }
 }
 
@@ -145,6 +157,15 @@ pub fn malformed_attribute_approach(attr_type: AttrType) -> ErrorHandlingApproac
     }
 }
 
+/// The AFI/SAFI header an MP_REACH_NLRI or MP_UNREACH_NLRI value starts with, when it is long
+/// enough to carry one. The header identifies the family even when the rest did not decode.
+pub(crate) fn mp_nlri_family(bytes: &[u8]) -> Option<(u16, u8)> {
+    match bytes {
+        [afi_hi, afi_lo, safi, ..] => Some((u16::from_be_bytes([*afi_hi, *afi_lo]), *safi)),
+        _ => None,
+    }
+}
+
 /// Whether the parser fully decodes MP_REACH_NLRI and MP_UNREACH_NLRI of this family, so that a
 /// decode failure means the attribute is malformed rather than unsupported. Other families,
 /// such as VPN and FlowSpec, use encodings this parser does not implement.
@@ -231,17 +252,12 @@ impl BgpValidationWarning {
                 raw_bytes,
                 ..
             } => match *nlri_type {
-                "mp_reach" | "mp_unreach" => match raw_bytes.as_slice() {
+                "mp_reach" | "mp_unreach" => match mp_nlri_family(raw_bytes) {
                     // RFC 7606 §5.3 and §7.11: the AFI/SAFI header is readable, so the
                     // speaker may disable just that family.
-                    [afi_hi, afi_lo, safi, ..] => {
-                        let afi = u16::from_be_bytes([*afi_hi, *afi_lo]);
-                        if !decodes_mp_family(afi, *safi) {
-                            return None;
-                        }
-                        AfiSafiDisable
-                    }
-                    _ => SessionReset,
+                    Some((afi, safi)) if decodes_mp_family(afi, safi) => AfiSafiDisable,
+                    Some(_) => return None,
+                    None => SessionReset,
                 },
                 _ => SessionReset,
             },
@@ -252,23 +268,8 @@ impl BgpValidationWarning {
     }
 }
 
-/// RFC 7606 §5.2: an UPDATE that carries path attributes other than MP_UNREACH_NLRI but no
-/// reachable NLRI cannot be treated as withdrawn, so any error stronger than attribute discard
-/// resets the session.
-pub(crate) fn escalate_without_reachability(
-    approach: ErrorHandlingApproach,
-    has_reachable_nlri: bool,
-    has_attrs_other_than_mp_unreach: bool,
-) -> ErrorHandlingApproach {
-    if !has_reachable_nlri && has_attrs_other_than_mp_unreach && approach.withdraws_routes() {
-        ErrorHandlingApproach::SessionReset
-    } else {
-        approach
-    }
-}
-
 /// The strongest approach across `warnings`, per RFC 7606 §3(h).
-pub(crate) fn strongest_approach<'a>(
+fn strongest_approach<'a>(
     warnings: impl IntoIterator<Item = &'a BgpValidationWarning>,
 ) -> Option<ErrorHandlingApproach> {
     warnings
@@ -277,23 +278,29 @@ pub(crate) fn strongest_approach<'a>(
         .max()
 }
 
-/// Bitmask over attribute type codes, used to pick the attributes attribute discard removes.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AttrCodeSet([u64; 4]);
-
-impl AttrCodeSet {
-    pub(crate) fn insert(&mut self, code: u8) {
-        self.0[(code / 64) as usize] |= 1u64 << (code % 64);
-    }
-
-    pub(crate) fn contains(&self, code: u8) -> bool {
-        self.0[(code / 64) as usize] & (1u64 << (code % 64)) != 0
+/// The RFC 7606 approach for a whole UPDATE with these findings: the strongest one (§3(h)),
+/// escalated to session reset when the UPDATE carries path attributes other than MP_UNREACH_NLRI
+/// but no reachable NLRI, which leaves nothing to treat as withdrawn (§5.2).
+///
+/// Both [`BgpUpdateMessage::error_handling_approach`] and the route iterator judge UPDATEs with
+/// this, so the two agree on the same findings.
+pub(crate) fn update_approach<'a>(
+    warnings: impl IntoIterator<Item = &'a BgpValidationWarning>,
+    has_reachable_nlri: bool,
+    has_attrs_other_than_mp_unreach: bool,
+) -> Option<ErrorHandlingApproach> {
+    let approach = strongest_approach(warnings)?;
+    if !has_reachable_nlri && has_attrs_other_than_mp_unreach && approach.withdraws_routes() {
+        Some(ErrorHandlingApproach::SessionReset)
+    } else {
+        Some(approach)
     }
 }
 
 /// The attributes RFC 7606 attribute discard removes, given an UPDATE's findings: every
 /// occurrence of an attribute with a finding, and the second and later occurrences of a
-/// repeated attribute (RFC 7606 §3(g)).
+/// repeated attribute (RFC 7606 §3(g)). Findings only ever concern the first occurrence; see
+/// `AttributeValidationState::is_repeat`.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct DiscardPlan {
     pub(crate) drop_all: AttrCodeSet,
@@ -311,9 +318,11 @@ impl DiscardPlan {
             };
             match warning {
                 BgpValidationWarning::DuplicateAttribute { .. } => {
-                    plan.keep_first.insert(u8::from(attr_type))
+                    plan.keep_first.insert(u8::from(attr_type));
                 }
-                _ => plan.drop_all.insert(u8::from(attr_type)),
+                _ => {
+                    plan.drop_all.insert(u8::from(attr_type));
+                }
             }
         }
         plan
@@ -322,6 +331,16 @@ impl DiscardPlan {
     /// Whether the attribute with `code`, seen before iff `seen` is true, survives.
     pub(crate) fn keeps(&self, code: u8, seen: bool) -> bool {
         !self.drop_all.contains(code) && !(seen && self.keep_first.contains(code))
+    }
+
+    /// Applies the plan to `attributes`, in wire order.
+    pub(crate) fn apply(&self, attributes: &mut Attributes) {
+        let mut seen = AttrCodeSet::default();
+        attributes.inner.retain(|attribute| {
+            let code = attribute.value.attr_code();
+            let first = seen.insert(code);
+            self.keeps(code, !first)
+        });
     }
 }
 
@@ -351,14 +370,13 @@ impl BgpUpdateMessage {
     /// This is the strongest approach across the findings (RFC 7606 §3(h)), escalated to
     /// session reset when the UPDATE carries attributes but no reachable NLRI (§5.2).
     pub fn error_handling_approach(&self) -> Option<ErrorHandlingApproach> {
-        let approach = self.attributes.error_handling_approach()?;
         let has_reachable_nlri = !self.announced_prefixes.is_empty()
             || self.attributes.has_attr(AttrType::MP_REACHABLE_NLRI);
-        Some(escalate_without_reachability(
-            approach,
+        update_approach(
+            &self.attributes.validation_warnings,
             has_reachable_nlri,
             self.attributes.has_attrs_other_than_mp_unreach(),
-        ))
+        )
     }
 
     /// Whether RFC 7606 forbids installing the routes this UPDATE announces: true when its
