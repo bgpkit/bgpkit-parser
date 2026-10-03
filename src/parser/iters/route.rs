@@ -1,6 +1,8 @@
 use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
-use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
+use crate::parser::bgp::attributes::{
+    parse_as_path, parse_nlri, parse_origin, AttributeValidationState,
+};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
 use crate::parser::iters::{handle_record_parse_error, write_mrt_core_dump};
 use crate::parser::mrt::messages::bgp4mp::{bgp4mp_message_payload_len, is_short_zebra_open};
@@ -24,6 +26,8 @@ struct RouteAttributes {
     as_path: Option<Arc<AsPath>>,
     announced: Vec<NetworkPrefix>,
     withdrawn: Vec<NetworkPrefix>,
+    /// RFC 7606 approach, when the attributes were judged.
+    approach: Option<ErrorHandlingApproach>,
 }
 
 struct RouteAttributeContext<'a> {
@@ -32,6 +36,34 @@ struct RouteAttributeContext<'a> {
     prefixes: Option<&'a [NetworkPrefix]>,
     is_announcement: Option<bool>,
     has_standard_nlri: bool,
+    /// Judge the attributes as the minimal RFC 7606 speaker described at
+    /// [`minimal_speaker_recognizes`].
+    judge: bool,
+}
+
+/// The attributes the route iterator recognizes under RFC 7606 error handling.
+///
+/// The route iterator acts as a minimal BGP speaker: it recognizes the well-known attributes,
+/// which RFC 4271 §5 requires every speaker to recognize, plus the attributes routes are built
+/// from: MP_REACH_NLRI and MP_UNREACH_NLRI for multiprotocol routes, and AS4_PATH for the AS path
+/// of 2-octet sessions. Every other attribute is handled like an unrecognized optional attribute,
+/// which RFC 4271 §5 has a speaker ignore, so it is not judged. Only a clear optional bit on an
+/// attribute outside this set is a finding (RFC 4271 §6.3).
+///
+/// The element iterators judge every attribute this crate parses, so the two can disagree: a
+/// malformed COMMUNITIES withdraws the routes there and is ignored here.
+fn minimal_speaker_recognizes(attr_type: AttrType) -> bool {
+    matches!(
+        attr_type,
+        AttrType::ORIGIN
+            | AttrType::AS_PATH
+            | AttrType::NEXT_HOP
+            | AttrType::LOCAL_PREFERENCE
+            | AttrType::ATOMIC_AGGREGATE
+            | AttrType::MP_REACHABLE_NLRI
+            | AttrType::MP_UNREACHABLE_NLRI
+            | AttrType::AS4_PATH
+    )
 }
 
 fn merge_as_path(as_path: Option<AsPath>, as4_path: Option<AsPath>) -> Option<Arc<AsPath>> {
@@ -49,11 +81,14 @@ fn parse_route_attributes(
     add_path: bool,
     ctx: RouteAttributeContext<'_>,
 ) -> Result<RouteAttributes, ParserError> {
+    let judge = ctx.judge;
     let mut validation = AttributeValidationState::new();
     let mut as_path = None;
     let mut as4_path = None;
     let mut announced = Vec::new();
     let mut withdrawn = Vec::new();
+    let mut overrun = false;
+    let mut has_attrs_other_than_mp_unreach = false;
 
     while data.remaining() >= 3 {
         let flags = AttrFlags::from_bits_retain(data.read_u8()?);
@@ -64,25 +99,59 @@ fn parse_route_attributes(
             data.read_u8()? as usize
         };
         let attr_type = AttrType::from(raw_attr_type);
-        let partial = validation.observe_header(raw_attr_type, attr_type, flags, attr_length);
+        has_attrs_other_than_mp_unreach |= attr_type != AttrType::MP_UNREACHABLE_NLRI;
+        let partial = match (judge, minimal_speaker_recognizes(attr_type)) {
+            (false, _) => false,
+            (true, true) => validation.observe_header(raw_attr_type, attr_type, flags, attr_length),
+            (true, false) => {
+                validation.observe_unrecognized_header(raw_attr_type, flags);
+                false
+            }
+        };
 
         if data.remaining() < attr_length {
-            warn!(
-                "{:?} attribute encodes a length ({}) that is longer than the remaining attribute data ({}). Skipping remaining attribute data for BGP message",
-                attr_type,
-                attr_length,
-                data.remaining()
-            );
+            if judge {
+                validation.observe_attribute_overrun(attr_type, attr_length, data.remaining());
+            } else {
+                warn!(
+                    "{:?} attribute encodes a length ({}) that is longer than the remaining attribute data ({}). Skipping remaining attribute data for BGP message",
+                    attr_type,
+                    attr_length,
+                    data.remaining()
+                );
+            }
+            overrun = true;
             break;
         }
 
         let attr_data = data.split_to(attr_length);
+        // findings on these attributes carry their bytes; cloning `Bytes` is a refcount bump
+        let raw_bytes = (judge
+            && matches!(
+                attr_type,
+                AttrType::ORIGIN | AttrType::MP_REACHABLE_NLRI | AttrType::MP_UNREACHABLE_NLRI
+            ))
+        .then(|| attr_data.clone());
         let result = match attr_type {
+            // ORIGIN is the only recognized fixed-size attribute with a value to check; the
+            // length rules cover NEXT_HOP, LOCAL_PREF and ATOMIC_AGGREGATE
+            AttrType::ORIGIN if judge => parse_origin(attr_data).map(|_| ()),
             AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(|path| {
-                as_path = Some(path);
+                if judge {
+                    validation.observe_as_path(&path);
+                    // RFC 7606 §3(g): only the first occurrence counts
+                    as_path.get_or_insert(path);
+                } else {
+                    as_path = Some(path);
+                }
             }),
             AttrType::AS4_PATH => parse_as_path(attr_data, &AsnLength::Bits32).map(|path| {
-                as4_path = Some(path);
+                if judge {
+                    validation.observe_as4_path(&path);
+                    as4_path.get_or_insert(path);
+                } else {
+                    as4_path = Some(path);
+                }
             }),
             AttrType::MP_REACHABLE_NLRI => parse_nlri(
                 attr_data,
@@ -113,20 +182,48 @@ fn parse_route_attributes(
             _ => Ok(()),
         };
 
-        if let Err(err) = result {
-            validation.observe_parse_error(attr_type, partial, &err);
+        if let (true, Err(err)) = (judge, result) {
+            validation.observe_parse_error(
+                attr_type,
+                partial,
+                &err,
+                raw_bytes.as_deref().unwrap_or_default(),
+            );
         }
     }
 
-    let is_announcement = ctx
-        .is_announcement
-        .unwrap_or(ctx.has_standard_nlri || validation.has_attr(AttrType::MP_REACHABLE_NLRI));
-    validation.check_mandatory_attributes(is_announcement, ctx.has_standard_nlri);
-    let _warnings = validation.finish();
+    let mut approach = None;
+    if judge {
+        if !overrun {
+            validation.observe_trailing_bytes(data.remaining());
+        }
+        let has_mp_reach = validation.has_attr(AttrType::MP_REACHABLE_NLRI);
+        let is_announcement = ctx
+            .is_announcement
+            .unwrap_or(ctx.has_standard_nlri || has_mp_reach);
+        validation.check_mandatory_attributes(is_announcement, ctx.has_standard_nlri);
+        let (warnings, _) = validation.finish();
+        approach = strongest_approach(&warnings).map(|approach| {
+            escalate_without_reachability(
+                approach,
+                ctx.has_standard_nlri || has_mp_reach,
+                has_attrs_other_than_mp_unreach,
+            )
+        });
+        // RFC 6793 §6: a malformed AS4_PATH is discarded
+        if warnings
+            .iter()
+            .any(|w| w.attr_type() == Some(AttrType::AS4_PATH))
+        {
+            as4_path = None;
+        }
+    }
+
     Ok(RouteAttributes {
         as_path: merge_as_path(as_path, as4_path),
         announced,
         withdrawn,
+        approach,
     })
 }
 
@@ -147,6 +244,9 @@ struct RouteUpdateIter {
     withdrawn:
         std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
     in_withdrawn_phase: bool,
+    /// `ANNOUNCE`, or `WITHDRAW` / `RESET` when RFC 7606 error handling withdrew the
+    /// announcements, in which case `as_path` is empty.
+    announced_as: ElemType,
 }
 
 impl RouteUpdateIter {
@@ -155,7 +255,7 @@ impl RouteUpdateIter {
             if let Some(prefix) = self.announced.next() {
                 return Some(BgpRouteElem {
                     timestamp: self.timestamp,
-                    elem_type: ElemType::ANNOUNCE,
+                    elem_type: self.announced_as,
                     peer_ip: self.peer_ip,
                     peer_asn: self.peer_asn,
                     prefix,
@@ -277,6 +377,7 @@ impl RouteTableDumpIter {
                 prefixes: None,
                 is_announcement: Some(true),
                 has_standard_nlri: self.afi == Afi::Ipv4,
+                judge: false,
             },
         )?;
 
@@ -340,6 +441,7 @@ impl RouteRibAfiIter {
                     prefixes: Some(&prefixes),
                     is_announcement: Some(true),
                     has_standard_nlri: self.afi == Afi::Ipv4,
+                    judge: false,
                 },
             )?;
             let Some(peer) = self.peer_table.get_peer_by_id(peer_index) else {
@@ -361,6 +463,22 @@ impl RouteRibAfiIter {
     }
 }
 
+/// Under RFC 7606 error handling, NLRI that do not parse are a session reset (RFC 7606 §3(i),
+/// §5.3) instead of a fatal error, as in the UPDATE parser.
+fn nlri_or_reset(
+    result: Result<Vec<NetworkPrefix>, ParserError>,
+    judge: bool,
+    reset: &mut bool,
+) -> Result<Vec<NetworkPrefix>, ParserError> {
+    match result {
+        Err(_) if judge => {
+            *reset = true;
+            Ok(Vec::new())
+        }
+        result => result,
+    }
+}
+
 fn parse_bgp_update_routes(
     mut input: Bytes,
     add_path: bool,
@@ -368,15 +486,27 @@ fn parse_bgp_update_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
+    mode: ErrorHandlingMode,
 ) -> Result<RouteUpdateIter, ParserError> {
+    let judge = mode == ErrorHandlingMode::Rfc7606;
+    let mut malformed_nlri = false;
     let withdrawn_len = input.read_u16()? as usize;
     input.has_n_remaining(withdrawn_len)?;
-    let withdrawn_prefixes = parse_nlri_list(input.split_to(withdrawn_len), add_path, &Afi::Ipv4)?;
+    let withdrawn_prefixes = nlri_or_reset(
+        parse_nlri_list(input.split_to(withdrawn_len), add_path, &Afi::Ipv4),
+        judge,
+        &mut malformed_nlri,
+    )?;
 
     let attribute_length = input.read_u16()? as usize;
     input.has_n_remaining(attribute_length)?;
     let attribute_bytes = input.split_to(attribute_length);
-    let announced_prefixes = parse_nlri_list(input, add_path, &Afi::Ipv4)?;
+    let announced_bytes_present = !input.is_empty();
+    let announced_prefixes = nlri_or_reset(
+        parse_nlri_list(input, add_path, &Afi::Ipv4),
+        judge,
+        &mut malformed_nlri,
+    )?;
     let attributes = parse_route_attributes(
         attribute_bytes,
         asn_len,
@@ -386,19 +516,53 @@ fn parse_bgp_update_routes(
             safi: None,
             prefixes: None,
             is_announcement: None,
-            has_standard_nlri: !announced_prefixes.is_empty(),
+            // judged like the UPDATE parser: NLRI bytes that fail to parse still announce
+            has_standard_nlri: if judge {
+                announced_bytes_present
+            } else {
+                !announced_prefixes.is_empty()
+            },
+            judge,
         },
     )?;
+
+    let approach = match malformed_nlri {
+        true => Some(ErrorHandlingApproach::SessionReset),
+        false => attributes.approach,
+    };
+    let announced_as = match approach {
+        Some(approach) if approach >= ErrorHandlingApproach::AfiSafiDisable => ElemType::RESET,
+        Some(approach) if approach.withdraws_routes() => ElemType::WITHDRAW,
+        _ => ElemType::ANNOUNCE,
+    };
 
     Ok(RouteUpdateIter {
         timestamp,
         peer_ip,
         peer_asn,
-        as_path: attributes.as_path,
+        as_path: match announced_as {
+            ElemType::ANNOUNCE => attributes.as_path,
+            _ => None,
+        },
         announced: announced_prefixes.into_iter().chain(attributes.announced),
         withdrawn: withdrawn_prefixes.into_iter().chain(attributes.withdrawn),
         in_withdrawn_phase: false,
+        announced_as,
     })
+}
+
+fn parse_update_routes(
+    msg_data: Bytes,
+    add_path: bool,
+    asn_len: &AsnLength,
+    timestamp: f64,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    mode: ErrorHandlingMode,
+) -> Result<RouteRecordIter, ParserError> {
+    Ok(RouteRecordIter::Update(parse_bgp_update_routes(
+        msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn, mode,
+    )?))
 }
 
 fn parse_bgp_message_routes(
@@ -408,6 +572,7 @@ fn parse_bgp_message_routes(
     timestamp: f64,
     peer_ip: IpAddr,
     peer_asn: Asn,
+    mode: ErrorHandlingMode,
 ) -> Result<RouteRecordIter, ParserError> {
     let total_size = data.len();
     data.has_n_remaining(19)?;
@@ -444,9 +609,9 @@ fn parse_bgp_message_routes(
     let msg_data = data.split_to(bgp_msg_length);
 
     match msg_type {
-        BgpMessageType::UPDATE => Ok(RouteRecordIter::Update(parse_bgp_update_routes(
-            msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn,
-        )?)),
+        BgpMessageType::UPDATE => parse_update_routes(
+            msg_data, add_path, asn_len, timestamp, peer_ip, peer_asn, mode,
+        ),
         BgpMessageType::OPEN
         | BgpMessageType::NOTIFICATION
         | BgpMessageType::KEEPALIVE
@@ -472,6 +637,7 @@ fn parse_bgp4mp_routes(
     sub_type: u16,
     mut data: Bytes,
     timestamp: f64,
+    mode: ErrorHandlingMode,
 ) -> Result<RouteRecordIter, ParserError> {
     let msg_type = Bgp4MpType::try_from(sub_type)?;
     let Some((asn_len, add_path)) = bgp4mp_asn_len_and_add_path(msg_type) else {
@@ -490,6 +656,7 @@ fn parse_bgp4mp_routes(
             timestamp,
             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             peer_asn,
+            mode,
         );
     }
     let _interface_index = data.read_u16()?;
@@ -506,7 +673,7 @@ fn parse_bgp4mp_routes(
         )));
     }
 
-    parse_bgp_message_routes(data, add_path, &asn_len, timestamp, peer_ip, peer_asn)
+    parse_bgp_message_routes(data, add_path, &asn_len, timestamp, peer_ip, peer_asn, mode)
 }
 
 fn table_dump_v2_afi_safi(rib_type: TableDumpV2Type) -> Result<(Afi, Safi), ParserError> {
@@ -564,6 +731,7 @@ fn parse_legacy_bgp_routes(
     sub_type: u16,
     mut data: Bytes,
     timestamp: f64,
+    mode: ErrorHandlingMode,
 ) -> Result<RouteRecordIter, ParserError> {
     match sub_type {
         BGP_UPDATE => {
@@ -571,14 +739,15 @@ fn parse_legacy_bgp_routes(
             let peer_ip = IpAddr::V4(data.read_ipv4_address()?);
             let _local_asn = data.read_u16()?;
             let _local_ip = data.read_ipv4_address()?;
-            Ok(RouteRecordIter::Update(parse_bgp_update_routes(
+            parse_update_routes(
                 data,
                 false,
                 &AsnLength::Bits16,
                 timestamp,
                 peer_ip,
                 peer_asn,
-            )?))
+                mode,
+            )
         }
         BGP_STATE_CHANGE | BGP_OPEN | BGP_NOTIFY | BGP_KEEPALIVE => {
             parse_legacy_bgp(sub_type, data)?;
@@ -633,6 +802,7 @@ fn parse_table_dump_v2_routes(
 fn parse_raw_record_route_iter(
     raw_record: crate::RawMrtRecord,
     peer_table: &mut Option<RoutePeerTable>,
+    mode: ErrorHandlingMode,
 ) -> Result<RouteRecordIter, ParserError> {
     let timestamp = record_timestamp(&raw_record.common_header);
     match raw_record.common_header.entry_type {
@@ -649,11 +819,13 @@ fn parse_raw_record_route_iter(
             raw_record.common_header.entry_subtype,
             raw_record.message_bytes,
             timestamp,
+            mode,
         ),
         EntryType::BGP => parse_legacy_bgp_routes(
             raw_record.common_header.entry_subtype,
             raw_record.message_bytes,
             timestamp,
+            mode,
         ),
         v => Err(ParserError::Unsupported(format!(
             "unsupported MRT type: {v:?}"
@@ -731,7 +903,11 @@ impl<R: Read> Iterator for RouteIterator<R> {
 
             let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
             let raw_bytes = raw_record.raw_bytes().to_vec();
-            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+            match parse_raw_record_route_iter(
+                raw_record,
+                &mut self.peer_table,
+                self.parser.options.error_handling,
+            ) {
                 Ok(routes) => {
                     if used_zebra_compat {
                         self.parser.warn_zebra_compat_once();
@@ -809,7 +985,11 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
 
             let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
             let raw_bytes = raw_record.raw_bytes().to_vec();
-            match parse_raw_record_route_iter(raw_record, &mut self.peer_table) {
+            match parse_raw_record_route_iter(
+                raw_record,
+                &mut self.peer_table,
+                self.parser.options.error_handling,
+            ) {
                 Ok(routes) => {
                     if used_zebra_compat {
                         self.parser.warn_zebra_compat_once();
@@ -1178,11 +1358,15 @@ mod tests {
         data.put_u16(Afi::LinkState as u16);
         data.put_slice(&BgpMessage::KeepAlive.encode(AsnLength::Bits16).unwrap());
 
-        let error =
-            match parse_bgp4mp_routes(Bgp4MpType::Message as u16, data.freeze(), 1_700_000_000.0) {
-                Err(error) => error,
-                Ok(_) => panic!("unexpectedly parsed BGP4MP routes"),
-            };
+        let error = match parse_bgp4mp_routes(
+            Bgp4MpType::Message as u16,
+            data.freeze(),
+            1_700_000_000.0,
+            ErrorHandlingMode::Preserve,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("unexpectedly parsed BGP4MP routes"),
+        };
         assert!(matches!(
             error,
             ParserError::ParseError(message)
@@ -1367,6 +1551,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(true),
                 has_standard_nlri: true,
+                judge: false,
             },
         )
         .unwrap();
@@ -1391,6 +1576,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(true),
                 has_standard_nlri: true,
+                judge: false,
             },
         )
         .unwrap();
@@ -1416,6 +1602,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(false),
                 has_standard_nlri: false,
+                judge: false,
             },
         )
         .unwrap();
@@ -1438,6 +1625,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(false),
                 has_standard_nlri: false,
+                judge: false,
             },
         )
         .unwrap();
@@ -1465,6 +1653,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(false),
                 has_standard_nlri: false,
+                judge: false,
             },
         )
         .unwrap();
@@ -1483,6 +1672,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(false),
                 has_standard_nlri: false,
+                judge: false,
             },
         )
         .unwrap();
@@ -1501,6 +1691,7 @@ mod tests {
                 prefixes: None,
                 is_announcement: Some(false),
                 has_standard_nlri: false,
+                judge: false,
             },
         )
         .unwrap();
@@ -1657,7 +1848,8 @@ mod tests {
             &AsnLength::Bits16,
             1_700_000_000.0,
             "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496)
+            Asn::new_16bit(64496),
+            ErrorHandlingMode::Preserve,
         )
         .is_err());
         assert!(parse_bgp_message_routes(
@@ -1666,7 +1858,8 @@ mod tests {
             &AsnLength::Bits16,
             1_700_000_000.0,
             "192.0.2.1".parse().unwrap(),
-            Asn::new_16bit(64496)
+            Asn::new_16bit(64496),
+            ErrorHandlingMode::Preserve,
         )
         .is_err());
 
@@ -1678,6 +1871,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                ErrorHandlingMode::Preserve,
             )
             .unwrap(),
         )
@@ -1692,6 +1886,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                ErrorHandlingMode::Preserve,
             )
             .unwrap(),
         )
@@ -1706,6 +1901,7 @@ mod tests {
                 1_700_000_000.0,
                 "192.0.2.1".parse().unwrap(),
                 Asn::new_16bit(64496),
+                ErrorHandlingMode::Preserve,
             )
             .unwrap(),
         )

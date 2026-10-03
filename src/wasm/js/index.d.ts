@@ -215,7 +215,8 @@ export interface BmpPeerHeader {
 
 export interface BgpElem {
   timestamp: number;
-  type: "ANNOUNCE" | "WITHDRAW";
+  /** `RESET` only appears when RFC 7606 error handling is enabled, which the WASM bindings do not do. */
+  type: "ANNOUNCE" | "WITHDRAW" | "RESET";
   peer_ip: string;
   peer_asn: number;
   peer_bgp_id: string | null;
@@ -235,6 +236,11 @@ export interface BgpElem {
   unknown: { code: number; bytes: number[] }[] | null;
   /** Deprecated attributes serialized as `{ code, bytes }` entries. */
   deprecated: { code: number; bytes: number[] }[] | null;
+  /**
+   * RFC 7606 approach applied to the element's UPDATE. Present only when RFC 7606 error
+   * handling is enabled and the UPDATE had validation findings.
+   */
+  error_handling?: "attribute_discard" | "treat_as_withdraw" | "afi_safi_disable" | "session_reset";
 }
 
 // ── AS path types ────────────────────────────────────────────────────

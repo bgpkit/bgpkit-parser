@@ -808,7 +808,12 @@ mod tests {
         invalid_origin[3] = 3;
         assert_wire_validation(
             bgp4mp_update_wire(&[], &invalid_origin, &announced),
-            |warning| matches!(warning, BgpValidationWarning::MalformedAttributeList { .. }),
+            |warning| {
+                matches!(
+                    warning,
+                    BgpValidationWarning::InvalidOriginAttribute { value: 3 }
+                )
+            },
         );
 
         let malformed_as_path = vec![
@@ -818,7 +823,7 @@ mod tests {
         ];
         assert_wire_validation(
             bgp4mp_update_wire(&[], &malformed_as_path, &announced),
-            |warning| matches!(warning, BgpValidationWarning::MalformedAttributeList { .. }),
+            |warning| matches!(warning, BgpValidationWarning::MalformedAsPath { .. }),
         );
 
         let invalid_next_hop = vec![

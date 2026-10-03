@@ -380,6 +380,7 @@ fn entry_to_elem(
         only_to_customer: None,
         unknown: None,
         deprecated: None,
+        error_handling: None,
         peer_bgp_id: None,
     })
 }

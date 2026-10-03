@@ -169,6 +169,7 @@ pub struct RecoveringRecordIterator<R> {
 
 impl<R> RecoveringRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>, config: RecoveryConfig) -> Self {
+        let elementor = parser.options.elementor();
         let unsupported_input = parser.text_dump_iter.is_some().then(|| {
             "text-dump parsers have no MRT record representation; iterate elements instead"
                 .to_string()
@@ -177,7 +178,7 @@ impl<R> RecoveringRecordIterator<R> {
             reader: CarryoverReader::new(parser.reader),
             config,
             filters: parser.filters,
-            elementor: Elementor::new(),
+            elementor,
             options: parser.options,
             core_dump: parser.core_dump,
             unsupported_input,
@@ -344,12 +345,13 @@ pub struct RecoveringElemIterator<R> {
 
 impl<R> RecoveringElemIterator<R> {
     pub(crate) fn new(mut parser: BgpkitParser<R>, config: RecoveryConfig) -> Self {
+        let elementor = parser.options.elementor();
         // Elements are filtered here; strip the parser filters so the inner record
         // iterator does not also convert every record for record-level matching.
         let filters = std::mem::take(&mut parser.filters);
         Self {
             inner: RecoveringRecordIterator::new(parser, config),
-            elementor: Elementor::new(),
+            elementor,
             filters,
             cache_elems: Vec::new(),
         }

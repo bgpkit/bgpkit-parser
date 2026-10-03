@@ -267,8 +267,10 @@ pub enum BgpValidationWarning {
     PartialAttributeError { attr_type: AttrType, reason: String },
     /// Malformed NLRI field (RFC 7606 §5.3). The UPDATE message was parseable
     /// up to the NLRI section, but the NLRI itself contained syntactic errors.
-    /// Per RFC 7606, the recommended action is "treat-as-withdrawal": all
-    /// routes carried in the NLRI section should be withdrawn.
+    /// Treat-as-withdraw needs the NLRI, so RFC 7606 §3(i) and §5.3 call for a
+    /// session reset, or AFI/SAFI disable for a multiprotocol attribute whose
+    /// family is known; see
+    /// [`error_handling_approach`](BgpValidationWarning::error_handling_approach).
     ///
     /// `nlri_type` distinguishes between the standard (IPv4 unicast) NLRI
     /// field and the multiprotocol NLRI carried inside MP_REACH/MP_UNREACH

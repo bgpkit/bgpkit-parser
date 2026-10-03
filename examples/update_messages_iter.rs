@@ -121,6 +121,8 @@ fn main() {
         match elem.elem_type {
             ElemType::ANNOUNCE => elem_iter_announced += 1,
             ElemType::WITHDRAW => elem_iter_withdrawn += 1,
+            // RESET elems only appear with RFC 7606 error handling enabled
+            _ => {}
         }
     }
 

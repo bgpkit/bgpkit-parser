@@ -10,11 +10,15 @@ use std::sync::Arc;
 
 /// # ElemType
 ///
-/// `ElemType` is an enumeration that represents the type of an element.
-/// It has two possible values:
+/// `ElemType` is an enumeration that represents the type of an element:
 ///
 /// - `ANNOUNCE`: Indicates an announcement/reachable prefix.
 /// - `WITHDRAW`: Indicates a withdrawn/unreachable prefix.
+/// - `RESET`: A prefix announced in an UPDATE whose errors require a session reset or AFI/SAFI
+///   disable under RFC 7606. Only produced when RFC 7606 error handling is enabled; see
+///   [`ErrorHandlingMode`].
+///
+/// The enumeration is `#[non_exhaustive]`: match it with a wildcard arm.
 ///
 /// The enumeration derives the traits `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, and `Hash`.
 ///
@@ -41,9 +45,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
+#[non_exhaustive]
 pub enum ElemType {
     ANNOUNCE,
     WITHDRAW,
+    /// A prefix announced in an UPDATE that RFC 7606 says resets the session (or disables the
+    /// AFI/SAFI). Such a route is not installed, and the peer's other routes would be lost
+    /// with the session, which a per-UPDATE element cannot express.
+    RESET,
 }
 
 impl ElemType {
@@ -65,7 +74,7 @@ impl ElemType {
     pub fn is_announce(&self) -> bool {
         match self {
             ElemType::ANNOUNCE => true,
-            ElemType::WITHDRAW => false,
+            ElemType::WITHDRAW | ElemType::RESET => false,
         }
     }
 }
@@ -93,6 +102,8 @@ impl ElemType {
 /// - `only_to_customer`: The AS number to which the prefix is only announced.
 /// - `unknown`: Unknown attributes formatted as (TYPE, RAW_BYTES).
 /// - `deprecated`: Deprecated attributes formatted as (TYPE, RAW_BYTES).
+/// - `error_handling`: The RFC 7606 approach applied to the UPDATE this element came from, when
+///   RFC 7606 error handling is enabled and the UPDATE had errors.
 ///
 /// Note: Constructing BGP elements consumes more memory due to duplicate information
 /// shared between multiple elements of one MRT record.
@@ -155,6 +166,17 @@ pub struct BgpElem {
     pub unknown: Option<Vec<AttrRaw>>,
     /// deprecated attributes formatted as (TYPE, RAW_BYTES)
     pub deprecated: Option<Vec<AttrRaw>>,
+    /// The RFC 7606 approach applied to the UPDATE this element came from.
+    ///
+    /// Set only when RFC 7606 error handling is enabled (see [`ErrorHandlingMode`]) and the
+    /// UPDATE had validation findings; `None` otherwise. It tells a withdrawal synthesized by
+    /// treat-as-withdraw apart from one the peer sent, and marks announcements whose malformed
+    /// attributes were discarded. It is not part of the PSV output.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub error_handling: Option<ErrorHandlingApproach>,
 }
 
 /// Lightweight per-prefix route element.
@@ -240,6 +262,7 @@ impl Default for BgpElem {
             only_to_customer: None,
             unknown: None,
             deprecated: None,
+            error_handling: None,
         }
     }
 }
@@ -302,6 +325,7 @@ impl Display for BgpElem {
         let t = match self.elem_type {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
+            ElemType::RESET => "R",
         };
         write!(
             f,
@@ -329,6 +353,7 @@ impl Display for BgpRouteElem {
         let t = match self.elem_type {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
+            ElemType::RESET => "R",
         };
         write!(
             f,
@@ -414,6 +439,7 @@ impl BgpElem {
         let t = match self.elem_type {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
+            ElemType::RESET => "R",
         };
         format!(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",

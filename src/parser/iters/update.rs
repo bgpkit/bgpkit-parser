@@ -154,9 +154,10 @@ pub struct UpdateIterator<R> {
 
 impl<R> UpdateIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         UpdateIterator {
             parser,
-            elementor: Elementor::new(),
+            elementor,
             pending_table_dump: Vec::new(),
         }
     }
@@ -276,9 +277,10 @@ pub struct FallibleUpdateIterator<R> {
 
 impl<R> FallibleUpdateIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         FallibleUpdateIterator {
             parser,
-            elementor: Elementor::new(),
+            elementor,
             pending_table_dump: Vec::new(),
             finished: false,
         }
@@ -779,6 +781,7 @@ mod tests {
             match elem.elem_type {
                 ElemType::ANNOUNCE => elem_iter_announced += 1,
                 ElemType::WITHDRAW => elem_iter_withdrawn += 1,
+                other => panic!("unexpected elem type {other:?} without RFC 7606 handling"),
             }
         }
 

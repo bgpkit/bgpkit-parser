@@ -236,6 +236,52 @@ match process_mrt_file("http://example.com/updates.bz2") {
 }
 ```
 
+**RFC 7606 Error Handling (Treat-as-Withdraw)**
+
+Malformed path attributes never stop parsing: each finding is recorded as a
+`BgpValidationWarning` on the UPDATE, and the attribute bytes are kept. RFC 7606 and the RFCs
+defining later attributes say what a router does with each finding: discard the attribute, treat
+the UPDATE's routes as withdrawn, disable the AFI/SAFI, or reset the session.
+`BgpUpdateMessage::error_handling_approach` returns that approach for an UPDATE, combining its
+findings with the "strongest action wins" rule. The attribute-to-approach table is
+`models::malformed_attribute_approach`.
+
+MRT data does not say whether a session was iBGP or eBGP. Route collectors peer over eBGP, so the
+classification assumes eBGP: a malformed LOCAL_PREF, ORIGINATOR_ID or CLUSTER_LIST is attribute
+discard, not treat-as-withdraw.
+
+Element output is unchanged unless you opt in with `enable_rfc7606_error_handling()`. Then:
+
+- announcements of an UPDATE that RFC 7606 treats as withdrawn become `ElemType::WITHDRAW`;
+- announcements of an UPDATE whose errors call for a session reset or AFI/SAFI disable become
+  `ElemType::RESET`;
+- attributes subject to attribute discard, and repeats of an attribute after its first
+  occurrence, are left out of the announcement;
+- every element of such an UPDATE carries the approach in `BgpElem::error_handling`.
+
+RIB dump entries are converted as before. The CLI flag is `--rfc7606`.
+
+The route iterator (`into_route_iter`) stays a cheap, selective parser under this mode: it judges
+UPDATEs as a minimal BGP speaker that recognizes only the well-known attributes, MP_REACH_NLRI,
+MP_UNREACH_NLRI and AS4_PATH, and ignores the rest as unrecognized optional attributes. A
+malformed COMMUNITIES therefore withdraws routes in the element iterator but not in the route
+iterator.
+
+```no_run
+use bgpkit_parser::BgpkitParser;
+use bgpkit_parser::models::{ElemType, ErrorHandlingApproach};
+
+let parser = BgpkitParser::new("https://data.ris.ripe.net/rrc00/latest-update.gz")
+    .unwrap()
+    .enable_rfc7606_error_handling();
+for elem in parser {
+    if elem.error_handling == Some(ErrorHandlingApproach::TreatAsWithdraw) {
+        assert_eq!(elem.elem_type, ElemType::WITHDRAW);
+        println!("treated as withdrawn: {}", elem.prefix);
+    }
+}
+```
+
 **Recovering After Damaged MRT Framing**
 
 Recovery is opt-in and never reconstructs a damaged record. It reports the skipped decompressed
@@ -755,7 +801,7 @@ See the [BgpElem] documentation for the complete structure definition.
 
 **Key fields**:
 - `timestamp`: Unix timestamp of the BGP message
-- `elem_type`: Announcement or withdrawal
+- `elem_type`: Announcement, withdrawal, or (with RFC 7606 error handling) reset
 - `peer_ip` / `peer_asn`: The BGP peer information
 - `prefix`: The IP prefix being announced or withdrawn
 - `as_path`: The AS path attribute (if present)
@@ -792,6 +838,7 @@ BGPKIT Parser implements comprehensive BGP, MRT, BMP, and related protocol stand
 - [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271): A Border Gateway Protocol 4 (BGP-4) - Core protocol
 - [RFC 2858](https://datatracker.ietf.org/doc/html/rfc2858): Multiprotocol Extensions for BGP-4 (IPv6 support)
 - [RFC 6793](https://datatracker.ietf.org/doc/html/rfc6793): Four-Octet AS Number Space
+- [RFC 7607](https://datatracker.ietf.org/doc/html/rfc7607): Codification of AS 0 Processing
 - [RFC 7911](https://datatracker.ietf.org/doc/html/rfc7911): Advertisement of Multiple Paths (ADD-PATH)
 
 **Additional BGP RFCs**:
