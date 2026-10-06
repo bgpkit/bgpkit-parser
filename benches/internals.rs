@@ -1,6 +1,6 @@
-use bgpkit_parser::BgpkitParser;
+use bgpkit_parser::{BgpkitParser, Elementor};
 use bzip2::bufread::BzDecoder;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use flate2::bufread::GzDecoder;
 use std::fs::File;
 use std::hint::black_box;
@@ -76,6 +76,29 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(x);
                 });
         })
+    });
+
+    // Record-to-elem conversion on its own: the records are parsed during setup, so only the
+    // Elementor is timed.
+    let update_records: Vec<_> = BgpkitParser::from_reader(&updates[..])
+        .into_record_iter()
+        .take(RECORD_LIMIT)
+        .collect();
+    c.bench_function("updates elementor record_to_elems_iter", |b| {
+        b.iter_batched(
+            || update_records.clone(),
+            |records| {
+                let elementor = Elementor::new();
+                for record in records {
+                    if let Ok(elems) = elementor.record_to_elems_iter(record) {
+                        elems.for_each(|x| {
+                            black_box(x);
+                        });
+                    }
+                }
+            },
+            BatchSize::LargeInput,
+        )
     });
 
     c.bench_function("updates into_update_iter", |b| {

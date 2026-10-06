@@ -3,6 +3,7 @@ Default iterator implementations that skip errors and return successfully parsed
 */
 use crate::models::*;
 use crate::parser::iters::{handle_record_parse_error, record_matches_filters};
+use crate::parser::mrt::mrt_elem::PendingElems;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use std::io::Read;
@@ -62,7 +63,7 @@ BgpElem Iterator
 **********/
 
 pub struct ElemIterator<R> {
-    cache_elems: Vec<BgpElem>,
+    pending: PendingElems,
     record_iter: RecordIterator<R>,
     elementor: Elementor,
     count: u64,
@@ -73,7 +74,7 @@ impl<R> ElemIterator<R> {
         ElemIterator {
             record_iter: RecordIterator::new(parser),
             count: 0,
-            cache_elems: vec![],
+            pending: PendingElems::Empty,
             elementor: Elementor::new(),
         }
     }
@@ -85,47 +86,26 @@ impl<R: Read> Iterator for ElemIterator<R> {
     fn next(&mut self) -> Option<BgpElem> {
         self.count += 1;
 
+        // Fast path: drain streaming text-dump elems directly, with filter support.
+        if let Some(iter) = &mut self.record_iter.parser.text_dump_iter {
+            for elem in iter.by_ref() {
+                if elem.match_filters(&self.record_iter.parser.filters) {
+                    return Some(elem);
+                }
+            }
+            return None;
+        }
+
         loop {
-            // Fast path: drain streaming text-dump elems directly, with filter support.
-            if let Some(iter) = &mut self.record_iter.parser.text_dump_iter {
-                for elem in iter.by_ref() {
-                    if elem.match_filters(&self.record_iter.parser.filters) {
-                        return Some(elem);
-                    }
+            // drain the current record's elems before reading the next record
+            while let Some(elem) = self.pending.next_elem(self.elementor.peer_table.as_ref()) {
+                if elem.match_filters(&self.record_iter.parser.filters) {
+                    return Some(elem);
                 }
-                return None;
             }
-
-            if self.cache_elems.is_empty() {
-                // refill cache elems
-                loop {
-                    match self.record_iter.next() {
-                        None => {
-                            // no more records
-                            return None;
-                        }
-                        Some(r) => {
-                            let mut elems = self.elementor.record_to_elems(r);
-                            if elems.is_empty() {
-                                // somehow this record does not contain any elems, continue to parse next record
-                                continue;
-                            } else {
-                                elems.reverse();
-                                self.cache_elems = elems;
-                                break;
-                            }
-                        }
-                    }
-                }
-                // when reaching here, the `self.cache_elems` has been refilled with some more elems
-            }
-
-            // popping cached elems. note that the original elems order is preseved by reversing the
-            // vector before putting it on to cache_elems.
-            let elem = self.cache_elems.pop()?;
-            if elem.match_filters(&self.record_iter.parser.filters) {
-                return Some(elem);
-            }
+            // records without elems leave nothing pending, and the loop moves on to the next
+            let record = self.record_iter.next()?;
+            self.pending = self.elementor.ingest(record);
         }
     }
 }

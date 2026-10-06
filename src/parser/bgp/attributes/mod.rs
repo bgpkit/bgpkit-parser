@@ -450,6 +450,9 @@ pub fn parse_attributes(
     let estimated_attrs = (data.remaining() / 3).min(256);
     let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs.max(8));
     let mut validation = AttributeValidationState::new();
+    // A handle on the whole attribute section, so an attribute that fails to parse can be kept
+    // raw by re-slicing it, without cloning every attribute's bytes up front.
+    let section = data.clone();
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -485,8 +488,8 @@ pub fn parse_attributes(
 
         // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
         data.has_n_remaining(attr_length)?;
+        let value_start = section.len() - data.len();
         let mut attr_data = data.split_to(attr_length);
-        let raw_bytes = attr_data.clone();
         let raw_code = u8::from(attr_type);
 
         if let Some(t) = get_deprecated_attr_type(raw_code) {
@@ -494,7 +497,7 @@ pub fn parse_attributes(
             attributes.push(Attribute {
                 value: AttributeValue::Deprecated(AttrRaw {
                     code: raw_code,
-                    bytes: raw_bytes,
+                    bytes: attr_data,
                 }),
                 flag,
             });
@@ -506,7 +509,7 @@ pub fn parse_attributes(
             attributes.push(Attribute {
                 value: AttributeValue::Unknown(AttrRaw {
                     code: raw_code,
-                    bytes: raw_bytes,
+                    bytes: attr_data,
                 }),
                 flag,
             });
@@ -518,7 +521,7 @@ pub fn parse_attributes(
             attributes.push(Attribute {
                 value: AttributeValue::Raw(AttrRaw {
                     code: raw_code,
-                    bytes: raw_bytes,
+                    bytes: attr_data,
                 }),
                 flag,
             });
@@ -587,7 +590,7 @@ pub fn parse_attributes(
                 attributes.push(Attribute {
                     value: AttributeValue::Raw(AttrRaw {
                         code: raw_code,
-                        bytes: raw_bytes,
+                        bytes: section.slice(value_start..value_start + attr_length),
                     }),
                     flag,
                 });
@@ -1010,6 +1013,40 @@ mod tests {
         assert_eq!(
             attributes.encode(AsnLength::Bits16).unwrap(),
             Bytes::from_static(&[0x40, 0x03, 0x03, 0x01, 0x02, 0x03])
+        );
+    }
+
+    #[test]
+    fn test_malformed_attribute_after_others_keeps_its_own_bytes() {
+        let data = Bytes::from(
+            [
+                // ORIGIN IGP
+                &[0x40, 0x01, 0x01, 0x00][..],
+                // NEXT_HOP with an extended length of 3 (must be 4)
+                &[0x50, 0x03, 0x00, 0x03, 0x0a, 0x0b, 0x0c],
+                // MED 7
+                &[0x80, 0x04, 0x04, 0x00, 0x00, 0x00, 0x07],
+            ]
+            .concat(),
+        );
+        let attributes =
+            parse_attributes(data, &AsnLength::Bits16, false, None, None, None).unwrap();
+
+        assert_eq!(attributes.inner.len(), 3);
+        assert_eq!(
+            attributes.inner[0].value,
+            AttributeValue::Origin(Origin::IGP)
+        );
+        match &attributes.inner[1].value {
+            AttributeValue::Raw(raw) => {
+                assert_eq!(raw.code, 3);
+                assert_eq!(raw.bytes, Bytes::from_static(&[0x0a, 0x0b, 0x0c]));
+            }
+            value => panic!("expected Raw fallback, got {value:?}"),
+        }
+        assert_eq!(
+            attributes.inner[2].value,
+            AttributeValue::MultiExitDiscriminator(7)
         );
     }
 
