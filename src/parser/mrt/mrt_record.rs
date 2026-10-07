@@ -292,6 +292,13 @@ pub(crate) fn parse_mrt_record_with_zebra_compat(
     input: &mut impl Read,
 ) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
     let raw_record = chunk_mrt_record(input)?;
+    parse_chunked_record_with_zebra_compat(raw_record)
+}
+
+/// Parse an already-chunked raw record instead of reading the next one.
+pub(crate) fn parse_chunked_record_with_zebra_compat(
+    raw_record: RawMrtRecord,
+) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
     let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
     // Parse from a clone so the original is available for raw_bytes() on error,
     // avoiding manual reassembly that could diverge from RawMrtRecord::raw_bytes().

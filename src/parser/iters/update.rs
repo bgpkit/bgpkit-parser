@@ -305,6 +305,7 @@ pub struct FallibleUpdateIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
     pending_table_dump: Vec<TableDumpMessage>,
+    finished: bool,
 }
 
 impl<R> FallibleUpdateIterator<R> {
@@ -313,6 +314,7 @@ impl<R> FallibleUpdateIterator<R> {
             parser,
             elementor: Elementor::new(),
             pending_table_dump: Vec::new(),
+            finished: false,
         }
     }
 }
@@ -329,8 +331,8 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
             if let Some(message) = self.pending_table_dump.pop() {
                 return Some(Ok(MrtUpdate::TableDumpMessage(message)));
             }
-            match self.parser.next_record() {
-                Ok(record) => {
+            match super::next_fallible_record(&mut self.parser, &mut self.finished) {
+                Some(Ok(record)) => {
                     let t = record.common_header.timestamp;
                     let timestamp: f64 =
                         if let Some(micro) = &record.common_header.microsecond_timestamp {
@@ -400,10 +402,8 @@ impl<R: Read> Iterator for FallibleUpdateIterator<R> {
                         }
                     }
                 }
-                Err(e) if matches!(e.error, ParserError::EofExpected) => {
-                    return None;
-                }
-                Err(e) => {
+                None => return None,
+                Some(Err(e)) => {
                     return Some(Err(e));
                 }
             }

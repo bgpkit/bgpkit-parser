@@ -778,6 +778,7 @@ pub struct FallibleRouteIterator<R> {
     pending_routes: RouteRecordIter,
     peer_table: Option<RoutePeerTable>,
     pending_raw_bytes: Option<Vec<u8>>,
+    finished: bool,
 }
 
 impl<R> FallibleRouteIterator<R> {
@@ -787,6 +788,7 @@ impl<R> FallibleRouteIterator<R> {
             pending_routes: RouteRecordIter::Empty,
             peer_table: None,
             pending_raw_bytes: None,
+            finished: false,
         }
     }
 }
@@ -819,11 +821,12 @@ impl<R: Read> Iterator for FallibleRouteIterator<R> {
                 }
             }
 
-            let raw_record = match chunk_mrt_record(&mut self.parser.reader) {
-                Ok(raw_record) => raw_record,
-                Err(e) if matches!(e.error, ParserError::EofExpected) => return None,
-                Err(e) => return Some(Err(e)),
-            };
+            let raw_record =
+                match super::next_fallible_raw_record(&mut self.parser.reader, &mut self.finished)?
+                {
+                    Ok(raw_record) => raw_record,
+                    Err(e) => return Some(Err(e)),
+                };
 
             let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
             let raw_bytes = raw_record.raw_bytes().to_vec();

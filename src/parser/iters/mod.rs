@@ -43,15 +43,62 @@ pub use update::{
     UpdateIterator,
 };
 
-use crate::error::ParserError;
+use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::BgpElem;
 use crate::models::{MrtMessage, MrtRecord, TableDumpV2Message};
-use crate::parser::BgpkitParser;
+use crate::parser::mrt::mrt_record::parse_chunked_record_with_zebra_compat;
+use crate::parser::{chunk_mrt_record, BgpkitParser};
 use crate::RawMrtRecord;
 use crate::{Elementor, Filter, Filterable};
 use log::{debug, error, warn};
 use std::io::Read;
 use std::path::Path;
+
+// Classify stream failures while framing: body parsing can also return
+// skippable IoErrors, but a failed decompressor must not be polled again.
+fn next_fallible_raw_record(
+    reader: &mut impl Read,
+    finished: &mut bool,
+) -> Option<Result<RawMrtRecord, ParserErrorWithBytes>> {
+    if *finished {
+        return None;
+    }
+    match chunk_mrt_record(reader) {
+        Ok(record) => Some(Ok(record)),
+        Err(error) if matches!(error.error, ParserError::EofExpected) => {
+            *finished = true;
+            None
+        }
+        Err(error) => {
+            if let ParserError::IoError(io_error) | ParserError::EofError(io_error) = &error.error {
+                *finished = !matches!(
+                    io_error.kind(),
+                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                );
+            }
+            Some(Err(error))
+        }
+    }
+}
+
+fn next_fallible_record<R: Read>(
+    parser: &mut BgpkitParser<R>,
+    finished: &mut bool,
+) -> Option<Result<MrtRecord, ParserErrorWithBytes>> {
+    let raw_record = match next_fallible_raw_record(&mut parser.reader, finished)? {
+        Ok(record) => record,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(match parse_chunked_record_with_zebra_compat(raw_record) {
+        Ok((record, used_zebra_compat)) => {
+            if used_zebra_compat {
+                parser.warn_zebra_compat_once();
+            }
+            Ok(record)
+        }
+        Err(error) => Err(error),
+    })
+}
 
 #[inline]
 pub(crate) fn record_matches_filters(
@@ -290,6 +337,10 @@ impl<R> BgpkitParser<R> {
 
     /// Creates a fallible iterator over MRT records that returns parsing errors.
     ///
+    /// Malformed records can be skipped. A stream I/O or decompression error
+    /// other than `Interrupted` or `WouldBlock` is yielded once, then iteration
+    /// ends permanently. Normal EOF also ends iteration permanently.
+    ///
     /// # Example
     /// ```no_run
     /// use bgpkit_parser::BgpkitParser;
@@ -312,6 +363,9 @@ impl<R> BgpkitParser<R> {
     }
 
     /// Creates a fallible iterator over BGP elements that returns parsing errors.
+    ///
+    /// Uses the same stream-error termination policy as
+    /// [`into_fallible_record_iter`](Self::into_fallible_record_iter).
     ///
     /// # Example
     /// ```no_run
@@ -338,7 +392,9 @@ impl<R> BgpkitParser<R> {
     ///
     /// Unlike the default `into_update_iter()`, this iterator returns
     /// `Result<MrtUpdate, ParserErrorWithBytes>` allowing users to handle parsing
-    /// errors explicitly instead of having them logged and skipped.
+    /// errors explicitly instead of having them logged and skipped. Uses the same
+    /// stream-error termination policy as
+    /// [`into_fallible_record_iter`](Self::into_fallible_record_iter).
     ///
     /// # Example
     /// ```no_run
@@ -365,6 +421,9 @@ impl<R> BgpkitParser<R> {
     }
 
     /// Creates a fallible iterator over lightweight route elements.
+    ///
+    /// Uses the same stream-error termination policy as
+    /// [`into_fallible_record_iter`](Self::into_fallible_record_iter).
     pub fn into_fallible_route_iter(self) -> FallibleRouteIterator<R> {
         FallibleRouteIterator::new(self)
     }
