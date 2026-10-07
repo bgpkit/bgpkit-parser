@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+* **Dissection span correlation is linear in the number of warnings**: `span_record_warnings` (used by `DiagnosticIterator::with_dissection`) walked the whole dissection tree once per warning, so a BGP UPDATE carrying thousands of duplicate attributes took tens of seconds to diagnose. The tree is now indexed by field name once per record. Spans are unchanged.
 * **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely. An `Interrupted`/`WouldBlock` read stays retryable only when it consumed no framing bytes, and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
 
 ## v0.22.0 - 2026-09-10

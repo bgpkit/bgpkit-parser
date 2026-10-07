@@ -242,27 +242,58 @@ pub fn span_record_warnings(
     warnings: &[BgpValidationWarning],
     tree: &DissectionNode,
 ) -> Vec<SpannedWarning> {
+    // Index the tree once: a record can carry as many warnings as it has
+    // attributes, and walking the whole tree per warning is quadratic.
+    let index = SpanIndex::build(tree);
     let mut duplicate_counts: HashMap<u8, usize> = HashMap::new();
     warnings
         .iter()
         .map(|warning| SpannedWarning {
-            span: locate_warning_span(warning, tree, &mut duplicate_counts),
+            span: locate_warning_span(warning, &index, &mut duplicate_counts)
+                .unwrap_or_else(|| tree.span()),
             warning: warning.clone(),
         })
         .collect()
 }
 
+/// Spans of every node in a dissection tree, keyed by field name, in tree
+/// (pre-order) order: `nth(field, 0)` is the node `DissectionNode::find`
+/// would return, and `nth(field, n)` the `n`th match of `find_all`.
+struct SpanIndex<'a> {
+    spans: HashMap<&'a str, Vec<Span>>,
+}
+
+impl<'a> SpanIndex<'a> {
+    fn build(tree: &'a DissectionNode) -> Self {
+        let mut spans = HashMap::new();
+        Self::walk(tree, &mut spans);
+        Self { spans }
+    }
+
+    fn walk(node: &'a DissectionNode, spans: &mut HashMap<&'a str, Vec<Span>>) {
+        spans
+            .entry(node.field.as_str())
+            .or_default()
+            .push(node.span());
+        for child in &node.children {
+            Self::walk(child, spans);
+        }
+    }
+
+    fn nth(&self, field: &str, occurrence: usize) -> Option<Span> {
+        self.spans.get(field)?.get(occurrence).copied()
+    }
+}
+
 fn locate_warning_span(
     warning: &BgpValidationWarning,
-    tree: &DissectionNode,
+    index: &SpanIndex<'_>,
     duplicate_counts: &mut HashMap<u8, usize>,
-) -> Span {
+) -> Option<Span> {
     use BgpValidationWarning as W;
 
     let attr_span = |code: u8, occurrence: usize| -> Option<Span> {
-        let mut nodes = Vec::new();
-        tree.find_all(&format!("bgp.attr.{code}"), &mut nodes);
-        nodes.get(occurrence).map(|node| node.span())
+        index.nth(&format!("bgp.attr.{code}"), occurrence)
     };
     // Anchor to the attribute occurrence the warning is about. The parser
     // emits warnings while observing headers in wire order and reports
@@ -273,9 +304,9 @@ fn locate_warning_span(
         let occurrence = duplicate_counts.get(&code).copied().unwrap_or(0);
         attr_span(code, occurrence)
     };
-    let section_span = |field: &str| -> Option<Span> { tree.find(field).map(|node| node.span()) };
+    let section_span = |field: &str| -> Option<Span> { index.nth(field, 0) };
 
-    let span = match warning {
+    match warning {
         W::AttributeFlagsError { attr_type, .. }
         | W::AttributeLengthError { attr_type, .. }
         | W::OptionalAttributeError { attr_type, .. }
@@ -307,8 +338,7 @@ fn locate_warning_span(
         W::UnknownRouteRefreshSubtype { .. } | W::InvalidRouteRefreshLength { .. } => {
             section_span("bgp.route_refresh")
         }
-    };
-    span.unwrap_or_else(|| tree.span())
+    }
 }
 
 #[cfg(test)]
