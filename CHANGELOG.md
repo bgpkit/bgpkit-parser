@@ -21,7 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-* **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely; retryable `Interrupted`/`WouldBlock` reads and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
+* **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely. An `Interrupted`/`WouldBlock` read stays retryable only when it consumed no framing bytes, and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
 
 ## v0.22.0 - 2026-09-10
 

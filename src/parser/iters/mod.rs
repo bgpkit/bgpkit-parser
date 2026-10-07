@@ -71,10 +71,15 @@ fn next_fallible_raw_record(
         }
         Err(error) => {
             if let ParserError::IoError(io_error) | ParserError::EofError(io_error) = &error.error {
-                *finished = !matches!(
-                    io_error.kind(),
-                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
-                );
+                // A resumed pull starts a fresh header, so retrying is only safe
+                // when the failed read consumed nothing; otherwise the partial
+                // framing bytes are gone and the stream stays misaligned.
+                let nothing_consumed = error.bytes.as_ref().is_none_or(Vec::is_empty);
+                *finished = !(nothing_consumed
+                    && matches!(
+                        io_error.kind(),
+                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                    ));
             }
             Some(Err(error))
         }
@@ -337,9 +342,10 @@ impl<R> BgpkitParser<R> {
 
     /// Creates a fallible iterator over MRT records that returns parsing errors.
     ///
-    /// Malformed records can be skipped. A stream I/O or decompression error
-    /// other than `Interrupted` or `WouldBlock` is yielded once, then iteration
-    /// ends permanently. Normal EOF also ends iteration permanently.
+    /// Malformed records can be skipped. A framing I/O or decompression error
+    /// is yielded once and then ends iteration permanently, except for an
+    /// `Interrupted` or `WouldBlock` read that consumed no framing bytes, which
+    /// leaves the stream retryable. Normal EOF also ends iteration permanently.
     ///
     /// # Example
     /// ```no_run

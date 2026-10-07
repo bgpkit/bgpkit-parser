@@ -358,6 +358,73 @@ fn retryable_reader_errors_do_not_end_iteration() {
     }
 }
 
+/// A retryable read error is only safe to re-poll when framing consumed
+/// nothing: a resumed pull starts a fresh header, so a stream that already
+/// handed over part of a record would be read from a mid-record offset.
+#[test]
+fn retryable_error_after_partial_framing_ends_iteration() {
+    struct PartialThenWouldBlock {
+        stream: Vec<u8>,
+        pos: usize,
+        stage: u8,
+    }
+
+    impl Read for PartialThenWouldBlock {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            match self.stage {
+                // Part of the 12-byte common header, then the failure.
+                0 => {
+                    self.stage = 1;
+                    let n = 5.min(buffer.len()).min(self.stream.len());
+                    buffer[..n].copy_from_slice(&self.stream[self.pos..self.pos + n]);
+                    self.pos += n;
+                    Ok(n)
+                }
+                1 => {
+                    self.stage = 2;
+                    Err(io::Error::new(ErrorKind::WouldBlock, "no data yet"))
+                }
+                // The rest of the stream arrives later; re-polling here would
+                // misalign framing instead of resuming the record.
+                _ => {
+                    let n = buffer.len().min(self.stream.len() - self.pos);
+                    buffer[..n].copy_from_slice(&self.stream[self.pos..self.pos + n]);
+                    self.pos += n;
+                    Ok(n)
+                }
+            }
+        }
+    }
+
+    let stream = valid_record().repeat(2);
+    for kind in ITER_KINDS {
+        let reader = PartialThenWouldBlock {
+            stream: stream.clone(),
+            pos: 0,
+            stage: 0,
+        };
+        let mut iter = items(BgpkitParser::from_reader(reader), kind);
+        let Some(Err(error)) = iter.next() else {
+            panic!("{kind:?}: expected the retryable read to surface as an error");
+        };
+        assert!(
+            matches!(&error.error, ParserError::IoError(e) if e.kind() == ErrorKind::WouldBlock),
+            "{kind:?}: expected WouldBlock, got {:?}",
+            error.error
+        );
+        assert_eq!(
+            error.bytes.as_deref(),
+            Some(&stream[..5]),
+            "{kind:?}: the partial header bytes must be reported"
+        );
+        assert!(
+            iter.next().is_none(),
+            "{kind:?}: a partially consumed retryable read must latch the stream"
+        );
+        assert!(iter.next().is_none());
+    }
+}
+
 #[test]
 fn uncompressed_truncation_and_empty_eof_are_unchanged() {
     let valid = valid_record();
