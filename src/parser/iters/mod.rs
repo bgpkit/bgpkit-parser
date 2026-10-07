@@ -156,7 +156,7 @@ pub(crate) fn handle_record_parse_error<R>(
             true
         }
         ParserError::ParseError(err_str) => {
-            error!("parser error: {}", err_str);
+            parser.options.log_parse_error_once(&err_str);
             write_mrt_core_dump(parser.core_dump, bytes);
             // stop after writing the dump so later failures don't overwrite it
             !parser.core_dump

@@ -699,7 +699,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = None;
                 }
                 Err(err) => {
-                    error!("parser error: {}", err);
+                    self.parser.options.log_parse_error_once(&err);
                     self.pending_routes = RouteRecordIter::Empty;
                     write_mrt_core_dump(self.parser.core_dump, self.pending_raw_bytes.take());
                     if self.parser.core_dump {
@@ -720,7 +720,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
+                        self.parser.options.log_parse_error_once(&err_str);
                         write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
                             return None;
@@ -761,7 +761,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = Some(raw_bytes);
                 }
                 Err(err) => {
-                    error!("parser error: {}", err);
+                    self.parser.options.log_parse_error_once(&err);
                     write_mrt_core_dump(self.parser.core_dump, Some(raw_bytes));
                     if self.parser.core_dump {
                         return None;

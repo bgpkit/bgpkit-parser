@@ -53,7 +53,7 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
+                        self.parser.options.log_parse_error_once(&err_str);
                         write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
                             return None;
