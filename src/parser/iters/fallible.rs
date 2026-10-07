@@ -5,7 +5,8 @@ These iterators complement the default iterators by returning `Result<T, ParserE
 instead of silently skipping errors. This allows users to handle errors explicitly while
 maintaining backward compatibility with existing code.
 */
-use crate::error::{ParserError, ParserErrorWithBytes};
+use super::next_fallible_record;
+use crate::error::ParserErrorWithBytes;
 use crate::models::*;
 use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
@@ -18,6 +19,7 @@ use std::io::Read;
 pub struct FallibleRecordIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
+    finished: bool,
 }
 
 impl<R> FallibleRecordIterator<R> {
@@ -25,6 +27,7 @@ impl<R> FallibleRecordIterator<R> {
         FallibleRecordIterator {
             parser,
             elementor: Elementor::new(),
+            finished: false,
         }
     }
 }
@@ -39,8 +42,8 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
             return None;
         }
         loop {
-            match self.parser.next_record() {
-                Ok(record) => {
+            match next_fallible_record(&mut self.parser, &mut self.finished) {
+                Some(Ok(record)) => {
                     // Apply filters if any are set
                     let filters = &self.parser.filters;
                     if filters.is_empty() {
@@ -63,11 +66,8 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
                     // Record doesn't match filters, continue to next
                     continue;
                 }
-                Err(e) if matches!(e.error, ParserError::EofExpected) => {
-                    // Normal end of file
-                    return None;
-                }
-                Err(e) => {
+                None => return None,
+                Some(Err(e)) => {
                     // Return the error to the user
                     return Some(Err(e));
                 }
