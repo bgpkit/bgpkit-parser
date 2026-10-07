@@ -19,6 +19,10 @@ All notable changes to this project will be documented in this file.
 * **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.
 * **Faster elem conversion**: `into_elem_iter` is about 24% faster on updates and 21% faster on RIB dumps, mostly from fewer copies and allocations when building elems; output is unchanged.
 
+### Fixed
+
+* **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely; retryable `Interrupted`/`WouldBlock` reads and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
+
 ## v0.22.0 - 2026-09-10
 
 ### Breaking changes
