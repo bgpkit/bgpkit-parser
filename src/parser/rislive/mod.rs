@@ -135,7 +135,21 @@ fn unparsed_body_error(msg_str: &str) -> Option<ParserRisliveError> {
 /// returns [`ParserRisliveError::UnparsedMessageBody`] rather than no elems: callers streaming
 /// frames should log and skip it, and can fall back to [`parse_ris_live_message_raw`], which reads
 /// the `raw` bytes instead of the projection.
+///
+/// Every elem carries its own copy of the message's AS path and communities, so the returned
+/// `Vec` grows with prefixes × path length. For messages that announce many prefixes, use
+/// [`parse_ris_live_message_iter`] to produce the elems one at a time instead.
 pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
+    Ok(parse_ris_live_message_iter(msg_str)?.collect())
+}
+
+/// Parse one RIS Live message into an iterator over its elems.
+///
+/// Same inputs, validation, and elems as [`parse_ris_live_message`], but the per-prefix copies of
+/// the AS path and communities are made as each elem is yielded rather than all at once, so memory
+/// stays bounded by one elem plus the parsed prefix list. The message is validated up front: any
+/// error this function would report is returned here, and iteration itself cannot fail.
+pub fn parse_ris_live_message_iter(msg_str: &str) -> Result<RisLiveElemIter, ParserRisliveError> {
     let msg_string = msg_str.to_string();
 
     // parse RIS Live message to internal struct using serde.
@@ -144,157 +158,214 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
         Err(_e) => return Err(ParserRisliveError::IncorrectJson(msg_string)),
     };
 
-    match msg {
-        RisLiveMessage::RisMessage(ris_msg) => {
-            // we currently only handles the `ris_message` data type. other
-            // types provides meta information, but reveals no BGP elements, and
-            // thus for now will be ignored.
+    // we currently only handle the `ris_message` data type. other types provide meta
+    // information, but reveal no BGP elements, and thus for now will be ignored.
+    let RisLiveMessage::RisMessage(ris_msg) = msg else {
+        return Ok(RisLiveElemIter::empty());
+    };
 
-            if ris_msg.msg.is_none() {
-                // `msg` is flattened, so a body-level deserialisation failure arrives here as
-                // `None`: indistinguishable from a frame without a body, and silently empty.
-                if let Some(err) = unparsed_body_error(msg_str) {
-                    return Err(err);
-                }
-                return Ok(vec![]);
+    let Some(body) = ris_msg.msg else {
+        // `msg` is flattened, so a body-level deserialisation failure arrives here as
+        // `None`: indistinguishable from a frame without a body, and silently empty.
+        if let Some(err) = unparsed_body_error(msg_str) {
+            return Err(err);
+        }
+        return Ok(RisLiveElemIter::empty());
+    };
+
+    let RisMessageEnum::UPDATE {
+        path,
+        community,
+        origin,
+        med,
+        aggregator,
+        announcements,
+        withdrawals,
+    } = body
+    else {
+        return Ok(RisLiveElemIter::empty());
+    };
+
+    // parse community
+    let communities = community.map(|values| {
+        values
+            .into_iter()
+            .map(|(asn, data)| MetaCommunity::Plain(Community::Custom(Asn::new_32bit(asn), data)))
+            .collect()
+    });
+
+    // parse origin
+    let bgp_origin = match origin {
+        None => None,
+        Some(o) => Some(match o.as_str() {
+            "igp" | "IGP" => Origin::IGP,
+            "egp" | "EGP" => Origin::EGP,
+            "incomplete" | "INCOMPLETE" => Origin::INCOMPLETE,
+            other => {
+                return Err(ParserRisliveError::ElemUnknownOriginType(other.to_string()));
             }
+        }),
+    };
 
-            match ris_msg.msg.unwrap() {
-                RisMessageEnum::UPDATE {
-                    path,
-                    community,
-                    origin,
-                    med,
-                    aggregator,
-                    announcements,
-                    withdrawals,
-                } => {
-                    // Pre-allocate capacity based on announcements + withdrawals
-                    let announce_count: usize = announcements
-                        .as_ref()
-                        .map(|a| a.iter().map(|ann| ann.prefixes.len()).sum())
-                        .unwrap_or(0);
-                    let withdraw_count: usize = withdrawals.as_ref().map(|w| w.len()).unwrap_or(0);
-                    let mut elems: Vec<BgpElem> =
-                        Vec::with_capacity(announce_count + withdraw_count);
+    // parse aggregator
+    let (aggr_asn, aggr_ip) = match aggregator {
+        None => (None, None),
+        Some(aggr_str) => {
+            let (asn_str, ip_str) = match aggr_str.split_once(':') {
+                None => return Err(ParserRisliveError::ElemIncorrectAggregator(aggr_str)),
+                Some(v) => v,
+            };
 
-                    // parse community
-                    let communities = community.map(|values| {
-                        values
-                            .into_iter()
-                            .map(|(asn, data)| {
-                                MetaCommunity::Plain(Community::Custom(Asn::new_32bit(asn), data))
-                            })
-                            .collect()
-                    });
+            let asn = unwrap_or_return!(asn_str.parse::<Asn>(), msg_string);
+            let ip = unwrap_or_return!(ip_str.parse::<Ipv4Addr>(), msg_string);
+            (Some(asn), Some(ip))
+        }
+    };
 
-                    // parse origin
-                    let bgp_origin = match origin {
-                        None => None,
-                        Some(o) => Some(match o.as_str() {
-                            "igp" | "IGP" => Origin::IGP,
-                            "egp" | "EGP" => Origin::EGP,
-                            "incomplete" | "INCOMPLETE" => Origin::INCOMPLETE,
-                            other => {
-                                return Err(ParserRisliveError::ElemUnknownOriginType(
-                                    other.to_string(),
-                                ));
-                            }
-                        }),
-                    };
-
-                    // parse aggregator
-                    let bgp_aggregator = match aggregator {
-                        None => (None, None),
-                        Some(aggr_str) => {
-                            let (asn_str, ip_str) = match aggr_str.split_once(':') {
-                                None => {
-                                    return Err(ParserRisliveError::ElemIncorrectAggregator(
-                                        aggr_str,
-                                    ))
-                                }
-                                Some(v) => v,
-                            };
-
-                            let asn = unwrap_or_return!(asn_str.parse::<Asn>(), msg_string);
-                            let ip = unwrap_or_return!(ip_str.parse::<Ipv4Addr>(), msg_string);
-                            (Some(asn), Some(ip))
-                        }
-                    };
-
-                    // parser announcements
-                    if let Some(announcements) = announcements {
-                        for announcement in announcements {
-                            let next_hop = parse_next_hop(announcement.next_hop)?;
-                            for prefix in &announcement.prefixes {
-                                let p = parse_prefix(prefix.as_str())?;
-                                elems.push(BgpElem {
-                                    timestamp: ris_msg.timestamp,
-                                    elem_type: ElemType::ANNOUNCE,
-                                    peer_ip: ris_msg.peer,
-                                    peer_asn: ris_msg.peer_asn,
-                                    peer_bgp_id: None,
-                                    prefix: NetworkPrefix {
-                                        prefix: p,
-                                        path_id: None,
-                                    },
-                                    next_hop: Some(next_hop),
-                                    as_path: path.clone(),
-                                    origin_asns: None,
-                                    origin: bgp_origin,
-                                    local_pref: None,
-                                    med,
-                                    communities: communities.clone(),
-                                    atomic: false,
-                                    aggr_asn: bgp_aggregator.0,
-                                    aggr_ip: bgp_aggregator.1,
-                                    only_to_customer: None,
-                                    unknown: None,
-                                    deprecated: None,
-                                });
-                            }
-                        }
-                    }
-
-                    if let Some(withdrawals) = withdrawals {
-                        for prefix in withdrawals {
-                            // create new elems for withdrawals and push to elems
-                            let p = parse_prefix(prefix.as_str())?;
-                            elems.push(BgpElem {
-                                timestamp: ris_msg.timestamp,
-                                elem_type: ElemType::WITHDRAW,
-                                peer_ip: ris_msg.peer,
-                                peer_asn: ris_msg.peer_asn,
-                                peer_bgp_id: None,
-                                prefix: NetworkPrefix {
-                                    prefix: p,
-                                    path_id: None,
-                                },
-                                next_hop: None,
-                                as_path: None,
-                                origin_asns: None,
-                                origin: None,
-                                local_pref: None,
-                                med: None,
-                                communities: None,
-                                atomic: false,
-                                aggr_asn: None,
-                                aggr_ip: None,
-                                only_to_customer: None,
-                                unknown: None,
-                                deprecated: None,
-                            })
-                        }
-                    }
-
-                    Ok(elems)
-                }
-                _ => Ok(vec![]),
+    // validate announcements and withdrawals now, so iteration cannot fail
+    let mut announced = Vec::new();
+    if let Some(announcements) = announcements {
+        for announcement in announcements {
+            let next_hop = parse_next_hop(announcement.next_hop)?;
+            for prefix in &announcement.prefixes {
+                announced.push((parse_prefix(prefix.as_str())?, next_hop));
             }
         }
-        _ => Ok(vec![]),
+    }
+    let mut withdrawn = Vec::new();
+    if let Some(withdrawals) = withdrawals {
+        for prefix in withdrawals {
+            withdrawn.push(parse_prefix(prefix.as_str())?);
+        }
+    }
+
+    Ok(RisLiveElemIter {
+        attrs: Some(RisLiveUpdateAttrs {
+            timestamp: ris_msg.timestamp,
+            peer_ip: ris_msg.peer,
+            peer_asn: ris_msg.peer_asn,
+            as_path: path,
+            origin: bgp_origin,
+            med,
+            communities,
+            aggr_asn,
+            aggr_ip,
+        }),
+        announced: announced.into_iter(),
+        withdrawn: withdrawn.into_iter(),
+    })
+}
+
+/// The attributes one RIS Live UPDATE message shares across all of its elems.
+#[derive(Debug)]
+struct RisLiveUpdateAttrs {
+    timestamp: f64,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    as_path: Option<AsPath>,
+    origin: Option<Origin>,
+    med: Option<u32>,
+    communities: Option<Vec<MetaCommunity>>,
+    aggr_asn: Option<Asn>,
+    aggr_ip: Option<BgpIdentifier>,
+}
+
+/// Iterator over the elems of one RIS Live message, produced by [`parse_ris_live_message_iter`].
+///
+/// Announcements are yielded first, in message order, then withdrawals. The shared AS path and
+/// communities are cloned into each announcement as it is yielded; the last announcement takes
+/// them without a copy.
+#[derive(Debug)]
+pub struct RisLiveElemIter {
+    attrs: Option<RisLiveUpdateAttrs>,
+    announced: std::vec::IntoIter<(IpNet, IpAddr)>,
+    withdrawn: std::vec::IntoIter<IpNet>,
+}
+
+impl RisLiveElemIter {
+    /// An iterator for a message that carries no elems.
+    fn empty() -> Self {
+        Self {
+            attrs: None,
+            announced: Vec::new().into_iter(),
+            withdrawn: Vec::new().into_iter(),
+        }
     }
 }
+
+impl Iterator for RisLiveElemIter {
+    type Item = BgpElem;
+
+    fn next(&mut self) -> Option<BgpElem> {
+        let attrs = self.attrs.as_mut()?;
+
+        if let Some((prefix, next_hop)) = self.announced.next() {
+            // the last announcement takes the shared attributes instead of cloning them
+            let (as_path, communities) = if self.announced.len() == 0 {
+                (attrs.as_path.take(), attrs.communities.take())
+            } else {
+                (attrs.as_path.clone(), attrs.communities.clone())
+            };
+            return Some(BgpElem {
+                timestamp: attrs.timestamp,
+                elem_type: ElemType::ANNOUNCE,
+                peer_ip: attrs.peer_ip,
+                peer_asn: attrs.peer_asn,
+                peer_bgp_id: None,
+                prefix: NetworkPrefix {
+                    prefix,
+                    path_id: None,
+                },
+                next_hop: Some(next_hop),
+                as_path,
+                origin_asns: None,
+                origin: attrs.origin,
+                local_pref: None,
+                med: attrs.med,
+                communities,
+                atomic: false,
+                aggr_asn: attrs.aggr_asn,
+                aggr_ip: attrs.aggr_ip,
+                only_to_customer: None,
+                unknown: None,
+                deprecated: None,
+            });
+        }
+
+        let prefix = self.withdrawn.next()?;
+        Some(BgpElem {
+            timestamp: attrs.timestamp,
+            elem_type: ElemType::WITHDRAW,
+            peer_ip: attrs.peer_ip,
+            peer_asn: attrs.peer_asn,
+            peer_bgp_id: None,
+            prefix: NetworkPrefix {
+                prefix,
+                path_id: None,
+            },
+            next_hop: None,
+            as_path: None,
+            origin_asns: None,
+            origin: None,
+            local_pref: None,
+            med: None,
+            communities: None,
+            atomic: false,
+            aggr_asn: None,
+            aggr_ip: None,
+            only_to_customer: None,
+            unknown: None,
+            deprecated: None,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.announced.len() + self.withdrawn.len();
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for RisLiveElemIter {}
 
 /// Alias for [`parse_ris_live_message`] to make the JSON-vs-raw choice explicit.
 pub fn parse_ris_live_message_json(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisliveError> {
@@ -519,5 +590,62 @@ mod tests {
         let result = parse_ris_live_message(msg_str);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn iter_yields_the_same_elems_as_the_vec_parser() {
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1640553894.84,"peer":"195.66.226.38","peer_asn":"24482","id":"01-2833-11980099","host":"rrc01","type":"UPDATE","path":[24482,30844,328471],"community":[[0,5713],[24482,2]],"origin":"igp","med":10,"aggregator":"4200000002:10.102.100.2","announcements":[{"next_hop":"195.66.224.68","prefixes":["102.66.116.0/24","102.66.117.0/24"]},{"next_hop":"195.66.224.69","prefixes":["102.66.118.0/24"]}],"withdrawals":["10.0.0.0/24","10.0.1.0/24"]}}
+        "#;
+        let collected = parse_ris_live_message(msg_str).unwrap();
+        let iter = parse_ris_live_message_iter(msg_str).unwrap();
+        assert_eq!(iter.len(), 5);
+        let lazy: Vec<BgpElem> = iter.collect();
+        assert_eq!(lazy, collected);
+
+        // every announcement carries the shared attributes, including the last one that takes
+        // them without a copy; withdrawals carry none
+        for elem in &lazy[..3] {
+            assert_eq!(elem.elem_type, ElemType::ANNOUNCE);
+            assert_eq!(elem.as_path.as_ref().unwrap().route_len(), 3);
+            assert_eq!(elem.communities.as_ref().unwrap().len(), 2);
+            assert_eq!(elem.med, Some(10));
+        }
+        for elem in &lazy[3..] {
+            assert_eq!(elem.elem_type, ElemType::WITHDRAW);
+            assert!(elem.as_path.is_none());
+        }
+    }
+
+    #[test]
+    fn iter_size_hint_tracks_remaining_elems() {
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1.0,"peer":"192.0.2.1","peer_asn":"64496","id":"x","host":"rrc00","type":"UPDATE","path":[64496],"origin":"igp","announcements":[{"next_hop":"192.0.2.1","prefixes":["10.0.0.0/24"]}],"withdrawals":["10.0.1.0/24"]}}
+        "#;
+        let mut iter = parse_ris_live_message_iter(msg_str).unwrap();
+        assert_eq!(iter.size_hint(), (2, Some(2)));
+        assert!(iter.next().is_some());
+        assert_eq!(iter.size_hint(), (1, Some(1)));
+        assert!(iter.next().is_some());
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn iter_reports_validation_errors_before_yielding() {
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1.0,"peer":"192.0.2.1","peer_asn":"64496","id":"x","host":"rrc00","type":"UPDATE","path":[64496],"origin":"igp","announcements":[{"next_hop":"192.0.2.1","prefixes":["10.0.0.0/24"]}],"withdrawals":["not a prefix"]}}
+        "#;
+        let error = parse_ris_live_message_iter(msg_str).unwrap_err();
+        assert!(matches!(error, ParserRisliveError::ElemIncorrectPrefix(_)));
+    }
+
+    #[test]
+    fn iter_is_empty_for_frames_without_elems() {
+        let msg_str = r#"{"type": "ris_message","data":{"timestamp":1.0,"peer":"192.0.2.1","peer_asn":"64496","id":"x","host":"rrc00","type":"KEEPALIVE"}}"#;
+        let mut iter = parse_ris_live_message_iter(msg_str).unwrap();
+        assert_eq!(iter.len(), 0);
+        assert!(iter.next().is_none());
     }
 }

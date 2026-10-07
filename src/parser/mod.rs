@@ -38,8 +38,8 @@ pub use rislive::messages::{
 };
 #[cfg(feature = "rislive")]
 pub use rislive::{
-    parse_ris_live_message, parse_ris_live_message_json, parse_ris_live_message_raw,
-    parse_ris_live_message_raw_full,
+    parse_ris_live_message, parse_ris_live_message_iter, parse_ris_live_message_json,
+    parse_ris_live_message_raw, parse_ris_live_message_raw_full, RisLiveElemIter,
 };
 
 pub struct BgpkitParser<R> {
