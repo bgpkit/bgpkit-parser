@@ -56,9 +56,17 @@ type Widen<T> = T extends string
  * serde) and the declared type. Plain assignability would silently allow
  * extra fixture fields — this catches a Rust model gaining or losing a field
  * without the .d.ts being updated (and vice versa).
+ *
+ * Keys declared optional may be absent from the fixture: serde skips
+ * `Option::None` fields, so a fixture cannot assert their presence.
+ * Required keys must all appear.
  */
+type RequiredKeys<T> = {
+  [K in keyof T]-?: Record<never, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
 type ExactKeys<Actual, Declared> = [keyof Actual] extends [keyof Declared]
-  ? [keyof Declared] extends [keyof Actual]
+  ? [RequiredKeys<Declared>] extends [keyof Actual]
     ? true
     : false
   : false;

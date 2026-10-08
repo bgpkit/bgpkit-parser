@@ -344,6 +344,7 @@ impl Iterator for RisLiveElemIter {
                 only_to_customer: None,
                 unknown: None,
                 deprecated: None,
+                error_handling: None,
             });
         }
 
@@ -371,6 +372,7 @@ impl Iterator for RisLiveElemIter {
             only_to_customer: None,
             unknown: None,
             deprecated: None,
+            error_handling: None,
         })
     }
 

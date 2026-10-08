@@ -734,7 +734,12 @@ pub fn parse_attributes(
                 attributes.push(Attribute { value, flag });
             }
             Err(e) => {
-                validation.observe_parse_error(attr_type, partial, &e, &raw_bytes);
+                validation.observe_parse_error(
+                    attr_type,
+                    partial,
+                    &e,
+                    &section.slice(value_start..value_start + attr_length),
+                );
                 attributes.push(Attribute {
                     value: AttributeValue::Raw(AttrRaw {
                         code: raw_code,
