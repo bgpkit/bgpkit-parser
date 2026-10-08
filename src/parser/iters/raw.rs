@@ -11,14 +11,9 @@ when possible and continue processing the remaining data. It also supports confi
 warning messages and core dump generation for debugging purposes.
 */
 
-use crate::parser::iters::{
-    handle_record_parse_error, record_matches_filters, write_mrt_core_dump,
-};
+use crate::parser::iters::{handle_record_parse_error, record_matches_filters};
 use crate::parser::mrt::mrt_record::raw_record_uses_zebra_compat;
-use crate::{
-    chunk_mrt_record, BgpkitParser, Elementor, Filter, MrtRecord, ParserError, RawMrtRecord,
-};
-use log::{error, warn};
+use crate::{chunk_mrt_record, BgpkitParser, Elementor, Filter, MrtRecord, RawMrtRecord};
 use std::io::Read;
 
 pub struct RawRecordIterator<R> {
@@ -44,52 +39,11 @@ impl<R: Read> Iterator for RawRecordIterator<R> {
         loop {
             match chunk_mrt_record(&mut self.parser.reader) {
                 Ok(raw_record) => return Some(raw_record),
-                Err(e) => match e.error {
-                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: {}", err_str);
-                        }
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        continue;
-                    }
-                    ParserError::ParseError(err_str) => {
-                        self.parser.log_parse_error_once(&err_str);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        if self.parser.core_dump {
-                            return None;
-                        } else {
-                            continue;
-                        }
-                    }
-                    ParserError::EofExpected => {
-                        // normal end of file
+                Err(e) => {
+                    if !handle_record_parse_error(&mut self.parser, e.error, e.bytes) {
                         return None;
                     }
-                    ParserError::IoError(err) | ParserError::EofError(err) => {
-                        // when reaching IO error, stop iterating
-                        error!("{:?}", err);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        return None;
-                    }
-                    #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => return None,
-                    ParserError::FilterError(_) => {
-                        // this should not happen at this stage
-                        return None;
-                    }
-                    // Labeled NLRI parsing errors - treat as malformed and skip
-                    ParserError::InvalidLabeledNlriLength
-                    | ParserError::TruncatedLabeledNlri
-                    | ParserError::TruncatedPrefix
-                    | ParserError::MaxLabelStackDepthExceeded
-                    | ParserError::PeerMaxLabelsExceeded
-                    | ParserError::InvalidPrefix => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
-                        }
-                        continue;
-                    }
-                },
+                }
             }
         }
     }
