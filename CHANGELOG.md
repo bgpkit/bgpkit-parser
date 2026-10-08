@@ -12,20 +12,24 @@ All notable changes to this project will be documented in this file.
 
 * **BGP Domain Path (D-PATH) attribute support** ([RFC 10039](https://datatracker.ietf.org/doc/html/rfc10039)): path attribute type 36 now parses into `AttributeValue::DomainPath(DomainPathAttribute)` — segments of `DomainPathDomain { global_admin, local_admin, isf_safi_type }` — and re-encodes byte-identically instead of falling into the `Unknown` raw catch-all. Malformed values, and a D-PATH on a family other than IPVPN or EVPN, become RFC 7606 validation findings with the bytes retained raw, and the encoder refuses values it cannot represent. Text rendering and byte-level dissection label the attribute `BGP_DOMAIN_PATH`.
 * **`--color auto|always|never` for `--format text`**: colors session keys, section headers, prefixes, and next-hop values with ANSI accents that follow the terminal theme. `auto` (the default) colors only when stdout is a terminal; `NO_COLOR` disables coloring and `CLICOLOR_FORCE` forces it. Library callers opt in with `render::text::Style::ansi()` plus the new `format_record_with_style` / `format_record_with_hex_and_style`; `format_record` and the unstyled output are unchanged, since styling is a post-pass over the rendered block.
-
 * **`parse_ris_live_message_iter`**: parses one RIS Live JSON message into an iterator over its elems instead of a `Vec`. Every elem carries its own copy of the message's AS path and communities, so collecting a message that announces many prefixes needs memory proportional to prefixes × path length; the iterator makes those copies one elem at a time. `parse_ris_live_message` is unchanged and now builds on it.
 
 ### Changed
 
 * **Internal cleanups, no behavior change**: the MP next-hop encoder (`encode_mp_next_hop`) is shared by the `NEXT_HOP` and MP_REACH encoders instead of being duplicated, `AsPathSegment` hashing skips the sort when a set is already ordered, `Elementor::record_to_elems` logs peer-table conversion errors as its documentation promises, the invariant `unreachable!()` arms state their invariant, and both the crate-wide `uninlined_format_args` allow and a module-wide `#![allow(unused)]` are removed.
 * **`--format text` session labels are now `PEER`/`LOCAL`**: the endpoint lines read `PEER: <peer_ip> AS<peer_asn>` and `LOCAL: <local_ip> AS<local_asn>`, matching the peer/local names MRT ([RFC 6396](https://www.rfc-editor.org/rfc/rfc6396.html)) uses for the same fields instead of the ambiguous `FROM`/`TO`. The rendered values are unchanged.
-* **Record parse errors are logged once per parser**: the default, raw, update and route iterators log the first `ParseError` of a parser at `error` level and later ones at `debug` level. A corrupted stream re-synchronises header by header, which previously emitted one `error` line per 12 bytes of damaged input.
+* **Record parse errors are logged once per parser**: the default, raw, update and route iterators log the first `ParseError` of a parser at `error` level and later ones at `debug` level. A corrupted stream re-synchronises header by header, which previously emitted one `error` line per 12 bytes of damaged input. Other error classes are logged as before.
 * **Faster elem conversion**: `into_elem_iter` is about 24% faster on updates and 21% faster on RIB dumps, mostly from fewer copies and allocations when building elems; output is unchanged.
 
 ### Fixed
 
+* **RIS Live JSON elems carry `origin_asns`**: `parse_ris_live_message` left `origin_asns` empty, so an `origin_asn` filter never matched an elem parsed from RIS Live's JSON fields. It is now derived from the AS path, as `parse_ris_live_message_raw` and the MRT iterators already did.
 * **Dissection span correlation is linear in the number of warnings**: `span_record_warnings` (used by `DiagnosticIterator::with_dissection`) walked the whole dissection tree once per warning, so a BGP UPDATE carrying thousands of duplicate attributes took tens of seconds to diagnose. The tree is now indexed by field name once per record. Spans are unchanged.
 * **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely. An `Interrupted`/`WouldBlock` read stays retryable only when it consumed no framing bytes, and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
+
+### Contributors
+
+* @ties — faster elem conversion ([#348](https://github.com/bgpkit/bgpkit-parser/pull/348)), `parse_ris_live_message_iter` and RIS Live origin ASNs, once-per-parser parse error logging, linear-time dissection span correlation
 
 ## v0.22.0 - 2026-09-10
 

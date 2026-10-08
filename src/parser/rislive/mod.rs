@@ -150,12 +150,10 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpElem>, ParserRisli
 /// stays bounded by one elem plus the parsed prefix list. The message is validated up front: any
 /// error this function would report is returned here, and iteration itself cannot fail.
 pub fn parse_ris_live_message_iter(msg_str: &str) -> Result<RisLiveElemIter, ParserRisliveError> {
-    let msg_string = msg_str.to_string();
-
     // parse RIS Live message to internal struct using serde.
     let msg: RisLiveMessage = match serde_json::from_str(msg_str) {
         Ok(m) => m,
-        Err(_e) => return Err(ParserRisliveError::IncorrectJson(msg_string)),
+        Err(_e) => return Err(ParserRisliveError::IncorrectJson(msg_str.to_string())),
     };
 
     // we currently only handle the `ris_message` data type. other types provide meta
@@ -216,28 +214,35 @@ pub fn parse_ris_live_message_iter(msg_str: &str) -> Result<RisLiveElemIter, Par
                 Some(v) => v,
             };
 
-            let asn = unwrap_or_return!(asn_str.parse::<Asn>(), msg_string);
-            let ip = unwrap_or_return!(ip_str.parse::<Ipv4Addr>(), msg_string);
+            let asn = unwrap_or_return!(asn_str.parse::<Asn>(), msg_str.to_string());
+            let ip = unwrap_or_return!(ip_str.parse::<Ipv4Addr>(), msg_str.to_string());
             (Some(asn), Some(ip))
         }
     };
 
     // validate announcements and withdrawals now, so iteration cannot fail
-    let mut announced = Vec::new();
-    if let Some(announcements) = announcements {
-        for announcement in announcements {
-            let next_hop = parse_next_hop(announcement.next_hop)?;
-            for prefix in &announcement.prefixes {
-                announced.push((parse_prefix(prefix.as_str())?, next_hop));
-            }
+    let announcements = announcements.unwrap_or_default();
+    let mut announced = Vec::with_capacity(
+        announcements
+            .iter()
+            .map(|a| a.prefixes.len())
+            .sum::<usize>(),
+    );
+    for announcement in announcements {
+        let next_hop = parse_next_hop(announcement.next_hop)?;
+        for prefix in &announcement.prefixes {
+            announced.push((parse_prefix(prefix.as_str())?, next_hop));
         }
     }
-    let mut withdrawn = Vec::new();
-    if let Some(withdrawals) = withdrawals {
-        for prefix in withdrawals {
-            withdrawn.push(parse_prefix(prefix.as_str())?);
-        }
-    }
+    let withdrawn = withdrawals
+        .unwrap_or_default()
+        .iter()
+        .map(|prefix| parse_prefix(prefix.as_str()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let origin_asns = path
+        .as_ref()
+        .map(|as_path| as_path.iter_origins().collect());
 
     Ok(RisLiveElemIter {
         attrs: Some(RisLiveUpdateAttrs {
@@ -245,6 +250,7 @@ pub fn parse_ris_live_message_iter(msg_str: &str) -> Result<RisLiveElemIter, Par
             peer_ip: ris_msg.peer,
             peer_asn: ris_msg.peer_asn,
             as_path: path,
+            origin_asns,
             origin: bgp_origin,
             med,
             communities,
@@ -263,6 +269,7 @@ struct RisLiveUpdateAttrs {
     peer_ip: IpAddr,
     peer_asn: Asn,
     as_path: Option<AsPath>,
+    origin_asns: Option<Vec<Asn>>,
     origin: Option<Origin>,
     med: Option<u32>,
     communities: Option<Vec<MetaCommunity>>,
@@ -272,9 +279,9 @@ struct RisLiveUpdateAttrs {
 
 /// Iterator over the elems of one RIS Live message, produced by [`parse_ris_live_message_iter`].
 ///
-/// Announcements are yielded first, in message order, then withdrawals. The shared AS path and
-/// communities are cloned into each announcement as it is yielded; the last announcement takes
-/// them without a copy.
+/// Announcements are yielded first, in message order, then withdrawals. The shared AS path,
+/// origin ASNs and communities are cloned into each announcement as it is yielded; the last
+/// announcement takes them without a copy.
 #[derive(Debug)]
 pub struct RisLiveElemIter {
     attrs: Option<RisLiveUpdateAttrs>,
@@ -301,10 +308,18 @@ impl Iterator for RisLiveElemIter {
 
         if let Some((prefix, next_hop)) = self.announced.next() {
             // the last announcement takes the shared attributes instead of cloning them
-            let (as_path, communities) = if self.announced.len() == 0 {
-                (attrs.as_path.take(), attrs.communities.take())
+            let (as_path, origin_asns, communities) = if self.announced.len() == 0 {
+                (
+                    attrs.as_path.take(),
+                    attrs.origin_asns.take(),
+                    attrs.communities.take(),
+                )
             } else {
-                (attrs.as_path.clone(), attrs.communities.clone())
+                (
+                    attrs.as_path.clone(),
+                    attrs.origin_asns.clone(),
+                    attrs.communities.clone(),
+                )
             };
             return Some(BgpElem {
                 timestamp: attrs.timestamp,
@@ -318,7 +333,7 @@ impl Iterator for RisLiveElemIter {
                 },
                 next_hop: Some(next_hop),
                 as_path,
-                origin_asns: None,
+                origin_asns,
                 origin: attrs.origin,
                 local_pref: None,
                 med: attrs.med,
@@ -593,28 +608,72 @@ mod tests {
     }
 
     #[test]
-    fn iter_yields_the_same_elems_as_the_vec_parser() {
+    fn iter_yields_one_elem_per_prefix_with_the_shared_attributes() {
         let msg_str = r#"
         {"type": "ris_message","data":{"timestamp":1640553894.84,"peer":"195.66.226.38","peer_asn":"24482","id":"01-2833-11980099","host":"rrc01","type":"UPDATE","path":[24482,30844,328471],"community":[[0,5713],[24482,2]],"origin":"igp","med":10,"aggregator":"4200000002:10.102.100.2","announcements":[{"next_hop":"195.66.224.68","prefixes":["102.66.116.0/24","102.66.117.0/24"]},{"next_hop":"195.66.224.69","prefixes":["102.66.118.0/24"]}],"withdrawals":["10.0.0.0/24","10.0.1.0/24"]}}
         "#;
-        let collected = parse_ris_live_message(msg_str).unwrap();
         let iter = parse_ris_live_message_iter(msg_str).unwrap();
         assert_eq!(iter.len(), 5);
-        let lazy: Vec<BgpElem> = iter.collect();
-        assert_eq!(lazy, collected);
+        let elems: Vec<BgpElem> = iter.collect();
 
-        // every announcement carries the shared attributes, including the last one that takes
-        // them without a copy; withdrawals carry none
-        for elem in &lazy[..3] {
-            assert_eq!(elem.elem_type, ElemType::ANNOUNCE);
-            assert_eq!(elem.as_path.as_ref().unwrap().route_len(), 3);
-            assert_eq!(elem.communities.as_ref().unwrap().len(), 2);
-            assert_eq!(elem.med, Some(10));
-        }
-        for elem in &lazy[3..] {
-            assert_eq!(elem.elem_type, ElemType::WITHDRAW);
-            assert!(elem.as_path.is_none());
-        }
+        let peer_ip: IpAddr = "195.66.226.38".parse().unwrap();
+        let as_path = AsPath::from_sequence([24482, 30844, 328471]);
+        let communities = vec![
+            MetaCommunity::Plain(Community::Custom(Asn::new_32bit(0), 5713)),
+            MetaCommunity::Plain(Community::Custom(Asn::new_32bit(24482), 2)),
+        ];
+        let announce = |prefix: &str, next_hop: &str| BgpElem {
+            timestamp: 1640553894.84,
+            elem_type: ElemType::ANNOUNCE,
+            peer_ip,
+            peer_asn: Asn::new_32bit(24482),
+            prefix: NetworkPrefix::new(prefix.parse().unwrap(), None),
+            next_hop: Some(next_hop.parse().unwrap()),
+            as_path: Some(as_path.clone()),
+            origin_asns: Some(vec![Asn::new_32bit(328471)]),
+            origin: Some(Origin::IGP),
+            med: Some(10),
+            communities: Some(communities.clone()),
+            aggr_asn: Some(Asn::new_32bit(4200000002)),
+            aggr_ip: Some("10.102.100.2".parse().unwrap()),
+            ..Default::default()
+        };
+        let withdraw = |prefix: &str| BgpElem {
+            timestamp: 1640553894.84,
+            elem_type: ElemType::WITHDRAW,
+            peer_ip,
+            peer_asn: Asn::new_32bit(24482),
+            prefix: NetworkPrefix::new(prefix.parse().unwrap(), None),
+            next_hop: None,
+            ..Default::default()
+        };
+
+        // the last announcement takes the shared attributes instead of cloning them, so it is
+        // the one most likely to come out wrong
+        assert_eq!(
+            elems,
+            vec![
+                announce("102.66.116.0/24", "195.66.224.68"),
+                announce("102.66.117.0/24", "195.66.224.68"),
+                announce("102.66.118.0/24", "195.66.224.69"),
+                withdraw("10.0.0.0/24"),
+                withdraw("10.0.1.0/24"),
+            ]
+        );
+        assert_eq!(parse_ris_live_message(msg_str).unwrap(), elems);
+    }
+
+    #[test]
+    fn origin_asn_filter_matches_json_parsed_elems() {
+        let msg_str = r#"
+        {"type": "ris_message","data":{"timestamp":1.0,"peer":"192.0.2.1","peer_asn":"64496","id":"x","host":"rrc00","type":"UPDATE","path":[64496,64511],"origin":"igp","announcements":[{"next_hop":"192.0.2.1","prefixes":["10.0.0.0/24","10.0.2.0/24"]}]}}
+        "#;
+        use crate::parser::{Filter, Filterable};
+
+        let filters = [Filter::new("origin_asn", "64511").unwrap()];
+        let elems = parse_ris_live_message(msg_str).unwrap();
+        assert_eq!(elems.len(), 2);
+        assert!(elems.iter().all(|elem| elem.match_filters(&filters)));
     }
 
     #[test]

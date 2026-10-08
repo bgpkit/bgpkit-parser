@@ -80,9 +80,15 @@ impl ParserOptions {
     /// Log a record-level parse error at `error` level the first time it happens for this
     /// parser, and at `debug` level afterwards. A corrupted stream re-synchronises header by
     /// header, which can otherwise produce one `error` line per 12 bytes of damaged input.
-    pub(crate) fn log_parse_error_once(&mut self, error: &dyn std::fmt::Display) {
+    ///
+    /// `stops_iteration` is set when the iterator ends at this error (core dumps enabled), so
+    /// there are no further errors to announce.
+    fn log_parse_error_once(&mut self, error: &dyn std::fmt::Display, stops_iteration: bool) {
         if self.logged_parse_error {
             debug!("parser error: {}", error);
+        } else if stops_iteration {
+            error!("parser error: {}", error);
+            self.logged_parse_error = true;
         } else {
             error!(
                 "parser error: {} (further parse errors for this parser will be logged at debug level)",
@@ -327,6 +333,12 @@ impl BgpkitParser<Box<dyn Read + Send>> {
 impl<R> BgpkitParser<R> {
     pub(crate) fn warn_zebra_compat_once(&mut self) {
         self.options.warn_zebra_compat_once();
+    }
+
+    /// See [`ParserOptions::log_parse_error_once`]; iterators stop at the first parse error
+    /// when core dumps are enabled.
+    pub(crate) fn log_parse_error_once(&mut self, error: &dyn std::fmt::Display) {
+        self.options.log_parse_error_once(error, self.core_dump);
     }
 
     pub fn enable_core_dump(self) -> Self {

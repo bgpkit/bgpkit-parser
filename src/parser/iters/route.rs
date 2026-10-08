@@ -679,6 +679,16 @@ impl<R> RouteIterator<R> {
     }
 }
 
+/// Log an error from parsing a record body into routes. Only a `ParseError` goes through the
+/// once-per-parser limiter, as in the other iterators, so that another error class cannot use up
+/// the one `error`-level parse error line.
+fn log_route_body_error<R>(parser: &mut BgpkitParser<R>, err: &ParserError) {
+    match err {
+        ParserError::ParseError(err_str) => parser.log_parse_error_once(err_str),
+        other => error!("parser error: {}", other),
+    }
+}
+
 impl<R: Read> Iterator for RouteIterator<R> {
     type Item = BgpRouteElem;
 
@@ -699,7 +709,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = None;
                 }
                 Err(err) => {
-                    self.parser.options.log_parse_error_once(&err);
+                    log_route_body_error(&mut self.parser, &err);
                     self.pending_routes = RouteRecordIter::Empty;
                     write_mrt_core_dump(self.parser.core_dump, self.pending_raw_bytes.take());
                     if self.parser.core_dump {
@@ -720,7 +730,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
-                        self.parser.options.log_parse_error_once(&err_str);
+                        self.parser.log_parse_error_once(&err_str);
                         write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
                             return None;
@@ -761,7 +771,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = Some(raw_bytes);
                 }
                 Err(err) => {
-                    self.parser.options.log_parse_error_once(&err);
+                    log_route_body_error(&mut self.parser, &err);
                     write_mrt_core_dump(self.parser.core_dump, Some(raw_bytes));
                     if self.parser.core_dump {
                         return None;

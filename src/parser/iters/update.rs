@@ -188,7 +188,7 @@ impl<R: Read> Iterator for UpdateIterator<R> {
                         continue;
                     }
                     ParserError::ParseError(err_str) => {
-                        self.parser.options.log_parse_error_once(&err_str);
+                        self.parser.log_parse_error_once(&err_str);
                         write_mrt_core_dump(self.parser.core_dump, e.bytes);
                         if self.parser.core_dump {
                             return None;

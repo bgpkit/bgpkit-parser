@@ -242,6 +242,10 @@ pub fn span_record_warnings(
     warnings: &[BgpValidationWarning],
     tree: &DissectionNode,
 ) -> Vec<SpannedWarning> {
+    // Most records are clean: don't walk the tree for them at all.
+    if warnings.is_empty() {
+        return Vec::new();
+    }
     // Index the tree once: a record can carry as many warnings as it has
     // attributes, and walking the whole tree per warning is quadratic.
     let index = SpanIndex::build(tree);
