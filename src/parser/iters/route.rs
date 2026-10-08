@@ -2,7 +2,7 @@ use crate::error::{ParserError, ParserErrorWithBytes};
 use crate::models::*;
 use crate::parser::bgp::attributes::{parse_as_path, parse_nlri, AttributeValidationState};
 use crate::parser::bgp::messages::read_and_validate_bgp_marker;
-use crate::parser::iters::write_mrt_core_dump;
+use crate::parser::iters::{handle_record_parse_error, write_mrt_core_dump};
 use crate::parser::mrt::messages::bgp4mp::{bgp4mp_message_payload_len, is_short_zebra_open};
 use crate::parser::mrt::messages::legacy_bgp::{
     BGP_KEEPALIVE, BGP_NOTIFY, BGP_OPEN, BGP_STATE_CHANGE, BGP_UPDATE,
@@ -679,6 +679,16 @@ impl<R> RouteIterator<R> {
     }
 }
 
+/// Log an error from parsing a record body into routes. Only a `ParseError` goes through the
+/// once-per-parser limiter, as in the other iterators, so that another error class cannot use up
+/// the one `error`-level parse error line.
+fn log_route_body_error<R>(parser: &mut BgpkitParser<R>, err: &ParserError) {
+    match err {
+        ParserError::ParseError(err_str) => parser.log_parse_error_once(err_str),
+        other => error!("parser error: {}", other),
+    }
+}
+
 impl<R: Read> Iterator for RouteIterator<R> {
     type Item = BgpRouteElem;
 
@@ -699,7 +709,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = None;
                 }
                 Err(err) => {
-                    error!("parser error: {}", err);
+                    log_route_body_error(&mut self.parser, &err);
                     self.pending_routes = RouteRecordIter::Empty;
                     write_mrt_core_dump(self.parser.core_dump, self.pending_raw_bytes.take());
                     if self.parser.core_dump {
@@ -711,43 +721,12 @@ impl<R: Read> Iterator for RouteIterator<R> {
 
             let raw_record = match chunk_mrt_record(&mut self.parser.reader) {
                 Ok(raw_record) => raw_record,
-                Err(e) => match e.error {
-                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: {}", err_str);
-                        }
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        continue;
-                    }
-                    ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        if self.parser.core_dump {
-                            return None;
-                        }
-                        continue;
-                    }
-                    ParserError::EofExpected => return None,
-                    ParserError::IoError(err) | ParserError::EofError(err) => {
-                        error!("{:?}", err);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
+                Err(e) => {
+                    if !handle_record_parse_error(&mut self.parser, e.error, e.bytes) {
                         return None;
                     }
-                    #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => return None,
-                    ParserError::FilterError(_) => return None,
-                    ParserError::InvalidLabeledNlriLength
-                    | ParserError::TruncatedLabeledNlri
-                    | ParserError::TruncatedPrefix
-                    | ParserError::MaxLabelStackDepthExceeded
-                    | ParserError::PeerMaxLabelsExceeded
-                    | ParserError::InvalidPrefix => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
-                        }
-                        continue;
-                    }
-                },
+                    continue;
+                }
             };
 
             let used_zebra_compat = raw_record_uses_zebra_compat(&raw_record);
@@ -761,7 +740,7 @@ impl<R: Read> Iterator for RouteIterator<R> {
                     self.pending_raw_bytes = Some(raw_bytes);
                 }
                 Err(err) => {
-                    error!("parser error: {}", err);
+                    log_route_body_error(&mut self.parser, &err);
                     write_mrt_core_dump(self.parser.core_dump, Some(raw_bytes));
                     if self.parser.core_dump {
                         return None;

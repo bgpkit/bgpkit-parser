@@ -54,7 +54,7 @@ fn has_comma_joined_next_hop(msg: &RisMessage) -> bool {
 /// One sortable string per elem, over the fields RIS Live projects into JSON.
 ///
 /// Excluded (raw-only): large/extended communities, OTC, local-pref,
-/// atomic-aggregate, peer BGP id, origin-ASN derivation. Plain communities
+/// atomic-aggregate, peer BGP id. Plain communities
 /// are compared, empty normalised to `None`. Absent MED is normalised to 0 —
 /// the raw path has always reported a missing MED as `Some(0)`
 /// (`get_relevant_attributes` in `src/parser/mrt/mrt_elem.rs`).
@@ -67,7 +67,7 @@ fn projected_key(elem: &BgpElem) -> String {
         (!plain.is_empty()).then_some(plain)
     });
     format!(
-        "{:?} {} ts={} peer={} asn={} nh={:?} path={:?} origin={:?} med={} communities={:?} aggr={:?}/{:?}",
+        "{:?} {} ts={} peer={} asn={} nh={:?} path={:?} origin_asns={:?} origin={:?} med={} communities={:?} aggr={:?}/{:?}",
         elem.elem_type,
         elem.prefix,
         elem.timestamp,
@@ -75,6 +75,7 @@ fn projected_key(elem: &BgpElem) -> String {
         elem.peer_asn,
         elem.next_hop,
         elem.as_path,
+        elem.origin_asns,
         elem.origin,
         elem.med.unwrap_or(0),
         communities,

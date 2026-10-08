@@ -2,7 +2,7 @@
 parser module maintains the main logic for processing BGP and MRT messages.
 */
 use crate::models::{BgpElem, MrtRecord};
-use log::warn;
+use log::{debug, error, warn};
 use std::io::{BufReader, Cursor, Read};
 pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIterator};
 
@@ -38,8 +38,8 @@ pub use rislive::messages::{
 };
 #[cfg(feature = "rislive")]
 pub use rislive::{
-    parse_ris_live_message, parse_ris_live_message_json, parse_ris_live_message_raw,
-    parse_ris_live_message_raw_full,
+    parse_ris_live_message, parse_ris_live_message_iter, parse_ris_live_message_json,
+    parse_ris_live_message_raw, parse_ris_live_message_raw_full, RisLiveElemIter,
 };
 
 pub struct BgpkitParser<R> {
@@ -55,12 +55,14 @@ pub struct BgpkitParser<R> {
 pub(crate) struct ParserOptions {
     show_warnings: bool,
     warned_zebra_compat: bool,
+    logged_parse_error: bool,
 }
 impl Default for ParserOptions {
     fn default() -> Self {
         ParserOptions {
             show_warnings: true,
             warned_zebra_compat: false,
+            logged_parse_error: false,
         }
     }
 }
@@ -72,6 +74,27 @@ impl ParserOptions {
                 "recovered shortened Zebra BGP4MP records with missing envelope fields; substituting IPv4 zero addresses and interface index 0 (further occurrences for this parser will not be logged)"
             );
             self.warned_zebra_compat = true;
+        }
+    }
+
+    /// Log a record-level parse error at `error` level the first time it happens for this
+    /// parser, and at `debug` level afterwards. A corrupted stream re-synchronises header by
+    /// header, which can otherwise produce one `error` line per 12 bytes of damaged input.
+    ///
+    /// `stops_iteration` is set when the iterator ends at this error (core dumps enabled), so
+    /// there are no further errors to announce.
+    fn log_parse_error_once(&mut self, error: &dyn std::fmt::Display, stops_iteration: bool) {
+        if self.logged_parse_error {
+            debug!("parser error: {}", error);
+        } else if stops_iteration {
+            error!("parser error: {}", error);
+            self.logged_parse_error = true;
+        } else {
+            error!(
+                "parser error: {} (further parse errors for this parser will be logged at debug level)",
+                error
+            );
+            self.logged_parse_error = true;
         }
     }
 }
@@ -310,6 +333,12 @@ impl BgpkitParser<Box<dyn Read + Send>> {
 impl<R> BgpkitParser<R> {
     pub(crate) fn warn_zebra_compat_once(&mut self) {
         self.options.warn_zebra_compat_once();
+    }
+
+    /// See [`ParserOptions::log_parse_error_once`]; iterators stop at the first parse error
+    /// when core dumps are enabled.
+    pub(crate) fn log_parse_error_once(&mut self, error: &dyn std::fmt::Display) {
+        self.options.log_parse_error_once(error, self.core_dump);
     }
 
     pub fn enable_core_dump(self) -> Self {

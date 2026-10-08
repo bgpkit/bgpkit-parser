@@ -44,12 +44,10 @@ for announcement in parser.into_update_iter() {
 }
 ```
 */
-use crate::error::ParserError;
 use crate::models::*;
-use crate::parser::iters::write_mrt_core_dump;
+use crate::parser::iters::handle_record_parse_error;
 use crate::parser::BgpkitParser;
 use crate::Elementor;
-use log::{error, warn};
 use std::io::Read;
 use std::net::IpAddr;
 
@@ -179,44 +177,12 @@ impl<R: Read> Iterator for UpdateIterator<R> {
             }
             let record = match self.parser.next_record() {
                 Ok(record) => record,
-                Err(e) => match e.error {
-                    ParserError::TruncatedMsg(err_str) | ParserError::Unsupported(err_str) => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: {}", err_str);
-                        }
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        continue;
-                    }
-                    ParserError::ParseError(err_str) => {
-                        error!("parser error: {}", err_str);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
-                        if self.parser.core_dump {
-                            return None;
-                        }
-                        continue;
-                    }
-                    ParserError::EofExpected => return None,
-                    ParserError::IoError(err) | ParserError::EofError(err) => {
-                        error!("{:?}", err);
-                        write_mrt_core_dump(self.parser.core_dump, e.bytes);
+                Err(e) => {
+                    if !handle_record_parse_error(&mut self.parser, e.error, e.bytes) {
                         return None;
                     }
-                    #[cfg(feature = "oneio")]
-                    ParserError::OneIoError(_) => return None,
-                    ParserError::FilterError(_) => return None,
-                    // Labeled NLRI parsing errors - treat as malformed and skip
-                    ParserError::InvalidLabeledNlriLength
-                    | ParserError::TruncatedLabeledNlri
-                    | ParserError::TruncatedPrefix
-                    | ParserError::MaxLabelStackDepthExceeded
-                    | ParserError::PeerMaxLabelsExceeded
-                    | ParserError::InvalidPrefix => {
-                        if self.parser.options.show_warnings {
-                            warn!("parser warn: labeled NLRI parsing error: {:?}", e.error);
-                        }
-                        continue;
-                    }
-                },
+                    continue;
+                }
             };
 
             let t = record.common_header.timestamp;
