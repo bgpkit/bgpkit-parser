@@ -26,6 +26,7 @@ Options:
   -e, --elems-count              Count BGP elems
   -r, --records-count            Count MRT records
       --recover                  Recover after damaged MRT framing and report skipped byte ranges on stderr
+      --rfc7606                  Apply RFC 7606 error handling to elems (treat-as-withdraw, attribute discard, reset)
   -o, --origin-asn <ORIGIN_ASN>  Filter by origin AS Number
   -f, --filter <FILTERS>         Generic filter expression (key=value or key!=value)
   -p, --prefix <PREFIX>          Filter by network prefix
@@ -35,7 +36,7 @@ Options:
   -6, --ipv6-only                Filter by IPv6 only
   -j, --peer-ip <PEER_IP>        Filter by peer IP address
   -J, --peer-asn <PEER_ASN>      Filter by peer ASN
-  -m, --elem-type <ELEM_TYPE>    Filter by elem type: announce (a) or withdraw (w)
+  -m, --elem-type <ELEM_TYPE>    Filter by elem type: announce (a), withdraw (w), or reset (r, with --rfc7606)
   -t, --start-ts <START_TS>      Filter by start unix timestamp inclusive
   -T, --end-ts <END_TS>          Filter by end unix timestamp inclusive
   -a, --as-path <AS_PATH>        Filter by AS path regex string

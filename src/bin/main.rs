@@ -4,6 +4,7 @@ use std::io::{IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
 
+use bgpkit_parser::models::ErrorHandlingMode;
 use bgpkit_parser::render::text::Style;
 use bgpkit_parser::{BgpElem, BgpkitParser, Elementor, RecoveryConfig, RecoveryEvent, RecoveryGap};
 use clap::{Parser, ValueEnum};
@@ -107,6 +108,14 @@ struct Opts {
     #[clap(long)]
     recover: bool,
 
+    /// Apply RFC 7606 error handling to elems, assuming eBGP sessions: announcements of
+    /// an UPDATE that must be treated as withdrawn are output as withdrawals (W),
+    /// session-reset-class errors as resets (R), and malformed attributes subject to
+    /// attribute discard are dropped. JSON elems carry the applied approach in
+    /// `error_handling`.
+    #[clap(long)]
+    rfc7606: bool,
+
     #[clap(flatten)]
     filters: Filters,
 }
@@ -153,7 +162,7 @@ struct Filters {
     #[clap(short = 'J', long)]
     peer_asn: Option<u32>,
 
-    /// Filter by elem type: announce (a) or withdraw (w)
+    /// Filter by elem type: announce (a), withdraw (w), or reset (r, with --rfc7606)
     #[clap(short = 'm', long)]
     elem_type: Option<String>,
 
@@ -224,6 +233,9 @@ fn main() {
         parser = parser
             .add_filter("peer_asn", v.to_string().as_str())
             .unwrap();
+    }
+    if opts.rfc7606 {
+        parser = parser.enable_rfc7606_error_handling();
     }
     if let Some(v) = opts.filters.elem_type {
         parser = parser.add_filter("type", v.as_str()).unwrap();
@@ -319,6 +331,11 @@ fn main() {
     // parsed records. Count-only runs emit no hex, so they keep the
     // normal elem/record counting pipelines and their semantics
     // (per-elem filtering for -e).
+    let error_handling = if opts.rfc7606 {
+        ErrorHandlingMode::Rfc7606
+    } else {
+        ErrorHandlingMode::Preserve
+    };
     let result = if opts.hex && !counting {
         run_hex_records(parser.into_filtered_raw_record_iter(), output_format, style)
     } else {
@@ -348,6 +365,7 @@ fn main() {
                 opts.elems_count,
                 opts.records_count,
                 true,
+                error_handling,
             ),
             (false, false) => run_records(
                 parser
@@ -358,6 +376,7 @@ fn main() {
                 opts.elems_count,
                 opts.records_count,
                 false,
+                error_handling,
             ),
         }
     };
@@ -450,6 +469,7 @@ where
     terminal_error.map_or(Ok(()), Err)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_records<I>(
     events: I,
     output_format: OutputFormat,
@@ -457,12 +477,13 @@ fn run_records<I>(
     elems_count_requested: bool,
     records_count_requested: bool,
     report_recovery: bool,
+    error_handling: ErrorHandlingMode,
 ) -> Result<(), String>
 where
     I: IntoIterator<Item = Result<RecoveryEvent<bgpkit_parser::MrtRecord>, String>>,
 {
     let mut stdout = std::io::stdout();
-    let mut elementor = Elementor::new();
+    let mut elementor = Elementor::new().with_error_handling(error_handling);
     let mut records_count = 0usize;
     let mut elems_count = 0usize;
     let mut stats = RecoveryStats::new(report_recovery);

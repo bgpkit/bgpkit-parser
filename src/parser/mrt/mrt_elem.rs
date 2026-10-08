@@ -13,6 +13,7 @@ use std::net::{IpAddr, Ipv4Addr};
 #[derive(Default, Debug, Clone)]
 pub struct Elementor {
     pub peer_table: Option<PeerIndexTable>,
+    error_handling: ErrorHandlingMode,
 }
 
 /// Error returned by [`Elementor::record_to_elems_iter`].
@@ -222,6 +223,7 @@ fn rib_entry_to_elem(prefix: NetworkPrefix, peer: &Peer, entry: RibEntry) -> Bgp
         only_to_customer: attrs.only_to_customer,
         unknown: attrs.unknown,
         deprecated: attrs.deprecated,
+        error_handling: None,
     }
 }
 
@@ -375,6 +377,11 @@ pub struct BgpUpdateElemIter {
     withdrawn:
         std::iter::Chain<std::vec::IntoIter<NetworkPrefix>, std::vec::IntoIter<NetworkPrefix>>,
     in_withdrawn_phase: bool,
+    /// Element type of the announced prefixes: `ANNOUNCE`, or `WITHDRAW` / `RESET` when RFC 7606
+    /// error handling withdrew them, in which case the shared attributes above are all empty.
+    announced_as: ElemType,
+    /// RFC 7606 approach stamped on every element, when one was applied.
+    error_handling: Option<ErrorHandlingApproach>,
 }
 
 impl Iterator for BgpUpdateElemIter {
@@ -405,7 +412,7 @@ impl Iterator for BgpUpdateElemIter {
                 };
                 return Some(BgpElem {
                     timestamp: self.timestamp,
-                    elem_type: ElemType::ANNOUNCE,
+                    elem_type: self.announced_as,
                     peer_ip: self.peer_ip,
                     peer_asn: self.peer_asn,
                     peer_bgp_id: self.peer_bgp_id,
@@ -423,6 +430,7 @@ impl Iterator for BgpUpdateElemIter {
                     only_to_customer: self.only_to_customer,
                     unknown,
                     deprecated,
+                    error_handling: self.error_handling,
                 });
             }
             self.in_withdrawn_phase = true;
@@ -448,6 +456,7 @@ impl Iterator for BgpUpdateElemIter {
             only_to_customer: None,
             unknown: None,
             deprecated: None,
+            error_handling: self.error_handling,
         })
     }
 
@@ -510,7 +519,44 @@ impl Elementor {
     pub fn with_peer_table(peer_table: PeerIndexTable) -> Elementor {
         Elementor {
             peer_table: Some(peer_table),
+            ..Default::default()
         }
+    }
+
+    /// Sets how UPDATE messages with validation findings become elements.
+    ///
+    /// With [`ErrorHandlingMode::Rfc7606`], each UPDATE is converted according to its
+    /// [`BgpUpdateMessage::error_handling_approach`], assuming an eBGP session:
+    ///
+    /// - attribute discard: the announcements are kept and the malformed attributes, plus
+    ///   repeats of an attribute after its first occurrence, are left out;
+    /// - treat-as-withdraw: every announced prefix becomes a [`ElemType::WITHDRAW`] element;
+    /// - AFI/SAFI disable or session reset: every announced prefix becomes a
+    ///   [`ElemType::RESET`] element.
+    ///
+    /// Elements of an UPDATE that had an approach applied carry it in
+    /// [`BgpElem::error_handling`]. RIB entries are converted as before.
+    ///
+    /// ```
+    /// use bgpkit_parser::Elementor;
+    /// use bgpkit_parser::models::ErrorHandlingMode;
+    ///
+    /// let elementor = Elementor::new().with_error_handling(ErrorHandlingMode::Rfc7606);
+    /// assert_eq!(elementor.error_handling(), ErrorHandlingMode::Rfc7606);
+    /// ```
+    pub fn with_error_handling(mut self, mode: ErrorHandlingMode) -> Elementor {
+        self.error_handling = mode;
+        self
+    }
+
+    /// Shorthand for [`with_error_handling(ErrorHandlingMode::Rfc7606)`](Self::with_error_handling).
+    pub fn enable_rfc7606_error_handling(self) -> Elementor {
+        self.with_error_handling(ErrorHandlingMode::Rfc7606)
+    }
+
+    /// How this elementor converts UPDATE messages with validation findings.
+    pub fn error_handling(&self) -> ErrorHandlingMode {
+        self.error_handling
     }
 
     /// Convert a [`MrtRecord`] into an iterator of [`BgpElem`]s without
@@ -587,11 +633,12 @@ impl Elementor {
             MrtMessage::Bgp4Mp(msg) => match msg {
                 Bgp4MpEnum::StateChange(_) => Ok(PendingElems::Empty),
                 Bgp4MpEnum::Message(v) => {
-                    match Elementor::bgp_to_elems_iter(
+                    match Elementor::bgp_to_elems_iter_with(
                         v.bgp_message,
                         timestamp,
                         &v.peer_ip,
                         &v.peer_asn,
+                        self.error_handling,
                     ) {
                         Some(iter) => Ok(PendingElems::Bgp4Mp(iter)),
                         None => Ok(PendingElems::Empty),
@@ -600,11 +647,12 @@ impl Elementor {
             },
             MrtMessage::LegacyBgp(msg) => match msg {
                 LegacyBgp::StateChange(_) => Ok(PendingElems::Empty),
-                LegacyBgp::Message(message) => match Elementor::bgp_to_elems_iter(
+                LegacyBgp::Message(message) => match Elementor::bgp_to_elems_iter_with(
                     message.bgp_message,
                     timestamp,
                     &message.peer_ip,
                     &message.peer_asn,
+                    self.error_handling,
                 ) {
                     Some(iter) => Ok(PendingElems::Bgp4Mp(iter)),
                     None => Ok(PendingElems::Empty),
@@ -656,9 +704,27 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> Option<BgpUpdateElemIter> {
+        Elementor::bgp_to_elems_iter_with(
+            msg,
+            timestamp,
+            peer_ip,
+            peer_asn,
+            ErrorHandlingMode::Preserve,
+        )
+    }
+
+    /// Like [`bgp_to_elems_iter`](Self::bgp_to_elems_iter), converting UPDATE messages according
+    /// to `mode`; see [`with_error_handling`](Self::with_error_handling).
+    pub fn bgp_to_elems_iter_with(
+        msg: BgpMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+        mode: ErrorHandlingMode,
+    ) -> Option<BgpUpdateElemIter> {
         match msg {
-            BgpMessage::Update(msg) => Some(Elementor::bgp_update_to_elems_iter(
-                msg, timestamp, peer_ip, peer_asn,
+            BgpMessage::Update(msg) => Some(Elementor::bgp_update_to_elems_iter_with(
+                msg, timestamp, peer_ip, peer_asn, mode,
             )),
             BgpMessage::Open(_)
             | BgpMessage::Notification(_)
@@ -677,6 +743,18 @@ impl Elementor {
         Elementor::bgp_update_to_elems_iter(msg, timestamp, peer_ip, peer_asn).collect()
     }
 
+    /// Like [`bgp_update_to_elems`](Self::bgp_update_to_elems), converting the UPDATE according
+    /// to `mode`; see [`with_error_handling`](Self::with_error_handling).
+    pub fn bgp_update_to_elems_with(
+        msg: BgpUpdateMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+        mode: ErrorHandlingMode,
+    ) -> Vec<BgpElem> {
+        Elementor::bgp_update_to_elems_iter_with(msg, timestamp, peer_ip, peer_asn, mode).collect()
+    }
+
     /// Convert a [BgpUpdateMessage] into a [`BgpUpdateElemIter`] that lazily
     /// yields [BgpElem]s without allocating a `Vec`.
     pub fn bgp_update_to_elems_iter(
@@ -685,6 +763,37 @@ impl Elementor {
         peer_ip: &IpAddr,
         peer_asn: &Asn,
     ) -> BgpUpdateElemIter {
+        Elementor::bgp_update_to_elems_iter_with(
+            msg,
+            timestamp,
+            peer_ip,
+            peer_asn,
+            ErrorHandlingMode::Preserve,
+        )
+    }
+
+    /// Like [`bgp_update_to_elems_iter`](Self::bgp_update_to_elems_iter), converting the UPDATE
+    /// according to `mode`; see [`with_error_handling`](Self::with_error_handling).
+    pub fn bgp_update_to_elems_iter_with(
+        mut msg: BgpUpdateMessage,
+        timestamp: f64,
+        peer_ip: &IpAddr,
+        peer_asn: &Asn,
+        mode: ErrorHandlingMode,
+    ) -> BgpUpdateElemIter {
+        let approach = match mode {
+            ErrorHandlingMode::Rfc7606 => msg.error_handling_approach(),
+            ErrorHandlingMode::Preserve => None,
+        };
+        match approach {
+            Some(approach) if approach.withdraws_routes() => {
+                return withdrawn_update_elems_iter(msg, timestamp, peer_ip, peer_asn, approach);
+            }
+            Some(_) => DiscardPlan::from_warnings(&msg.attributes.validation_warnings)
+                .apply(&mut msg.attributes),
+            None => {}
+        }
+
         let mut attrs = get_relevant_attributes(msg.attributes);
         let path = attrs.path();
 
@@ -719,6 +828,8 @@ impl Elementor {
                 .into_iter()
                 .chain(attrs.withdrawn_prefixes),
             in_withdrawn_phase: false,
+            announced_as: ElemType::ANNOUNCE,
+            error_handling: approach,
         }
     }
 
@@ -745,6 +856,58 @@ impl Elementor {
                 }
             },
         }
+    }
+}
+
+/// RFC 7606 treat-as-withdraw and stronger: no announced route is installed, so every announced
+/// prefix becomes a `WITHDRAW` element, or a `RESET` element when the approach is AFI/SAFI disable
+/// or session reset. The path attributes describe routes that are not installed, so no element
+/// carries them. As in the route iterator, only the first MP_REACH_NLRI and MP_UNREACH_NLRI
+/// count (RFC 7606 §3(g)).
+fn withdrawn_update_elems_iter(
+    msg: BgpUpdateMessage,
+    timestamp: f64,
+    peer_ip: &IpAddr,
+    peer_asn: &Asn,
+    approach: ErrorHandlingApproach,
+) -> BgpUpdateElemIter {
+    let mut nlri_announced = Vec::new();
+    let mut nlri_withdrawn = Vec::new();
+    let mut seen = AttrCodeSet::default();
+    for attribute in msg.attributes.inner {
+        if !seen.insert(attribute.value.attr_code()) {
+            continue;
+        }
+        match attribute.value {
+            AttributeValue::MpReachNlri(nlri) => nlri_announced.extend(nlri.prefixes),
+            AttributeValue::MpUnreachNlri(nlri) => nlri_withdrawn.extend(nlri.prefixes),
+            _ => {}
+        }
+    }
+
+    BgpUpdateElemIter {
+        timestamp,
+        peer_ip: *peer_ip,
+        peer_asn: *peer_asn,
+        peer_bgp_id: None,
+        only_to_customer: None,
+        path: None,
+        origin_asns: None,
+        origin: None,
+        next_hop: None,
+        local_pref: None,
+        med: None,
+        communities: None,
+        atomic: false,
+        aggr_asn: None,
+        aggr_ip: None,
+        unknown: None,
+        deprecated: None,
+        announced: msg.announced_prefixes.into_iter().chain(nlri_announced),
+        withdrawn: msg.withdrawn_prefixes.into_iter().chain(nlri_withdrawn),
+        in_withdrawn_phase: false,
+        announced_as: approach.announced_elem_type(),
+        error_handling: Some(approach),
     }
 }
 
@@ -776,6 +939,7 @@ fn table_dump_to_elem(msg: TableDumpMessage) -> BgpElem {
         only_to_customer: attrs.only_to_customer,
         unknown: attrs.unknown,
         deprecated: attrs.deprecated,
+        error_handling: None,
     }
 }
 
@@ -797,7 +961,8 @@ impl From<&BgpElem> for Attributes {
         let mut attributes = Attributes::default();
         let prefix = value.prefix;
 
-        if value.elem_type == ElemType::WITHDRAW {
+        // RESET elems are routes RFC 7606 forbids installing, so they encode as withdrawals too
+        if !value.elem_type.is_announce() {
             values.push(AttributeValue::MpUnreachNlri(Nlri::new_unreachable(prefix)));
             attributes.extend(values);
             return attributes;
@@ -977,11 +1142,24 @@ mod tests {
                 code: AttrType::RESERVED.into(),
                 bytes: Bytes::new(),
             }]),
+            error_handling: None,
         };
 
         let _attributes = Attributes::from(&elem);
         elem.elem_type = ElemType::WITHDRAW;
         let _attributes = Attributes::from(&elem);
+    }
+
+    #[test]
+    fn test_reset_elem_converts_to_withdrawal() {
+        let elem = BgpElem {
+            elem_type: ElemType::RESET,
+            prefix: NetworkPrefix::from_str("10.0.0.0/24").unwrap(),
+            ..Default::default()
+        };
+        let attributes = Attributes::from(&elem);
+        assert!(attributes.has_attr(AttrType::MP_UNREACHABLE_NLRI));
+        assert!(!attributes.has_attr(AttrType::MP_REACHABLE_NLRI));
     }
 
     #[test]

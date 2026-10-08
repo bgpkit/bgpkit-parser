@@ -1,7 +1,7 @@
 /*!
 parser module maintains the main logic for processing BGP and MRT messages.
 */
-use crate::models::{BgpElem, MrtRecord};
+use crate::models::{BgpElem, ErrorHandlingMode, MrtRecord};
 use log::{debug, error, warn};
 use std::io::{BufReader, Cursor, Read};
 pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIterator};
@@ -56,6 +56,7 @@ pub(crate) struct ParserOptions {
     show_warnings: bool,
     warned_zebra_compat: bool,
     logged_parse_error: bool,
+    pub(crate) error_handling: ErrorHandlingMode,
 }
 impl Default for ParserOptions {
     fn default() -> Self {
@@ -63,11 +64,17 @@ impl Default for ParserOptions {
             show_warnings: true,
             warned_zebra_compat: false,
             logged_parse_error: false,
+            error_handling: ErrorHandlingMode::Preserve,
         }
     }
 }
 
 impl ParserOptions {
+    /// An [`Elementor`] that converts UPDATE messages the way these options ask.
+    pub(crate) fn elementor(&self) -> Elementor {
+        Elementor::new().with_error_handling(self.error_handling)
+    }
+
     pub(crate) fn warn_zebra_compat_once(&mut self) {
         if self.show_warnings && !self.warned_zebra_compat {
             warn!(
@@ -361,6 +368,51 @@ impl<R> BgpkitParser<R> {
             options,
             text_dump_iter: self.text_dump_iter,
         }
+    }
+
+    /// Sets how UPDATE messages with validation findings become elements in the element and
+    /// route iterators, and in record filtering. See
+    /// [`Elementor::with_error_handling`] for what each mode does. The route iterator skips the
+    /// value checks of attributes it does not parse; see
+    /// [`into_route_iter`](Self::into_route_iter).
+    ///
+    /// Records themselves are unchanged:
+    /// [`BgpUpdateMessage::error_handling_approach`](crate::models::BgpUpdateMessage::error_handling_approach) reports
+    /// the approach of an UPDATE in any mode.
+    pub fn with_error_handling(self, mode: ErrorHandlingMode) -> Self {
+        let mut options = self.options;
+        options.error_handling = mode;
+        BgpkitParser {
+            reader: self.reader,
+            core_dump: self.core_dump,
+            filters: self.filters,
+            options,
+            text_dump_iter: self.text_dump_iter,
+        }
+    }
+
+    /// Apply RFC 7606 error handling to elements, assuming eBGP sessions: announcements of an
+    /// UPDATE that RFC 7606 treats as withdrawn become
+    /// [`ElemType::WITHDRAW`](crate::models::ElemType::WITHDRAW) elements, session-reset-class
+    /// errors produce [`ElemType::RESET`](crate::models::ElemType::RESET) elements, and attributes subject
+    /// to attribute discard are left out. Shorthand for
+    /// [`with_error_handling(ErrorHandlingMode::Rfc7606)`](Self::with_error_handling).
+    ///
+    /// ```no_run
+    /// use bgpkit_parser::BgpkitParser;
+    /// use bgpkit_parser::models::ElemType;
+    ///
+    /// let parser = BgpkitParser::new("https://data.ris.ripe.net/rrc00/latest-update.gz")
+    ///     .unwrap()
+    ///     .enable_rfc7606_error_handling();
+    /// for elem in parser {
+    ///     if let Some(approach) = elem.error_handling {
+    ///         println!("{:?} {} ({approach:?})", elem.elem_type, elem.prefix);
+    ///     }
+    /// }
+    /// ```
+    pub fn enable_rfc7606_error_handling(self) -> Self {
+        self.with_error_handling(ErrorHandlingMode::Rfc7606)
     }
 
     /// Add a filter to the parser by specifying filter type and value as strings.

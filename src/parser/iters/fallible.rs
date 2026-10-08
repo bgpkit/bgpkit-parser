@@ -24,9 +24,10 @@ pub struct FallibleRecordIterator<R> {
 
 impl<R> FallibleRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         FallibleRecordIterator {
             parser,
-            elementor: Elementor::new(),
+            elementor,
             finished: false,
         }
     }
@@ -88,10 +89,11 @@ pub struct FallibleElemIterator<R> {
 
 impl<R> FallibleElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         FallibleElemIterator {
             record_iter: FallibleRecordIterator::new(parser),
             cache_elems: vec![],
-            elementor: Elementor::new(),
+            elementor,
         }
     }
 }

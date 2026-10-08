@@ -81,10 +81,11 @@ pub struct FilteredRawRecordIterator<R> {
 
 impl<R> FilteredRawRecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         let filters = parser.filters.clone();
         FilteredRawRecordIterator {
             inner: RawRecordIterator::new(parser),
-            elementor: Elementor::new(),
+            elementor,
             filters,
         }
     }

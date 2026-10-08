@@ -22,14 +22,15 @@ mod attr_40_bgp_prefix_sid;
 mod attr_41_bier;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::{debug, warn};
+use log::debug;
 use std::net::IpAddr;
 
 use crate::models::*;
 
 use crate::encoder::sink::{with_u16_len, with_u8_len};
 use crate::error::{BgpValidationWarning, EncodingError, ParserError};
-use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
+use crate::parser::bgp::attributes::attr_01_origin::encode_origin;
+pub(crate) use crate::parser::bgp::attributes::attr_01_origin::parse_origin;
 use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
 pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
@@ -157,37 +158,31 @@ fn is_raw_retained_attr(attr_type: AttrType) -> bool {
     )
 }
 
-/// Check if an attribute type is well-known mandatory
-fn is_well_known_mandatory(attr_type: AttrType) -> bool {
-    matches!(
-        attr_type,
-        AttrType::ORIGIN | AttrType::AS_PATH | AttrType::NEXT_HOP | AttrType::LOCAL_PREFERENCE
-    )
-}
-
 pub(crate) struct AttributeValidationState {
     warnings: Vec<BgpValidationWarning>,
-    attr_mask: [u64; 4],
+    attr_mask: AttrCodeSet,
+    /// Whether the attribute last passed to [`observe_header`](Self::observe_header) repeats an
+    /// earlier one.
+    repeat: bool,
 }
 
 impl AttributeValidationState {
     pub(crate) fn new() -> Self {
         Self {
             warnings: Vec::new(),
-            attr_mask: [0; 4],
+            attr_mask: AttrCodeSet::default(),
+            repeat: false,
         }
     }
 
-    fn has_raw_attr(&self, attr: u8) -> bool {
-        (self.attr_mask[(attr / 64) as usize] & (1u64 << (attr % 64))) != 0
-    }
-
     pub(crate) fn has_attr(&self, attr_type: AttrType) -> bool {
-        self.has_raw_attr(u8::from(attr_type))
+        self.attr_mask.contains(u8::from(attr_type))
     }
 
-    fn set_attr(&mut self, attr: u8) {
-        self.attr_mask[(attr / 64) as usize] |= 1u64 << (attr % 64);
+    /// Whether the current attribute repeats an earlier one. RFC 7606 §3(g) discards every
+    /// repeat, so the `observe_*` methods record no finding about it.
+    pub(crate) fn is_repeat(&self) -> bool {
+        self.repeat
     }
 
     pub(crate) fn observe_header(
@@ -197,11 +192,24 @@ impl AttributeValidationState {
         flags: AttrFlags,
         length: usize,
     ) -> bool {
-        if self.has_raw_attr(raw_attr_type) {
+        self.repeat = !self.attr_mask.insert(raw_attr_type);
+        if self.repeat {
             self.warnings
                 .push(BgpValidationWarning::DuplicateAttribute { attr_type });
+            return flags.contains(AttrFlags::PARTIAL);
         }
-        self.set_attr(raw_attr_type);
+
+        // RFC 4271 §6.3: an attribute this parser does not recognize must be optional. A
+        // deprecated code point is recognized, so it is not reported here.
+        if matches!(attr_type, AttrType::Unknown(_))
+            && get_deprecated_attr_type(raw_attr_type).is_none()
+            && !flags.contains(AttrFlags::OPTIONAL)
+        {
+            self.warnings
+                .push(BgpValidationWarning::UnrecognizedWellKnownAttribute {
+                    attr_type_code: raw_attr_type,
+                });
+        }
 
         validate_attribute_flags(attr_type, flags, &mut self.warnings);
         validate_attribute_length(attr_type, length, &mut self.warnings);
@@ -209,39 +217,142 @@ impl AttributeValidationState {
         flags.contains(AttrFlags::PARTIAL)
     }
 
+    /// RFC 7606 §4: an attribute whose length runs past the end of the attribute list.
+    pub(crate) fn observe_attribute_overrun(
+        &mut self,
+        attr_type: AttrType,
+        attr_length: usize,
+        remaining: usize,
+    ) {
+        debug!(
+            "{attr_type:?} attribute encodes a length ({attr_length}) that is longer than the remaining attribute data ({remaining}); skipping the rest of the attribute list"
+        );
+        self.warnings
+            .push(BgpValidationWarning::MalformedAttributeList {
+                reason: format!(
+                    "{attr_type:?} attribute length {attr_length} exceeds the {remaining} bytes left in the attribute list (RFC 7606 §4)"
+                ),
+            });
+    }
+
+    /// RFC 7606 §4: one or two bytes left at the end of the attribute list, too few for an
+    /// attribute header.
+    pub(crate) fn observe_trailing_bytes(&mut self, remaining: usize) {
+        if remaining == 0 {
+            return;
+        }
+        debug!("{remaining} trailing bytes after the last path attribute");
+        self.warnings
+            .push(BgpValidationWarning::MalformedAttributeList {
+                reason: format!(
+                    "{remaining} trailing bytes after the last path attribute, too few for an attribute header (RFC 7606 §4)"
+                ),
+            });
+    }
+
+    /// Record why an attribute value failed to parse. `raw_bytes` is the attribute value.
     pub(crate) fn observe_parse_error(
         &mut self,
         attr_type: AttrType,
         partial: bool,
         error: &ParserError,
+        raw_bytes: &[u8],
     ) {
-        if partial {
-            self.warnings
-                .push(BgpValidationWarning::PartialAttributeError {
-                    attr_type,
-                    reason: error.to_string(),
+        if self.repeat {
+            return;
+        }
+        let reason = error.to_string();
+        match attr_type {
+            // RFC 7606 §5.3: the error handling of MP_REACH_NLRI and MP_UNREACH_NLRI follows
+            // from the family their AFI/SAFI header names.
+            AttrType::MP_REACHABLE_NLRI | AttrType::MP_UNREACHABLE_NLRI => {
+                debug!("{attr_type:?} attribute parsing failed: {reason}");
+                self.warnings.push(BgpValidationWarning::MalformedNlri {
+                    nlri_type: if attr_type == AttrType::MP_REACHABLE_NLRI {
+                        "mp_reach"
+                    } else {
+                        "mp_unreach"
+                    },
+                    reason,
+                    raw_bytes: raw_bytes.to_vec(),
                 });
-            debug!("PARTIAL attribute error: {}", error);
-        } else if is_well_known_mandatory(attr_type) {
+            }
+            _ if partial => {
+                debug!("PARTIAL attribute error: {reason}");
+                self.warnings
+                    .push(BgpValidationWarning::PartialAttributeError { attr_type, reason });
+            }
+            AttrType::ORIGIN => {
+                debug!("ORIGIN attribute parsing failed: {reason}");
+                // A wrong length is already reported by the length check.
+                if let [value] = raw_bytes {
+                    self.warnings
+                        .push(BgpValidationWarning::InvalidOriginAttribute { value: *value });
+                }
+            }
+            AttrType::AS_PATH => {
+                debug!("AS_PATH attribute parsing failed: {reason}");
+                self.warnings
+                    .push(BgpValidationWarning::MalformedAsPath { reason });
+            }
+            AttrType::NEXT_HOP => {
+                debug!("NEXT_HOP attribute parsing failed: {reason}");
+                self.warnings
+                    .push(BgpValidationWarning::InvalidNextHopAttribute { reason });
+            }
+            _ => {
+                debug!("{attr_type:?} attribute parsing failed: {reason}");
+                self.warnings
+                    .push(BgpValidationWarning::OptionalAttributeError { attr_type, reason });
+            }
+        }
+    }
+
+    /// Checks on values that parsed but are still malformed: RFC 7607 AS 0, and RFC 7606 §7.2
+    /// AS_PATH segments without ASNs. The typed value is kept, so output that does not apply
+    /// RFC 7606 error handling is unchanged.
+    pub(crate) fn observe_value(&mut self, value: &AttributeValue) {
+        if self.repeat {
+            return;
+        }
+        match value {
+            AttributeValue::AsPath(path) => self.observe_as_path(path),
+            AttributeValue::As4Path(path) => self.observe_as4_path(path),
+            AttributeValue::Aggregator { asn, .. } | AttributeValue::As4Aggregator { asn, .. }
+                if asn.to_u32() == 0 =>
+            {
+                self.warnings
+                    .push(BgpValidationWarning::OptionalAttributeError {
+                        attr_type: value.attr_type(),
+                        reason: "aggregator AS 0 (RFC 7607 §2)".to_string(),
+                    });
+            }
+            _ => {}
+        }
+    }
+
+    /// RFC 7606 §7.2 and RFC 7607 §2 checks on a parsed AS_PATH.
+    pub(crate) fn observe_as_path(&mut self, path: &AsPath) {
+        if self.repeat {
+            return;
+        }
+        if let Some(reason) = as_path_problem(path) {
             self.warnings
-                .push(BgpValidationWarning::MalformedAttributeList {
-                    reason: format!(
-                        "Well-known mandatory attribute {} parsing failed: {}",
-                        u8::from(attr_type),
-                        error
-                    ),
-                });
-            debug!(
-                "Well-known mandatory attribute parsing failed, treating as withdraw: {}",
-                error
-            );
-        } else {
+                .push(BgpValidationWarning::MalformedAsPath { reason });
+        }
+    }
+
+    /// RFC 7607 §2 and empty-segment checks on a parsed AS4_PATH, which RFC 6793 §6 discards.
+    pub(crate) fn observe_as4_path(&mut self, path: &AsPath) {
+        if self.repeat {
+            return;
+        }
+        if let Some(reason) = as_path_problem(path) {
             self.warnings
                 .push(BgpValidationWarning::OptionalAttributeError {
-                    attr_type,
-                    reason: error.to_string(),
+                    attr_type: AttrType::AS4_PATH,
+                    reason,
                 });
-            debug!("Optional attribute error, discarding: {}", error);
         }
     }
 
@@ -277,8 +388,75 @@ impl AttributeValidationState {
         }
     }
 
-    pub(crate) fn finish(self) -> (Vec<BgpValidationWarning>, [u64; 4]) {
+    pub(crate) fn finish(self) -> (Vec<BgpValidationWarning>, AttrCodeSet) {
         (self.warnings, self.attr_mask)
+    }
+}
+
+/// An AS path that parsed but is malformed: a segment without ASNs (RFC 7606 §7.2), or AS 0
+/// (RFC 7607 §2).
+fn as_path_problem(path: &AsPath) -> Option<String> {
+    if path.segments.iter().any(AsPathSegment::is_empty) {
+        return Some("AS path segment without AS numbers (RFC 7606 §7.2)".to_string());
+    }
+    if path
+        .segments
+        .iter()
+        .any(|segment| segment.iter().any(|asn| asn.to_u32() == 0))
+    {
+        return Some("AS path contains AS 0 (RFC 7607 §2)".to_string());
+    }
+    None
+}
+
+/// Length constraint on an attribute value, from RFC 7606 §7 and the RFCs defining later
+/// attributes.
+enum LengthRule {
+    Exactly(usize),
+    OneOf(&'static [usize]),
+    NonZeroMultipleOf(usize),
+    AtLeast(usize),
+    Any,
+}
+
+impl LengthRule {
+    fn for_attr(attr_type: AttrType) -> Self {
+        match attr_type {
+            // RFC 7606 §7.1, §7.3, §7.4, §7.5, §7.6, §7.9
+            AttrType::ORIGIN => LengthRule::Exactly(1),
+            AttrType::NEXT_HOP => LengthRule::Exactly(4), // IPv4 next hop
+            AttrType::MULTI_EXIT_DISCRIMINATOR => LengthRule::Exactly(4),
+            AttrType::LOCAL_PREFERENCE => LengthRule::Exactly(4),
+            AttrType::ATOMIC_AGGREGATE => LengthRule::Exactly(0),
+            AttrType::ORIGINATOR_ID => LengthRule::Exactly(4),
+            // RFC 9234 §6
+            AttrType::ONLY_TO_CUSTOMER => LengthRule::Exactly(4),
+            // RFC 6793 §6
+            AttrType::AS4_AGGREGATOR => LengthRule::Exactly(8),
+            // RFC 7606 §7.7: 6 with 2-octet ASNs, 8 with 4-octet ASNs
+            AttrType::AGGREGATOR => LengthRule::OneOf(&[6, 8]),
+            // RFC 7606 §7.8, §7.10, §7.14, §7.15; RFC 8092 §6
+            AttrType::COMMUNITIES | AttrType::CLUSTER_LIST => LengthRule::NonZeroMultipleOf(4),
+            AttrType::EXTENDED_COMMUNITIES => LengthRule::NonZeroMultipleOf(8),
+            AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                LengthRule::NonZeroMultipleOf(20)
+            }
+            AttrType::LARGE_COMMUNITIES => LengthRule::NonZeroMultipleOf(12),
+            // RFC 7606 §5.3
+            AttrType::MP_REACHABLE_NLRI => LengthRule::AtLeast(5),
+            AttrType::MP_UNREACHABLE_NLRI => LengthRule::AtLeast(3),
+            _ => LengthRule::Any,
+        }
+    }
+
+    fn allows(&self, length: usize) -> bool {
+        match self {
+            LengthRule::Exactly(expected) => length == *expected,
+            LengthRule::OneOf(allowed) => allowed.contains(&length),
+            LengthRule::NonZeroMultipleOf(unit) => length != 0 && length.is_multiple_of(*unit),
+            LengthRule::AtLeast(min) => length >= *min,
+            LengthRule::Any => true,
+        }
     }
 }
 
@@ -288,37 +466,16 @@ fn validate_attribute_length(
     length: usize,
     warnings: &mut Vec<BgpValidationWarning>,
 ) {
-    let expected_length = match attr_type {
-        AttrType::ORIGIN => Some(1),
-        AttrType::NEXT_HOP => Some(4), // IPv4 next hop
-        AttrType::MULTI_EXIT_DISCRIMINATOR => Some(4),
-        AttrType::LOCAL_PREFERENCE => Some(4),
-        AttrType::ATOMIC_AGGREGATE => Some(0),
-        AttrType::ORIGINATOR_ID => Some(4),
-        AttrType::ONLY_TO_CUSTOMER => Some(4),
-        // Variable length attributes - no fixed constraint
-        AttrType::AS_PATH
-        | AttrType::AS4_PATH
-        | AttrType::AGGREGATOR
-        | AttrType::AS4_AGGREGATOR
-        | AttrType::COMMUNITIES
-        | AttrType::EXTENDED_COMMUNITIES
-        | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
-        | AttrType::LARGE_COMMUNITIES
-        | AttrType::CLUSTER_LIST
-        | AttrType::MP_REACHABLE_NLRI
-        | AttrType::MP_UNREACHABLE_NLRI => None,
-        _ => None, // Unknown attributes
-    };
-
-    if let Some(expected) = expected_length {
-        if length != expected {
-            warnings.push(BgpValidationWarning::AttributeLengthError {
-                attr_type,
-                expected_length: Some(expected),
-                actual_length: length,
-            });
-        }
+    let rule = LengthRule::for_attr(attr_type);
+    if !rule.allows(length) {
+        warnings.push(BgpValidationWarning::AttributeLengthError {
+            attr_type,
+            expected_length: match rule {
+                LengthRule::Exactly(expected) => Some(expected),
+                _ => None,
+            },
+            actual_length: length,
+        });
     }
 }
 
@@ -326,15 +483,6 @@ fn validate_attribute_length(
 /// IPv4 or IPv6 with SAFI 128, and EVPN, which is AFI 25 with SAFI 70.
 fn is_domain_path_family(afi: u16, safi: u8) -> bool {
     matches!((afi, safi), (1 | 2, 128) | (25, 70))
-}
-
-/// The AFI/SAFI header an MP_REACH_NLRI attribute value starts with, when it is long enough to
-/// carry one. The header identifies the family even when the rest did not decode.
-fn mp_reach_family(bytes: &[u8]) -> Option<(u16, u8)> {
-    match bytes.len() >= 3 {
-        true => Some((u16::from_be_bytes([bytes[0], bytes[1]]), bytes[2])),
-        false => None,
-    }
 }
 
 /// The route families a D-PATH-carrying message carries, as far as the caller can tell.
@@ -367,7 +515,7 @@ impl DomainPathFamilies {
                         AttributeValue::Raw(raw) | AttributeValue::Unknown(raw)
                             if raw.code == u8::from(AttrType::MP_REACHABLE_NLRI) =>
                         {
-                            mp_reach_family(&raw.bytes)
+                            mp_nlri_family(&raw.bytes)
                         }
                         _ => None,
                     })
@@ -453,6 +601,7 @@ pub fn parse_attributes(
     // A handle on the whole attribute section, so an attribute that fails to parse can be kept
     // raw by re-slicing it, without cloning every attribute's bytes up front.
     let section = data.clone();
+    let mut overrun = false;
 
     while data.remaining() >= 3 {
         // each attribute is at least 3 bytes: flag(1) + type(1) + length(1)
@@ -477,12 +626,10 @@ pub fn parse_attributes(
 
         let bytes_left = data.remaining();
 
-        if data.remaining() < attr_length {
-            warn!(
-                "{:?} attribute encodes a length ({}) that is longer than the remaining attribute data ({}). Skipping remaining attribute data for BGP message",
-                attr_type, attr_length, bytes_left
-            );
+        if bytes_left < attr_length {
+            validation.observe_attribute_overrun(attr_type, attr_length, bytes_left);
             // break and return already parsed attributes
+            overrun = true;
             break;
         }
 
@@ -583,10 +730,16 @@ pub fn parse_attributes(
         match attr {
             Ok(value) => {
                 assert_eq!(attr_type, value.attr_type());
+                validation.observe_value(&value);
                 attributes.push(Attribute { value, flag });
             }
             Err(e) => {
-                validation.observe_parse_error(attr_type, partial, &e);
+                validation.observe_parse_error(
+                    attr_type,
+                    partial,
+                    &e,
+                    &section.slice(value_start..value_start + attr_length),
+                );
                 attributes.push(Attribute {
                     value: AttributeValue::Raw(AttrRaw {
                         code: raw_code,
@@ -597,6 +750,10 @@ pub fn parse_attributes(
                 continue;
             }
         };
+    }
+
+    if !overrun {
+        validation.observe_trailing_bytes(data.remaining());
     }
 
     let (mut validation_warnings, attr_mask) = validation.finish();
@@ -1314,5 +1471,156 @@ mod tests {
             }
             other => panic!("expected As4Aggregator variant, got {other:?}"),
         }
+    }
+
+    fn warnings_for(wire: &[u8]) -> Vec<BgpValidationWarning> {
+        parse_attributes(
+            Bytes::from(wire.to_vec()),
+            &AsnLength::Bits32,
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect("attribute list must parse")
+        .validation_warnings
+    }
+
+    fn has_length_error(warnings: &[BgpValidationWarning], expected: AttrType) -> bool {
+        warnings.iter().any(|w| {
+            matches!(w, BgpValidationWarning::AttributeLengthError { attr_type, .. } if *attr_type == expected)
+        })
+    }
+
+    #[test]
+    fn test_rfc7606_length_rules() {
+        // COMMUNITIES of 6 bytes: not a multiple of 4
+        let warnings = warnings_for(&[0xc0, 0x08, 0x06, 0, 0, 0, 1, 0, 2]);
+        assert!(has_length_error(&warnings, AttrType::COMMUNITIES));
+        // AGGREGATOR of 7 bytes: neither 6 nor 8
+        let warnings = warnings_for(&[0xc0, 0x07, 0x07, 0, 0, 0, 1, 10, 0, 0]);
+        assert!(has_length_error(&warnings, AttrType::AGGREGATOR));
+        // ATOMIC_AGGREGATE with a value byte
+        let warnings = warnings_for(&[0x40, 0x06, 0x01, 0x00]);
+        assert!(has_length_error(&warnings, AttrType::ATOMIC_AGGREGATE));
+        // MP_UNREACH_NLRI shorter than its AFI/SAFI header
+        let warnings = warnings_for(&[0x80, 0x0f, 0x02, 0x00, 0x02]);
+        assert!(has_length_error(&warnings, AttrType::MP_UNREACHABLE_NLRI));
+        // LARGE_COMMUNITIES of zero length
+        let warnings = warnings_for(&[0xc0, 0x20, 0x00]);
+        assert!(has_length_error(&warnings, AttrType::LARGE_COMMUNITIES));
+        // well-formed values raise nothing
+        let warnings = warnings_for(&[
+            0xc0, 0x08, 0x04, 0, 0, 0, 1, // COMMUNITIES
+            0xc0, 0x07, 0x08, 0, 0, 0, 1, 10, 0, 0, 1, // AGGREGATOR, 4-octet AS
+            0x40, 0x06, 0x00, // ATOMIC_AGGREGATE
+        ]);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn test_rfc7606_attribute_overrun_is_recorded() {
+        // ORIGIN, then an attribute header claiming 100 bytes with 1 left
+        let warnings = warnings_for(&[0x40, 0x01, 0x01, 0x00, 0xc0, 0x08, 0x64, 0x00]);
+        assert!(warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MalformedAttributeList { .. })));
+    }
+
+    #[test]
+    fn test_rfc7606_trailing_bytes_are_recorded() {
+        let warnings = warnings_for(&[0x40, 0x01, 0x01, 0x00, 0x40, 0x02]);
+        assert!(warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MalformedAttributeList { .. })));
+    }
+
+    #[test]
+    fn test_unrecognized_well_known_attribute() {
+        // unknown type 200 without the OPTIONAL bit
+        let warnings = warnings_for(&[0x40, 0xc8, 0x00]);
+        assert!(
+            warnings.contains(&BgpValidationWarning::UnrecognizedWellKnownAttribute {
+                attr_type_code: 200
+            })
+        );
+        // the same code marked optional is fine
+        assert!(warnings_for(&[0xc0, 0xc8, 0x00]).is_empty());
+        // a deprecated code point is recognized
+        assert!(warnings_for(&[0x40, 0x0b, 0x00]).is_empty());
+    }
+
+    #[test]
+    fn test_specific_variants_for_mandatory_attributes() {
+        let warnings = warnings_for(&[0x40, 0x01, 0x01, 0x03]);
+        assert!(warnings.contains(&BgpValidationWarning::InvalidOriginAttribute { value: 3 }));
+
+        // segment type 9 does not exist
+        let warnings = warnings_for(&[0x40, 0x02, 0x06, 0x09, 0x01, 0, 0, 0, 1]);
+        assert!(warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MalformedAsPath { .. })));
+
+        let warnings = warnings_for(&[0x40, 0x03, 0x03, 192, 0, 2]);
+        assert!(warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::InvalidNextHopAttribute { .. })));
+        assert!(has_length_error(&warnings, AttrType::NEXT_HOP));
+    }
+
+    #[test]
+    fn test_malformed_mp_reach_reports_malformed_nlri() {
+        // IPv6 unicast MP_REACH whose next-hop length (3) is not a valid length
+        let wire = [
+            0x80, 0x0e, 0x08, 0x00, 0x02, 0x01, 0x03, 0xaa, 0xbb, 0xcc, 0x00,
+        ];
+        let warnings = warnings_for(&wire);
+        let found = warnings.iter().find_map(|w| match w {
+            BgpValidationWarning::MalformedNlri {
+                nlri_type,
+                raw_bytes,
+                ..
+            } => Some((*nlri_type, raw_bytes.clone())),
+            _ => None,
+        });
+        assert_eq!(found, Some(("mp_reach", wire[3..].to_vec())));
+    }
+
+    #[test]
+    fn test_as_zero_and_empty_segments_keep_the_typed_value() {
+        // AS_SEQUENCE [0]
+        let attributes = parse_attributes(
+            Bytes::from_static(&[0x40, 0x02, 0x06, 0x02, 0x01, 0, 0, 0, 0]),
+            &AsnLength::Bits32,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(matches!(
+            attributes.inner[0].value,
+            AttributeValue::AsPath(_)
+        ));
+        assert!(attributes
+            .validation_warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MalformedAsPath { reason } if reason.contains("AS 0"))));
+
+        // an AS_SEQUENCE without ASNs
+        let warnings = warnings_for(&[0x40, 0x02, 0x02, 0x02, 0x00]);
+        assert!(warnings
+            .iter()
+            .any(|w| matches!(w, BgpValidationWarning::MalformedAsPath { reason } if reason.contains("without"))));
+
+        // AGGREGATOR with AS 0
+        let warnings = warnings_for(&[0xc0, 0x07, 0x08, 0, 0, 0, 0, 10, 0, 0, 1]);
+        assert!(warnings.iter().any(|w| matches!(
+            w,
+            BgpValidationWarning::OptionalAttributeError {
+                attr_type: AttrType::AGGREGATOR,
+                ..
+            }
+        )));
     }
 }

@@ -167,6 +167,7 @@ fn write_bgp_elem_fixtures() {
             bytes: Bytes::from_static(&[0xff]),
         }]),
         deprecated: None,
+        error_handling: None,
     };
     write_fixture("bgp_elem_announce", &announce);
 
@@ -190,6 +191,7 @@ fn write_bgp_elem_fixtures() {
         only_to_customer: None,
         unknown: None,
         deprecated: None,
+        error_handling: None,
     };
     write_fixture("bgp_elem_withdraw", &withdraw);
 }

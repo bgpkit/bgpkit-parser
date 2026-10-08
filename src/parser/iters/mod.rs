@@ -336,6 +336,12 @@ impl<R> BgpkitParser<R> {
     /// AS path. Use [`into_elem_iter`](Self::into_elem_iter) when you need
     /// the full [`BgpElem`] attribute set. Filters that only depend on route
     /// fields are supported; `community` filters do not match route elements.
+    ///
+    /// With [RFC 7606 error handling](Self::enable_rfc7606_error_handling), the route iterator
+    /// checks every attribute header like the element iterators do, but parses only the values
+    /// of ORIGIN, AS_PATH, AS4_PATH, MP_REACH_NLRI and MP_UNREACH_NLRI. A value error in any
+    /// other attribute, such as a truncated D-PATH, goes unnoticed: the route iterator may keep
+    /// routes the element iterators withdraw, never the reverse.
     pub fn into_route_iter(self) -> RouteIterator<R> {
         RouteIterator::new(self)
     }
@@ -494,6 +500,7 @@ impl<R> BgpkitParser<R> {
     where
         R: Read,
     {
+        let mode = self.options.error_handling;
         let mut raw_iter = RawRecordIterator::new(self).peekable();
         let elementor = match raw_iter.peek().cloned().and_then(|r| r.parse().ok()) {
             Some(MrtRecord {
@@ -501,9 +508,9 @@ impl<R> BgpkitParser<R> {
                 ..
             }) => {
                 raw_iter.next();
-                Elementor::with_peer_table(pit)
+                Elementor::with_peer_table(pit).with_error_handling(mode)
             }
-            _ => Elementor::new(),
+            _ => Elementor::new().with_error_handling(mode),
         };
         (elementor, raw_iter)
     }
@@ -520,6 +527,7 @@ impl<R> BgpkitParser<R> {
     where
         R: Read,
     {
+        let mode = self.options.error_handling;
         let mut record_iter = RecordIterator::new(self).peekable();
         let elementor = match record_iter.peek().cloned() {
             Some(MrtRecord {
@@ -527,9 +535,9 @@ impl<R> BgpkitParser<R> {
                 ..
             }) => {
                 record_iter.next();
-                Elementor::with_peer_table(pit)
+                Elementor::with_peer_table(pit).with_error_handling(mode)
             }
-            _ => Elementor::new(),
+            _ => Elementor::new().with_error_handling(mode),
         };
         (elementor, record_iter)
     }

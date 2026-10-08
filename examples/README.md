@@ -69,7 +69,7 @@ Construct and serialize BGP/MRT data, including the fallible encoders and the RF
 
 - [dissect_mrt.rs](dissect_mrt.rs) — Wireshark-style byte-level dissection: render the `DissectionNode` field tree with byte-offset gutters for MRT/BGP records, including a truncated-input demo showing dissectors never fail.
 - [diagnostic_iterator.rs](diagnostic_iterator.rs) — Classify clean records, RFC 7606 validation findings, and fatal parse failures while exporting each finding's raw MRT bytes.
-- [treat_as_withdrawal.rs](treat_as_withdrawal.rs) — Scan MRT files for RFC 7606 validation issues (malformed NLRI, bad attributes) and classify them by error-handling category: attribute discard vs. treat-as-withdrawal.
+- [treat_as_withdrawal.rs](treat_as_withdrawal.rs) — Report the RFC 7606 approach (attribute discard, treat-as-withdraw, AFI/SAFI disable, session reset) of each malformed UPDATE in an MRT file, then count the announcements `enable_rfc7606_error_handling()` withdraws.
 - [fallible_parsing.rs](fallible_parsing.rs) — Demonstrate fallible record/element iterators that let you handle parse errors explicitly while continuing to process.
 - [mrt_debug.rs](mrt_debug.rs) — Print parsed and raw MRT records for debugging, including raw-byte export and re-parsing.
 - [extract_problematic_records.rs](extract_problematic_records.rs) — Find and export MRT records that fail to parse for further analysis with other tools.

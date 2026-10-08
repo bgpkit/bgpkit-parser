@@ -13,7 +13,7 @@ The available filters are:
 - `peer_ips` -- peers' IP addresses (OR logic)
 - `peer_asn` -- peer's AS number
 - `peer_asns` -- multiple peer AS numbers (OR logic)
-- `type` -- message type (`withdraw` or `announce`)
+- `type` -- message type (`withdraw`, `announce`, or `reset`)
 - `ts_start` -- start and end unix timestamp
 - `as_path` -- regular expression for AS path string
 - `ip_version` -- IP version (`ipv4` or `ipv6`)
@@ -141,7 +141,8 @@ use std::str::FromStr;
 /// - `peer_ips` (`PeerIps(Vec<IpAddr>)`) -- peers' IP addresses (OR logic)
 /// - `peer_asn` (`PeerAsn(u32)`) -- peer's AS number
 /// - `peer_asns` (`PeerAsns(Vec<u32>)`) -- multiple peer AS numbers (OR logic)
-/// - `type` (`Type(ElemType)`) -- message type (`withdraw` or `announce`)
+/// - `type` (`Type(ElemType)`) -- message type (`withdraw`, `announce`, or `reset`; `reset`
+///   elems only appear with RFC 7606 error handling enabled)
 /// - `ts_start` (`TsStart(f64)`) and `ts_end` (`TsEnd(f64)`) -- start and end unix timestamp
 /// - `as_path` (`ComparableRegex`) -- regular expression for AS path string
 /// - `community` (`ComparableRegex`) -- regular expression for community string
@@ -544,6 +545,7 @@ impl Filter {
             "type" => match filter_value {
                 "w" | "withdraw" | "withdrawal" => Ok(Filter::Type(ElemType::WITHDRAW)),
                 "a" | "announce" | "announcement" => Ok(Filter::Type(ElemType::ANNOUNCE)),
+                "r" | "reset" => Ok(Filter::Type(ElemType::RESET)),
                 _ => Err(FilterError(format!(
                     "cannot parse elem type from {filter_value}"
                 ))),
@@ -997,6 +999,7 @@ mod tests {
             unknown: None,
             elem_type: ElemType::ANNOUNCE,
             deprecated: None,
+            error_handling: None,
         }
     }
 
@@ -1338,6 +1341,9 @@ mod tests {
         let filter = Filter::new("type", "w").unwrap();
         assert_eq!(filter, Filter::Type(ElemType::WITHDRAW));
 
+        let filter = Filter::new("type", "reset").unwrap();
+        assert_eq!(filter, Filter::Type(ElemType::RESET));
+
         let filter = Filter::new("ts_start", "1637437798").unwrap();
         assert_eq!(filter, Filter::TsStart(1637437798_f64));
 
@@ -1594,6 +1600,7 @@ mod tests {
             unknown: None,
             elem_type: ElemType::ANNOUNCE,
             deprecated: None,
+            error_handling: None,
         };
 
         // Test negated origin_asn filter (using value-based negation: origin_asn=!12345)
@@ -2044,6 +2051,7 @@ mod tests {
             unknown: None,
             elem_type: ElemType::ANNOUNCE,
             deprecated: None,
+            error_handling: None,
         };
 
         // Test OriginAsns with OR logic - element has origin ASN 12345
@@ -2096,6 +2104,7 @@ mod tests {
             unknown: None,
             elem_type: ElemType::ANNOUNCE,
             deprecated: None,
+            error_handling: None,
         }
     }
 

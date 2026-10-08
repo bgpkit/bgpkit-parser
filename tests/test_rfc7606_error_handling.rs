@@ -312,6 +312,13 @@ fn test_treat_as_withdrawal_emulation() {
         needs_taw,
         "malformed NLRI should be detectable via warnings"
     );
+    // RFC 7606 §5.3: unparseable NLRI leave nothing to withdraw, so the
+    // approach is a session reset, which also withdraws the routes
+    assert!(bad_update.is_treat_as_withdraw());
+    assert_eq!(
+        bad_update.error_handling_approach(),
+        Some(ErrorHandlingApproach::SessionReset)
+    );
 
     // Caller actions:
     // 1. Do not install any routes (announced_prefixes is empty)
@@ -483,4 +490,467 @@ fn test_malformed_nlri_still_triggers_mandatory_attr_check() {
         )),
         "expected MissingWellKnownAttribute(NEXT_HOP)"
     );
+}
+
+// ========================================================================
+// RFC 7606 error handling applied to elements
+//
+// These tests wrap an UPDATE body in a BGP4MP_MESSAGE_AS4 MRT record and
+// parse it with `BgpkitParser`, once as encoded and once with
+// `enable_rfc7606_error_handling()`.
+// ========================================================================
+
+/// Wrap an UPDATE body in a BGP message and a BGP4MP_MESSAGE_AS4 MRT record
+/// from peer AS 65000 at 192.0.2.1.
+fn bgp4mp_update_record(update_body: &[u8]) -> Vec<u8> {
+    let mut bgp = vec![0xff; 16];
+    bgp.extend_from_slice(&((19 + update_body.len()) as u16).to_be_bytes());
+    bgp.push(2); // UPDATE
+    bgp.extend_from_slice(update_body);
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&65000u32.to_be_bytes()); // peer AS
+    body.extend_from_slice(&65001u32.to_be_bytes()); // local AS
+    body.extend_from_slice(&0u16.to_be_bytes()); // interface index
+    body.extend_from_slice(&1u16.to_be_bytes()); // AFI IPv4
+    body.extend_from_slice(&[192, 0, 2, 1]); // peer IP
+    body.extend_from_slice(&[192, 0, 2, 2]); // local IP
+    body.extend_from_slice(&bgp);
+
+    let mut record = Vec::new();
+    record.extend_from_slice(&1_700_000_000u32.to_be_bytes());
+    record.extend_from_slice(&16u16.to_be_bytes()); // BGP4MP
+    record.extend_from_slice(&4u16.to_be_bytes()); // BGP4MP_MESSAGE_AS4
+    record.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    record.extend_from_slice(&body);
+    record
+}
+
+fn elems_of(update_body: &[u8], rfc7606: bool) -> Vec<BgpElem> {
+    let parser =
+        bgpkit_parser::BgpkitParser::from_reader(Cursor::new(bgp4mp_update_record(update_body)));
+    let parser = if rfc7606 {
+        parser.enable_rfc7606_error_handling()
+    } else {
+        parser
+    };
+    parser.into_elem_iter().collect()
+}
+
+/// ORIGIN, empty AS_PATH and NEXT_HOP, with ORIGIN set to `origin`.
+fn attrs_with_origin(origin: u8) -> Vec<u8> {
+    let mut attrs = build_valid_attrs();
+    attrs[3] = origin;
+    attrs
+}
+
+/// 10.0.0.0/24 and 10.0.1.0/24
+fn two_prefixes() -> Vec<u8> {
+    vec![0x18, 10, 0, 0, 0x18, 10, 0, 1]
+}
+
+/// IPv6 unicast MP_REACH_NLRI announcing 2001:db8::/32 via 2001:db8::1.
+fn ipv6_mp_reach() -> Vec<u8> {
+    let mut value = vec![0x00, 0x02, 0x01, 16];
+    value.extend_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    value.push(0); // reserved
+    value.extend_from_slice(&[32, 0x20, 0x01, 0x0d, 0xb8]);
+    let mut attr = vec![0x80, 0x0e, value.len() as u8];
+    attr.extend_from_slice(&value);
+    attr
+}
+
+#[test]
+fn test_treat_as_withdraw_mode_withdraws_announced_prefixes() {
+    let body = build_update_body(&[], &attrs_with_origin(3), &two_prefixes());
+
+    // as encoded: the announcements are kept and carry no verdict
+    let elems = elems_of(&body, false);
+    assert_eq!(elems.len(), 2);
+    assert!(elems
+        .iter()
+        .all(|e| e.elem_type == ElemType::ANNOUNCE && e.error_handling.is_none()));
+
+    // RFC 7606 §7.1: an undefined ORIGIN value is treat-as-withdraw
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 2);
+    for elem in &elems {
+        assert_eq!(elem.elem_type, ElemType::WITHDRAW);
+        assert_eq!(
+            elem.error_handling,
+            Some(ErrorHandlingApproach::TreatAsWithdraw)
+        );
+        assert_eq!(elem.as_path, None);
+        assert_eq!(elem.next_hop, None);
+        assert_eq!(elem.unknown, None);
+    }
+}
+
+#[test]
+fn test_treat_as_withdraw_mode_covers_mp_reach_prefixes() {
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x00];
+    attrs.extend_from_slice(&ipv6_mp_reach());
+    // COMMUNITIES of 6 bytes: not a multiple of 4 (RFC 7606 §7.8)
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 1, 0, 1, 0, 2]);
+    let body = build_update_body(&[], &attrs, &[]);
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].prefix.to_string(), "2001:db8::/32");
+    assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    assert_eq!(
+        elems[0].error_handling,
+        Some(ErrorHandlingApproach::TreatAsWithdraw)
+    );
+}
+
+#[test]
+fn test_attribute_discard_mode_keeps_routes_and_drops_attributes() {
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0x40, 0x06, 0x01, 0x00]); // ATOMIC_AGGREGATE with a value byte
+    attrs.extend_from_slice(&[0xc0, 0x07, 0x07, 0, 0, 0xfd, 0xe8, 10, 0, 0]); // AGGREGATOR, 7 bytes
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x04, 0, 1, 0, 1]); // COMMUNITIES 1:1
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x04, 0, 2, 0, 2]); // repeated COMMUNITIES 2:2
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    // as encoded: the malformed values show up and both COMMUNITIES are kept
+    let elems = elems_of(&body, false);
+    assert_eq!(elems.len(), 1);
+    assert!(elems[0].atomic);
+    assert!(elems[0].unknown.is_some(), "AGGREGATOR kept raw");
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    let elem = &elems[0];
+    assert_eq!(elem.elem_type, ElemType::ANNOUNCE);
+    assert_eq!(
+        elem.error_handling,
+        Some(ErrorHandlingApproach::AttributeDiscard)
+    );
+    assert!(!elem.atomic, "malformed ATOMIC_AGGREGATE discarded");
+    assert_eq!(elem.aggr_asn, None, "malformed AGGREGATOR discarded");
+    assert_eq!(
+        elem.unknown, None,
+        "discarded attribute must not leak as unknown"
+    );
+    assert_eq!(
+        elem.communities,
+        Some(vec![MetaCommunity::Plain(Community::Custom(
+            Asn::new_32bit(1),
+            1
+        ))]),
+        "the first COMMUNITIES is kept (RFC 7606 §3(g))"
+    );
+    assert_eq!(elem.next_hop.unwrap().to_string(), "1.2.3.4");
+}
+
+#[test]
+fn test_malformed_repeat_does_not_affect_the_first_occurrence() {
+    // RFC 7606 §3(g): a repeat is discarded whatever it holds, so a malformed
+    // repeat neither withdraws the routes nor takes the valid first copy with it
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x04, 0, 1, 0, 1]); // COMMUNITIES 1:1
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 2, 0, 2, 0, 2]); // COMMUNITIES, 6 bytes
+    attrs.extend_from_slice(&[0xc0, 0x07, 0x08, 0, 0, 0xfd, 0xe8, 10, 0, 0, 1]); // AGGREGATOR
+    attrs.extend_from_slice(&[0xc0, 0x07, 0x07, 0, 0, 0xfd, 0xe9, 10, 0, 0]); // AGGREGATOR, 7 bytes
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    let update =
+        parse_bgp_update_message(Bytes::from(body.clone()), false, &AsnLength::Bits32).unwrap();
+    assert!(update
+        .attributes
+        .validation_warnings()
+        .iter()
+        .all(|w| matches!(w, BgpValidationWarning::DuplicateAttribute { .. })));
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    let elem = &elems[0];
+    assert_eq!(elem.elem_type, ElemType::ANNOUNCE);
+    assert_eq!(
+        elem.error_handling,
+        Some(ErrorHandlingApproach::AttributeDiscard)
+    );
+    assert_eq!(
+        elem.communities,
+        Some(vec![MetaCommunity::Plain(Community::Custom(
+            Asn::new_32bit(1),
+            1
+        ))])
+    );
+    assert_eq!(elem.aggr_asn, Some(Asn::new_32bit(65000)));
+    assert_routes_match_elems(&body, true);
+}
+
+#[test]
+fn test_local_pref_is_attribute_discard_under_ebgp_assumption() {
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0x40, 0x05, 0x02, 0, 100]); // LOCAL_PREF, 2 bytes
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].elem_type, ElemType::ANNOUNCE);
+    assert_eq!(
+        elems[0].error_handling,
+        Some(ErrorHandlingApproach::AttributeDiscard)
+    );
+}
+
+#[test]
+fn test_malformed_mp_reach_produces_reset_elems() {
+    let mut attrs = build_valid_attrs();
+    // IPv6 unicast MP_REACH_NLRI whose next-hop length (3) is invalid
+    attrs.extend_from_slice(&[
+        0x80, 0x0e, 0x08, 0x00, 0x02, 0x01, 0x03, 0xaa, 0xbb, 0xcc, 0x00,
+    ]);
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].prefix.to_string(), "10.0.0.0/24");
+    assert_eq!(elems[0].elem_type, ElemType::RESET);
+    assert_eq!(
+        elems[0].error_handling,
+        Some(ErrorHandlingApproach::AfiSafiDisable)
+    );
+    assert!(elems[0].to_string().starts_with("R|"));
+}
+
+#[test]
+fn test_repeated_mp_reach_is_session_reset() {
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x00];
+    attrs.extend_from_slice(&ipv6_mp_reach());
+    attrs.extend_from_slice(&ipv6_mp_reach());
+    let body = build_update_body(&[], &attrs, &[]);
+
+    let elems = elems_of(&body, true);
+    assert!(!elems.is_empty());
+    assert!(elems.iter().all(|e| e.elem_type == ElemType::RESET
+        && e.error_handling == Some(ErrorHandlingApproach::SessionReset)));
+}
+
+#[test]
+fn test_repeated_mp_reach_counts_only_the_first() {
+    // the repeat announces 2001:db8:1::/48; both iterators report only the
+    // first MP_REACH_NLRI's 2001:db8::/32
+    let mut repeat = ipv6_mp_reach();
+    let len = repeat.len();
+    repeat[len - 5..].copy_from_slice(&[48, 0x20, 0x01, 0x0d, 0xb8]);
+    repeat.extend_from_slice(&[0x00, 0x01]);
+    repeat[2] += 2;
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x00];
+    attrs.extend_from_slice(&ipv6_mp_reach());
+    attrs.extend_from_slice(&repeat);
+    let body = build_update_body(&[], &attrs, &[]);
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].prefix.to_string(), "2001:db8::/32");
+    assert_eq!(elems[0].elem_type, ElemType::RESET);
+    assert_routes_match_elems(&body, true);
+}
+
+#[test]
+fn test_malformed_classic_nlri_is_session_reset() {
+    let body = build_update_body(&[], &build_valid_attrs(), &malformed_nlri());
+    let update = parse_bgp_update_message(Bytes::from(body), false, &AsnLength::Bits32).unwrap();
+    assert_eq!(
+        update.error_handling_approach(),
+        Some(ErrorHandlingApproach::SessionReset)
+    );
+}
+
+#[test]
+fn test_update_without_nlri_escalates_to_session_reset() {
+    // RFC 7606 §5.2: attributes and a withdrawn route, no reachable NLRI, and a
+    // treat-as-withdraw error
+    let body = build_update_body(&valid_nlri_prefix(), &attrs_with_origin(3), &[]);
+    let update =
+        parse_bgp_update_message(Bytes::from(body.clone()), false, &AsnLength::Bits32).unwrap();
+    assert_eq!(
+        update.error_handling_approach(),
+        Some(ErrorHandlingApproach::SessionReset)
+    );
+
+    let elems = elems_of(&body, true);
+    assert_eq!(elems.len(), 1);
+    assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    assert_eq!(
+        elems[0].error_handling,
+        Some(ErrorHandlingApproach::SessionReset)
+    );
+}
+
+#[test]
+fn test_clean_update_is_unchanged_by_the_mode() {
+    let body = build_update_body(&[], &build_valid_attrs(), &two_prefixes());
+    assert_eq!(elems_of(&body, false), elems_of(&body, true));
+}
+
+#[test]
+fn test_type_filter_sees_synthesized_withdrawals() {
+    let body = build_update_body(&[], &attrs_with_origin(3), &two_prefixes());
+    let parser = bgpkit_parser::BgpkitParser::from_reader(Cursor::new(bgp4mp_update_record(&body)))
+        .enable_rfc7606_error_handling()
+        .add_filter("type", "w")
+        .unwrap();
+    assert_eq!(parser.into_elem_iter().count(), 2);
+}
+
+#[test]
+fn test_malformed_update_reencodes_byte_identically() {
+    let mut attrs = attrs_with_origin(3);
+    attrs.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 1, 0, 1, 0, 2]);
+    let body = build_update_body(&[], &attrs, &two_prefixes());
+    let update =
+        parse_bgp_update_message(Bytes::from(body.clone()), false, &AsnLength::Bits32).unwrap();
+    assert!(update.is_treat_as_withdraw());
+    assert_eq!(update.encode(AsnLength::Bits32).unwrap(), Bytes::from(body));
+}
+
+/// The route iterator yields the projection of the element iterator, for
+/// UPDATEs without value errors in attributes the route iterator does not parse.
+fn assert_routes_match_elems(update_body: &[u8], rfc7606: bool) {
+    let record = bgp4mp_update_record(update_body);
+    let parser = |bytes: Vec<u8>| {
+        let parser = bgpkit_parser::BgpkitParser::from_reader(Cursor::new(bytes));
+        if rfc7606 {
+            parser.enable_rfc7606_error_handling()
+        } else {
+            parser
+        }
+    };
+    let routes: Vec<BgpRouteElem> = parser(record.clone()).into_route_iter().collect();
+    let projected: Vec<BgpRouteElem> = parser(record)
+        .into_elem_iter()
+        .map(|elem| BgpRouteElem {
+            timestamp: elem.timestamp,
+            elem_type: elem.elem_type,
+            peer_ip: elem.peer_ip,
+            peer_asn: elem.peer_asn,
+            prefix: elem.prefix,
+            as_path: elem.as_path.map(std::sync::Arc::new),
+        })
+        .collect();
+    assert_eq!(routes, projected);
+}
+
+#[test]
+fn test_route_iterator_matches_elems_under_rfc7606() {
+    let mut discard = build_valid_attrs();
+    discard.extend_from_slice(&[0x40, 0x06, 0x01, 0x00]);
+    let mut reset = build_valid_attrs();
+    reset.extend_from_slice(&[
+        0x80, 0x0e, 0x08, 0x00, 0x02, 0x01, 0x03, 0xaa, 0xbb, 0xcc, 0x00,
+    ]);
+    let mut as4 = vec![0x40, 0x01, 0x01, 0x00];
+    as4.extend_from_slice(&[0x40, 0x02, 0x06, 0x02, 0x01, 0x00, 0x00, 0x5b, 0xa0]); // AS_TRANS
+    as4.extend_from_slice(&[0x40, 0x03, 0x04, 1, 2, 3, 4]);
+    as4.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00]); // AS4_PATH [0]
+
+    // header-level findings on attributes the route iterator does not parse
+    let mut short_communities = build_valid_attrs();
+    short_communities.extend_from_slice(&[0xc0, 0x08, 0x06, 0, 1, 0, 1, 0, 2]);
+    let mut well_known_communities = build_valid_attrs();
+    well_known_communities.extend_from_slice(&[0x40, 0x08, 0x04, 0, 1, 0, 1]);
+
+    let bodies = [
+        build_update_body(&[], &build_valid_attrs(), &two_prefixes()),
+        build_update_body(&[], &short_communities, &two_prefixes()),
+        build_update_body(&[], &well_known_communities, &two_prefixes()),
+        build_update_body(&[], &attrs_with_origin(3), &two_prefixes()),
+        build_update_body(&[], &discard, &two_prefixes()),
+        build_update_body(&[], &reset, &valid_nlri_prefix()),
+        build_update_body(&valid_nlri_prefix(), &attrs_with_origin(3), &[]),
+        build_update_body(&[], &as4, &valid_nlri_prefix()),
+    ];
+    for body in &bodies {
+        assert_routes_match_elems(body, true);
+    }
+    // a malformed AS4_PATH is discarded, so the route keeps the AS_PATH alone
+    assert_eq!(
+        routes_of(&bodies[7])[0]
+            .as_path
+            .as_deref()
+            .map(|p| p.to_string()),
+        Some("23456".to_string())
+    );
+}
+
+#[test]
+fn test_repeated_as4_path_keeps_the_first_in_both_iterators() {
+    let mut attrs = vec![0x40, 0x01, 0x01, 0x00];
+    attrs.extend_from_slice(&[0x40, 0x02, 0x06, 0x02, 0x01, 0x00, 0x00, 0x5b, 0xa0]); // AS_TRANS
+    attrs.extend_from_slice(&[0x40, 0x03, 0x04, 1, 2, 3, 4]);
+    attrs.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0x34, 0x17]); // [13335]
+    attrs.extend_from_slice(&[0xc0, 0x11, 0x06, 0x02, 0x01, 0x00, 0x00, 0xfb, 0xf4]); // [64500]
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+
+    assert_routes_match_elems(&body, true);
+    assert_eq!(
+        routes_of(&body)[0]
+            .as_path
+            .as_deref()
+            .map(|p| p.to_string()),
+        Some("13335".to_string())
+    );
+}
+
+fn routes_of(update_body: &[u8]) -> Vec<BgpRouteElem> {
+    bgpkit_parser::BgpkitParser::from_reader(Cursor::new(bgp4mp_update_record(update_body)))
+        .enable_rfc7606_error_handling()
+        .into_route_iter()
+        .collect()
+}
+
+#[test]
+fn test_route_iterator_misses_value_errors_in_attributes_it_does_not_parse() {
+    // a D-PATH whose value is too short (RFC 10039 §4): its header is fine, so
+    // only the element iterator, which parses the value, withdraws the routes
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0xc0, 0x24, 0x02, 0x00, 0x00]);
+    let body = build_update_body(&[], &attrs, &two_prefixes());
+
+    assert!(elems_of(&body, true)
+        .iter()
+        .all(|e| e.elem_type == ElemType::WITHDRAW));
+    let routes = routes_of(&body);
+    assert_eq!(routes.len(), 2);
+    assert!(routes
+        .iter()
+        .all(|r| r.elem_type == ElemType::ANNOUNCE && r.as_path.is_some()));
+}
+
+#[test]
+fn test_route_iterator_judges_headers_of_attributes_it_does_not_parse() {
+    // COMMUNITIES without the optional bit is a known attribute with wrong
+    // flags: treat-as-withdraw in both iterators, not a session reset
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0x40, 0x08, 0x04, 0, 1, 0, 1]);
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+    let routes = routes_of(&body);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
+
+    // an unknown code without the optional bit is a session reset in both
+    let mut attrs = build_valid_attrs();
+    attrs.extend_from_slice(&[0x40, 0xc8, 0x00]);
+    let body = build_update_body(&[], &attrs, &valid_nlri_prefix());
+    assert_eq!(routes_of(&body)[0].elem_type, ElemType::RESET);
+    assert_eq!(elems_of(&body, true)[0].elem_type, ElemType::RESET);
+}
+
+#[test]
+fn test_route_iterator_malformed_nlri_is_not_fatal_under_rfc7606() {
+    // valid withdrawn route, unparseable announced NLRI
+    let body = build_update_body(
+        &valid_nlri_prefix(),
+        &build_valid_attrs(),
+        &malformed_nlri(),
+    );
+    let routes = routes_of(&body);
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].elem_type, ElemType::WITHDRAW);
+    assert_eq!(routes[0].prefix.to_string(), "10.0.0.0/24");
 }

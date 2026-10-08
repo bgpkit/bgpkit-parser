@@ -20,10 +20,11 @@ pub struct RecordIterator<R> {
 
 impl<R> RecordIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         RecordIterator {
             parser,
             count: 0,
-            elementor: Elementor::new(),
+            elementor,
         }
     }
 }
@@ -71,11 +72,12 @@ pub struct ElemIterator<R> {
 
 impl<R> ElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        let elementor = parser.options.elementor();
         ElemIterator {
             record_iter: RecordIterator::new(parser),
             count: 0,
             pending: PendingElems::Empty,
-            elementor: Elementor::new(),
+            elementor,
         }
     }
 }
