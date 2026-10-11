@@ -19,6 +19,14 @@ pub enum ParserError {
     ParseError(String),
     TruncatedMsg(String),
     Unsupported(String),
+    /// An MRT common header declared a body longer than the parser is willing to
+    /// read (16 MiB). The length field itself is untrusted, so the reader is left
+    /// just past the header with no known record boundary to resume from; the
+    /// skip-and-continue iterators stop rather than reinterpret the body as headers.
+    OversizedRecord {
+        /// The declared body length that exceeded the limit.
+        length: u32,
+    },
     FilterError(String),
     /// NLRI length field is inconsistent with content
     /// (total_bits < minimum required, or underflow in prefix calculation)
@@ -133,6 +141,9 @@ impl Display for ParserError {
             ParserError::ParseError(s) => write!(f, "Error: {s}"),
             ParserError::TruncatedMsg(s) => write!(f, "Error: {s}"),
             ParserError::Unsupported(s) => write!(f, "Error: {s}"),
+            ParserError::OversizedRecord { length } => {
+                write!(f, "Error: MRT message too large: {length} bytes")
+            }
             ParserError::EofExpected => write!(f, "Error: reach end of file"),
             #[cfg(feature = "oneio")]
             ParserError::OneIoError(e) => write!(f, "Error: {e}"),

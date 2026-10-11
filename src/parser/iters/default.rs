@@ -8,6 +8,9 @@ use crate::parser::BgpkitParser;
 use crate::{Elementor, Filterable};
 use std::io::Read;
 
+#[cfg(test)]
+mod tests;
+
 /*********
 MrtRecord Iterator
 **********/

@@ -16,6 +16,12 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
 
+/// Upper bound on the MRT body length the parser will read into memory.
+const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
+
+/// Length of the MRT common header without the ET microsecond timestamp.
+const MRT_BASE_HEADER_LEN: usize = 12;
+
 /// Raw MRT record containing the common header and unparsed message bytes.
 /// This allows for lazy parsing of the MRT message body, and provides
 /// utilities for debugging and exporting problematic records.
@@ -33,6 +39,9 @@ pub(crate) struct RawMrtRecordError {
     pub(crate) error: ParserError,
     pub(crate) common_header: Option<CommonHeader>,
     pub(crate) bytes: Option<Vec<u8>>,
+    /// The reader was left at the next record boundary, so framing can continue
+    /// after this error. False whenever the body was not consumed whole.
+    pub(crate) aligned: bool,
 }
 
 impl RawMrtRecord {
@@ -139,37 +148,21 @@ pub(crate) fn chunk_mrt_record_with_context(
         captured: &mut consumed_header,
     }) {
         Ok(v) => v,
-        Err(e) => {
-            if let ParserError::EofError(e) = &e {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
-                    return Err(RawMrtRecordError {
-                        error: ParserError::EofExpected,
-                        common_header: None,
-                        bytes: None,
-                    });
-                }
-            }
-            return Err(RawMrtRecordError {
-                error: e,
-                common_header: None,
-                bytes: Some(consumed_header),
-            });
-        }
+        Err(error) => return Err(header_error(input, error, consumed_header)),
     };
 
     let common_header = parsed_header.header;
     let header_bytes = parsed_header.raw_bytes;
 
     // Protect against unreasonable allocations from corrupt headers
-    const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
     if common_header.length > MAX_MRT_MESSAGE_LEN {
         return Err(RawMrtRecordError {
-            error: ParserError::Unsupported(format!(
-                "MRT message too large: {} bytes",
-                common_header.length
-            )),
+            error: ParserError::OversizedRecord {
+                length: common_header.length,
+            },
             common_header: Some(common_header),
             bytes: Some(header_bytes.to_vec()),
+            aligned: false,
         });
     }
 
@@ -245,6 +238,73 @@ pub(crate) fn chunk_mrt_record_with_context(
     })
 }
 
+/// Build the framing error for a common header that could not be parsed.
+///
+/// When the 12-byte base header was read whole but its contents were rejected
+/// (an entry type the parser does not know, or an ET length below four), the
+/// declared body is still unread in the stream. Consume it here so the reader is
+/// left at the next record boundary: the skip-and-continue iterators would
+/// otherwise reinterpret the body as the next header and misparse everything
+/// after it. The skipped body is kept in `bytes` so core dumps and recovery see
+/// the whole record. A declared length over the limit is reported as
+/// [`ParserError::OversizedRecord`] instead, since it cannot be trusted.
+fn header_error(
+    input: &mut impl Read,
+    error: ParserError,
+    mut consumed: Vec<u8>,
+) -> RawMrtRecordError {
+    if let ParserError::EofError(io_error) = &error {
+        if io_error.kind() == std::io::ErrorKind::UnexpectedEof && consumed.is_empty() {
+            return RawMrtRecordError {
+                error: ParserError::EofExpected,
+                common_header: None,
+                bytes: None,
+                aligned: false,
+            };
+        }
+    }
+
+    if matches!(error, ParserError::ParseError(_)) && consumed.len() == MRT_BASE_HEADER_LEN {
+        // The on-wire length counts every byte after the 12-byte base header,
+        // including the microsecond timestamp of an ET record, so skipping it
+        // lands on the next record whatever the unknown type would have been.
+        let length = u32::from_be_bytes(consumed[8..12].try_into().unwrap());
+        if length > MAX_MRT_MESSAGE_LEN {
+            return RawMrtRecordError {
+                error: ParserError::OversizedRecord { length },
+                common_header: None,
+                bytes: Some(consumed),
+                aligned: false,
+            };
+        }
+        if let Err(io_error) = input.take(length as u64).read_to_end(&mut consumed) {
+            return RawMrtRecordError {
+                error: ParserError::IoError(io_error),
+                common_header: None,
+                bytes: Some(consumed),
+                aligned: false,
+            };
+        }
+        // A short read means the stream ended inside this record. The next
+        // chunk attempt then reads nothing and reports `EofExpected`, so the
+        // header error is the one worth reporting here.
+        let aligned = consumed.len() == MRT_BASE_HEADER_LEN + length as usize;
+        return RawMrtRecordError {
+            error,
+            common_header: None,
+            bytes: Some(consumed),
+            aligned,
+        };
+    }
+
+    RawMrtRecordError {
+        error,
+        common_header: None,
+        bytes: Some(consumed),
+        aligned: false,
+    }
+}
+
 struct CapturingReader<'a, R: ?Sized> {
     inner: &'a mut R,
     captured: &'a mut Vec<u8>,
@@ -271,6 +331,7 @@ fn record_io_error(
         error: ParserError::IoError(error),
         common_header: Some(common_header),
         bytes: Some(bytes),
+        aligned: false,
     }
 }
 
@@ -765,5 +826,118 @@ mod tests {
         wire.put_slice(&[1, 2]);
         let error = chunk_mrt_record(&mut Cursor::new(wire.clone().freeze())).unwrap_err();
         assert_eq!(error.bytes.as_deref(), Some(wire.as_ref()));
+    }
+
+    /// A record of type 0x7777 whose 20-byte body reads as a plausible common
+    /// header (timestamp 1, type BGP, subtype 7, length 8), so a reader that
+    /// skips only the 12 header bytes would treat the body as the next record.
+    fn unknown_type_record() -> Vec<u8> {
+        let mut wire = BytesMut::new();
+        wire.put_u32(946_684_800);
+        wire.put_u16(0x7777);
+        wire.put_u16(0);
+        wire.put_u32(20);
+        wire.put_slice(&[0, 0, 0, 1, 0, 5, 0, 7, 0, 0, 0, 32]);
+        wire.put_slice(&[0xaa; 8]);
+        wire.to_vec()
+    }
+
+    fn keepalive_record() -> (CommonHeader, Vec<u8>) {
+        let body = vec![0, 1, 192, 0, 2, 1, 0, 2, 192, 0, 2, 2];
+        let header = CommonHeader {
+            timestamp: 946_684_801,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP,
+            entry_subtype: 7,
+            length: body.len() as u32,
+        };
+        let mut wire = header.encode().to_vec();
+        wire.extend_from_slice(&body);
+        (header, wire)
+    }
+
+    #[test]
+    fn chunk_skips_body_of_unknown_entry_type() {
+        let unknown = unknown_type_record();
+        let (next_header, next_wire) = keepalive_record();
+        let mut wire = unknown.clone();
+        wire.extend_from_slice(&next_wire);
+        let mut cursor = Cursor::new(wire);
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(
+            matches!(&error.error, ParserError::ParseError(msg) if msg.contains("entry type")),
+            "unexpected error: {}",
+            error.error
+        );
+        assert_eq!(error.bytes.as_deref(), Some(unknown.as_slice()));
+        assert_eq!(cursor.position(), unknown.len() as u64);
+
+        let next = chunk_mrt_record(&mut cursor).unwrap();
+        assert_eq!(next.common_header, next_header);
+        assert!(matches!(
+            next.parse().unwrap().message,
+            MrtMessage::LegacyBgp(LegacyBgp::Message(LegacyBgpMessage {
+                bgp_message: BgpMessage::KeepAlive,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            chunk_mrt_record(&mut cursor).unwrap_err().error,
+            ParserError::EofExpected
+        ));
+    }
+
+    #[test]
+    fn chunk_reports_header_error_when_unknown_type_body_is_truncated() {
+        let unknown = unknown_type_record();
+        let truncated = &unknown[..unknown.len() - 5];
+        let mut cursor = Cursor::new(truncated.to_vec());
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(matches!(error.error, ParserError::ParseError(_)));
+        assert_eq!(error.bytes.as_deref(), Some(truncated));
+        assert!(matches!(
+            chunk_mrt_record(&mut cursor).unwrap_err().error,
+            ParserError::EofExpected
+        ));
+    }
+
+    #[test]
+    fn chunk_reports_oversized_length_without_reading_body() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(EntryType::BGP as u16);
+        wire.put_u16(7);
+        wire.put_u32(MAX_MRT_MESSAGE_LEN + 1);
+        wire.put_slice(&[0xaa; 32]);
+        let mut cursor = Cursor::new(wire.to_vec());
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(matches!(
+            error.error,
+            ParserError::OversizedRecord { length } if length == MAX_MRT_MESSAGE_LEN + 1
+        ));
+        assert_eq!(error.bytes.as_deref(), Some(&wire[..12]));
+        assert_eq!(cursor.position(), 12);
+    }
+
+    #[test]
+    fn chunk_reports_oversized_length_for_unknown_entry_type() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(0x7777);
+        wire.put_u16(0);
+        wire.put_u32(u32::MAX);
+        wire.put_slice(&[0xaa; 32]);
+        let mut cursor = Cursor::new(wire.to_vec());
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(matches!(
+            error.error,
+            ParserError::OversizedRecord { length: u32::MAX }
+        ));
+        assert_eq!(error.bytes.as_deref(), Some(&wire[..12]));
+        assert_eq!(cursor.position(), 12);
     }
 }

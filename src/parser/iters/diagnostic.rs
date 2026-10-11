@@ -93,8 +93,9 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
             }
             Err(error) => {
                 // A framing error may leave the reader between record boundaries. Do not
-                // attempt to reinterpret the remaining bytes as another MRT header.
-                self.terminated = true;
+                // attempt to reinterpret the remaining bytes as another MRT header unless
+                // the declared record was consumed whole (an unknown entry type).
+                self.terminated = !error.aligned;
                 return Some(DiagnosticEvent::ParseError {
                     error: error.error,
                     common_header: error.common_header,
@@ -681,6 +682,61 @@ mod tests {
             } => {
                 assert_eq!(common_header, Some(header));
                 assert_eq!(raw_bytes.as_deref(), Some(header.encode().as_ref()));
+            }
+            event => panic!("expected parse error event, got {event:?}"),
+        }
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn diagnostic_iterator_continues_after_unknown_entry_type() {
+        // An unknown entry type is skipped whole, so the reader is still on a
+        // record boundary and the following record must be reported.
+        let mut unknown = vec![
+            0, 0, 0, 1, // timestamp
+            0x77, 0x77, // unknown entry type
+            0, 0, // subtype
+            0, 0, 0, 20, // length
+        ];
+        unknown.extend_from_slice(&[0, 0, 0, 1, 0, 5, 0, 7, 0, 0, 0, 32]);
+        unknown.extend_from_slice(&[0xaa; 8]);
+        let mut input = unknown.clone();
+        input.extend_from_slice(&update_record(valid_attributes()).encode().unwrap());
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input)).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::ParseError {
+                error,
+                common_header,
+                raw_bytes,
+                ..
+            } => {
+                assert!(matches!(error, ParserError::ParseError(_)));
+                assert_eq!(common_header, None);
+                assert_eq!(raw_bytes.as_deref(), Some(unknown.as_slice()));
+            }
+            event => panic!("expected parse error event, got {event:?}"),
+        }
+        assert!(matches!(iter.next(), Some(DiagnosticEvent::Record { .. })));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn diagnostic_iterator_terminates_after_truncated_unknown_entry_type() {
+        // The declared body outruns the stream, so no boundary is known and the
+        // iterator must not poll again.
+        let input = vec![
+            0, 0, 0, 1, // timestamp
+            0x77, 0x77, // unknown entry type
+            0, 0, // subtype
+            0, 0, 0, 8, // length, but only 4 body bytes follow
+            1, 2, 3, 4,
+        ];
+
+        let mut iter = BgpkitParser::from_reader(Cursor::new(input.clone())).into_diagnostic_iter();
+        match iter.next().unwrap() {
+            DiagnosticEvent::ParseError { raw_bytes, .. } => {
+                assert_eq!(raw_bytes.as_deref(), Some(input.as_slice()));
             }
             event => panic!("expected parse error event, got {event:?}"),
         }

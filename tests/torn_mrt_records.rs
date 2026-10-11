@@ -35,8 +35,17 @@
 //! UPDATE, 307 STATE_CHANGE, 34 KEEPALIVE), 5,378 elements, zero errors — so there
 //! is no body-level parsing defect here. What is missing is stream
 //! resynchronization: on a framing error the reader has no pushback and cannot scan
-//! forward for the next plausible common header, so every iterator either retries
-//! at the same wrong offset or stops.
+//! forward for the next plausible common header. From offset 14,756 the parser
+//! frames two more "headers" out of mid-record bytes before giving up:
+//!
+//! ```text
+//! 00 cb 25 ff  7e 31  6e c1  00 00 01 00   unknown entry type 32305, 256-byte body
+//! de 57 0c 14  c8 bc  80 38  dc 36 b9 00   length 3,694,573,824 exceeds the 16 MiB limit
+//! ```
+//!
+//! The unknown-type record is skipped whole, which keeps the reader on whatever
+//! boundary it is on, and the oversized length stops iteration because the length
+//! cannot be trusted.
 //!
 //! The assertions below therefore pin **current, lossy** behaviour rather than
 //! desired behaviour. Every count is a deterministic function of the fixture bytes.
@@ -57,10 +66,13 @@ const FIXTURE: &str = "tests/fixtures/ripe/rrc00/2000.03/updates.20000325.0345.g
 /// holds 2,580 recoverable records and 5,378 recoverable elements, so all but these
 /// four are lost.
 const RECORDS_BEFORE_FIRST_TORN_WRITE: usize = 4;
-/// Errors produced while the parser hunts forward 12 bytes at a time after
-/// desynchronizing. It never re-aligns, because the true record boundary is not a
-/// multiple of 12 from where the oversized read left it.
-const DESYNCHRONIZED_ERRORS: usize = 128;
+/// Errors produced from the torn write onwards: the truncated 14,556-byte body,
+/// the unknown-type "record" skipped whole, and the oversized length that ends
+/// iteration.
+const DESYNCHRONIZED_ERRORS: usize = 3;
+/// Body length the unknown-type "header" at offset 14,756 declares; its 12 header
+/// bytes plus this body are consumed and attached to the error.
+const UNKNOWN_TYPE_BODY_LENGTH: usize = 256;
 
 /// Header the parser manufactures from the 10-byte torn write at offset 188.
 const TORN_HEADER_TIMESTAMP: u32 = 953_955_944;
@@ -87,16 +99,13 @@ fn torn_writes_desynchronize_raw_record_framing() {
     }
 
     // Only 5 of the fixture's 2,580 records reach framing — 4 genuine ones plus the
-    // 14,556-byte torn "record" — after which the parser frames 3 more headers out of
-    // misaligned bytes.
-    assert_eq!(raw_records, 8);
+    // 14,556-byte torn "record". The misaligned bytes after it frame no further
+    // records: one header has an unknown type and is skipped, the next declares an
+    // oversized body and stops the iterator.
+    assert_eq!(raw_records, 5);
     assert_eq!(
         headers,
         BTreeMap::from([
-            (
-                (EntryType::NULL as u16, 256),
-                3 // pure garbage, framed mid-record after desynchronizing
-            ),
             (
                 (EntryType::BGP as u16, 1),
                 4 // 3 genuine UPDATEs plus the torn 14,556-byte "record"
@@ -110,8 +119,8 @@ fn torn_writes_desynchronize_raw_record_framing() {
 fn torn_writes_lose_all_but_four_records() {
     let source = repo_fixture(FIXTURE);
 
-    // Skipping iterators: the error arms can only retry at the same wrong offset or
-    // stop, so 2,576 of 2,580 records and 5,374 of 5,378 elements are lost.
+    // Skipping iterators: the error arms can only skip a framed record or stop, so
+    // 2,576 of 2,580 records and 5,374 of 5,378 elements are lost.
     assert_eq!(
         BgpkitParser::new(&source)
             .unwrap()
@@ -207,9 +216,10 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         .into_diagnostic_iter()
         .collect();
 
-    // Four clean records, then one body error, then one framing error which
-    // terminates the iterator by design.
-    assert_eq!(events.len(), RECORDS_BEFORE_FIRST_TORN_WRITE + 2);
+    // Four clean records, then one body error, then the unknown-type record that
+    // is skipped whole, then the oversized length which terminates the iterator
+    // by design.
+    assert_eq!(events.len(), RECORDS_BEFORE_FIRST_TORN_WRITE + 3);
     for event in &events[..RECORDS_BEFORE_FIRST_TORN_WRITE] {
         let DiagnosticEvent::Record { record, .. } = event else {
             panic!("expected a clean record, got {event:?}");
@@ -249,8 +259,9 @@ fn diagnostic_iterator_reports_both_torn_writes() {
     );
 
     // The oversized read left the stream mid-record, so the next 12 bytes are not a
-    // header. There is no header to report, and the framing error terminates
-    // iteration rather than reinterpreting the remaining bytes.
+    // header. There is no header to report; the declared 256-byte body is consumed
+    // and attached, and because the record was consumed whole the iterator carries
+    // on from the byte after it.
     let DiagnosticEvent::ParseError {
         error,
         common_header,
@@ -267,6 +278,36 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         panic!("expected ParseError, got {error:?}");
     };
     assert_eq!(message, "cannot parse entry type: 32305");
+    assert!(common_header.is_none());
+    assert_eq!(
+        raw_bytes.as_deref().map(<[u8]>::len),
+        Some(12 + UNKNOWN_TYPE_BODY_LENGTH)
+    );
+
+    // The bytes after that have another unknown entry type (51388) and declare a
+    // body the parser will not read. The length cannot be trusted, so there is no
+    // boundary to continue from and the framing error terminates iteration.
+    let DiagnosticEvent::ParseError {
+        error,
+        common_header,
+        raw_bytes,
+        ..
+    } = &events[RECORDS_BEFORE_FIRST_TORN_WRITE + 2]
+    else {
+        panic!(
+            "expected an oversized-length error, got {:?}",
+            events[RECORDS_BEFORE_FIRST_TORN_WRITE + 2]
+        );
+    };
+    assert!(
+        matches!(
+            error,
+            ParserError::OversizedRecord {
+                length: 3_694_573_824
+            }
+        ),
+        "expected OversizedRecord, got {error:?}"
+    );
     assert!(common_header.is_none());
     assert_eq!(raw_bytes.as_deref().map(<[u8]>::len), Some(12));
 }

@@ -70,16 +70,24 @@ fn next_fallible_raw_record(
             None
         }
         Err(error) => {
-            if let ParserError::IoError(io_error) | ParserError::EofError(io_error) = &error.error {
-                // A resumed pull starts a fresh header, so retrying is only safe
-                // when the failed read consumed nothing; otherwise the partial
-                // framing bytes are gone and the stream stays misaligned.
-                let nothing_consumed = error.bytes.as_ref().is_none_or(Vec::is_empty);
-                *finished = !(nothing_consumed
-                    && matches!(
-                        io_error.kind(),
-                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
-                    ));
+            match &error.error {
+                ParserError::IoError(io_error) | ParserError::EofError(io_error) => {
+                    // A resumed pull starts a fresh header, so retrying is only safe
+                    // when the failed read consumed nothing; otherwise the partial
+                    // framing bytes are gone and the stream stays misaligned.
+                    let nothing_consumed = error.bytes.as_ref().is_none_or(Vec::is_empty);
+                    *finished = !(nothing_consumed
+                        && matches!(
+                            io_error.kind(),
+                            std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                        ));
+                }
+                ParserError::OversizedRecord { .. } => {
+                    // The declared length is untrusted, so the reader sits at no
+                    // known record boundary and must not be polled again.
+                    *finished = true;
+                }
+                _ => {}
             }
             Some(Err(error))
         }
@@ -163,6 +171,16 @@ pub(crate) fn handle_record_parse_error<R>(
         }
         ParserError::EofExpected => {
             // normal end of file
+            false
+        }
+        ParserError::OversizedRecord { length } => {
+            // The length field itself is corrupt, so there is no record boundary
+            // to skip to; continuing would reinterpret the body as headers.
+            error!(
+                "parser error: MRT message too large: {} bytes; stream position is unreliable, stopping",
+                length
+            );
+            write_mrt_core_dump(parser.core_dump, bytes);
             false
         }
         ParserError::IoError(err) | ParserError::EofError(err) => {
