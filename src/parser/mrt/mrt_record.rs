@@ -36,9 +36,8 @@ pub(crate) struct RawMrtRecordError {
     pub(crate) error: ParserError,
     pub(crate) common_header: Option<CommonHeader>,
     pub(crate) bytes: Option<Vec<u8>>,
-    /// The header was rejected after its declared body was read in full, so the
-    /// next read starts after this record (which is not proof the record itself
-    /// started on a true boundary).
+    /// A rejected header's declared body was read in full, so the next read starts
+    /// after this record, though not necessarily on a true boundary.
     pub(crate) record_consumed: bool,
 }
 
@@ -788,7 +787,7 @@ mod tests {
     }
 
     /// A record of type 0x7777 whose 20-byte body reads as a plausible common
-    /// header (timestamp 1, type BGP, subtype 7, length 8), so a reader that
+    /// header (timestamp 1, type BGP, subtype 7, length 32), so a reader that
     /// skips only the 12 header bytes would treat the body as the next record.
     fn unknown_type_record() -> Vec<u8> {
         let mut wire = BytesMut::new();

@@ -83,8 +83,7 @@ fn next_fallible_raw_record(
                         ));
                 }
                 ParserError::OversizedRecord { .. } => {
-                    // The declared length is untrusted, so the reader sits at no
-                    // known record boundary and must not be polled again.
+                    // no record boundary to resume from
                     *finished = true;
                 }
                 _ => {}
@@ -174,8 +173,7 @@ pub(crate) fn handle_record_parse_error<R>(
             false
         }
         ParserError::OversizedRecord { length } => {
-            // The length field itself is corrupt, so there is no record boundary
-            // to skip to; continuing would reinterpret the body as headers.
+            // no record boundary to resume from, stop iterating
             error!(
                 "parser error: MRT message too large: {} bytes; stream position is unreliable, stopping",
                 length

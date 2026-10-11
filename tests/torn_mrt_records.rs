@@ -43,9 +43,9 @@
 //! de 57 0c 14  c8 bc  80 38  dc 36 b9 00   length 3,694,573,824 exceeds the 16 MiB limit
 //! ```
 //!
-//! The unknown-type record is skipped whole, which keeps the reader on whatever
-//! boundary it is on, and the oversized length stops iteration because the length
-//! cannot be trusted.
+//! Skipping the unknown-type "record" by its declared length does not restore
+//! alignment here: it moves 256 bytes further into the damage. Only the oversized
+//! length stops iteration.
 //!
 //! The assertions below therefore pin **current, lossy** behaviour rather than
 //! desired behaviour. Every count is a deterministic function of the fixture bytes.
@@ -258,10 +258,10 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         Some(12 + TORN_HEADER_LENGTH as usize)
     );
 
-    // The oversized read left the stream mid-record, so the next 12 bytes are not a
-    // header. There is no header to report; the declared 256-byte body is consumed
-    // and attached, and because the record was consumed whole the iterator carries
-    // on from the byte after it.
+    // The 14,556-byte read left the stream mid-record, so the next 12 bytes are not a
+    // real header. Their entry type is unknown, so no header is reported; the
+    // declared 256-byte body is consumed and attached, and the iterator carries on
+    // from the byte after it, still misaligned.
     let DiagnosticEvent::ParseError {
         error,
         common_header,
@@ -284,9 +284,8 @@ fn diagnostic_iterator_reports_both_torn_writes() {
         Some(12 + UNKNOWN_TYPE_BODY_LENGTH)
     );
 
-    // The bytes after that have another unknown entry type (51388) and declare a
-    // body the parser will not read. The length cannot be trusted, so there is no
-    // boundary to continue from and the framing error terminates iteration.
+    // The next 12 bytes have another unknown entry type (51388) and a length over
+    // the 16 MiB limit, which ends iteration.
     let DiagnosticEvent::ParseError {
         error,
         common_header,

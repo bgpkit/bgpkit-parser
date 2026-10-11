@@ -19,10 +19,9 @@ pub enum ParserError {
     ParseError(String),
     TruncatedMsg(String),
     Unsupported(String),
-    /// An MRT common header declared a body longer than the parser is willing to
-    /// read (16 MiB). The length field itself is untrusted, so the reader is left
-    /// just past the header with no known record boundary to resume from; the
-    /// skip-and-continue iterators stop rather than reinterpret the body as headers.
+    /// An MRT common header declared a body over the 16 MiB limit. The length is
+    /// untrusted, so the reader is left past the header with no record boundary to
+    /// resume from, and the iterators stop instead of reading the body as headers.
     OversizedRecord {
         /// The declared body length that exceeded the limit.
         length: u32,

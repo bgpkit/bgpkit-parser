@@ -35,8 +35,8 @@ fn keepalive_record(timestamp: u32) -> Vec<u8> {
     wire
 }
 
-/// A header declaring a body larger than the parser will read, followed by
-/// bytes that would parse as a valid record if the iterator carried on.
+/// A bare header declaring a body over the 16 MiB limit. Tests append a valid
+/// record after it to check that iteration does not resume there.
 fn oversized_record() -> Vec<u8> {
     let mut wire = BytesMut::new();
     wire.put_u32(1);
