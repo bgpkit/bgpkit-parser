@@ -118,6 +118,27 @@ pub fn parse_common_header<T: Read>(input: &mut T) -> Result<CommonHeader, Parse
 /// This is useful when you need to preserve the original bytes for debugging
 /// or exporting problematic records without re-encoding.
 pub fn parse_common_header_with_bytes<T: Read>(input: &mut T) -> Result<ParsedHeader, ParserError> {
+    let framed = frame_common_header(input)?;
+    Ok(ParsedHeader {
+        header: framed.header?,
+        raw_bytes: framed.raw_bytes,
+    })
+}
+
+/// A common header as read from the wire, with its contents validated separately
+/// from its framing.
+pub(crate) struct FramedHeader {
+    /// The parsed header, or why its contents were rejected.
+    pub(crate) header: Result<CommonHeader, ParserError>,
+    /// The header bytes as read from the wire.
+    pub(crate) raw_bytes: Bytes,
+    /// Length of the record body following `raw_bytes`.
+    pub(crate) body_length: u32,
+}
+
+/// Read a common header, keeping its body length even when the contents are
+/// rejected. Only I/O failures are returned as `Err`.
+pub(crate) fn frame_common_header<T: Read>(input: &mut T) -> std::io::Result<FramedHeader> {
     let mut base_bytes = [0u8; 12];
     input.read_exact(&mut base_bytes)?;
 
@@ -126,40 +147,56 @@ pub fn parse_common_header_with_bytes<T: Read>(input: &mut T) -> Result<ParsedHe
         .expect("base_bytes is exactly 12 bytes with no alignment requirement");
 
     let timestamp = raw.timestamp.get();
-    let entry_type = EntryType::try_from(raw.entry_type.get())?;
     let entry_subtype = raw.entry_subtype.get();
     // the length field does not include the length of the common header
-    let mut length = raw.length.get();
+    let length = raw.length.get();
 
-    let (microsecond_timestamp, raw_bytes) = match &entry_type {
+    // The on-wire length counts every byte after the 12-byte base header, so it
+    // frames the record even when the header contents are invalid.
+    let rejected = |error: ParserError| FramedHeader {
+        header: Err(error),
+        raw_bytes: Bytes::copy_from_slice(&base_bytes),
+        body_length: length,
+    };
+
+    let entry_type = match EntryType::try_from(raw.entry_type.get()) {
+        Ok(entry_type) => entry_type,
+        Err(error) => return Ok(rejected(error.into())),
+    };
+
+    let (microsecond_timestamp, raw_bytes, body_length) = match &entry_type {
         EntryType::BGP4MP_ET => {
             // For ET records, the on-wire length includes the extra 4-byte microsecond timestamp
             // that lives in the header. Internally we store `length` as the message length only,
             // so subtract 4 after validating to avoid underflow.
             if length < 4 {
-                return Err(ParserError::ParseError(
+                return Ok(rejected(ParserError::ParseError(
                     "invalid MRT header length for ET record: length < 4".into(),
-                ));
+                )));
             }
-            length -= 4;
             let mut combined = [0u8; 16];
             combined[..12].copy_from_slice(&base_bytes);
             input.read_exact(&mut combined[12..])?;
             let microseconds = u32::from_be_bytes(combined[12..16].try_into().unwrap());
-            (Some(microseconds), Bytes::copy_from_slice(&combined))
+            (
+                Some(microseconds),
+                Bytes::copy_from_slice(&combined),
+                length - 4,
+            )
         }
-        _ => (None, Bytes::copy_from_slice(&base_bytes)),
+        _ => (None, Bytes::copy_from_slice(&base_bytes), length),
     };
 
-    Ok(ParsedHeader {
-        header: CommonHeader {
+    Ok(FramedHeader {
+        header: Ok(CommonHeader {
             timestamp,
             microsecond_timestamp,
             entry_type,
             entry_subtype,
-            length,
-        },
+            length: body_length,
+        }),
         raw_bytes,
+        body_length,
     })
 }
 

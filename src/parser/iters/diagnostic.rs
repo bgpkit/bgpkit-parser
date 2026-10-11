@@ -94,8 +94,8 @@ impl<R: Read> Iterator for DiagnosticIterator<R> {
             Err(error) => {
                 // A framing error may leave the reader between record boundaries. Do not
                 // attempt to reinterpret the remaining bytes as another MRT header unless
-                // the declared record was consumed whole (an unknown entry type).
-                self.terminated = !error.aligned;
+                // a rejected header's record was consumed whole.
+                self.terminated = !error.record_consumed;
                 return Some(DiagnosticEvent::ParseError {
                     error: error.error,
                     common_header: error.common_header,
