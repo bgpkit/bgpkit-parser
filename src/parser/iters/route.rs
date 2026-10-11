@@ -1950,7 +1950,10 @@ mod tests {
         let mut iter =
             BgpkitParser::from_reader(Cursor::new(invalid_data.clone())).into_fallible_route_iter();
 
+        // The unknown-type record is skipped whole, so the error carries the
+        // header and the declared body, and the stream ends cleanly after it.
         let error = iter.next().unwrap().unwrap_err();
-        assert_eq!(error.bytes.as_deref(), Some(&invalid_data[..12]));
+        assert_eq!(error.bytes.as_deref(), Some(invalid_data.as_slice()));
+        assert!(iter.next().is_none());
     }
 }

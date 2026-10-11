@@ -1,4 +1,4 @@
-use super::mrt_header::parse_common_header_with_bytes;
+use super::mrt_header::frame_common_header;
 use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
@@ -15,6 +15,9 @@ use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
+
+/// Upper bound on the MRT body length the parser will read into memory.
+const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
 
 /// Raw MRT record containing the common header and unparsed message bytes.
 /// This allows for lazy parsing of the MRT message body, and provides
@@ -33,6 +36,9 @@ pub(crate) struct RawMrtRecordError {
     pub(crate) error: ParserError,
     pub(crate) common_header: Option<CommonHeader>,
     pub(crate) bytes: Option<Vec<u8>>,
+    /// A rejected header's declared body was read in full, so the next read starts
+    /// after this record, though not necessarily on a true boundary.
+    pub(crate) record_consumed: bool,
 }
 
 impl RawMrtRecord {
@@ -132,75 +138,87 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
 pub(crate) fn chunk_mrt_record_with_context(
     input: &mut impl Read,
 ) -> Result<RawMrtRecord, RawMrtRecordError> {
-    // parse common header and capture raw bytes
+    // read the common header and capture raw bytes
     let mut consumed_header = Vec::with_capacity(16);
-    let parsed_header = match parse_common_header_with_bytes(&mut CapturingReader {
+    let framed = match frame_common_header(&mut CapturingReader {
         inner: input,
         captured: &mut consumed_header,
     }) {
-        Ok(v) => v,
-        Err(e) => {
-            if let ParserError::EofError(e) = &e {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
-                    return Err(RawMrtRecordError {
-                        error: ParserError::EofExpected,
-                        common_header: None,
-                        bytes: None,
-                    });
-                }
+        Ok(framed) => framed,
+        Err(error) => {
+            if error.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
+                return Err(RawMrtRecordError {
+                    error: ParserError::EofExpected,
+                    common_header: None,
+                    bytes: None,
+                    record_consumed: false,
+                });
             }
             return Err(RawMrtRecordError {
-                error: e,
+                error: error.into(),
                 common_header: None,
                 bytes: Some(consumed_header),
+                record_consumed: false,
             });
         }
     };
 
-    let common_header = parsed_header.header;
-    let header_bytes = parsed_header.raw_bytes;
+    let header_bytes = framed.raw_bytes;
+    let parsed_header = framed.header.as_ref().ok().copied();
 
     // Protect against unreasonable allocations from corrupt headers
-    const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB upper bound
-    if common_header.length > MAX_MRT_MESSAGE_LEN {
+    if framed.body_length > MAX_MRT_MESSAGE_LEN {
         return Err(RawMrtRecordError {
-            error: ParserError::Unsupported(format!(
-                "MRT message too large: {} bytes",
-                common_header.length
-            )),
-            common_header: Some(common_header),
+            error: ParserError::OversizedRecord {
+                length: framed.body_length,
+            },
+            common_header: parsed_header,
             bytes: Some(header_bytes.to_vec()),
+            record_consumed: false,
         });
     }
 
     // Read the declared body while retaining partial bytes on failure.
-    let mut buffer = Vec::with_capacity(common_header.length as usize + 4);
+    let mut buffer = Vec::with_capacity(framed.body_length as usize + 4);
     if let Err(error) = input
-        .take(common_header.length as u64)
+        .take(framed.body_length as u64)
         .read_to_end(&mut buffer)
     {
         return Err(record_io_error(
             error,
-            common_header,
+            parsed_header,
             &header_bytes,
             &buffer,
         ));
     }
-    if buffer.len() != common_header.length as usize {
+    if buffer.len() != framed.body_length as usize {
         return Err(record_io_error(
             std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 format!(
                     "truncated MRT body: expected {} bytes, read {}",
-                    common_header.length,
+                    framed.body_length,
                     buffer.len()
                 ),
             ),
-            common_header,
+            parsed_header,
             &header_bytes,
             &buffer,
         ));
     }
+
+    // A rejected header is reported only now, so its body is not left in the stream.
+    let common_header = match framed.header {
+        Ok(common_header) => common_header,
+        Err(error) => {
+            return Err(RawMrtRecordError {
+                error,
+                common_header: None,
+                bytes: Some([&header_bytes[..], &buffer].concat()),
+                record_consumed: true,
+            })
+        }
+    };
 
     if common_header.entry_type == EntryType::TABLE_DUMP
         && super::messages::table_dump::needs_legacy_length_correction(
@@ -213,7 +231,7 @@ pub(crate) fn chunk_mrt_record_with_context(
             buffer.extend_from_slice(&correction);
             return Err(record_io_error(
                 error,
-                common_header,
+                Some(common_header),
                 &header_bytes,
                 &buffer,
             ));
@@ -225,7 +243,7 @@ pub(crate) fn chunk_mrt_record_with_context(
                     std::io::ErrorKind::UnexpectedEof,
                     "truncated historical TABLE_DUMP length correction",
                 ),
-                common_header,
+                Some(common_header),
                 &header_bytes,
                 &buffer,
             ));
@@ -260,7 +278,7 @@ impl<R: Read + ?Sized> Read for CapturingReader<'_, R> {
 
 fn record_io_error(
     error: std::io::Error,
-    common_header: CommonHeader,
+    common_header: Option<CommonHeader>,
     header: &[u8],
     body: &[u8],
 ) -> RawMrtRecordError {
@@ -269,8 +287,9 @@ fn record_io_error(
     bytes.extend_from_slice(body);
     RawMrtRecordError {
         error: ParserError::IoError(error),
-        common_header: Some(common_header),
+        common_header,
         bytes: Some(bytes),
+        record_consumed: false,
     }
 }
 
@@ -765,5 +784,146 @@ mod tests {
         wire.put_slice(&[1, 2]);
         let error = chunk_mrt_record(&mut Cursor::new(wire.clone().freeze())).unwrap_err();
         assert_eq!(error.bytes.as_deref(), Some(wire.as_ref()));
+    }
+
+    /// A record of type 0x7777 whose 20-byte body reads as a plausible common
+    /// header (timestamp 1, type BGP, subtype 7, length 32), so a reader that
+    /// skips only the 12 header bytes would treat the body as the next record.
+    fn unknown_type_record() -> Vec<u8> {
+        let mut wire = BytesMut::new();
+        wire.put_u32(946_684_800);
+        wire.put_u16(0x7777);
+        wire.put_u16(0);
+        wire.put_u32(20);
+        wire.put_slice(&[0, 0, 0, 1, 0, 5, 0, 7, 0, 0, 0, 32]);
+        wire.put_slice(&[0xaa; 8]);
+        wire.to_vec()
+    }
+
+    fn keepalive_record() -> (CommonHeader, Vec<u8>) {
+        let body = vec![0, 1, 192, 0, 2, 1, 0, 2, 192, 0, 2, 2];
+        let header = CommonHeader {
+            timestamp: 946_684_801,
+            microsecond_timestamp: None,
+            entry_type: EntryType::BGP,
+            entry_subtype: 7,
+            length: body.len() as u32,
+        };
+        let mut wire = header.encode().to_vec();
+        wire.extend_from_slice(&body);
+        (header, wire)
+    }
+
+    #[test]
+    fn chunk_skips_body_of_unknown_entry_type() {
+        let unknown = unknown_type_record();
+        let (next_header, next_wire) = keepalive_record();
+        let mut wire = unknown.clone();
+        wire.extend_from_slice(&next_wire);
+        let mut cursor = Cursor::new(wire);
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(
+            matches!(&error.error, ParserError::ParseError(msg) if msg.contains("entry type")),
+            "unexpected error: {}",
+            error.error
+        );
+        assert_eq!(error.bytes.as_deref(), Some(unknown.as_slice()));
+        assert_eq!(cursor.position(), unknown.len() as u64);
+
+        let next = chunk_mrt_record(&mut cursor).unwrap();
+        assert_eq!(next.common_header, next_header);
+        assert!(matches!(
+            next.parse().unwrap().message,
+            MrtMessage::LegacyBgp(LegacyBgp::Message(LegacyBgpMessage {
+                bgp_message: BgpMessage::KeepAlive,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            chunk_mrt_record(&mut cursor).unwrap_err().error,
+            ParserError::EofExpected
+        ));
+    }
+
+    #[test]
+    fn chunk_skips_body_of_et_header_with_short_length() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(EntryType::BGP4MP_ET as u16);
+        wire.put_u16(4);
+        wire.put_u32(2);
+        wire.put_slice(&[0xaa; 2]);
+        let rejected = wire.to_vec();
+        let (next_header, next_wire) = keepalive_record();
+        wire.put_slice(&next_wire);
+        let mut cursor = Cursor::new(wire.to_vec());
+
+        let error = chunk_mrt_record_with_context(&mut cursor).unwrap_err();
+        assert!(matches!(error.error, ParserError::ParseError(_)));
+        assert!(error.record_consumed);
+        assert_eq!(error.bytes.as_deref(), Some(rejected.as_slice()));
+        assert_eq!(
+            chunk_mrt_record(&mut cursor).unwrap().common_header,
+            next_header
+        );
+    }
+
+    #[test]
+    fn chunk_reports_truncated_body_of_unknown_entry_type() {
+        let unknown = unknown_type_record();
+        let truncated = &unknown[..unknown.len() - 5];
+        let mut cursor = Cursor::new(truncated.to_vec());
+
+        let error = chunk_mrt_record_with_context(&mut cursor).unwrap_err();
+        assert!(matches!(
+            &error.error,
+            ParserError::IoError(io_error) if io_error.kind() == std::io::ErrorKind::UnexpectedEof
+        ));
+        assert!(error.common_header.is_none());
+        assert!(!error.record_consumed);
+        assert_eq!(error.bytes.as_deref(), Some(truncated));
+        assert!(matches!(
+            chunk_mrt_record(&mut cursor).unwrap_err().error,
+            ParserError::EofExpected
+        ));
+    }
+
+    #[test]
+    fn chunk_reports_oversized_length_without_reading_body() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(EntryType::BGP as u16);
+        wire.put_u16(7);
+        wire.put_u32(MAX_MRT_MESSAGE_LEN + 1);
+        wire.put_slice(&[0xaa; 32]);
+        let mut cursor = Cursor::new(wire.to_vec());
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(matches!(
+            error.error,
+            ParserError::OversizedRecord { length } if length == MAX_MRT_MESSAGE_LEN + 1
+        ));
+        assert_eq!(error.bytes.as_deref(), Some(&wire[..12]));
+        assert_eq!(cursor.position(), 12);
+    }
+
+    #[test]
+    fn chunk_reports_oversized_length_for_unknown_entry_type() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(0x7777);
+        wire.put_u16(0);
+        wire.put_u32(u32::MAX);
+        wire.put_slice(&[0xaa; 32]);
+        let mut cursor = Cursor::new(wire.to_vec());
+
+        let error = chunk_mrt_record(&mut cursor).unwrap_err();
+        assert!(matches!(
+            error.error,
+            ParserError::OversizedRecord { length: u32::MAX }
+        ));
+        assert_eq!(error.bytes.as_deref(), Some(&wire[..12]));
+        assert_eq!(cursor.position(), 12);
     }
 }

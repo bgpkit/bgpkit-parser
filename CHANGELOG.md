@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
+* **`ParserError::OversizedRecord { length }`**: an MRT header declaring a body over the 16 MiB limit now returns this variant instead of `Unsupported("MRT message too large: …")`. The `Display` text is unchanged. Downstream exhaustive matches on `ParserError` need a new arm.
 * **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError { kind, message }` and `UnknownMessageType(u8)` variants. Downstream matches on the enum now need a wildcard arm: `#[non_exhaustive]` means the two new variants cannot be covered by adding arms alone.
 
 ### Added
@@ -23,13 +24,15 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+* **Iterators stay aligned after an unknown MRT entry type**: `chunk_mrt_record` rejected an unknown entry type after reading only the 12-byte header, so `into_record_iter`, `into_elem_iter`, `into_raw_record_iter` and the fallible iterators read the record body as the next header and misparsed or dropped every record after it. The body is now consumed first, and the error's `bytes` hold the whole record. `into_diagnostic_iter` reports the record as a `ParseError` event and continues, where it previously stopped at any framing error.
+* **Iterators stop at an oversized MRT length**: after a header declaring a body over 16 MiB, the default and fallible iterators read that body as headers. The default iterators now log the new `OversizedRecord` error and end, and the fallible iterators yield it once and end. `into_recovering_record_iter` still scans forward.
 * **RIS Live JSON elems carry `origin_asns`**: `parse_ris_live_message` left `origin_asns` empty, so an `origin_asn` filter never matched an elem parsed from RIS Live's JSON fields. It is now derived from the AS path, as `parse_ris_live_message_raw` and the MRT iterators already did.
 * **Dissection span correlation is linear in the number of warnings**: `span_record_warnings` (used by `DiagnosticIterator::with_dissection`) walked the whole dissection tree once per warning, so a BGP UPDATE carrying thousands of duplicate attributes took tens of seconds to diagnose. The tree is now indexed by field name once per record. Spans are unchanged.
 * **Fallible iterators stop after a fatal stream read error**: `into_fallible_record_iter`, `into_fallible_elem_iter`, `into_fallible_update_iter` and `into_fallible_route_iter` now yield a framing I/O or decompression error once and then end, instead of polling a spent decoder indefinitely. An `Interrupted`/`WouldBlock` read stays retryable only when it consumed no framing bytes, and skippable malformed records are unchanged ([#350](https://github.com/bgpkit/bgpkit-parser/pull/350)).
 
 ### Contributors
 
-* @ties — faster elem conversion ([#348](https://github.com/bgpkit/bgpkit-parser/pull/348)), `parse_ris_live_message_iter` and RIS Live origin ASNs, once-per-parser parse error logging, linear-time dissection span correlation
+* @ties — faster elem conversion ([#348](https://github.com/bgpkit/bgpkit-parser/pull/348)), `parse_ris_live_message_iter` and RIS Live origin ASNs, once-per-parser parse error logging, linear-time dissection span correlation, MRT framing after unknown entry types and oversized lengths
 
 ## v0.22.0 - 2026-09-10
 
