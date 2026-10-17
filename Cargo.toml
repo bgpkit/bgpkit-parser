@@ -143,7 +143,7 @@ harness = false
 [dev-dependencies]
 regex = "1"
 anyhow = "1"
-bgpkit-broker = "0.12"
+bgpkit-broker = "0.13"
 env_logger = "0.11"
 kafka = "0.10.0"
 tungstenite = "0.30.0"
