@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.23.0 - 2026-10-17
+
 ### Breaking changes
 
 * **`ParserError::OversizedRecord { length }`**: an MRT header declaring a body over the 16 MiB limit now returns this variant instead of `Unsupported("MRT message too large: …")`. The `Display` text is unchanged. Downstream exhaustive matches on `ParserError` need a new arm.
