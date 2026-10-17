@@ -10,6 +10,7 @@ use std::io::ErrorKind;
 use std::{error::Error, fmt, io};
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParserError {
     IoError(io::Error),
     EofError(io::Error),

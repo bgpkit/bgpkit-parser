@@ -4,9 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.23.0 - 2026-10-17
+
 ### Breaking changes
 
-* **`ParserError::OversizedRecord { length }`**: an MRT header declaring a body over the 16 MiB limit now returns this variant instead of `Unsupported("MRT message too large: …")`. The `Display` text is unchanged. Downstream exhaustive matches on `ParserError` need a new arm.
+* **`ParserError` is now `#[non_exhaustive]` and gains `OversizedRecord { length }`**: an MRT header declaring a body over the 16 MiB limit now returns this variant instead of `Unsupported("MRT message too large: …")`. The `Display` text is unchanged. Downstream exhaustive matches need a wildcard arm; future variants will not break them again, matching `ParserBmpError` and the model error enums.
 * **`ParserBmpError` carries the failing value and is `#[non_exhaustive]`**: `From<io::Error>` and the unknown-message-type conversion collapsed every failure into `InvalidOpenBmpHeader` and dropped the cause; they now return the new `IoError { kind, message }` and `UnknownMessageType(u8)` variants. Downstream matches on the enum now need a wildcard arm: `#[non_exhaustive]` means the two new variants cannot be covered by adding arms alone.
 
 ### Added
