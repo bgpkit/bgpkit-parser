@@ -76,6 +76,12 @@ pub fn parse_nlri(
             }
             let nlris = parse_evpn_nlri(&mut input, additional_paths)?;
             (Vec::new(), None, None, Some(nlris))
+        } else if afi == Afi::L2vpn || safi == Safi::Evpn {
+            // L2VPN with another SAFI, or EVPN with another AFI: not a family we
+            // can interpret, and not one to hand to the IP-prefix parser either.
+            return Err(ParserError::Unsupported(format!(
+                "unsupported address family combination {afi:?}/{safi:?}"
+            )));
         } else if afi == Afi::LinkState && (safi == Safi::LinkState || safi == Safi::LinkStateVpn) {
             // Parse Link-State NLRI
             if reachable {
@@ -169,9 +175,11 @@ fn parse_evpn_nlri(
     let mut nlris = Vec::new();
 
     while input.remaining() > 0 {
-        if additional_paths {
-            input.read_u32()?;
-        }
+        let path_id = if additional_paths {
+            Some(input.read_u32()?)
+        } else {
+            None
+        };
 
         let route_type = EvpnRouteType::from(input.read_u8()?);
         let body_len = input.read_u8()? as usize;
@@ -204,6 +212,7 @@ fn parse_evpn_nlri(
         };
 
         nlris.push(EvpnNlri {
+            path_id,
             route_type,
             route_distinguisher,
             payload,
@@ -215,7 +224,10 @@ fn parse_evpn_nlri(
 
 /// MAC/IP Advertisement route body - RFC 7432 §7.2.
 fn parse_mac_ip_advertisement(body: &mut Bytes) -> Result<MacIpAdvertisement, ParserError> {
-    if body.remaining() < 10 + 4 + 1 {
+    // Fixed part, with the route distinguisher already consumed:
+    // ESI (10) | Ethernet tag (4) | MAC length (1) | MAC (6) | IP length (1) |
+    // Label1 (3).
+    if body.remaining() < 10 + 4 + 1 + 6 + 1 + 3 {
         return Err(ParserError::ParseError(
             "EVPN type 2 NLRI too short for the fixed fields".to_string(),
         ));
@@ -248,12 +260,28 @@ fn parse_mac_ip_advertisement(body: &mut Bytes) -> Result<MacIpAdvertisement, Pa
 
     let label = read_three_octet_label(body)?;
 
+    // Label2 is optional: it appears when the route is used for IP-VRF
+    // forwarding - RFC 7432 §7.2.
+    let label2 = if body.remaining() == 3 {
+        Some(read_three_octet_label(body)?)
+    } else {
+        None
+    };
+
+    if body.remaining() != 0 {
+        return Err(ParserError::ParseError(format!(
+            "EVPN type 2 NLRI has {} trailing octets",
+            body.remaining()
+        )));
+    }
+
     Ok(MacIpAdvertisement {
         esi,
         ethernet_tag_id,
         mac,
         ip,
         label,
+        label2,
     })
 }
 
@@ -285,61 +313,43 @@ fn parse_inclusive_multicast(body: &mut Bytes) -> Result<InclusiveMulticastRoute
 
 /// IP Prefix route body - RFC 9136 §3.1.
 ///
-/// The address family of the prefix is not signalled explicitly; a prefix
-/// length above 32 can only be IPv6, and the gateway address length is checked
-/// against the family that follows from it.
+/// Layout, with the route distinguisher already consumed:
+/// `ESI (10) | Ethernet tag (4) | IP prefix length (1) | IP prefix (4 or 16) |
+/// GW IP address (4 or 16) | MPLS label (3)`. The NLRI length identifies the
+/// address family: 34 octets for IPv4 and 58 for IPv6, which leaves 26 or 50
+/// here. The prefix and gateway fields are full width, so a /32 IPv6 prefix is
+/// still a 16-octet field.
 fn parse_ip_prefix_route(body: &mut Bytes) -> Result<IpPrefixRoute, ParserError> {
-    if body.remaining() < 4 + 1 {
-        return Err(ParserError::ParseError(
-            "EVPN type 5 NLRI too short".to_string(),
-        ));
-    }
-
-    let ethernet_tag_id = body.read_u32()?;
-    let prefix_len = body.read_u8()?;
-    let is_ipv6 = prefix_len > 32;
-    let max_len = if is_ipv6 { 128 } else { 32 };
-    if prefix_len > max_len {
-        return Err(ParserError::ParseError(format!(
-            "EVPN type 5 prefix length {prefix_len} is invalid"
-        )));
-    }
-
-    let prefix_bytes = usize::from(prefix_len).div_ceil(8);
-    if body.remaining() < prefix_bytes {
-        return Err(ParserError::ParseError(
-            "EVPN type 5 NLRI truncated inside the prefix".to_string(),
-        ));
-    }
-    let mut prefix_octets = [0u8; 16];
-    body.copy_to_slice(&mut prefix_octets[..prefix_bytes]);
-
-    let gateway_bytes = body.remaining().checked_sub(3).ok_or_else(|| {
-        ParserError::ParseError("EVPN type 5 NLRI truncated before the label".to_string())
-    })?;
-
-    let ip_prefix = match (is_ipv6, gateway_bytes) {
-        (false, 4) => {
-            let addr = std::net::Ipv4Addr::new(
-                prefix_octets[0],
-                prefix_octets[1],
-                prefix_octets[2],
-                prefix_octets[3],
-            );
-            ipnet::IpNet::new(addr.into(), prefix_len)
-                .map_err(|e| ParserError::ParseError(format!("EVPN type 5 invalid prefix: {e}")))?
-        }
-        (true, 16) => {
-            let addr = std::net::Ipv6Addr::from(prefix_octets);
-            ipnet::IpNet::new(addr.into(), prefix_len)
-                .map_err(|e| ParserError::ParseError(format!("EVPN type 5 invalid prefix: {e}")))?
-        }
-        (family_is_ipv6, got) => {
+    let is_ipv6 = match body.len() {
+        26 => false,
+        50 => true,
+        other => {
             return Err(ParserError::ParseError(format!(
-                "EVPN type 5 gateway length {got} does not match an {family_is_ipv6} prefix"
+                "EVPN type 5 payload is {other} octets after the route distinguisher, not 26 (IPv4) or 50 (IPv6)"
             )))
         }
     };
+
+    let mut esi = [0u8; 10];
+    body.copy_to_slice(&mut esi);
+    let ethernet_tag_id = body.read_u32()?;
+
+    let prefix_len = body.read_u8()?;
+    let max_len = if is_ipv6 { 128 } else { 32 };
+    if prefix_len > max_len {
+        return Err(ParserError::ParseError(format!(
+            "EVPN type 5 prefix length {prefix_len} is invalid for an {is_ipv6} prefix"
+        )));
+    }
+
+    let ip_prefix = if is_ipv6 {
+        let addr = body.read_ipv6_address()?;
+        ipnet::IpNet::new(addr.into(), prefix_len)
+    } else {
+        let addr = body.read_ipv4_address()?;
+        ipnet::IpNet::new(addr.into(), prefix_len)
+    }
+    .map_err(|e| ParserError::ParseError(format!("EVPN type 5 invalid prefix: {e}")))?;
 
     let gateway_ip = if is_ipv6 {
         IpAddr::V6(body.read_ipv6_address()?)
@@ -348,7 +358,15 @@ fn parse_ip_prefix_route(body: &mut Bytes) -> Result<IpPrefixRoute, ParserError>
     };
     let label = read_three_octet_label(body)?;
 
+    if body.remaining() != 0 {
+        return Err(ParserError::ParseError(format!(
+            "EVPN type 5 NLRI has {} trailing octets",
+            body.remaining()
+        )));
+    }
+
     Ok(IpPrefixRoute {
+        esi,
         ethernet_tag_id,
         ip_prefix,
         gateway_ip,
@@ -879,11 +897,14 @@ mod evpn_tests {
 
     #[test]
     fn parses_ip_prefix_route() {
-        let mut nlri = vec![0x05, 0x17];
+        // RFC 9136 §3.1: RD | ESI | Ethernet tag | prefix length | prefix (4) |
+        // gateway (4) | label, 34 octets in total for IPv4.
+        let mut nlri = vec![0x05, 0x22];
         nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 12, 0, 2]); // RD
+        nlri.extend_from_slice(&[0u8; 10]); // ESI
         nlri.extend_from_slice(&[0, 0, 0, 0]); // ethernet tag
         nlri.push(24); // prefix length
-        nlri.extend_from_slice(&[198, 51, 100]); // 198.51.100.0/24
+        nlri.extend_from_slice(&[198, 51, 100, 0]); // 198.51.100.0/24, full width
         nlri.extend_from_slice(&[0, 0, 0, 0]); // gateway IP
         nlri.extend_from_slice(&[0, 0, 0x64]); // label 100
 
@@ -896,12 +917,115 @@ mod evpn_tests {
         let EvpnRoutePayload::IpPrefix(body) = &routes[0].payload else {
             panic!("expected an IP prefix route");
         };
+        assert_eq!(body.esi, [0u8; 10]);
         assert_eq!(
             body.ip_prefix,
             ipnet::IpNet::from_str("198.51.100.0/24").unwrap()
         );
         assert_eq!(body.gateway_ip, "0.0.0.0".parse::<IpAddr>().unwrap());
         assert_eq!(body.label, 100);
+    }
+
+    #[test]
+    fn parses_ipv6_ip_prefix_route_shorter_than_slash_32() {
+        // A /20 IPv6 prefix still carries 16-octet prefix and gateway fields;
+        // the family comes from the NLRI length, not from the prefix length.
+        let mut nlri = vec![0x05, 0x3a];
+        nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 12, 0, 2]); // RD
+        nlri.extend_from_slice(&[0u8; 10]); // ESI
+        nlri.extend_from_slice(&[0, 0, 0, 0]); // ethernet tag
+        nlri.push(20); // prefix length
+        nlri.extend_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        nlri.extend_from_slice(&[0u8; 16]); // gateway IP
+        nlri.extend_from_slice(&[0, 0, 0x64]); // label 100
+
+        let res = parse_nlri(reach(nlri), &None, &None, &None, true, false);
+        let Ok(AttributeValue::MpReachNlri(parsed)) = res else {
+            panic!("expected MP_REACH_NLRI, got {res:?}");
+        };
+        let routes = parsed.evpn_nlris.expect("EVPN NLRI");
+        let EvpnRoutePayload::IpPrefix(body) = &routes[0].payload else {
+            panic!("expected an IP prefix route");
+        };
+        assert_eq!(
+            body.ip_prefix,
+            ipnet::IpNet::from_str("2001:db8::/20").unwrap()
+        );
+        assert_eq!(body.gateway_ip, "::".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn rejects_ip_prefix_route_with_the_wrong_length() {
+        // 26 octets after the route distinguisher is neither 34 nor 58 in total.
+        let mut nlri = vec![0x05, 0x1a];
+        nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 12, 0, 2]); // RD
+        nlri.extend_from_slice(&[0u8; 18]);
+
+        let res = parse_nlri(reach(nlri), &None, &None, &None, true, false);
+        assert!(
+            res.is_err(),
+            "a type 5 route of the wrong length must not parse"
+        );
+    }
+
+    #[test]
+    fn parses_optional_second_label() {
+        // MAC/IP advertisement used for IP-VRF forwarding carries Label2 too.
+        let mut body = mac_ip_nlri(32, &[192, 0, 2, 10]);
+        let label2 = [0x00, 0x00, 0x2a];
+        body[1] += 3; // body length
+        body.extend_from_slice(&label2);
+
+        let res = parse_nlri(reach(body), &None, &None, &None, true, false);
+        let Ok(AttributeValue::MpReachNlri(parsed)) = res else {
+            panic!("expected MP_REACH_NLRI, got {res:?}");
+        };
+        let routes = parsed.evpn_nlris.expect("EVPN NLRI");
+        let EvpnRoutePayload::MacIpAdvertisement(route) = &routes[0].payload else {
+            panic!("expected a MAC/IP advertisement");
+        };
+        assert_eq!(route.label, 100);
+        assert_eq!(route.label2, Some(42));
+    }
+
+    #[test]
+    fn rejects_a_mac_address_that_does_not_fit() {
+        // The fixed-field check passes, but the body ends where the MAC should
+        // start: this must be an error, never a panic.
+        let mut nlri = vec![0x02, 0x17];
+        nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 12, 0, 2]); // RD
+        nlri.extend_from_slice(&[0u8; 10]); // ESI
+        nlri.extend_from_slice(&[0, 0, 0, 0]); // ethernet tag
+        nlri.push(48); // MAC length 48, no MAC bytes follow
+
+        let res = parse_nlri(reach(nlri), &None, &None, &None, true, false);
+        assert!(res.is_err(), "a truncated MAC must be a parse error");
+    }
+
+    #[test]
+    fn keeps_the_add_path_identifier() {
+        let mut nlri = vec![0x00, 0x00, 0x00, 0x07]; // path id 7
+        nlri.extend_from_slice(&mac_ip_nlri(0, &[]));
+
+        let res = parse_nlri(reach(nlri), &None, &None, &None, true, true);
+        let Ok(AttributeValue::MpReachNlri(parsed)) = res else {
+            panic!("expected MP_REACH_NLRI, got {res:?}");
+        };
+        let routes = parsed.evpn_nlris.expect("EVPN NLRI");
+        assert_eq!(routes[0].path_id, Some(7));
+    }
+
+    #[test]
+    fn rejects_families_that_mix_l2vpn_or_evpn_with_something_else() {
+        // AFI 1 with SAFI 70 would otherwise be read as IPv4 prefixes.
+        let bytes = Bytes::from(vec![0x00, 0x01, 0x46, 0x00]);
+        let res = parse_nlri(bytes, &None, &None, &None, false, false);
+        assert!(res.is_err(), "ipv4/evpn must not be parsed as prefixes");
+
+        // AFI 25 with SAFI 1 is not a family this parser knows either.
+        let bytes = Bytes::from(vec![0x00, 0x19, 0x01, 0x00]);
+        let res = parse_nlri(bytes, &None, &None, &None, false, false);
+        assert!(res.is_err(), "l2vpn/unicast must not be parsed as prefixes");
     }
 
     #[test]

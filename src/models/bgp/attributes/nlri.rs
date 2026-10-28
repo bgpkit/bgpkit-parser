@@ -65,6 +65,16 @@ impl Nlri {
         matches!(self.safi, Safi::MplsLabel)
     }
 
+    /// Returns true when this NLRI carries no reachability information in any
+    /// family, which is the shape of an MP_UNREACH end-of-RIB marker.
+    pub fn is_empty(&self) -> bool {
+        self.prefixes.is_empty()
+            && self.labeled_prefixes.as_ref().is_none_or(|p| p.is_empty())
+            && self.link_state_nlris.as_ref().is_none_or(|n| n.is_empty())
+            && self.flowspec_nlris.as_ref().is_none_or(|n| n.is_empty())
+            && self.evpn_nlris.as_ref().is_none_or(|n| n.is_empty())
+    }
+
     /// Returns true if this NLRI refers to reachable prefixes
     pub const fn is_reachable(&self) -> bool {
         self.next_hop.is_some()

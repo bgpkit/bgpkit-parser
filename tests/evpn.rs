@@ -204,6 +204,8 @@ fn every_route_names_its_own_leaf_as_rd_and_next_hop() {
             };
 
             assert_eq!(body.esi, [0u8; 10], "single-homed host, ESI 0");
+            assert_eq!(body.label2, None, "MAC-only route, no IP-VRF label");
+            assert_eq!(route.path_id, None, "the lab session does not run ADD-PATH");
             assert_eq!(body.ethernet_tag_id, 0);
             assert_eq!(body.ip, None, "MAC-only advertisement, IP length 0");
             assert_eq!(body.label, 100, "VNI 100");

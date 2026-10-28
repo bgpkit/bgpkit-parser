@@ -13,4 +13,4 @@
  * - RFC 7752: BGP Link-State - defines SAFI 71, 72
  * - RFC 8950: Advertising IPv4 Network Layer Reachability Information (NLRI) with an IPv6 Next Hop
  */
-export type Safi = "Unicast" | "Multicast" | "UnicastMulticast" | "MplsLabel" | "LinkState" | "LinkStateVpn" | "MplsVpn" | "MulticastVpn" | "FlowSpec" | "FlowSpecL3Vpn";
+export type Safi = "Unicast" | "Multicast" | "UnicastMulticast" | "MplsLabel" | "Evpn" | "LinkState" | "LinkStateVpn" | "MplsVpn" | "MulticastVpn" | "FlowSpec" | "FlowSpecL3Vpn";

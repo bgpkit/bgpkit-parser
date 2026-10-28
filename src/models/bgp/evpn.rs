@@ -45,6 +45,9 @@ pub enum EvpnRouteType {
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EvpnNlri {
+    /// ADD-PATH path identifier (RFC 7911); present when the session
+    /// negotiated ADD-PATH, `None` otherwise.
+    pub path_id: Option<u32>,
     pub route_type: EvpnRouteType,
     /// Route Distinguisher (8 octets), shared by every EVPN route type.
     pub route_distinguisher: RouteDistinguisher,
@@ -83,6 +86,9 @@ pub struct MacIpAdvertisement {
     pub ip: Option<IpAddr>,
     /// Label1 (3 octets). For VXLAN this is the VNI - RFC 8365.
     pub label: u32,
+    /// Optional Label2 (3 octets), present when the route is used for IP-VRF
+    /// forwarding - RFC 7432 §7.2.
+    pub label2: Option<u32>,
 }
 
 /// Inclusive Multicast Ethernet Tag route body - RFC 7432 §7.3.
@@ -96,9 +102,16 @@ pub struct InclusiveMulticastRoute {
 }
 
 /// IP Prefix route body - RFC 9136 §3.1.
+///
+/// The wire format carries the Ethernet Segment Identifier like the other EVPN
+/// route types, and the IP prefix and gateway address are always full width
+/// (4 or 16 octets). The NLRI length, not the prefix length, tells IPv4 (34
+/// octets) from IPv6 (58).
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IpPrefixRoute {
+    /// Ethernet Segment Identifier (10 octets).
+    pub esi: [u8; 10],
     /// Ethernet Tag ID (4 octets).
     pub ethernet_tag_id: u32,
     /// The advertised IP prefix; the prefix length is on the wire and the
