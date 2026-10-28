@@ -117,6 +117,9 @@ pub(crate) fn validate_bgp4mp_afi(afi: &Afi) -> Result<(), ParserError> {
         Afi::LinkState => Err(ParserError::ParseError(
             "Link-State AFI is invalid in a BGP4MP envelope".to_string(),
         )),
+        Afi::L2vpn => Err(ParserError::ParseError(
+            "L2VPN AFI is invalid in a BGP4MP envelope".to_string(),
+        )),
     }
 }
 

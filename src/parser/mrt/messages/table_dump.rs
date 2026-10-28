@@ -118,9 +118,9 @@ fn parse_table_dump_entry(
     let prefix = match afi {
         Afi::Ipv4 => data.read_ipv4_prefix().map(ipnet::IpNet::V4),
         Afi::Ipv6 => data.read_ipv6_prefix().map(ipnet::IpNet::V6),
-        Afi::LinkState => {
-            // Link-State doesn't use traditional prefixes, but we need a placeholder
-            // Use 0.0.0.0/0 as a placeholder for now
+        Afi::LinkState | Afi::L2vpn => {
+            // Neither Link-State nor EVPN uses traditional prefixes, but we need
+            // a placeholder; use 0.0.0.0/0.
             Ok(ipnet::IpNet::V4(
                 ipnet::Ipv4Net::new(std::net::Ipv4Addr::new(0, 0, 0, 0), 0).unwrap(),
             ))

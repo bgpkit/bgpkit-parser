@@ -29,6 +29,9 @@ pub struct Nlri {
     /// Flow-Spec NLRI data - RFC 8955/8956
     #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
     pub flowspec_nlris: Option<Vec<crate::models::bgp::flowspec::FlowSpecNlri>>,
+    /// EVPN NLRI data - RFC 7432 (AFI 25, SAFI 70)
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
+    pub evpn_nlris: Option<Vec<crate::models::bgp::evpn::EvpnNlri>>,
 }
 
 impl Nlri {
@@ -50,6 +53,11 @@ impl Nlri {
     /// Returns true if this NLRI refers to Flow-Spec information.
     pub const fn is_flowspec(&self) -> bool {
         matches!(self.safi, Safi::FlowSpec | Safi::FlowSpecL3Vpn)
+    }
+
+    /// Returns true if this NLRI refers to EVPN (AFI 25, SAFI 70).
+    pub const fn is_evpn(&self) -> bool {
+        matches!(self.afi, Afi::L2vpn) && matches!(self.safi, Safi::Evpn)
     }
 
     /// Returns true if this NLRI refers to MPLS-labeled prefixes (SAFI 4).
@@ -88,6 +96,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -105,6 +114,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -122,6 +132,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -137,6 +148,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -156,6 +168,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
+            evpn_nlris: None,
         }
     }
 
@@ -173,6 +186,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
+            evpn_nlris: None,
         }
     }
 
@@ -191,6 +205,39 @@ impl Nlri {
             labeled_prefixes: Some(labeled_prefixes),
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
+        }
+    }
+
+    /// Create a new EVPN reachable NLRI (AFI 25 / SAFI 70) - RFC 7432
+    pub fn new_evpn_reachable(
+        next_hop: Option<IpAddr>,
+        nlri_list: Vec<crate::models::bgp::evpn::EvpnNlri>,
+    ) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        Nlri {
+            afi: Afi::L2vpn,
+            safi: Safi::Evpn,
+            next_hop,
+            prefixes: Vec::new(),
+            labeled_prefixes: None,
+            link_state_nlris: None,
+            flowspec_nlris: None,
+            evpn_nlris: Some(nlri_list),
+        }
+    }
+
+    /// Create a new EVPN unreachable NLRI (AFI 25 / SAFI 70) - RFC 7432
+    pub fn new_evpn_unreachable(nlri_list: Vec<crate::models::bgp::evpn::EvpnNlri>) -> Nlri {
+        Nlri {
+            afi: Afi::L2vpn,
+            safi: Safi::Evpn,
+            next_hop: None,
+            prefixes: Vec::new(),
+            labeled_prefixes: None,
+            link_state_nlris: None,
+            flowspec_nlris: None,
+            evpn_nlris: Some(nlri_list),
         }
     }
 
@@ -205,6 +252,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 }

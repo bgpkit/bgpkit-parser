@@ -11,6 +11,8 @@ use std::net::IpAddr;
 pub enum Afi {
     Ipv4 = 1,
     Ipv6 = 2,
+    /// Layer 2 VPN address family, used to carry EVPN - RFC 7432
+    L2vpn = 25,
     /// BGP Link-State - RFC 7752
     LinkState = 16388,
 }
@@ -47,6 +49,8 @@ pub enum Safi {
     /// MPLS-labeled address - RFC 3107/8277
     /// SAFI 4 for labeled unicast prefixes (not VPN)
     MplsLabel = 4,
+    /// BGP EVPN - RFC 7432
+    Evpn = 70,
     /// BGP Link-State - RFC 7752
     LinkState = 71,
     /// BGP Link-State VPN - RFC 7752
@@ -85,11 +89,14 @@ mod tests {
     fn test_afi_safi_repr() {
         assert_eq!(Afi::Ipv4 as u16, 1);
         assert_eq!(Afi::Ipv6 as u16, 2);
+        assert_eq!(Afi::L2vpn as u16, 25);
         assert_eq!(Afi::LinkState as u16, 16388);
 
         assert_eq!(Safi::Unicast as u8, 1);
         assert_eq!(Safi::Multicast as u8, 2);
         assert_eq!(Safi::UnicastMulticast as u8, 3);
+        // RFC 7432 EVPN SAFI value
+        assert_eq!(Safi::Evpn as u8, 70);
         // RFC 7752 Link-State SAFI values
         assert_eq!(Safi::LinkState as u8, 71);
         assert_eq!(Safi::LinkStateVpn as u8, 72);

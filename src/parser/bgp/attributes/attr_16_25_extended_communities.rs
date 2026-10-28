@@ -177,6 +177,32 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
                     value,
                 })
             }
+            ExtendedCommunityType::Evpn => {
+                let sub_type = input.read_u8()?;
+                match sub_type {
+                    // MAC Mobility - RFC 7432 §7.7
+                    0x00 => {
+                        let flags = input.read_u8()?;
+                        // Reserved octet, sent as zero and ignored on receipt.
+                        input.read_u8()?;
+                        let sequence = input.read_u32()?;
+                        ExtendedCommunity::MacMobility(MacMobility {
+                            sticky: flags & 0x01 != 0,
+                            sequence,
+                        })
+                    }
+                    // Other EVPN sub-types (ESI Label, ES-Import Route Target,
+                    // Router's MAC, Layer 2 Attributes, E-Tree, Default Gateway,
+                    // ARP/ND) and anything newer keep their octets verbatim.
+                    _ => {
+                        let mut buffer: [u8; 8] = [0; 8];
+                        buffer[0] = ec_type_u8;
+                        buffer[1] = sub_type;
+                        input.read_exact(&mut buffer[2..])?;
+                        ExtendedCommunity::Raw(buffer)
+                    }
+                }
+            }
             ExtendedCommunityType::Unknown(_) => {
                 let mut buffer: [u8; 8] = [0; 8];
                 buffer[0] = ec_type_u8;
@@ -296,6 +322,13 @@ pub fn encode_extended_communities(communities: &Vec<ExtendedCommunity>) -> Byte
                 bytes.put_u16(link_bandwidth.global_admin);
                 bytes.put_f32(link_bandwidth.bandwidth);
             }
+            ExtendedCommunity::MacMobility(mobility) => {
+                bytes.put_u8(ec_type);
+                bytes.put_u8(0x00); // MAC Mobility subtype
+                bytes.put_u8(u8::from(mobility.sticky));
+                bytes.put_u8(0); // reserved
+                bytes.put_u32(mobility.sequence);
+            }
             ExtendedCommunity::Raw(raw) => {
                 bytes.put_slice(raw);
             }
@@ -327,6 +360,61 @@ mod tests {
     // TransitiveIpv4AddressSpecific = 0x01,
     // TransitiveFourOctetAsSpecific = 0x02,
     // TransitiveOpaque = 0x03,
+
+    #[test]
+    fn test_parse_mac_mobility() {
+        // MAC Mobility, sequence 7, sticky flag clear - RFC 7432 §7.7
+        let data: Vec<u8> = vec![0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07];
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(data)).unwrap()
+        {
+            assert_eq!(communities.len(), 1);
+            assert_eq!(
+                communities[0],
+                ExtendedCommunity::MacMobility(MacMobility {
+                    sticky: false,
+                    sequence: 7
+                })
+            );
+        } else {
+            panic!("expected extended communities");
+        }
+
+        // Sticky bit set in the flags octet.
+        let data: Vec<u8> = vec![0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00];
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(data)).unwrap()
+        {
+            assert_eq!(
+                communities[0],
+                ExtendedCommunity::MacMobility(MacMobility {
+                    sticky: true,
+                    sequence: 256
+                })
+            );
+        }
+
+        // Other EVPN sub-types stay raw, with type and sub-type preserved:
+        // 0x0c is the Encapsulation extended community, VXLAN tunnel type 8.
+        let data: Vec<u8> = vec![0x06, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08];
+        let expected: [u8; 8] = data.clone().try_into().unwrap();
+        if let AttributeValue::ExtendedCommunities(communities) =
+            parse_extended_community(Bytes::from(data)).unwrap()
+        {
+            assert_eq!(communities[0], ExtendedCommunity::Raw(expected));
+        }
+
+        // The MAC Mobility community round-trips through the encoder.
+        let community = ExtendedCommunity::MacMobility(MacMobility {
+            sticky: true,
+            sequence: 42,
+        });
+        let encoded = encode_extended_communities(&vec![community]);
+        assert_eq!(
+            &encoded[..],
+            &[0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 42]
+        );
+    }
 
     #[test]
     fn test_parse_extended_communities_two_octet_as() {

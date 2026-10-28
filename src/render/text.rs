@@ -723,6 +723,7 @@ UPDATE:
                 labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
+                evpn_nlris: None,
             })
             .into(),
         );
@@ -775,6 +776,7 @@ UPDATE:
                 labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
+                evpn_nlris: None,
             })
             .into(),
         );
@@ -1010,6 +1012,7 @@ UPDATE:
                 labeled_prefixes: Some(vec![labeled]),
                 link_state_nlris: Some(vec![]),
                 flowspec_nlris: Some(vec![]),
+                evpn_nlris: None,
             })
             .into(),
         );

@@ -72,9 +72,9 @@ pub trait ReadUtils: Buf {
                 Ok(ip) => Ok(IpAddr::V6(ip)),
                 _ => Err(io::Error::other("Cannot parse IPv6 address")),
             },
-            Afi::LinkState => {
-                // Link-State doesn't use traditional IP addresses
-                // Use IPv4 zero address as placeholder
+            Afi::LinkState | Afi::L2vpn => {
+                // Neither Link-State nor EVPN uses a traditional IP next hop in
+                // this path; use the IPv4 zero address as a placeholder.
                 Ok(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))
             }
         }
@@ -221,7 +221,9 @@ fn try_parse_prefix(
     let max_bit_len: u8 = match afi {
         Afi::Ipv4 => 32,
         Afi::Ipv6 => 128,
-        Afi::LinkState => 0,
+        // EVPN NLRI are decoded by their own parser; a bit-length prefix does
+        // not apply to either family here.
+        Afi::LinkState | Afi::L2vpn => 0,
     };
 
     if bit_len > max_bit_len {
@@ -267,7 +269,8 @@ fn try_parse_prefix(
             pos += byte_len;
             IpAddr::V6(Ipv6Addr::from(buff))
         }
-        Afi::LinkState => {
+        // Neither Link-State nor EVPN carries a traditional prefix here.
+        Afi::LinkState | Afi::L2vpn => {
             pos += byte_len;
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
         }

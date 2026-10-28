@@ -176,6 +176,7 @@
       "value": {
         "MpReachNlri": {
           "afi": "Ipv6",
+          "evpn_nlris": null,
           "flowspec_nlris": null,
           "labeled_prefixes": null,
           "link_state_nlris": null,
@@ -201,6 +202,7 @@
       "value": {
         "MpUnreachNlri": {
           "afi": "Ipv6",
+          "evpn_nlris": null,
           "flowspec_nlris": null,
           "labeled_prefixes": null,
           "link_state_nlris": null,
@@ -389,6 +391,7 @@
     {
       "MpReachNlri": {
         "afi": "Ipv6",
+        "evpn_nlris": null,
         "flowspec_nlris": null,
         "labeled_prefixes": null,
         "link_state_nlris": null,
@@ -411,6 +414,7 @@
     {
       "MpUnreachNlri": {
         "afi": "Ipv6",
+        "evpn_nlris": null,
         "flowspec_nlris": null,
         "labeled_prefixes": null,
         "link_state_nlris": null,
