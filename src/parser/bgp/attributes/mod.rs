@@ -618,6 +618,20 @@ pub fn parse_attributes(
     })
 }
 
+/// Whether any route in this NLRI carries an ADD-PATH identifier (RFC 7911).
+///
+/// The wire format has no flag for it: the encoder has to infer the state from
+/// the routes themselves, exactly as a decoder is told the state out of band.
+fn has_path_id(nlri: &Nlri) -> bool {
+    nlri.labeled_prefixes
+        .as_ref()
+        .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()))
+        || nlri
+            .evpn_nlris
+            .as_ref()
+            .is_some_and(|routes| routes.iter().any(|r| r.path_id.is_some()))
+}
+
 impl Attribute {
     /// Append the wire representation of this attribute to `buf`.
     ///
@@ -668,16 +682,13 @@ impl Attribute {
                 }
                 AttributeValue::Clusters(v) => b.put_slice(&encode_clusters(v)),
                 AttributeValue::MpReachNlri(v) => {
-                    // Infer ADD-PATH from presence of path_id in any labeled prefix
-                    let add_path = v
-                        .labeled_prefixes
-                        .as_ref()
-                        .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()));
-                    encode_nlri(v, true, add_path, b)?;
+                    encode_nlri(v, true, has_path_id(v), b)?;
                 }
                 AttributeValue::MpUnreachNlri(v) => {
-                    // Withdrawals don't use ADD-PATH encoding per RFC 8277
-                    encode_nlri(v, false, false, b)?;
+                    // Labeled withdrawals carry plain prefixes (RFC 8277 §2.4),
+                    // but an EVPN withdrawal still carries its ADD-PATH
+                    // identifier, so the state follows the NLRI either way.
+                    encode_nlri(v, false, has_path_id(v), b)?;
                 }
                 AttributeValue::LinkState(v) => encode_link_state_attribute(v, b)?,
                 AttributeValue::TunnelEncapsulation(v) => {

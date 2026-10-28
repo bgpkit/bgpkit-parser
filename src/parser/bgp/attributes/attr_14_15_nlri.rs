@@ -305,6 +305,13 @@ fn parse_inclusive_multicast(body: &mut Bytes) -> Result<InclusiveMulticastRoute
         }
     };
 
+    if body.remaining() != 0 {
+        return Err(ParserError::ParseError(format!(
+            "EVPN type 3 NLRI has {} trailing octets",
+            body.remaining()
+        )));
+    }
+
     Ok(InclusiveMulticastRoute {
         ethernet_tag_id,
         originating_router_ip,
@@ -375,7 +382,28 @@ fn parse_ip_prefix_route(body: &mut Bytes) -> Result<IpPrefixRoute, ParserError>
 }
 
 /// Encode the route-type-specific body of an EVPN NLRI - RFC 7432 §7.
-fn encode_evpn_payload(payload: &EvpnRoutePayload) -> Result<Vec<u8>, EncodingError> {
+///
+/// The payload variant has to agree with the route type: the wire format has one
+/// type octet and one body, so a mismatch would be published as a route of the
+/// wrong kind.
+fn encode_evpn_payload(route: &EvpnNlri) -> Result<Vec<u8>, EncodingError> {
+    let payload = &route.payload;
+    let expected = match payload {
+        EvpnRoutePayload::MacIpAdvertisement(_) => EvpnRouteType::MacIpAdvertisement,
+        EvpnRoutePayload::InclusiveMulticast(_) => EvpnRouteType::InclusiveMulticastEthernetTag,
+        EvpnRoutePayload::IpPrefix(_) => EvpnRouteType::IpPrefix,
+        EvpnRoutePayload::Raw(_) => route.route_type,
+    };
+    if expected != route.route_type {
+        return Err(EncodingError::unencodable(
+            "EVPN NLRI route type",
+            format!(
+                "route type {:?} does not match its {:?} payload",
+                route.route_type, expected
+            ),
+        ));
+    }
+
     let mut out = Vec::new();
     match payload {
         EvpnRoutePayload::MacIpAdvertisement(body) => {
@@ -476,6 +504,27 @@ pub fn encode_nlri(
     add_path: bool,
     bytes: &mut BytesMut,
 ) -> Result<(), EncodingError> {
+    // An EVPN MP_REACH always carries the VTEP as next hop, and an MP_UNREACH
+    // never carries one. Either mismatch would produce a header a receiver
+    // decodes into something else, so reject it before writing a byte.
+    if nlri.afi == Afi::L2vpn {
+        match (reachable, nlri.next_hop) {
+            (true, None) => {
+                return Err(EncodingError::unencodable(
+                    "EVPN NLRI next hop",
+                    "an EVPN announcement needs the originating VTEP as next hop",
+                ))
+            }
+            (false, Some(_)) => {
+                return Err(EncodingError::unencodable(
+                    "EVPN NLRI next hop",
+                    "an EVPN withdrawal carries no next hop",
+                ))
+            }
+            _ => {}
+        }
+    }
+
     // encode address family
     bytes.put_u16(nlri.afi as u16);
     bytes.put_u8(nlri.safi as u8);
@@ -514,7 +563,7 @@ pub fn encode_nlri(
                 }
                 (false, None) => {}
             }
-            let body = encode_evpn_payload(&route.payload)?;
+            let body = encode_evpn_payload(route)?;
             // The length covers the route distinguisher and the body, and
             // excludes the ADD-PATH identifier.
             let entry_len = 8 + body.len();
@@ -1251,6 +1300,126 @@ mod evpn_tests {
         let err = encode_nlri(&parsed, true, false, &mut buf)
             .expect_err("ADD-PATH state and path identifiers must agree");
         assert!(format!("{err:?}").contains("path identifier"));
+    }
+
+    #[test]
+    fn rejects_trailing_octets_in_an_implicit_route() {
+        let mut nlri = vec![0x03, 0x13];
+        nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 11, 0, 2]); // RD
+        nlri.extend_from_slice(&[0, 0, 0, 100]); // ethernet tag
+        nlri.push(32);
+        nlri.extend_from_slice(&[10, 10, 0, 11]);
+        nlri.extend_from_slice(&[0xde, 0xad]); // trailing junk
+
+        let res = parse_nlri(reach(nlri), &None, &None, &None, true, false);
+        assert!(res.is_err(), "trailing octets must not be dropped silently");
+    }
+
+    #[test]
+    fn refuses_evpn_next_hop_states_that_do_not_exist_on_the_wire() {
+        let route = EvpnNlri {
+            path_id: None,
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+
+        // An announcement without a VTEP would omit the next-hop length.
+        let announcement = Nlri::new_evpn_reachable(None, vec![route.clone()]);
+        let mut buf = BytesMut::new();
+        let err = encode_nlri(&announcement, true, false, &mut buf)
+            .expect_err("a reachable EVPN NLRI needs a next hop");
+        assert!(format!("{err:?}").contains("next hop"), "{err:?}");
+        assert!(buf.is_empty(), "nothing is written before the refusal");
+
+        // A withdrawal with a next hop would write a field MP_UNREACH lacks.
+        let withdrawal = Nlri::new_evpn_reachable(Some("10.10.0.11".parse().unwrap()), vec![route]);
+        let mut buf = BytesMut::new();
+        let err = encode_nlri(&withdrawal, false, false, &mut buf)
+            .expect_err("an EVPN withdrawal carries no next hop");
+        assert!(format!("{err:?}").contains("no next hop"), "{err:?}");
+    }
+
+    #[test]
+    fn refuses_a_route_type_that_disagrees_with_its_payload() {
+        let route = EvpnNlri {
+            path_id: None,
+            // Type 5 with a type 2 body: the header would advertise a family the
+            // body does not describe.
+            route_type: EvpnRouteType::IpPrefix,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        let nlri = Nlri::new_evpn_reachable(Some("10.10.0.11".parse().unwrap()), vec![route]);
+        let mut buf = BytesMut::new();
+        let err = encode_nlri(&nlri, true, false, &mut buf)
+            .expect_err("the route type and payload must agree");
+        assert!(format!("{err:?}").contains("route type"), "{err:?}");
+    }
+
+    #[test]
+    fn the_attribute_encoder_keeps_add_path_state_for_evpn() {
+        // The public path infers ADD-PATH from the routes, for announcements
+        // and withdrawals alike.
+        let route = EvpnNlri {
+            path_id: Some(7),
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 12, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+
+        let announced = AttributeValue::MpReachNlri(Nlri::new_evpn_reachable(
+            Some("10.10.0.12".parse().unwrap()),
+            vec![route.clone()],
+        ));
+        let mut buf = BytesMut::new();
+        Attribute {
+            value: announced,
+            flag: AttrFlags::OPTIONAL,
+        }
+        .encode_to(AsnLength::Bits32, &mut buf)
+        .expect("an ADD-PATH EVPN announcement encodes");
+        // attribute header, then AFI/SAFI, next hop, reserved octet, path id
+        assert!(
+            buf.windows(4)
+                .any(|window| window == [0x00, 0x00, 0x00, 0x07]),
+            "the path identifier is on the wire"
+        );
+
+        let withdrawn = AttributeValue::MpUnreachNlri(Nlri::new_evpn_unreachable(vec![route]));
+        let mut buf = BytesMut::new();
+        Attribute {
+            value: withdrawn,
+            flag: AttrFlags::OPTIONAL,
+        }
+        .encode_to(AsnLength::Bits32, &mut buf)
+        .expect("an ADD-PATH EVPN withdrawal encodes");
+        assert!(
+            buf.windows(4)
+                .any(|window| window == [0x00, 0x00, 0x00, 0x07]),
+            "the path identifier survives a withdrawal"
+        );
     }
 
     #[test]

@@ -11,8 +11,8 @@
 //! and 4, each round preceded by a withdrawal of the previous claim.
 
 use bgpkit_parser::models::*;
-use bgpkit_parser::parse_bmp_msg;
 use bgpkit_parser::parser::bmp::messages::BmpMessageBody;
+use bgpkit_parser::{parse_bmp_msg, parse_mrt_record};
 use bytes::Bytes;
 
 const CAPTURE: &[u8] = include_bytes!("fixtures/evpn/mac-move.bmp");
@@ -288,9 +288,14 @@ fn a_route_monitoring_message_converts_to_an_mrt_record() {
 
         original.push(evpn_nlri(update, true).clone());
 
+        // The conversion clones the parsed message, so encode the record and
+        // parse those bytes: only that proves the re-encoded NLRI is valid.
         let record = MrtRecord::try_from(&message)
             .expect("an EVPN route monitoring message converts to an MRT record");
-        let MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(bgp4mp)) = &record.message else {
+        let encoded = record.encode().expect("the converted record encodes");
+        let mut encoded_data = std::io::Cursor::new(encoded);
+        let reparsed = parse_mrt_record(&mut encoded_data).expect("the encoded record parses");
+        let MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(bgp4mp)) = &reparsed.message else {
             panic!("expected a BGP4MP message record");
         };
         let BgpMessage::Update(converted_update) = &bgp4mp.bgp_message else {
