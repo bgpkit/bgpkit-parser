@@ -52,6 +52,7 @@ Construct and serialize BGP/MRT data, including the fallible encoders and the RF
 - [real_time_routeviews_kafka_to_mrt.rs](real_time_routeviews_kafka_to_mrt.rs) — Consume RouteViews Kafka BMP messages and archive them into an MRT file for later analysis.
 - [bmp_listener.rs](bmp_listener.rs) — Minimal TCP BMP listener that parses incoming BMP Route Monitoring messages and logs them.
 - [parse_bmp_mpls.rs](parse_bmp_mpls.rs) — Construct and parse a synthetic BMP Route Monitoring message containing MPLS-labeled NLRI (SAFI 4), demonstrating label stack extraction.
+- [evpn_mac_mobility.rs](evpn_mac_mobility.rs) — Decode EVPN (AFI 25 / SAFI 70) routes from a BMP capture: route type 2/3/5, route distinguisher, MAC, VTEP and MAC Mobility sequence. Runs on the committed capture of a real MAC move, where one host claims another's MAC and the two leaves trade sequence numbers.
 
 ## Attributes and Metadata
 
