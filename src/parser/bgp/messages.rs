@@ -702,7 +702,9 @@ impl BgpUpdateMessage {
 
         // has only one attribute, check if it is withdrawal attribute
         if let AttributeValue::MpUnreachNlri(nlri) = &self.attributes.inner.first().unwrap().value {
-            if nlri.prefixes.is_empty() {
+            // Every family's collection has to be empty: an EVPN withdrawal
+            // carries its routes in `evpn_nlris`, not in `prefixes`.
+            if nlri.is_empty() {
                 // the only attribute is MP_UNREACH_NLRI with no prefixes:
                 // case 2 end-of-rib
                 return true;
@@ -783,7 +785,44 @@ mod tests {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         })]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(msg.is_end_of_rib());
+
+        // EVPN withdrawal: the routes live in `evpn_nlris`, so an empty
+        // `prefixes` alone must not read as an end-of-rib marker.
+        let withdrawn = EvpnNlri {
+            path_id: None,
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpUnreachNlri(
+            Nlri::new_evpn_unreachable(vec![withdrawn.clone()]),
+        )]);
+        let msg = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: attrs,
+            announced_prefixes: vec![],
+        };
+        assert!(!msg.is_end_of_rib(), "an EVPN withdrawal is not an EOR");
+
+        // The same family with no routes is the actual EVPN end-of-rib marker.
+        let attrs = Attributes::from_iter(vec![AttributeValue::MpUnreachNlri(
+            Nlri::new_evpn_unreachable(vec![]),
+        )]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
             attributes: attrs,
@@ -820,6 +859,7 @@ mod tests {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -837,6 +877,7 @@ mod tests {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -854,6 +895,7 @@ mod tests {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         })]);
         let msg = BgpUpdateMessage {
             withdrawn_prefixes: vec![],
@@ -872,6 +914,7 @@ mod tests {
                 labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
+                evpn_nlris: None,
             }),
             AttributeValue::AtomicAggregate,
         ]);
@@ -967,7 +1010,7 @@ mod tests {
             0xFF, 0xFF, 0xFF, 0xFF, // marker
             0x00, 0x1A, // length = 26
             0x05, // type = ROUTE-REFRESH
-            0x00, 0x19, // AFI = 25 (L2VPN, not in the Afi enum)
+            0x00, 0x63, // AFI = 99, not in the Afi enum
             0x01, // subtype = BoRR
             0x41, // SAFI = 65 (VPLS, not in the Safi enum)
             0xDE, 0xAD, 0xBE, // trailing ORF bytes, kept raw
@@ -978,7 +1021,7 @@ mod tests {
             BgpMessage::RouteRefresh(refresh) => refresh,
             _ => panic!("expected RouteRefresh, got {msg:?}"),
         };
-        assert_eq!(refresh.afi, 25);
+        assert_eq!(refresh.afi, 99);
         assert_eq!(refresh.subtype, 1);
         assert_eq!(refresh.safi, 65);
         assert_eq!(refresh.data, vec![0xDE, 0xAD, 0xBE]);

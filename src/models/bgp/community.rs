@@ -56,6 +56,8 @@ pub enum ExtendedCommunityType {
     TransitiveIpv4Addr = 0x01,
     TransitiveFourOctetAs = 0x02,
     TransitiveOpaque = 0x03,
+    /// EVPN extended community - RFC 7432 §7
+    Evpn = 0x06,
 
     // non-transitive types
     NonTransitiveTwoOctetAs = 0x40,
@@ -65,6 +67,29 @@ pub enum ExtendedCommunityType {
     // the rest are either draft or experimental
     #[num_enum(catch_all)]
     Unknown(u8),
+}
+
+impl ExtendedCommunityType {
+    /// Map a wire type octet to a variant.
+    ///
+    /// [`From<u8>`] cannot be used in a constant context, and
+    /// [`ExtendedCommunity::community_type`] is `const`, so the mapping is
+    /// spelled out here. Keep it in step with the enum.
+    pub const fn from_byte(byte: u8) -> Self {
+        use ExtendedCommunityType::*;
+        match byte {
+            0x00 => TransitiveTwoOctetAs,
+            0x01 => TransitiveIpv4Addr,
+            0x02 => TransitiveFourOctetAs,
+            0x03 => TransitiveOpaque,
+            0x06 => Evpn,
+            0x40 => NonTransitiveTwoOctetAs,
+            0x41 => NonTransitiveIpv4Addr,
+            0x42 => NonTransitiveFourOctetAs,
+            0x43 => NonTransitiveOpaque,
+            other => Unknown(other),
+        }
+    }
 }
 
 /// Extended Communities.
@@ -116,6 +141,8 @@ pub enum ExtendedCommunity {
     FlowSpecTrafficMarking(FlowSpecTrafficMarking),
     /// BGP Link Bandwidth - RFC 10005
     LinkBandwidth(LinkBandwidth),
+    /// MAC Mobility - RFC 7432 §7.7
+    MacMobility(MacMobility),
     Raw([u8; 8]),
 }
 
@@ -142,7 +169,8 @@ impl ExtendedCommunity {
                     NonTransitiveTwoOctetAs
                 }
             }
-            ExtendedCommunity::Raw(buffer) => Unknown(buffer[0]),
+            ExtendedCommunity::MacMobility(_) => Evpn,
+            ExtendedCommunity::Raw(buffer) => ExtendedCommunityType::from_byte(buffer[0]),
         }
     }
 }
@@ -157,6 +185,33 @@ pub struct Ipv6AddrExtCommunity {
     pub global_admin: Ipv6Addr,
     // 2 octets
     pub local_admin: [u8; 2],
+}
+
+/// MAC Mobility Extended Community - RFC 7432 §7.7
+///
+/// Carried with a MAC/IP Advertisement (route type 2). The sequence number is
+/// how a fabric orders competing advertisements for the same MAC: the highest
+/// value wins, and a PE that sees a locally learned MAC it previously knew as
+/// remote re-advertises it with the sequence number incremented.
+///
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Type = 0x06  | Sub-Type = 0x00|     Flags   |   Reserved    |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                      Sequence Number                          |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS), ts(export))]
+pub struct MacMobility {
+    /// Sticky/static flag (bit 0 of the flags octet): the MAC is considered
+    /// immobile and does not take part in sequence-number comparison.
+    pub sticky: bool,
+    /// Sequence number, 32 bits big-endian.
+    pub sequence: u32,
 }
 
 /// Two-Octet AS Specific Extended Community
@@ -437,6 +492,16 @@ impl Display for ExtendedCommunity {
                     f,
                     "{}:{}:{}:{}",
                     ec_type, 0x04, link_bandwidth.global_admin, link_bandwidth.bandwidth
+                )
+            }
+            ExtendedCommunity::MacMobility(mobility) => {
+                write!(
+                    f,
+                    "{}:{}:{}:{}",
+                    ec_type,
+                    0x00,
+                    u8::from(mobility.sticky),
+                    mobility.sequence
                 )
             }
             ExtendedCommunity::Raw(ec) => {

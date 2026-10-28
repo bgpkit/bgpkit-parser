@@ -29,6 +29,9 @@ pub struct Nlri {
     /// Flow-Spec NLRI data - RFC 8955/8956
     #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
     pub flowspec_nlris: Option<Vec<crate::models::bgp::flowspec::FlowSpecNlri>>,
+    /// EVPN NLRI data - RFC 7432 (AFI 25, SAFI 70)
+    #[cfg_attr(feature = "ts-rs", ts(type = "Record<string, unknown>[] | null"))]
+    pub evpn_nlris: Option<Vec<crate::models::bgp::evpn::EvpnNlri>>,
 }
 
 impl Nlri {
@@ -52,9 +55,24 @@ impl Nlri {
         matches!(self.safi, Safi::FlowSpec | Safi::FlowSpecL3Vpn)
     }
 
+    /// Returns true if this NLRI refers to EVPN (AFI 25, SAFI 70).
+    pub const fn is_evpn(&self) -> bool {
+        matches!(self.afi, Afi::L2vpn) && matches!(self.safi, Safi::Evpn)
+    }
+
     /// Returns true if this NLRI refers to MPLS-labeled prefixes (SAFI 4).
     pub const fn is_mpls_labeled(&self) -> bool {
         matches!(self.safi, Safi::MplsLabel)
+    }
+
+    /// Returns true when this NLRI carries no reachability information in any
+    /// family, which is the shape of an MP_UNREACH end-of-RIB marker.
+    pub fn is_empty(&self) -> bool {
+        self.prefixes.is_empty()
+            && self.labeled_prefixes.as_ref().is_none_or(|p| p.is_empty())
+            && self.link_state_nlris.as_ref().is_none_or(|n| n.is_empty())
+            && self.flowspec_nlris.as_ref().is_none_or(|n| n.is_empty())
+            && self.evpn_nlris.as_ref().is_none_or(|n| n.is_empty())
     }
 
     /// Returns true if this NLRI refers to reachable prefixes
@@ -88,6 +106,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -105,6 +124,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -122,6 +142,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -137,6 +158,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: Some(nlri_list),
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 
@@ -156,6 +178,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
+            evpn_nlris: None,
         }
     }
 
@@ -173,6 +196,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: Some(flowspec_nlris),
+            evpn_nlris: None,
         }
     }
 
@@ -191,6 +215,39 @@ impl Nlri {
             labeled_prefixes: Some(labeled_prefixes),
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
+        }
+    }
+
+    /// Create a new EVPN reachable NLRI (AFI 25 / SAFI 70) - RFC 7432
+    pub fn new_evpn_reachable(
+        next_hop: Option<IpAddr>,
+        nlri_list: Vec<crate::models::bgp::evpn::EvpnNlri>,
+    ) -> Nlri {
+        let next_hop = next_hop.map(NextHopAddress::from);
+        Nlri {
+            afi: Afi::L2vpn,
+            safi: Safi::Evpn,
+            next_hop,
+            prefixes: Vec::new(),
+            labeled_prefixes: None,
+            link_state_nlris: None,
+            flowspec_nlris: None,
+            evpn_nlris: Some(nlri_list),
+        }
+    }
+
+    /// Create a new EVPN unreachable NLRI (AFI 25 / SAFI 70) - RFC 7432
+    pub fn new_evpn_unreachable(nlri_list: Vec<crate::models::bgp::evpn::EvpnNlri>) -> Nlri {
+        Nlri {
+            afi: Afi::L2vpn,
+            safi: Safi::Evpn,
+            next_hop: None,
+            prefixes: Vec::new(),
+            labeled_prefixes: None,
+            link_state_nlris: None,
+            flowspec_nlris: None,
+            evpn_nlris: Some(nlri_list),
         }
     }
 
@@ -205,6 +262,7 @@ impl Nlri {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }
     }
 }

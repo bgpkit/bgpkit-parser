@@ -323,9 +323,10 @@ pub fn parse_per_peer_header(data: &mut Bytes) -> Result<BmpPerPeerHeader, Parse
                     IpAddr::V4(data.read_ipv4_address()?)
                 }
                 Afi::Ipv6 => IpAddr::V6(data.read_ipv6_address()?),
-                Afi::LinkState => {
-                    // Link-State doesn't use traditional IP addresses for peer identification
-                    // Use IPv4 zero address as placeholder
+                // Peer addresses are IPv4 or IPv6 (see `PeerFlags::address_family`);
+                // anything else, Link-State and EVPN included, has no peer IP of
+                // its own here, so consume the field and use the zero placeholder.
+                Afi::LinkState | Afi::L2vpn => {
                     data.has_n_remaining(12)?;
                     data.advance(12);
                     IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))

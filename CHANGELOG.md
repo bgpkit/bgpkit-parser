@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking changes
+
+* **`Afi` and `Safi` gain the EVPN family and `ExtendedCommunity` gains `MacMobility`**: `Afi::L2vpn` (25) and `Safi::Evpn` (70) now parse instead of failing, and the MAC Mobility extended community (type `0x06`, sub-type `0x00`) parses into `ExtendedCommunity::MacMobility { sticky, sequence }` instead of a raw 8-byte blob. `ExtendedCommunity::Raw` now reports the registered type of an undecoded community (`Evpn` for the other EVPN sub-types) rather than `Unknown`. Downstream exhaustive matches on these enums need a new arm.
+
+### Added
+
+* **EVPN NLRI support** ([RFC 7432](https://datatracker.ietf.org/doc/html/rfc7432), [RFC 9136](https://datatracker.ietf.org/doc/html/rfc9136)): `MP_REACH_NLRI` and `MP_UNREACH_NLRI` for AFI 25 / SAFI 70 decode into `Nlri::evpn_nlris`, one `EvpnNlri` per route with its route distinguisher and a route-type-specific body: type 2 (MAC/IP advertisement: ESI, Ethernet tag, MAC, optional IP, label), type 3 (inclusive multicast), and type 5 (IP prefix). Route types 1 and 4 keep their octets in `EvpnRoutePayload::Raw`, and an EVPN end-of-RIB marker decodes to an empty list. Until now an EVPN BMP feed produced only `AttributeValue::Raw` and no fields at all. The encoder writes the same routes back, so `MrtRecord::try_from(&BmpMessage)` keeps converting EVPN route monitoring messages, and text output renders an `ANNOUNCED (EVPN)` / `WITHDRAWN (EVPN)` section instead of dropping them.
+* **MAC Mobility extended community encoder**: `ExtendedCommunity::MacMobility` re-encodes to the 8 wire octets, so a decoded EVPN route survives a decode/encode round trip of its communities.
+
 ## v0.23.0 - 2026-10-17
 
 ### Breaking changes

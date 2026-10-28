@@ -5,6 +5,7 @@ import type { FlowSpecTrafficRate } from "./FlowSpecTrafficRate";
 import type { FourOctetAsExtCommunity } from "./FourOctetAsExtCommunity";
 import type { Ipv4AddrExtCommunity } from "./Ipv4AddrExtCommunity";
 import type { LinkBandwidth } from "./LinkBandwidth";
+import type { MacMobility } from "./MacMobility";
 import type { OpaqueExtCommunity } from "./OpaqueExtCommunity";
 import type { TwoOctetAsExtCommunity } from "./TwoOctetAsExtCommunity";
 
@@ -37,4 +38,4 @@ import type { TwoOctetAsExtCommunity } from "./TwoOctetAsExtCommunity";
  *           otherwise.
  * ```
  */
-export type ExtendedCommunity = { "TransitiveTwoOctetAs": TwoOctetAsExtCommunity } | { "TransitiveIpv4Addr": Ipv4AddrExtCommunity } | { "TransitiveFourOctetAs": FourOctetAsExtCommunity } | { "TransitiveOpaque": OpaqueExtCommunity } | { "NonTransitiveTwoOctetAs": TwoOctetAsExtCommunity } | { "NonTransitiveIpv4Addr": Ipv4AddrExtCommunity } | { "NonTransitiveFourOctetAs": FourOctetAsExtCommunity } | { "NonTransitiveOpaque": OpaqueExtCommunity } | { "FlowSpecTrafficRate": FlowSpecTrafficRate } | { "FlowSpecTrafficAction": FlowSpecTrafficAction } | { "FlowSpecRedirect": TwoOctetAsExtCommunity } | { "FlowSpecTrafficMarking": FlowSpecTrafficMarking } | { "LinkBandwidth": LinkBandwidth } | { "Raw": [number, number, number, number, number, number, number, number] };
+export type ExtendedCommunity = { "TransitiveTwoOctetAs": TwoOctetAsExtCommunity } | { "TransitiveIpv4Addr": Ipv4AddrExtCommunity } | { "TransitiveFourOctetAs": FourOctetAsExtCommunity } | { "TransitiveOpaque": OpaqueExtCommunity } | { "NonTransitiveTwoOctetAs": TwoOctetAsExtCommunity } | { "NonTransitiveIpv4Addr": Ipv4AddrExtCommunity } | { "NonTransitiveFourOctetAs": FourOctetAsExtCommunity } | { "NonTransitiveOpaque": OpaqueExtCommunity } | { "FlowSpecTrafficRate": FlowSpecTrafficRate } | { "FlowSpecTrafficAction": FlowSpecTrafficAction } | { "FlowSpecRedirect": TwoOctetAsExtCommunity } | { "FlowSpecTrafficMarking": FlowSpecTrafficMarking } | { "LinkBandwidth": LinkBandwidth } | { "MacMobility": MacMobility } | { "Raw": [number, number, number, number, number, number, number, number] };

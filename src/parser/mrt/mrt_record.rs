@@ -438,8 +438,16 @@ impl TryFrom<&BmpMessage> for MrtRecord {
             false => Asn::new_16bit(0),
         };
 
+        // A BMP feed cannot say whether the session negotiated ADD-PATH, but the
+        // parsed update can: pick the subtype that matches its identifiers.
+        let msg_type = if crate::parser::mrt::messages::bgp4mp::carries_path_ids(bgp_message) {
+            Bgp4MpType::MessageAs4Addpath
+        } else {
+            Bgp4MpType::MessageAs4
+        };
+
         let bgp4mp_message = Bgp4MpMessage {
-            msg_type: Bgp4MpType::MessageAs4, // TODO: check Message or MessageAs4
+            msg_type,
             peer_asn: bmp_header.peer_asn,
             local_asn,
             interface_index: 0,
@@ -452,7 +460,7 @@ impl TryFrom<&BmpMessage> for MrtRecord {
 
         let (seconds, microseconds) = convert_timestamp(bmp_header.timestamp);
 
-        let subtype = Bgp4MpType::MessageAs4 as u16;
+        let subtype = msg_type as u16;
         let encoded_message = mrt_message
             .encode(subtype)
             .map_err(|e| format!("cannot encode MRT message: {e}"))?;
@@ -460,7 +468,7 @@ impl TryFrom<&BmpMessage> for MrtRecord {
             timestamp: seconds,
             microsecond_timestamp: Some(microseconds),
             entry_type: EntryType::BGP4MP_ET,
-            entry_subtype: Bgp4MpType::MessageAs4 as u16,
+            entry_subtype: msg_type as u16,
             length: encoded_message.len() as u32,
         };
 
@@ -645,6 +653,69 @@ mod tests {
 
         let mrt_record = MrtRecord::try_from(&bmp_message).unwrap();
         assert_eq!(mrt_record.common_header.entry_type, EntryType::BGP4MP_ET);
+    }
+
+    #[test]
+    fn test_try_from_bmp_message_selects_the_add_path_subtype() {
+        // A BMP session cannot say whether ADD-PATH was negotiated, but the
+        // parsed update can: the conversion has to pick the subtype that
+        // matches its route identifiers or the record decodes into garbage.
+        let route = EvpnNlri {
+            path_id: Some(7),
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        let update = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::from_iter(vec![AttributeValue::MpReachNlri(
+                Nlri::new_evpn_reachable(
+                    Some(IpAddr::from_str("10.10.0.11").unwrap()),
+                    vec![route],
+                ),
+            )]),
+            announced_prefixes: vec![],
+        };
+        let bmp_message = BmpMessage {
+            common_header: BmpCommonHeader {
+                version: 3,
+                msg_len: 0,
+                msg_type: BmpMsgType::RouteMonitoring,
+            },
+            per_peer_header: Some(BmpPerPeerHeader {
+                peer_asn: Asn::new_32bit(65000),
+                peer_ip: IpAddr::from_str("10.10.0.11").unwrap(),
+                peer_bgp_id: Ipv4Addr::from_str("10.10.0.11").unwrap(),
+                timestamp: 0.0,
+                peer_type: BmpPeerType::Global,
+                peer_flags: PerPeerFlags::PeerFlags(PeerFlags::empty()),
+                peer_distinguisher: 0,
+            }),
+            message_body: BmpMessageBody::RouteMonitoring(RouteMonitoring {
+                bgp_message: BgpMessage::Update(update),
+            }),
+        };
+
+        let record = MrtRecord::try_from(&bmp_message).unwrap();
+        assert_eq!(
+            record.common_header.entry_subtype,
+            Bgp4MpType::MessageAs4Addpath as u16
+        );
+        // And the result survives a round trip through its own encoding.
+        let encoded = record.encode().expect("the converted record encodes");
+        let mut cursor = std::io::Cursor::new(encoded);
+        let reparsed = crate::parse_mrt_record(&mut cursor).expect("the record parses back");
+        assert_eq!(
+            reparsed.common_header.entry_subtype,
+            Bgp4MpType::MessageAs4Addpath as u16
+        );
     }
 
     #[test]

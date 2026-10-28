@@ -5,4 +5,4 @@
  *
  * <https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml>
  */
-export type Afi = "Ipv4" | "Ipv6" | "LinkState";
+export type Afi = "Ipv4" | "Ipv6" | "L2vpn" | "LinkState";

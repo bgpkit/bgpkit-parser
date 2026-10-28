@@ -65,9 +65,9 @@ pub fn parse_peer_up_notification(
             ip.into()
         }
         Afi::Ipv6 => data.read_ipv6_address()?.into(),
-        Afi::LinkState => {
-            // Link-State doesn't use traditional IP addresses for local address
-            // Use IPv4 zero address as placeholder
+        // Only IPv4 and IPv6 sessions have an address of their own here; for
+        // Link-State and EVPN consume the field and use the zero placeholder.
+        Afi::LinkState | Afi::L2vpn => {
             data.has_n_remaining(12)?;
             data.advance(12);
             std::net::Ipv4Addr::new(0, 0, 0, 0).into()

@@ -392,8 +392,7 @@ mod tests {
 
     #[test]
     fn test_domain_path_with_evpn_mp_reach_is_not_flagged() {
-        // EVPN is AFI 25 with SAFI 70: the NLRI do not decode yet, but the header still
-        // identifies a family D-PATH is allowed on
+        // EVPN is AFI 25 with SAFI 70, a family D-PATH is allowed on.
         let mut wire = DPATH.to_vec();
         wire.extend(mp_reach(&[
             0x00, 0x19, // AFI: L2VPN (25)
@@ -417,8 +416,8 @@ mod tests {
 
     #[test]
     fn test_domain_path_with_mismatched_evpn_safi_is_flagged() {
-        // SAFI 70 is EVPN only together with AFI 25, so this combination stays unsupported
-        // even though the MP_REACH attribute itself does not decode
+        // SAFI 70 is EVPN only together with AFI 25, so this combination is not
+        // a supported family.
         let mut wire = DPATH.to_vec();
         wire.extend(mp_reach(&[
             0x00, 0x02, // AFI: IPv6

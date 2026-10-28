@@ -95,6 +95,7 @@ fn sample_attributes() -> Vec<Attribute> {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }),
         AttributeValue::MpUnreachNlri(Nlri {
             afi: Afi::Ipv6,
@@ -107,6 +108,7 @@ fn sample_attributes() -> Vec<Attribute> {
             labeled_prefixes: None,
             link_state_nlris: None,
             flowspec_nlris: None,
+            evpn_nlris: None,
         }),
         AttributeValue::Development(vec![1, 2, 3]),
         AttributeValue::Raw(AttrRaw {

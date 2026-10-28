@@ -85,6 +85,7 @@ fn test_mp_reach_empty_label_stack_propagates() {
         }]),
         link_state_nlris: None,
         flowspec_nlris: None,
+        evpn_nlris: None,
     };
     let attr = Attribute::from(AttributeValue::MpReachNlri(nlri));
     let err = attr.encode(AsnLength::Bits32).unwrap_err();

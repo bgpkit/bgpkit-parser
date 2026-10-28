@@ -117,6 +117,9 @@ pub(crate) fn validate_bgp4mp_afi(afi: &Afi) -> Result<(), ParserError> {
         Afi::LinkState => Err(ParserError::ParseError(
             "Link-State AFI is invalid in a BGP4MP envelope".to_string(),
         )),
+        Afi::L2vpn => Err(ParserError::ParseError(
+            "L2VPN AFI is invalid in a BGP4MP envelope".to_string(),
+        )),
     }
 }
 
@@ -214,8 +217,91 @@ pub fn parse_bgp4mp_message(
     })
 }
 
+/// Whether any route in this update carries an ADD-PATH identifier (RFC 7911).
+pub(crate) fn carries_path_ids(message: &BgpMessage) -> bool {
+    let BgpMessage::Update(update) = message else {
+        return false;
+    };
+
+    update
+        .announced_prefixes
+        .iter()
+        .chain(update.withdrawn_prefixes.iter())
+        .any(|prefix| prefix.path_id.is_some())
+        || update.attributes.iter().any(|attribute| {
+            let (AttributeValue::MpReachNlri(nlri) | AttributeValue::MpUnreachNlri(nlri)) =
+                attribute
+            else {
+                return false;
+            };
+            nlri.prefixes.iter().any(|prefix| prefix.path_id.is_some())
+                || nlri
+                    .labeled_prefixes
+                    .as_ref()
+                    .is_some_and(|prefixes| prefixes.iter().any(|p| p.path_id.is_some()))
+                || nlri
+                    .evpn_nlris
+                    .as_ref()
+                    .is_some_and(|routes| routes.iter().any(|r| r.path_id.is_some()))
+        })
+}
+
+/// Whether the update carries any route at all, in any family.
+fn carries_routes(update: &BgpUpdateMessage) -> bool {
+    !update.announced_prefixes.is_empty()
+        || !update.withdrawn_prefixes.is_empty()
+        || update.attributes.iter().any(|attribute| {
+            let (AttributeValue::MpReachNlri(nlri) | AttributeValue::MpUnreachNlri(nlri)) =
+                attribute
+            else {
+                return false;
+            };
+            !nlri.prefixes.is_empty()
+                || nlri
+                    .labeled_prefixes
+                    .as_ref()
+                    .is_some_and(|p| !p.is_empty())
+                || nlri.evpn_nlris.as_ref().is_some_and(|r| !r.is_empty())
+        })
+}
+
+/// ADD-PATH is a property of the record subtype (RFC 8050), not of the message,
+/// so the payload and the subtype have to agree: encoding route identifiers
+/// under `MessageAs4` publishes bytes a reader decodes as NLRI.
+fn check_add_path_consistency(
+    msg_type: Bgp4MpType,
+    message: &BgpMessage,
+) -> Result<(), EncodingError> {
+    let BgpMessage::Update(update) = message else {
+        return Ok(());
+    };
+    if !carries_routes(update) {
+        return Ok(());
+    }
+
+    let add_path_subtype = matches!(
+        msg_type,
+        Bgp4MpType::MessageAddpath
+            | Bgp4MpType::MessageAs4Addpath
+            | Bgp4MpType::MessageLocalAddpath
+            | Bgp4MpType::MessageLocalAs4Addpath
+    );
+
+    if add_path_subtype != carries_path_ids(message) {
+        return Err(EncodingError::unencodable(
+            "BGP4MP message",
+            format!(
+                "subtype {msg_type:?} does not match the ADD-PATH identifiers present in the update"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 impl Bgp4MpMessage {
     pub fn encode(&self, asn_len: AsnLength) -> Result<Bytes, EncodingError> {
+        check_add_path_consistency(self.msg_type, &self.bgp_message)?;
         let mut bytes = BytesMut::new();
         bytes.extend(encode_asn(&self.peer_asn, &asn_len));
         bytes.extend(encode_asn(&self.local_asn, &asn_len));
@@ -322,6 +408,99 @@ impl Bgp4MpStateChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
+
+    fn add_path_update() -> BgpUpdateMessage {
+        let route = EvpnNlri {
+            path_id: Some(7),
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::from_iter(vec![AttributeValue::MpReachNlri(
+                Nlri::new_evpn_reachable(
+                    Some(IpAddr::V4(Ipv4Addr::new(10, 10, 0, 11))),
+                    vec![route],
+                ),
+            )]),
+            announced_prefixes: vec![],
+        }
+    }
+
+    fn message(msg_type: Bgp4MpType, update: BgpUpdateMessage) -> Bgp4MpMessage {
+        Bgp4MpMessage {
+            msg_type,
+            peer_asn: Asn::new_32bit(65000),
+            local_asn: Asn::new_32bit(65000),
+            interface_index: 0,
+            peer_ip: IpAddr::V4(Ipv4Addr::new(10, 10, 0, 11)),
+            local_ip: IpAddr::V4(Ipv4Addr::new(10, 10, 0, 254)),
+            bgp_message: BgpMessage::Update(update),
+        }
+    }
+
+    #[test]
+    fn test_add_path_payload_requires_an_add_path_subtype() {
+        let update = add_path_update();
+        assert!(carries_path_ids(&BgpMessage::Update(update.clone())));
+
+        // MessageAs4 says nothing about ADD-PATH, so the identifiers would be
+        // read back as NLRI.
+        let err = message(Bgp4MpType::MessageAs4, update.clone())
+            .encode(AsnLength::Bits32)
+            .expect_err("a plain subtype cannot carry ADD-PATH identifiers");
+        assert!(format!("{err:?}").contains("ADD-PATH"), "{err:?}");
+
+        message(Bgp4MpType::MessageAs4Addpath, update)
+            .encode(AsnLength::Bits32)
+            .expect("the ADD-PATH subtype accepts them");
+    }
+
+    #[test]
+    fn test_plain_payload_requires_a_plain_subtype() {
+        let route = EvpnNlri {
+            path_id: None,
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: None,
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        let update = BgpUpdateMessage {
+            withdrawn_prefixes: vec![],
+            attributes: Attributes::from_iter(vec![AttributeValue::MpReachNlri(
+                Nlri::new_evpn_reachable(
+                    Some(IpAddr::V4(Ipv4Addr::new(10, 10, 0, 11))),
+                    vec![route],
+                ),
+            )]),
+            announced_prefixes: vec![],
+        };
+
+        let err = message(Bgp4MpType::MessageAs4Addpath, update.clone())
+            .encode(AsnLength::Bits32)
+            .expect_err("an ADD-PATH subtype needs identifiers");
+        assert!(format!("{err:?}").contains("ADD-PATH"), "{err:?}");
+
+        message(Bgp4MpType::MessageAs4, update)
+            .encode(AsnLength::Bits32)
+            .expect("a plain subtype accepts a plain payload");
+    }
+
     use std::net::IpAddr;
     use std::str::FromStr;
 

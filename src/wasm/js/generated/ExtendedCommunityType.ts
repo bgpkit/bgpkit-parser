@@ -3,4 +3,4 @@
 /**
  * Type definitions of extended communities
  */
-export type ExtendedCommunityType = "TransitiveTwoOctetAs" | "TransitiveIpv4Addr" | "TransitiveFourOctetAs" | "TransitiveOpaque" | "NonTransitiveTwoOctetAs" | "NonTransitiveIpv4Addr" | "NonTransitiveFourOctetAs" | "NonTransitiveOpaque" | { "Unknown": number };
+export type ExtendedCommunityType = "TransitiveTwoOctetAs" | "TransitiveIpv4Addr" | "TransitiveFourOctetAs" | "TransitiveOpaque" | "Evpn" | "NonTransitiveTwoOctetAs" | "NonTransitiveIpv4Addr" | "NonTransitiveFourOctetAs" | "NonTransitiveOpaque" | { "Unknown": number };

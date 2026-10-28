@@ -350,6 +350,43 @@ fn capability_summary(cap: &Capability) -> String {
     }
 }
 
+/// One EVPN route as a single line: route type, route distinguisher, and the
+/// fields an operator looks at first (MAC, prefix, originator, label).
+fn render_evpn_route(route: &EvpnNlri) -> String {
+    let route_distinguisher = route.route_distinguisher;
+    let path_id = route
+        .path_id
+        .map_or_else(String::new, |id| format!(" path-id {id}"));
+    match &route.payload {
+        EvpnRoutePayload::MacIpAdvertisement(body) => {
+            let mac = body
+                .mac
+                .iter()
+                .map(|octet| format!("{octet:02x}"))
+                .collect::<Vec<_>>()
+                .join(":");
+            let ip = body.ip.map_or_else(|| "-".to_string(), |ip| ip.to_string());
+            format!(
+                "[2] RD {route_distinguisher} MAC {mac} IP {ip} label {}{path_id}",
+                body.raw_label
+            )
+        }
+        EvpnRoutePayload::InclusiveMulticast(body) => format!(
+            "[3] RD {route_distinguisher} originator {}{path_id}",
+            body.originating_router_ip
+        ),
+        EvpnRoutePayload::IpPrefix(body) => format!(
+            "[5] RD {route_distinguisher} {} via {} label {}{path_id}",
+            body.ip_prefix, body.gateway_ip, body.raw_label
+        ),
+        EvpnRoutePayload::Raw(octets) => format!(
+            "[{}] RD {route_distinguisher} {} octets (not decoded){path_id}",
+            u8::from(route.route_type),
+            octets.len()
+        ),
+    }
+}
+
 fn render_update(out: &mut String, update: &BgpUpdateMessage) {
     // Withdrawn prefixes: the standard field plus any carried in
     // MP_UNREACH_NLRI, so the transcript never silently drops routes.
@@ -358,18 +395,22 @@ fn render_update(out: &mut String, update: &BgpUpdateMessage) {
     let mut withdrawn: Vec<&NetworkPrefix> = update.withdrawn_prefixes.iter().collect();
     let mut announced: Vec<&NetworkPrefix> = update.announced_prefixes.iter().collect();
     let mut labeled_announced: Vec<&LabeledNetworkPrefix> = Vec::new();
+    let mut evpn_withdrawn: Vec<&EvpnNlri> = Vec::new();
+    let mut evpn_announced: Vec<&EvpnNlri> = Vec::new();
     let mut link_state_count = 0usize;
     let mut flowspec_count = 0usize;
     for attr in update.attributes.iter() {
         match attr {
             AttributeValue::MpUnreachNlri(nlri) => {
                 withdrawn.extend(nlri.prefixes.iter());
+                evpn_withdrawn.extend(nlri.evpn_nlris.iter().flatten());
                 link_state_count += nlri.link_state_nlris.as_ref().map_or(0, Vec::len);
                 flowspec_count += nlri.flowspec_nlris.as_ref().map_or(0, Vec::len);
             }
             AttributeValue::MpReachNlri(nlri) => {
                 announced.extend(nlri.prefixes.iter());
                 labeled_announced.extend(nlri.labeled_prefixes.iter().flatten());
+                evpn_announced.extend(nlri.evpn_nlris.iter().flatten());
                 link_state_count += nlri.link_state_nlris.as_ref().map_or(0, Vec::len);
                 flowspec_count += nlri.flowspec_nlris.as_ref().map_or(0, Vec::len);
             }
@@ -407,6 +448,18 @@ fn render_update(out: &mut String, update: &BgpUpdateMessage) {
                 labeled.prefix,
                 labels.join(", ")
             ));
+        }
+    }
+    if !evpn_withdrawn.is_empty() {
+        out.push_str(&format!("{INDENT}WITHDRAWN (EVPN):\n"));
+        for route in evpn_withdrawn {
+            out.push_str(&format!("{INDENT}{INDENT}{}\n", render_evpn_route(route)));
+        }
+    }
+    if !evpn_announced.is_empty() {
+        out.push_str(&format!("{INDENT}ANNOUNCED (EVPN):\n"));
+        for route in evpn_announced {
+            out.push_str(&format!("{INDENT}{INDENT}{}\n", render_evpn_route(route)));
         }
     }
     if link_state_count > 0 {
@@ -634,6 +687,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn renders_evpn_routes() {
+        let announced = EvpnNlri {
+            path_id: None,
+            route_type: EvpnRouteType::MacIpAdvertisement,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 11, 0, 2]),
+            payload: EvpnRoutePayload::MacIpAdvertisement(MacIpAdvertisement {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
+                ip: Some(IpAddr::from_str("10.100.0.101").unwrap()),
+                raw_label: 100,
+                raw_label2: None,
+            }),
+        };
+        let withdrawn = EvpnNlri {
+            path_id: None,
+            route_type: EvpnRouteType::IpPrefix,
+            route_distinguisher: RouteDistinguisher([0, 1, 10, 10, 0, 12, 0, 2]),
+            payload: EvpnRoutePayload::IpPrefix(IpPrefixRoute {
+                esi: [0; 10],
+                ethernet_tag_id: 0,
+                ip_prefix: ipnet::IpNet::from_str("198.51.100.0/24").unwrap(),
+                gateway_ip: IpAddr::from_str("0.0.0.0").unwrap(),
+                raw_label: 100,
+            }),
+        };
+        let attributes = Attributes::from_iter(vec![
+            AttributeValue::MpReachNlri(Nlri::new_evpn_reachable(
+                Some(IpAddr::from_str("10.10.0.11").unwrap()),
+                vec![announced],
+            )),
+            AttributeValue::MpUnreachNlri(Nlri::new_evpn_unreachable(vec![withdrawn])),
+        ]);
+
+        let text = format_record(&update_record(attributes));
+
+        assert!(
+            text.contains("ANNOUNCED (EVPN):\n    [2] RD 00:01:0a:0a:00:0b:00:02 MAC aa:c1:ab:73:01:4d IP 10.100.0.101 label 100"),
+            "missing EVPN announcement line in:\n{text}"
+        );
+        assert!(
+            text.contains("WITHDRAWN (EVPN):\n    [5] RD 00:01:0a:0a:00:0c:00:02 198.51.100.0/24 via 0.0.0.0 label 100"),
+            "missing EVPN withdrawal line in:\n{text}"
+        );
+    }
+
     fn full_attributes() -> Attributes {
         let mut attributes = Attributes::default();
         attributes.add_attr(AttributeValue::Origin(Origin::IGP).into());
@@ -723,6 +823,7 @@ UPDATE:
                 labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
+                evpn_nlris: None,
             })
             .into(),
         );
@@ -775,6 +876,7 @@ UPDATE:
                 labeled_prefixes: None,
                 link_state_nlris: None,
                 flowspec_nlris: None,
+                evpn_nlris: None,
             })
             .into(),
         );
@@ -1010,6 +1112,7 @@ UPDATE:
                 labeled_prefixes: Some(vec![labeled]),
                 link_state_nlris: Some(vec![]),
                 flowspec_nlris: Some(vec![]),
+                evpn_nlris: None,
             })
             .into(),
         );

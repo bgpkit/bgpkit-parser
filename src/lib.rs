@@ -857,6 +857,13 @@ Additional known attribute type codes are raw-retained (`AttributeValue::Raw`) a
 
 ## Advanced Features
 
+**EVPN** (AFI 25 / SAFI 70):
+- [RFC 7432](https://datatracker.ietf.org/doc/html/rfc7432): BGP MPLS-Based Ethernet VPN - route types 2
+  and 3, and the MAC Mobility extended community
+- [RFC 9136](https://datatracker.ietf.org/doc/html/rfc9136): IP Prefix Advertisement in EVPN - route type 5
+
+Route types 1 and 4 are accepted and preserved as raw octets; they are not decoded yet.
+
 **FlowSpec**:
 - [RFC 8955](https://datatracker.ietf.org/doc/html/rfc8955): Dissemination of Flow Specification Rules
 - [RFC 8956](https://datatracker.ietf.org/doc/html/rfc8956): Dissemination of Flow Specification Rules for IPv6

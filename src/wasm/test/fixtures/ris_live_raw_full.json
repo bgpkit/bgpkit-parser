@@ -234,7 +234,8 @@
           ],
           "labeled_prefixes": null,
           "link_state_nlris": null,
-          "flowspec_nlris": null
+          "flowspec_nlris": null,
+          "evpn_nlris": null
         }
       },
       "flag": "OPTIONAL"

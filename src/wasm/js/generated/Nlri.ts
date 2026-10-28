@@ -25,4 +25,8 @@ link_state_nlris: Record<string, unknown>[] | null,
 /**
  * Flow-Spec NLRI data - RFC 8955/8956
  */
-flowspec_nlris: Record<string, unknown>[] | null, };
+flowspec_nlris: Record<string, unknown>[] | null, 
+/**
+ * EVPN NLRI data - RFC 7432 (AFI 25, SAFI 70)
+ */
+evpn_nlris: Record<string, unknown>[] | null, };
