@@ -805,8 +805,8 @@ mod tests {
                 ethernet_tag_id: 0,
                 mac: [0xaa, 0xc1, 0xab, 0x73, 0x01, 0x4d],
                 ip: None,
-                label: 100,
-                label2: None,
+                raw_label: 100,
+                raw_label2: None,
             }),
         };
         let attrs = Attributes::from_iter(vec![AttributeValue::MpUnreachNlri(

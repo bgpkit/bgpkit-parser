@@ -204,11 +204,11 @@ fn every_route_names_its_own_leaf_as_rd_and_next_hop() {
             };
 
             assert_eq!(body.esi, [0u8; 10], "single-homed host, ESI 0");
-            assert_eq!(body.label2, None, "MAC-only route, no IP-VRF label");
+            assert_eq!(body.raw_label2, None, "MAC-only route, no IP-VRF label");
             assert_eq!(route.path_id, None, "the lab session does not run ADD-PATH");
             assert_eq!(body.ethernet_tag_id, 0);
             assert_eq!(body.ip, None, "MAC-only advertisement, IP length 0");
-            assert_eq!(body.label, 100, "VNI 100");
+            assert_eq!(body.raw_label, 100, "VNI 100");
 
             // The route distinguisher is derived from the advertising VTEP:
             // type 1 (IP-based), the leaf's underlay address, local part 2.
@@ -258,5 +258,50 @@ fn withdrawals_and_end_of_rib_are_typed() {
     assert!(
         withdrawn_macs.contains(&MOVED_MAC),
         "the war ends with a withdrawal of the moved MAC"
+    );
+}
+
+#[test]
+fn a_route_monitoring_message_converts_to_an_mrt_record() {
+    // `MrtRecord::try_from(&BmpMessage)` re-encodes the parsed update, so a
+    // decoded EVPN route has to survive the encoder for BMP-to-MRT conversion
+    // to keep working.
+    let mut data = Bytes::from_static(CAPTURE);
+    let mut original: Vec<Vec<EvpnNlri>> = Vec::new();
+    let mut converted: Vec<Vec<EvpnNlri>> = Vec::new();
+
+    while !data.is_empty() {
+        let message = parse_bmp_msg(&mut data).expect("parses");
+        let BmpMessageBody::RouteMonitoring(monitoring) = &message.message_body else {
+            continue;
+        };
+        let BgpMessage::Update(update) = &monitoring.bgp_message else {
+            continue;
+        };
+        if !update
+            .attributes
+            .iter()
+            .any(|attribute| matches!(attribute, AttributeValue::MpReachNlri(_)))
+        {
+            continue;
+        }
+
+        original.push(evpn_nlri(update, true).clone());
+
+        let record = MrtRecord::try_from(&message)
+            .expect("an EVPN route monitoring message converts to an MRT record");
+        let MrtMessage::Bgp4Mp(Bgp4MpEnum::Message(bgp4mp)) = &record.message else {
+            panic!("expected a BGP4MP message record");
+        };
+        let BgpMessage::Update(converted_update) = &bgp4mp.bgp_message else {
+            panic!("expected an update");
+        };
+        converted.push(evpn_nlri(converted_update, true).clone());
+    }
+
+    assert_eq!(original.len(), 8, "every announcement converts");
+    assert_eq!(
+        original, converted,
+        "the re-encoded routes decode to the same values"
     );
 }

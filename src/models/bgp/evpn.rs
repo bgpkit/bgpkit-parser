@@ -84,11 +84,30 @@ pub struct MacIpAdvertisement {
     /// IP address when the advertisement carries one; `None` when the IP
     /// address length is zero, which is a MAC-only advertisement.
     pub ip: Option<IpAddr>,
-    /// Label1 (3 octets). For VXLAN this is the VNI - RFC 8365.
-    pub label: u32,
-    /// Optional Label2 (3 octets), present when the route is used for IP-VRF
-    /// forwarding - RFC 7432 §7.2.
-    pub label2: Option<u32>,
+    /// Label1 as it appears on the wire: a 24-bit field. For VXLAN this *is*
+    /// the VNI, with no MPLS label semantics - RFC 8365 §5; an MPLS-signalled
+    /// fabric puts a label plus its TC/S/TTL bits here instead, see
+    /// [`MacIpAdvertisement::mpls_label`].
+    pub raw_label: u32,
+    /// Optional Label2, same encoding as [`Self::raw_label`], present when the
+    /// route is used for IP-VRF forwarding - RFC 7432 §7.2.
+    pub raw_label2: Option<u32>,
+}
+
+impl MacIpAdvertisement {
+    /// Interpret Label1 as an MPLS label: the high 20 bits are the label value
+    /// and the low 4 bits carry TC, S and TTL - RFC 7432 §7.2.
+    ///
+    /// A VXLAN fabric does not use MPLS label semantics; there the whole
+    /// 24-bit field is the VNI and this value is meaningless.
+    pub fn mpls_label(&self) -> crate::models::MplsLabel {
+        crate::models::MplsLabel::decode([
+            (self.raw_label >> 16) as u8,
+            (self.raw_label >> 8) as u8,
+            self.raw_label as u8,
+        ])
+        .0
+    }
 }
 
 /// Inclusive Multicast Ethernet Tag route body - RFC 7432 §7.3.
@@ -119,6 +138,20 @@ pub struct IpPrefixRoute {
     pub ip_prefix: ipnet::IpNet,
     /// Gateway IP address (4 or 16 octets, matching the prefix family).
     pub gateway_ip: IpAddr,
-    /// MPLS label or VNI (3 octets).
-    pub label: u32,
+    /// The 24-bit label field: a VNI in a VXLAN fabric (RFC 8365 §5), or an
+    /// MPLS label with TC/S/TTL in the low bits, see
+    /// [`IpPrefixRoute::mpls_label`].
+    pub raw_label: u32,
+}
+
+impl IpPrefixRoute {
+    /// Interpret the label field as an MPLS label - RFC 7432 §7.2.
+    pub fn mpls_label(&self) -> crate::models::MplsLabel {
+        crate::models::MplsLabel::decode([
+            (self.raw_label >> 16) as u8,
+            (self.raw_label >> 8) as u8,
+            self.raw_label as u8,
+        ])
+        .0
+    }
 }

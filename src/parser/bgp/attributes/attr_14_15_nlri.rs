@@ -258,11 +258,11 @@ fn parse_mac_ip_advertisement(body: &mut Bytes) -> Result<MacIpAdvertisement, Pa
         }
     };
 
-    let label = read_three_octet_label(body)?;
+    let raw_label = read_three_octet_label(body)?;
 
     // Label2 is optional: it appears when the route is used for IP-VRF
     // forwarding - RFC 7432 §7.2.
-    let label2 = if body.remaining() == 3 {
+    let raw_label2 = if body.remaining() == 3 {
         Some(read_three_octet_label(body)?)
     } else {
         None
@@ -280,8 +280,8 @@ fn parse_mac_ip_advertisement(body: &mut Bytes) -> Result<MacIpAdvertisement, Pa
         ethernet_tag_id,
         mac,
         ip,
-        label,
-        label2,
+        raw_label,
+        raw_label2,
     })
 }
 
@@ -356,7 +356,7 @@ fn parse_ip_prefix_route(body: &mut Bytes) -> Result<IpPrefixRoute, ParserError>
     } else {
         IpAddr::V4(body.read_ipv4_address()?)
     };
-    let label = read_three_octet_label(body)?;
+    let raw_label = read_three_octet_label(body)?;
 
     if body.remaining() != 0 {
         return Err(ParserError::ParseError(format!(
@@ -370,8 +370,90 @@ fn parse_ip_prefix_route(body: &mut Bytes) -> Result<IpPrefixRoute, ParserError>
         ethernet_tag_id,
         ip_prefix,
         gateway_ip,
-        label,
+        raw_label,
     })
+}
+
+/// Encode the route-type-specific body of an EVPN NLRI - RFC 7432 §7.
+fn encode_evpn_payload(payload: &EvpnRoutePayload) -> Result<Vec<u8>, EncodingError> {
+    let mut out = Vec::new();
+    match payload {
+        EvpnRoutePayload::MacIpAdvertisement(body) => {
+            out.extend_from_slice(&body.esi);
+            out.extend_from_slice(&body.ethernet_tag_id.to_be_bytes());
+            out.push(48); // MAC address length
+            out.extend_from_slice(&body.mac);
+            match body.ip {
+                None => out.push(0),
+                Some(IpAddr::V4(ip)) => {
+                    out.push(32);
+                    out.extend_from_slice(&ip.octets());
+                }
+                Some(IpAddr::V6(ip)) => {
+                    out.push(128);
+                    out.extend_from_slice(&ip.octets());
+                }
+            }
+            push_three_octet(&mut out, body.raw_label, "EVPN Label1")?;
+            if let Some(label2) = body.raw_label2 {
+                push_three_octet(&mut out, label2, "EVPN Label2")?;
+            }
+        }
+        EvpnRoutePayload::InclusiveMulticast(body) => {
+            out.extend_from_slice(&body.ethernet_tag_id.to_be_bytes());
+            match body.originating_router_ip {
+                IpAddr::V4(ip) => {
+                    out.push(32);
+                    out.extend_from_slice(&ip.octets());
+                }
+                IpAddr::V6(ip) => {
+                    out.push(128);
+                    out.extend_from_slice(&ip.octets());
+                }
+            }
+        }
+        EvpnRoutePayload::IpPrefix(body) => {
+            out.extend_from_slice(&body.esi);
+            out.extend_from_slice(&body.ethernet_tag_id.to_be_bytes());
+            out.push(body.ip_prefix.prefix_len());
+            match (&body.ip_prefix, body.gateway_ip) {
+                (ipnet::IpNet::V4(net), IpAddr::V4(gateway)) => {
+                    out.extend_from_slice(&net.addr().octets());
+                    out.extend_from_slice(&gateway.octets());
+                }
+                (ipnet::IpNet::V6(net), IpAddr::V6(gateway)) => {
+                    out.extend_from_slice(&net.addr().octets());
+                    out.extend_from_slice(&gateway.octets());
+                }
+                _ => {
+                    return Err(EncodingError::unencodable(
+                        "EVPN IP prefix route",
+                        "the prefix and the gateway address must be of the same family",
+                    ))
+                }
+            }
+            push_three_octet(&mut out, body.raw_label, "EVPN MPLS label")?;
+        }
+        // Undecoded route types are written back exactly as they were read.
+        EvpnRoutePayload::Raw(bytes) => out.extend_from_slice(bytes),
+    }
+    Ok(out)
+}
+
+/// Append a value as the 3-octet label field EVPN uses.
+fn push_three_octet(
+    out: &mut Vec<u8>,
+    value: u32,
+    field: &'static str,
+) -> Result<(), EncodingError> {
+    if value > 0x00FF_FFFF {
+        return Err(EncodingError::unencodable(
+            field,
+            format!("{value} does not fit 3 octets"),
+        ));
+    }
+    out.extend_from_slice(&[(value >> 16) as u8, (value >> 8) as u8, value as u8]);
+    Ok(())
 }
 
 /// Read the 3-octet label field shared by EVPN route types 2 and 5.
@@ -394,15 +476,6 @@ pub fn encode_nlri(
     add_path: bool,
     bytes: &mut BytesMut,
 ) -> Result<(), EncodingError> {
-    // EVPN NLRI are decoded but not encoded yet; refuse rather than emit an
-    // UPDATE whose NLRI a receiver would read as an empty prefix list.
-    if nlri.afi == Afi::L2vpn {
-        return Err(EncodingError::unencodable(
-            "MP NLRI",
-            "EVPN NLRI encoding is not implemented",
-        ));
-    }
-
     // encode address family
     bytes.put_u16(nlri.afi as u16);
     bytes.put_u8(nlri.safi as u8);
@@ -417,8 +490,52 @@ pub fn encode_nlri(
         put_u8_len_slice(bytes, "MP NLRI next hop length", &next_hop_bytes)?;
     }
 
-    // Handle MPLS-labeled NLRI encoding (SAFI 4 per RFC 3107/8277)
-    if nlri.safi == Safi::MplsLabel {
+    // EVPN NLRI - RFC 7432 §7: a sequence of route type, length, route
+    // distinguisher and route-type-specific body.
+    if nlri.afi == Afi::L2vpn && nlri.safi == Safi::Evpn {
+        // RFC 4760 §3: the reserved octet precedes reachable NLRI.
+        if reachable {
+            bytes.put_u8(0);
+        }
+        for route in nlri.evpn_nlris.iter().flatten() {
+            match (add_path, route.path_id) {
+                (true, Some(path_id)) => bytes.put_u32(path_id),
+                (true, None) => {
+                    return Err(EncodingError::unencodable(
+                        "EVPN NLRI path id",
+                        "ADD-PATH is requested but the route carries no path identifier",
+                    ))
+                }
+                (false, Some(_)) => {
+                    return Err(EncodingError::unencodable(
+                        "EVPN NLRI path id",
+                        "the route carries a path identifier but ADD-PATH is not enabled",
+                    ))
+                }
+                (false, None) => {}
+            }
+            let body = encode_evpn_payload(&route.payload)?;
+            // The length covers the route distinguisher and the body, and
+            // excludes the ADD-PATH identifier.
+            let entry_len = 8 + body.len();
+            if entry_len > u8::MAX as usize {
+                return Err(EncodingError::unencodable(
+                    "EVPN NLRI length",
+                    format!("{entry_len} octets do not fit the 1-octet length field"),
+                ));
+            }
+            bytes.put_u8(u8::from(route.route_type));
+            bytes.put_u8(entry_len as u8);
+            bytes.put_slice(&route.route_distinguisher.0);
+            bytes.extend_from_slice(&body);
+        }
+    } else if nlri.afi == Afi::L2vpn {
+        // L2VPN is only defined with the EVPN subsequent address family here.
+        return Err(EncodingError::unencodable(
+            "MP NLRI",
+            "L2VPN NLRI require the EVPN subsequent address family",
+        ));
+    } else if nlri.safi == Safi::MplsLabel {
         // RFC 8277: Write reserved byte for reachable NLRI
         if reachable {
             bytes.put_u8(0);
@@ -844,7 +961,7 @@ mod evpn_tests {
         assert_eq!(body.ethernet_tag_id, 100);
         assert_eq!(body.mac, [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
         assert_eq!(body.ip, Some("192.0.2.10".parse().unwrap()));
-        assert_eq!(body.label, 100);
+        assert_eq!(body.raw_label, 100);
     }
 
     #[test]
@@ -923,7 +1040,7 @@ mod evpn_tests {
             ipnet::IpNet::from_str("198.51.100.0/24").unwrap()
         );
         assert_eq!(body.gateway_ip, "0.0.0.0".parse::<IpAddr>().unwrap());
-        assert_eq!(body.label, 100);
+        assert_eq!(body.raw_label, 100);
     }
 
     #[test]
@@ -984,8 +1101,8 @@ mod evpn_tests {
         let EvpnRoutePayload::MacIpAdvertisement(route) = &routes[0].payload else {
             panic!("expected a MAC/IP advertisement");
         };
-        assert_eq!(route.label, 100);
-        assert_eq!(route.label2, Some(42));
+        assert_eq!(route.raw_label, 100);
+        assert_eq!(route.raw_label2, Some(42));
     }
 
     #[test]
@@ -1070,19 +1187,70 @@ mod evpn_tests {
     }
 
     #[test]
-    fn encoding_evpn_nlri_is_refused() {
-        let res = parse_nlri(reach(mac_ip_nlri(0, &[])), &None, &None, &None, true, false);
-        let Ok(AttributeValue::MpReachNlri(parsed)) = res else {
+    fn evpn_nlri_round_trips_through_the_encoder() {
+        let wire = reach(mac_ip_nlri(32, &[192, 0, 2, 10]));
+        let Ok(AttributeValue::MpReachNlri(parsed)) =
+            parse_nlri(wire.clone(), &None, &None, &None, true, false)
+        else {
+            panic!("expected MP_REACH_NLRI");
+        };
+
+        let mut buf = BytesMut::new();
+        encode_nlri(&parsed, true, false, &mut buf).expect("EVPN encoding");
+        let encoded = buf.freeze();
+
+        assert_eq!(encoded, wire, "encoding reproduces the wire bytes");
+        let again = parse_nlri(encoded, &None, &None, &None, true, false).unwrap();
+        assert_eq!(again, AttributeValue::MpReachNlri(parsed));
+    }
+
+    #[test]
+    fn evpn_type_5_round_trips_through_the_encoder() {
+        let mut nlri = vec![0x05, 0x22];
+        nlri.extend_from_slice(&[0x00, 0x01, 10, 10, 0, 12, 0, 2]); // RD
+        nlri.extend_from_slice(&[0u8; 10]); // ESI
+        nlri.extend_from_slice(&[0, 0, 0, 0]); // ethernet tag
+        nlri.push(24); // prefix length
+        nlri.extend_from_slice(&[198, 51, 100, 0]);
+        nlri.extend_from_slice(&[0, 0, 0, 0]);
+        nlri.extend_from_slice(&[0, 0, 0x64]); // label 100
+        let wire = reach(nlri);
+
+        let Ok(AttributeValue::MpReachNlri(parsed)) =
+            parse_nlri(wire.clone(), &None, &None, &None, true, false)
+        else {
             panic!("expected MP_REACH_NLRI");
         };
         let mut buf = BytesMut::new();
-        let err = encode_nlri(&parsed, true, false, &mut buf)
-            .expect_err("EVPN encoding is not implemented");
-        assert!(
-            format!("{err:?}").contains("EVPN NLRI encoding is not implemented"),
-            "unexpected error: {err:?}"
+        encode_nlri(&parsed, true, false, &mut buf).unwrap();
+        assert_eq!(buf.freeze(), wire);
+    }
+
+    #[test]
+    fn evpn_add_path_round_trips_preserving_the_path_id() {
+        let mut nlri = vec![0x00, 0x00, 0x00, 0x07]; // path id
+        nlri.extend_from_slice(&mac_ip_nlri(0, &[]));
+        let wire = reach(nlri);
+
+        let Ok(AttributeValue::MpReachNlri(parsed)) =
+            parse_nlri(wire.clone(), &None, &None, &None, true, true)
+        else {
+            panic!("expected MP_REACH_NLRI");
+        };
+        assert_eq!(
+            parsed.evpn_nlris.as_ref().and_then(|r| r[0].path_id),
+            Some(7)
         );
-        assert!(buf.is_empty(), "nothing is written before the refusal");
+
+        let mut buf = BytesMut::new();
+        encode_nlri(&parsed, true, true, &mut buf).unwrap();
+        assert_eq!(buf.freeze(), wire);
+
+        // Without ADD-PATH the identifier would be read as a route type.
+        let mut buf = BytesMut::new();
+        let err = encode_nlri(&parsed, true, false, &mut buf)
+            .expect_err("ADD-PATH state and path identifiers must agree");
+        assert!(format!("{err:?}").contains("path identifier"));
     }
 
     #[test]
