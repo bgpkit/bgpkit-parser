@@ -42,9 +42,15 @@ const STREAM_ELEMS: usize = 1_000_000;
 fn preload<R: Read>(input_reader: R) -> Vec<u8> {
     let mut buffer = Vec::new();
     input_reader
-        .take(MAX_PRELOAD_BYTES as u64)
+        .take(MAX_PRELOAD_BYTES as u64 + 1)
         .read_to_end(&mut buffer)
         .expect("read corpus");
+    assert!(
+        buffer.len() <= MAX_PRELOAD_BYTES,
+        "corpus is larger than the {} MiB in-memory budget; a truncated buffer would cut a record \
+         in half and the iterator would hide it",
+        MAX_PRELOAD_BYTES / 1_048_576
+    );
     buffer
 }
 
@@ -112,6 +118,8 @@ fn bench_corpus(c: &mut Criterion, label: &str, data: &[u8]) {
                 });
         })
     });
+    // The update iterator yields one item per UPDATE record, not one per parsed record.
+    group.throughput(Throughput::Elements(counts.updates));
     group.bench_function("into_update_iter", |b| {
         b.iter(|| {
             let mut reader = black_box(data);
@@ -181,7 +189,11 @@ fn bench_corpus(c: &mut Criterion, label: &str, data: &[u8]) {
         })
         .sum();
     println!("elementor: {} records, {} elems", records.len(), elem_count);
-    group.throughput(Throughput::Elements(elem_count.max(1)));
+    assert!(
+        elem_count > 0,
+        "elementor produced no elems (missing peer index table?); refusing a made-up throughput"
+    );
+    group.throughput(Throughput::Elements(elem_count));
     group.bench_function("elementor record_to_elems_iter", |b| {
         b.iter_batched(
             || records.clone(),
@@ -222,10 +234,15 @@ fn bench_file(c: &mut Criterion, label: &str, path: &Path, elems: usize) {
         available
     );
 
+    assert!(
+        available > 0,
+        "no elems streamed from {}; check the corpus and BGPKIT_BENCH_STREAM_ELEMS",
+        path.display()
+    );
     let mut group = c.benchmark_group(label);
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(30));
-    group.throughput(Throughput::Elements(available.max(1)));
+    group.throughput(Throughput::Elements(available));
     group.bench_function("into_elem_iter (file)", |b| {
         b.iter(|| {
             let parser = BgpkitParser::new(black_box(path_str.as_str())).expect("open corpus");
