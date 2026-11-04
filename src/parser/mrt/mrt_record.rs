@@ -884,6 +884,94 @@ mod tests {
         assert!(matches!(error, ParserError::TruncatedMsg(_)));
     }
 
+    /// A reader that returns `data` up to `fail_after` bytes and then raises an I/O error.
+    struct FailingReader {
+        data: Vec<u8>,
+        pos: usize,
+        fail_after: usize,
+    }
+
+    impl Read for FailingReader {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            if self.pos >= self.fail_after {
+                return Err(std::io::Error::other("reader exploded"));
+            }
+            let n = (self.fail_after - self.pos)
+                .min(out.len())
+                .min(self.data.len() - self.pos);
+            out[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    /// Bytes read before a mid-header I/O error must stay in the reported error bytes, including
+    /// the microseconds of an ET header.
+    #[test]
+    fn chunk_errors_keep_partial_extended_timestamp_on_io_error() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1); // timestamp
+        wire.put_u16(EntryType::BGP4MP_ET as u16);
+        wire.put_u16(4); // subtype
+        wire.put_u32(9); // length, including the 4-byte microsecond field
+        wire.put_u32(230_000); // microseconds
+        let wire = wire.freeze();
+
+        for consumed in [13usize, 14, 15] {
+            let mut reader = FailingReader {
+                data: wire.to_vec(),
+                pos: 0,
+                fail_after: consumed,
+            };
+            let error = chunk_mrt_record(&mut reader).unwrap_err();
+            assert_eq!(
+                error.bytes.as_deref(),
+                Some(&wire[..consumed]),
+                "an I/O error after {consumed} header bytes must report those bytes"
+            );
+        }
+    }
+
+    /// A reader that yields `data` and then reports a clean end of stream.
+    struct ShortReader {
+        data: Vec<u8>,
+        pos: usize,
+    }
+
+    impl Read for ShortReader {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let n = out.len().min(self.data.len() - self.pos);
+            out[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    /// The same partial-header accounting applies when the stream simply ends.
+    #[test]
+    fn chunk_errors_keep_partial_extended_timestamp_on_clean_eof() {
+        let mut wire = BytesMut::new();
+        wire.put_u32(1);
+        wire.put_u16(EntryType::BGP4MP_ET as u16);
+        wire.put_u16(4);
+        wire.put_u32(9);
+        wire.put_u32(230_000);
+        let wire = wire.freeze();
+
+        for consumed in [13usize, 14, 15] {
+            let mut reader = ShortReader {
+                data: wire[..consumed].to_vec(),
+                pos: 0,
+            };
+            let error = chunk_mrt_record(&mut reader).unwrap_err();
+            assert_eq!(
+                error.bytes.as_deref(),
+                Some(&wire[..consumed]),
+                "an end of stream after {consumed} header bytes must report those bytes"
+            );
+        }
+    }
+
     #[test]
     fn chunk_errors_include_invalid_header_and_partial_body_bytes() {
         let invalid_header = Bytes::from_static(&[0, 0, 0, 1, 0xff, 0xff, 0, 0, 0, 0, 0, 0]);

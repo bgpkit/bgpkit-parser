@@ -173,7 +173,7 @@ pub(crate) fn frame_common_header_captured<'a, T: Read>(
     header: &'a mut HeaderBuf,
 ) -> std::io::Result<FramedHeaderRef<'a>> {
     header.len = 0;
-    read_up_to(input, &mut header.bytes[..12], &mut header.len)?;
+    read_header_upto(input, header, 12)?;
     if header.len < 12 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
@@ -217,10 +217,8 @@ pub(crate) fn frame_common_header_captured<'a, T: Read>(
                     body_length: length,
                 });
             }
-            let mut tail = 0;
-            read_up_to(input, &mut header.bytes[12..16], &mut tail)?;
-            header.len = 12 + tail;
-            if tail < 4 {
+            read_header_upto(input, header, 16)?;
+            if header.len < 16 {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "failed to fill whole buffer",
@@ -249,15 +247,19 @@ pub(crate) fn frame_common_header_captured<'a, T: Read>(
     })
 }
 
-/// Fill `out` from `input`, stopping early at end of stream.
+/// Read into `header.bytes` until it holds `end` bytes.
 ///
-/// Returns the number of bytes read, so a truncated header still leaves the bytes it did contain
-/// in the caller's buffer for error reporting.
-fn read_up_to(input: &mut impl Read, out: &mut [u8], filled: &mut usize) -> std::io::Result<()> {
-    while *filled < out.len() {
-        match input.read(&mut out[*filled..]) {
+/// `header.len` advances as bytes arrive, so a reader that fails part-way still leaves the bytes it
+/// did deliver in the buffer for error reporting.
+fn read_header_upto(
+    input: &mut impl Read,
+    header: &mut HeaderBuf,
+    end: usize,
+) -> std::io::Result<()> {
+    while header.len < end {
+        match input.read(&mut header.bytes[header.len..end]) {
             Ok(0) => break,
-            Ok(read) => *filled += read,
+            Ok(read) => header.len += read,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         }
