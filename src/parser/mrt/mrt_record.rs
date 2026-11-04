@@ -1,4 +1,4 @@
-use super::mrt_header::frame_common_header;
+use super::mrt_header::{frame_common_header_captured, HeaderBuf};
 use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
@@ -134,19 +134,41 @@ pub fn chunk_mrt_record(input: &mut impl Read) -> Result<RawMrtRecord, ParserErr
     })
 }
 
+/// One framed record whose header bytes stay in a fixed buffer.
+///
+/// The raw-record API hands back the header as `Bytes`; the default parse path only needs those
+/// bytes to report an error, so it keeps them here instead of allocating per record.
+pub(crate) struct ChunkedRecord {
+    pub(crate) common_header: CommonHeader,
+    header: HeaderBuf,
+    pub(crate) body: Vec<u8>,
+}
+
+impl ChunkedRecord {
+    fn header_bytes(&self) -> &[u8] {
+        self.header.as_slice()
+    }
+}
+
 /// Read one raw MRT record while retaining parsed header context on framing errors.
 pub(crate) fn chunk_mrt_record_with_context(
     input: &mut impl Read,
 ) -> Result<RawMrtRecord, RawMrtRecordError> {
-    // read the common header and capture raw bytes
-    let mut consumed_header = Vec::with_capacity(16);
-    let framed = match frame_common_header(&mut CapturingReader {
-        inner: input,
-        captured: &mut consumed_header,
-    }) {
+    let chunk = read_chunk(input)?;
+    Ok(RawMrtRecord {
+        common_header: chunk.common_header,
+        header_bytes: Bytes::copy_from_slice(chunk.header_bytes()),
+        message_bytes: Bytes::from(chunk.body),
+    })
+}
+
+/// Read one MRT record, keeping the header bytes in a stack buffer.
+fn read_chunk(input: &mut impl Read) -> Result<ChunkedRecord, RawMrtRecordError> {
+    let mut header = HeaderBuf::new();
+    let framed = match frame_common_header_captured(input, &mut header) {
         Ok(framed) => framed,
         Err(error) => {
-            if error.kind() == std::io::ErrorKind::UnexpectedEof && consumed_header.is_empty() {
+            if error.kind() == std::io::ErrorKind::UnexpectedEof && header.as_slice().is_empty() {
                 return Err(RawMrtRecordError {
                     error: ParserError::EofExpected,
                     common_header: None,
@@ -157,7 +179,7 @@ pub(crate) fn chunk_mrt_record_with_context(
             return Err(RawMrtRecordError {
                 error: error.into(),
                 common_header: None,
-                bytes: Some(consumed_header),
+                bytes: Some(header.as_slice().to_vec()),
                 record_consumed: false,
             });
         }
@@ -184,12 +206,7 @@ pub(crate) fn chunk_mrt_record_with_context(
         .take(framed.body_length as u64)
         .read_to_end(&mut buffer)
     {
-        return Err(record_io_error(
-            error,
-            parsed_header,
-            &header_bytes,
-            &buffer,
-        ));
+        return Err(record_io_error(error, parsed_header, header_bytes, &buffer));
     }
     if buffer.len() != framed.body_length as usize {
         return Err(record_io_error(
@@ -202,7 +219,7 @@ pub(crate) fn chunk_mrt_record_with_context(
                 ),
             ),
             parsed_header,
-            &header_bytes,
+            header_bytes,
             &buffer,
         ));
     }
@@ -214,7 +231,7 @@ pub(crate) fn chunk_mrt_record_with_context(
             return Err(RawMrtRecordError {
                 error,
                 common_header: None,
-                bytes: Some([&header_bytes[..], &buffer].concat()),
+                bytes: Some([header_bytes, &buffer].concat()),
                 record_consumed: true,
             })
         }
@@ -232,7 +249,7 @@ pub(crate) fn chunk_mrt_record_with_context(
             return Err(record_io_error(
                 error,
                 Some(common_header),
-                &header_bytes,
+                header_bytes,
                 &buffer,
             ));
         }
@@ -244,7 +261,7 @@ pub(crate) fn chunk_mrt_record_with_context(
                     "truncated historical TABLE_DUMP length correction",
                 ),
                 Some(common_header),
-                &header_bytes,
+                header_bytes,
                 &buffer,
             ));
         }
@@ -256,24 +273,11 @@ pub(crate) fn chunk_mrt_record_with_context(
         );
     }
 
-    Ok(RawMrtRecord {
+    Ok(ChunkedRecord {
         common_header,
-        header_bytes,
-        message_bytes: Bytes::from(buffer),
+        header,
+        body: buffer,
     })
-}
-
-struct CapturingReader<'a, R: ?Sized> {
-    inner: &'a mut R,
-    captured: &'a mut Vec<u8>,
-}
-
-impl<R: Read + ?Sized> Read for CapturingReader<'_, R> {
-    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        let read = self.inner.read(buffer)?;
-        self.captured.extend_from_slice(&buffer[..read]);
-        Ok(read)
-    }
 }
 
 fn record_io_error(
@@ -310,8 +314,51 @@ pub(crate) fn raw_record_uses_zebra_compat(raw_record: &RawMrtRecord) -> bool {
 pub(crate) fn parse_mrt_record_with_zebra_compat(
     input: &mut impl Read,
 ) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
-    let raw_record = chunk_mrt_record(input)?;
-    parse_chunked_record_with_zebra_compat(raw_record)
+    let chunk = read_chunk(input).map_err(|error| ParserErrorWithBytes {
+        error: error.error,
+        bytes: error.bytes,
+    })?;
+
+    let common_header = chunk.common_header;
+    // Only the error path needs the wire bytes; cloning the `Bytes` handle below is a refcount
+    // bump, while keeping the header on the stack avoids a per-record allocation on success.
+    let mut header = [0u8; 16];
+    let header_bytes = chunk.header_bytes();
+    let header_len = header_bytes.len();
+    header[..header_len].copy_from_slice(header_bytes);
+    let body = Bytes::from(chunk.body);
+    let wire_bytes = body.clone();
+
+    let used_zebra_compat = matches!(
+        common_header.entry_type,
+        EntryType::BGP4MP | EntryType::BGP4MP_ET
+    ) && crate::parser::mrt::messages::bgp4mp::uses_zebra_compat(
+        common_header.entry_subtype,
+        &body,
+    );
+
+    match parse_mrt_body(
+        common_header.entry_type as u16,
+        common_header.entry_subtype,
+        body,
+    ) {
+        Ok(message) => Ok((
+            MrtRecord {
+                common_header,
+                message,
+            },
+            used_zebra_compat,
+        )),
+        Err(error) => {
+            let mut bytes = Vec::with_capacity(header_len + wire_bytes.len());
+            bytes.extend_from_slice(&header[..header_len]);
+            bytes.extend_from_slice(&wire_bytes);
+            Err(ParserErrorWithBytes {
+                error,
+                bytes: Some(bytes),
+            })
+        }
+    }
 }
 
 /// Parse an already-chunked raw record instead of reading the next one.

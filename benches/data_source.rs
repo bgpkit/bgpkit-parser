@@ -35,6 +35,7 @@ pub fn test_data_file(name: &str) -> PathBuf {
 ///
 /// Used for opt-in benchmarks against real archives, which are neither checked in nor downloaded
 /// by the benchmark itself.
+#[allow(dead_code)] // only the internals benchmark reads opt-in corpora; bench_main includes this module too
 pub fn env_corpus(var: &str) -> Option<PathBuf> {
     let value = std::env::var_os(var)?;
     if value.is_empty() {

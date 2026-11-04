@@ -132,18 +132,57 @@ pub(crate) struct FramedHeader {
     pub(crate) header: Result<CommonHeader, ParserError>,
     /// The header bytes as read from the wire.
     pub(crate) raw_bytes: Bytes,
+}
+
+/// A common header read from the wire, with its raw bytes kept in a fixed buffer.
+///
+/// The default parse path only needs the raw header bytes when something goes wrong, so capturing
+/// them on the stack avoids one small heap allocation per record.
+pub(crate) struct HeaderBuf {
+    bytes: [u8; 16],
+    len: usize,
+}
+
+impl HeaderBuf {
+    pub(crate) fn new() -> Self {
+        HeaderBuf {
+            bytes: [0u8; 16],
+            len: 0,
+        }
+    }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+/// A common header as read from the wire, borrowing its raw bytes from the caller's buffer.
+pub(crate) struct FramedHeaderRef<'a> {
+    /// The parsed header, or why its contents were rejected.
+    pub(crate) header: Result<CommonHeader, ParserError>,
+    /// The header bytes as read from the wire.
+    pub(crate) raw_bytes: &'a [u8],
     /// Length of the record body following `raw_bytes`.
     pub(crate) body_length: u32,
 }
 
-/// Read a common header, keeping its body length even when the contents are
+/// Read a common header into `header`, keeping its body length even when the contents are
 /// rejected. Only I/O failures are returned as `Err`.
-pub(crate) fn frame_common_header<T: Read>(input: &mut T) -> std::io::Result<FramedHeader> {
-    let mut base_bytes = [0u8; 12];
-    input.read_exact(&mut base_bytes)?;
+pub(crate) fn frame_common_header_captured<'a, T: Read>(
+    input: &mut T,
+    header: &'a mut HeaderBuf,
+) -> std::io::Result<FramedHeaderRef<'a>> {
+    header.len = 0;
+    read_up_to(input, &mut header.bytes[..12], &mut header.len)?;
+    if header.len < 12 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "failed to fill whole buffer",
+        ));
+    }
 
     // Single bounds check via zerocopy instead of four sequential cursor reads.
-    let raw = RawMrtCommonHeader::ref_from_bytes(&base_bytes)
+    let raw = RawMrtCommonHeader::ref_from_bytes(&header.bytes[..12])
         .expect("base_bytes is exactly 12 bytes with no alignment requirement");
 
     let timestamp = raw.timestamp.get();
@@ -153,41 +192,51 @@ pub(crate) fn frame_common_header<T: Read>(input: &mut T) -> std::io::Result<Fra
 
     // The on-wire length counts every byte after the 12-byte base header, so it
     // frames the record even when the header contents are invalid.
-    let rejected = |error: ParserError| FramedHeader {
-        header: Err(error),
-        raw_bytes: Bytes::copy_from_slice(&base_bytes),
-        body_length: length,
-    };
-
     let entry_type = match EntryType::try_from(raw.entry_type.get()) {
         Ok(entry_type) => entry_type,
-        Err(error) => return Ok(rejected(error.into())),
+        Err(error) => {
+            return Ok(FramedHeaderRef {
+                header: Err(error.into()),
+                raw_bytes: header.as_slice(),
+                body_length: length,
+            })
+        }
     };
 
-    let (microsecond_timestamp, raw_bytes, body_length) = match &entry_type {
+    let (microsecond_timestamp, body_length) = match &entry_type {
         EntryType::BGP4MP_ET => {
             // For ET records, the on-wire length includes the extra 4-byte microsecond timestamp
             // that lives in the header. Internally we store `length` as the message length only,
             // so subtract 4 after validating to avoid underflow.
             if length < 4 {
-                return Ok(rejected(ParserError::ParseError(
-                    "invalid MRT header length for ET record: length < 4".into(),
-                )));
+                return Ok(FramedHeaderRef {
+                    header: Err(ParserError::ParseError(
+                        "invalid MRT header length for ET record: length < 4".into(),
+                    )),
+                    raw_bytes: header.as_slice(),
+                    body_length: length,
+                });
             }
-            let mut combined = [0u8; 16];
-            combined[..12].copy_from_slice(&base_bytes);
-            input.read_exact(&mut combined[12..])?;
-            let microseconds = u32::from_be_bytes(combined[12..16].try_into().unwrap());
+            let mut tail = 0;
+            read_up_to(input, &mut header.bytes[12..16], &mut tail)?;
+            header.len = 12 + tail;
+            if tail < 4 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                ));
+            }
             (
-                Some(microseconds),
-                Bytes::copy_from_slice(&combined),
+                Some(u32::from_be_bytes(
+                    header.bytes[12..16].try_into().expect("four bytes"),
+                )),
                 length - 4,
             )
         }
-        _ => (None, Bytes::copy_from_slice(&base_bytes), length),
+        _ => (None, length),
     };
 
-    Ok(FramedHeader {
+    Ok(FramedHeaderRef {
         header: Ok(CommonHeader {
             timestamp,
             microsecond_timestamp,
@@ -195,8 +244,35 @@ pub(crate) fn frame_common_header<T: Read>(input: &mut T) -> std::io::Result<Fra
             entry_subtype,
             length: body_length,
         }),
-        raw_bytes,
+        raw_bytes: header.as_slice(),
         body_length,
+    })
+}
+
+/// Fill `out` from `input`, stopping early at end of stream.
+///
+/// Returns the number of bytes read, so a truncated header still leaves the bytes it did contain
+/// in the caller's buffer for error reporting.
+fn read_up_to(input: &mut impl Read, out: &mut [u8], filled: &mut usize) -> std::io::Result<()> {
+    while *filled < out.len() {
+        match input.read(&mut out[*filled..]) {
+            Ok(0) => break,
+            Ok(read) => *filled += read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// Read a common header, keeping its body length even when the contents are
+/// rejected. Only I/O failures are returned as `Err`.
+pub(crate) fn frame_common_header<T: Read>(input: &mut T) -> std::io::Result<FramedHeader> {
+    let mut header = HeaderBuf::new();
+    let framed = frame_common_header_captured(input, &mut header)?;
+    Ok(FramedHeader {
+        header: framed.header,
+        raw_bytes: Bytes::copy_from_slice(framed.raw_bytes),
     })
 }
 

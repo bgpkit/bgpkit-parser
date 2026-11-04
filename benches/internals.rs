@@ -57,8 +57,12 @@ struct Counts {
 }
 
 fn count_items(data: &[u8]) -> Counts {
-    let records = BgpkitParser::from_reader(black_box(data)).into_record_iter().count() as u64;
-    let elems = BgpkitParser::from_reader(black_box(data)).into_elem_iter().count() as u64;
+    let records = BgpkitParser::from_reader(black_box(data))
+        .into_record_iter()
+        .count() as u64;
+    let elems = BgpkitParser::from_reader(black_box(data))
+        .into_elem_iter()
+        .count() as u64;
     let updates = BgpkitParser::from_reader(black_box(data))
         .into_update_iter()
         .count() as u64;
@@ -212,7 +216,9 @@ fn bench_file(c: &mut Criterion, label: &str, path: &Path, elems: usize) {
     println!(
         "{label}: {} ({:.1} MiB on disk), streaming {} elems per iteration",
         path.display(),
-        std::fs::metadata(path).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0),
+        std::fs::metadata(path)
+            .map(|m| m.len() as f64 / 1_048_576.0)
+            .unwrap_or(0.0),
         available
     );
 
