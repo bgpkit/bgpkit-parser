@@ -445,10 +445,12 @@ pub fn parse_attributes(
     safi: Option<Safi>,
     prefixes: Option<&[NetworkPrefix]>,
 ) -> Result<Attributes, ParserError> {
-    // Estimate capacity from data size: each attribute is at least 3 bytes
-    // (flag + type + length). Cap at 256 to avoid over-allocation for corrupted data.
-    let estimated_attrs = (data.remaining() / 3).min(256);
-    let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs.max(8));
+    // Estimate capacity from data size. A wire attribute is at least four bytes (flags, type,
+    // length, one value byte) and real attributes average far larger, so `len / 3` claimed one
+    // slot per three bytes and over-allocated by an order of magnitude on short records. Cap the
+    // result so a large or corrupt section cannot reserve hundreds of slots.
+    let estimated_attrs = (data.remaining() / 16).clamp(4, 32);
+    let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs);
     let mut validation = AttributeValidationState::new();
     // A handle on the whole attribute section, so an attribute that fails to parse can be kept
     // raw by re-slicing it, without cloning every attribute's bytes up front.

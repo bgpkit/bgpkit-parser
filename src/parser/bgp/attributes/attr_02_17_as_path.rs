@@ -13,7 +13,9 @@ const AS_PATH_CONFED_SET: u8 = 4;
 
 pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, ParserError> {
     let mut output = AsPath {
-        segments: SmallVec::with_capacity(5),
+        // Segments are inline up to the SmallVec capacity; pre-sizing to the common
+        // multi-segment case would allocate for the single-segment paths that dominate.
+        segments: SmallVec::new(),
     };
     while input.remaining() > 0 {
         let segment = parse_as_path_segment(&mut input, asn_len)?;
@@ -21,6 +23,32 @@ pub fn parse_as_path(mut input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Pa
     }
 
     Ok(output)
+}
+
+/// Read `count` ASNs straight into inline storage.
+///
+/// [`ReadUtils::read_asns`] returns a `Vec`, which would allocate and then be copied into the
+/// segment's `SmallVec`; decoding directly into the `SmallVec` keeps short segments allocation
+/// free.
+fn read_asns_into(
+    input: &mut Bytes,
+    asn_len: &AsnLength,
+    count: usize,
+) -> Result<SmallVec<[Asn; 6]>, ParserError> {
+    let mut asns: SmallVec<[Asn; 6]> = SmallVec::with_capacity(count);
+    match asn_len {
+        AsnLength::Bits16 => {
+            for _ in 0..count {
+                asns.push(Asn::new_16bit(input.read_u16()?));
+            }
+        }
+        AsnLength::Bits32 => {
+            for _ in 0..count {
+                asns.push(Asn::new_32bit(input.read_u32()?));
+            }
+        }
+    }
+    Ok(asns)
 }
 
 fn parse_as_path_segment(
@@ -43,7 +71,7 @@ fn parse_as_path_segment(
         )));
     }
 
-    let path: SmallVec<[Asn; 6]> = input.read_asns(asn_len, count)?.into();
+    let path: SmallVec<[Asn; 6]> = read_asns_into(input, asn_len, count)?;
     match segment_type {
         AS_PATH_AS_SET => Ok(AsPathSegment::AsSet(path)),
         AS_PATH_AS_SEQUENCE => Ok(AsPathSegment::AsSequence(path)),
