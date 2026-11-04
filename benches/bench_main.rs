@@ -98,10 +98,21 @@ fn benchmark(c: &mut Criterion) {
         } = program;
 
         let path_result = match executable {
-            // Ensure we always use the latest build of the project. Optimized binary targets are
-            // compiled before benchmarks to allow for integration tests so it will always be found
-            // at this path.
-            "bgpkit-parser" => Ok(data_source::locate_target_dir().join("release/bgpkit-parser")),
+            // The CLI binary carries `required-features = ["cli"]`, which `cargo bench` does not
+            // enable, so it only exists after an explicit release build.
+            "bgpkit-parser" => {
+                let path = data_source::locate_target_dir().join("release/bgpkit-parser");
+                if path.is_file() {
+                    Ok(path)
+                } else {
+                    println!(
+                        "skipping bgpkit-parser: {} is missing; run \
+                         `cargo build --release --features cli` first",
+                        path.display()
+                    );
+                    continue;
+                }
+            }
             // For remaining programs use which crate to locate their executables on the system
             name => which::which(name),
         };
