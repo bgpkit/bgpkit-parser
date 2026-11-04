@@ -5,7 +5,8 @@ the commands at the end.
 
 ## Summary
 
-Parse-only instruction counts per full parse of the fixture (decompression excluded):
+Parse-only instruction counts per full parse of the fixture (decompression excluded), measured at
+`5a5afbc`; the two post-review changes recorded below add a further 0.5% end to end:
 
 | workload | before | after | delta |
 | --- | --- | --- | --- |
@@ -106,6 +107,45 @@ time, and the real-archive path streams a bounded number of elems
    against the same binary and stayed within 0.5% of each other on the fixtures; the end-to-end
    numbers quoted below were all measured with eight.
 
+## Post-review changes
+
+Two of the review's low-risk items were implemented and kept, one was deferred.
+
+| commit | change | measured effect |
+| --- | --- | --- |
+| `d4dd8af` | no attribute slots for an empty section | real RIS updates elems -0.25%, records -0.36%; RIB fixture +0.07% |
+| `42d0020` | ORIGIN, NEXT_HOP, MED, LOCAL_PREF parse from the section slice | RIB records -1.1%, RIB elems -0.9%, updates records -0.7%, real updates records -0.2% |
+
+Criterion medians for the tree after both changes, against the `pre-opt` baseline recorded before any
+of this work (same host, same harness, host load unchanged in kind):
+
+| benchmark | before | after | delta |
+| --- | --- | --- | --- |
+| updates/into_raw_record_iter | 513.48 us | 445.18 us | -13.3% |
+| updates/into_record_iter | 3.9379 ms | 3.2590 ms | -17.2% |
+| updates/into_elem_iter | 5.6239 ms | 5.1181 ms | -9.0% |
+| updates/into_route_iter | 2.5819 ms | 2.4096 ms | -6.7% |
+| rib/into_raw_record_iter | 25.330 ms | 23.972 ms | -5.4% |
+| rib/into_record_iter | 296.01 ms | 240.11 ms | -18.9% |
+| rib/into_elem_iter | 385.12 ms | 341.07 ms | -11.4% |
+| rib/into_route_iter | 174.23 ms | 159.36 ms | -8.5% |
+
+End to end, rrc00 bview 2026-10-14, four alternating runs, `-e` counting path:
+
+```
+before (5a5afbc)   392.451 G / 44.11 s   392.376 G / 43.45 s
+after  (42d0020)   390.588 G / 42.90 s   390.569 G / 41.45 s
+```
+
+-0.47% instructions, wall within host noise. The fixture-level CLI deltas above are diluted by
+decompression, which the parse-only rows exclude.
+
+Deferred: dense peer lookup for RIB elems. `Elementor.peer_table` is a public field of a public
+struct, so an id-indexed cache cannot live there without a breaking change, and a cache held beside
+it has a staleness window when a caller replaces the table mid-iteration. The hash lookup of a
+32-bit key against roughly a thousand peers is a small share of the remaining cost; it belongs with
+the structural rework, not before it.
+
 ## Comparison with CAIDA BGPStream
 
 Same files, both sides reading the compressed input, walking every record and (in `elems` mode)
@@ -149,13 +189,12 @@ kept the slice treatment and gained.
 
 Ranked by expected payoff per unit of risk, from an external review of this branch:
 
-1. Skip the attribute-vector allocation for empty attribute sections (103 of the 4,139 UPDATEs in
-   the updates fixture have none). Small, low risk.
-2. Borrowed-slice parsing for ORIGIN, NEXT_HOP, MED and LOCAL_PREF, one inlined arm each. Small;
-   the thirteen-way dispatcher result does not rule out per-arm slice parsing.
-3. Dense peer lookup for RIB elems: `next_rib_elem` hashes a dense `u16` id per elem. A private
-   cache inside the iterator has to be rebuilt when the peer table changes, and the public
-   `Elementor` path must keep honoring caller mutation.
+1. ~~Skip the attribute-vector allocation for empty attribute sections.~~ Done: `d4dd8af`.
+2. ~~Borrowed-slice parsing for ORIGIN, NEXT_HOP, MED and LOCAL_PREF, one inlined arm each.~~ Done:
+   `42d0020`; the per-arm result confirms the thirteen-way dispatcher was the problem, not slices.
+3. Dense peer lookup for RIB elems: `next_rib_elem` hashes a dense `u16` id per elem. Deferred:
+   `Elementor.peer_table` is a public field, so the cache either breaks the public struct or goes
+   stale when a caller swaps the table mid-iteration.
 4. Structural: emit elems directly from the record body instead of building a full
    `Vec<RibEntry>`/`Attributes` set and then dismantling it. This is the direction that could close
    part of the BGPStream gap; it needs an internal streaming builder plus a batch/view API for
