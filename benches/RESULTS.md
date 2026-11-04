@@ -115,7 +115,7 @@ every element, then discarding the result. The BGPStream probe and container are
 | --- | --- | --- | --- | --- |
 | rrc00 bview, 420 MB gz | records | 85.8 G / 5.28 s | 288.6 G / 29.8 s | 3.4x instr, 5.7x wall |
 | rrc00 bview | elems (55.8 M) | 116.2 G / 9.06 s | 392.4 G / 42.6 s | 3.4x instr, 4.7x wall |
-| RIS updates, 4.5 MB gz | records | 0.76 G | 4.17 G / 0.40 s | 5.5x instr |
+| RIS updates, 4.5 MB gz | records | 0.76 G / 0.09 s | 4.17 G / 0.40 s | 5.5x instr, 4.3x wall |
 | RIS updates | elems (417788) | 0.93 G / 0.11 s | 4.89 G / 0.47 s | 5.3x instr, 4.2x wall |
 | RIB fixture | records | 3.64 G / 0.61 s | 5.53 G / 0.71 s | 1.5x instr, 1.2x wall |
 | RIB fixture | elems | 3.90 G / 0.58 s | 6.49 G / 0.85 s | 1.7x instr, 1.5x wall |
