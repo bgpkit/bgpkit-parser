@@ -21,6 +21,7 @@ benchmarks
 docs/
 *.md
 !DIAGNOSTIC_ITERATOR_DESIGN.md
+!benches/*.md
 !examples/**/*.md
 !src/wasm/**/*.md
 !tests/fixtures/ripe/**/*.md

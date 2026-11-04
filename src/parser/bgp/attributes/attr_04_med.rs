@@ -3,7 +3,7 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::Bytes;
 
-pub fn parse_med(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub(crate) fn parse_med(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::MultiExitDiscriminator(input.read_u32()?))
 }
 
@@ -18,7 +18,7 @@ mod tests {
     #[test]
     fn test_parse_med() {
         assert_eq!(
-            parse_med(Bytes::from(vec![0, 0, 0, 123])).unwrap(),
+            parse_med(&[0, 0, 0, 123]).unwrap(),
             AttributeValue::MultiExitDiscriminator(123)
         );
     }

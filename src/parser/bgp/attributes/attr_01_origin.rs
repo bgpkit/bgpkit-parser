@@ -4,7 +4,7 @@ use crate::ParserError;
 use bytes::Bytes;
 use std::convert::TryFrom;
 
-pub fn parse_origin(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub(crate) fn parse_origin(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     match Origin::try_from(input.read_u8()?) {
         Ok(v) => Ok(AttributeValue::Origin(v)),
         Err(_) => Err(ParserError::ParseError(
@@ -44,18 +44,18 @@ mod tests {
     fn test_parse_origin() {
         assert_eq!(
             AttributeValue::Origin(Origin::IGP),
-            parse_origin(Bytes::from_static(&[0u8])).unwrap()
+            parse_origin(&[0u8]).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::EGP),
-            parse_origin(Bytes::from_static(&[1u8])).unwrap()
+            parse_origin(&[1u8]).unwrap()
         );
         assert_eq!(
             AttributeValue::Origin(Origin::INCOMPLETE),
-            parse_origin(Bytes::from_static(&[2u8])).unwrap()
+            parse_origin(&[2u8]).unwrap()
         );
         assert!(matches!(
-            parse_origin(Bytes::from_static(&[3u8])).unwrap_err(),
+            parse_origin(&[3u8]).unwrap_err(),
             ParserError::ParseError(_)
         ));
     }
@@ -65,19 +65,19 @@ mod tests {
         let value = Origin::IGP;
         assert_eq!(
             AttributeValue::Origin(value),
-            parse_origin(encode_origin(&value)).unwrap()
+            parse_origin(&encode_origin(&value)).unwrap()
         );
 
         let value = Origin::EGP;
         assert_eq!(
             AttributeValue::Origin(value),
-            parse_origin(encode_origin(&value)).unwrap()
+            parse_origin(&encode_origin(&value)).unwrap()
         );
 
         let value = Origin::INCOMPLETE;
         assert_eq!(
             AttributeValue::Origin(value),
-            parse_origin(encode_origin(&value)).unwrap()
+            parse_origin(&encode_origin(&value)).unwrap()
         );
     }
 }
