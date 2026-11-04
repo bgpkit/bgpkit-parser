@@ -500,8 +500,9 @@ pub fn parse_attributes(
         let value_start = section.len() - data.len();
         let raw_code = u8::from(attr_type);
 
-        // AS_PATH appears in essentially every announcement and decodes from a borrowed slice, so
-        // it skips the per-attribute `Bytes` split that the remaining attributes still take.
+        // The attributes that make up nearly every record decode from a borrowed slice, which
+        // skips the per-attribute `Bytes` split and its refcount traffic. Each stays in its own
+        // branch: routing them through one dispatcher costs more than the split it saves.
         let attr = if matches!(attr_type, AttrType::AS_PATH | AttrType::AS4_PATH) {
             let value = &section[value_start..value_start + attr_length];
             let path_len = match attr_type {
@@ -514,6 +515,22 @@ pub fn parse_attributes(
                 AttrType::AS4_PATH => AttributeValue::As4Path(path),
                 _ => AttributeValue::AsPath(path),
             })
+        } else if attr_type == AttrType::ORIGIN {
+            let value = &section[value_start..value_start + attr_length];
+            data.advance(attr_length);
+            parse_origin(value)
+        } else if attr_type == AttrType::NEXT_HOP {
+            let value = &section[value_start..value_start + attr_length];
+            data.advance(attr_length);
+            parse_next_hop(value, &afi)
+        } else if attr_type == AttrType::MULTI_EXIT_DISCRIMINATOR {
+            let value = &section[value_start..value_start + attr_length];
+            data.advance(attr_length);
+            parse_med(value)
+        } else if attr_type == AttrType::LOCAL_PREFERENCE {
+            let value = &section[value_start..value_start + attr_length];
+            data.advance(attr_length);
+            parse_local_pref(value)
         } else {
             let mut attr_data = data.split_to(attr_length);
 
@@ -554,10 +571,7 @@ pub fn parse_attributes(
             }
 
             match attr_type {
-                AttrType::ORIGIN => parse_origin(attr_data),
-                AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
-                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
-                AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
+                // ORIGIN, NEXT_HOP, MED and LOCAL_PREF are handled above from a borrowed slice.
                 AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
                 AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
                     .map(|(asn, id)| AttributeValue::Aggregator { asn, id }),
