@@ -18,6 +18,9 @@ use std::net::IpAddr;
 
 impl ReadUtils for Bytes {}
 
+// Attribute values that decode straight from a borrowed record body.
+impl ReadUtils for &[u8] {}
+
 // Allow reading IPs from Reads
 pub trait ReadUtils: Buf {
     #[inline]

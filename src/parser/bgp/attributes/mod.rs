@@ -31,7 +31,9 @@ use crate::encoder::sink::{with_u16_len, with_u8_len};
 use crate::error::{BgpValidationWarning, EncodingError, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
 use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
-pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::parse_as_path;
+pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::{
+    parse_as_path, parse_as_path_slice,
+};
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
 use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
 use crate::parser::bgp::attributes::attr_05_local_pref::{encode_local_pref, parse_local_pref};
@@ -491,95 +493,108 @@ pub fn parse_attributes(
         // we know data has enough bytes to read, so we can split the bytes into a new Bytes object
         data.has_n_remaining(attr_length)?;
         let value_start = section.len() - data.len();
-        let mut attr_data = data.split_to(attr_length);
         let raw_code = u8::from(attr_type);
 
-        if let Some(t) = get_deprecated_attr_type(raw_code) {
-            debug!("deprecated attribute type: {} - {}", raw_code, t);
-            attributes.push(Attribute {
-                value: AttributeValue::Deprecated(AttrRaw {
-                    code: raw_code,
-                    bytes: attr_data,
-                }),
-                flag,
-            });
-            continue;
-        }
+        // AS_PATH appears in essentially every announcement and decodes from a borrowed slice, so
+        // it skips the per-attribute `Bytes` split that the remaining attributes still take.
+        let attr = if matches!(attr_type, AttrType::AS_PATH | AttrType::AS4_PATH) {
+            let value = &section[value_start..value_start + attr_length];
+            let path_len = match attr_type {
+                AttrType::AS4_PATH => &AsnLength::Bits32,
+                _ => asn_len,
+            };
+            let parsed = parse_as_path_slice(value, path_len);
+            data.advance(attr_length);
+            parsed.map(|path| match attr_type {
+                AttrType::AS4_PATH => AttributeValue::As4Path(path),
+                _ => AttributeValue::AsPath(path),
+            })
+        } else {
+            let mut attr_data = data.split_to(attr_length);
 
-        if matches!(attr_type, AttrType::Unknown(_)) {
-            debug!("unknown attribute type: {}", raw_code);
-            attributes.push(Attribute {
-                value: AttributeValue::Unknown(AttrRaw {
-                    code: raw_code,
-                    bytes: attr_data,
-                }),
-                flag,
-            });
-            continue;
-        }
+            if let Some(t) = get_deprecated_attr_type(raw_code) {
+                debug!("deprecated attribute type: {} - {}", raw_code, t);
+                attributes.push(Attribute {
+                    value: AttributeValue::Deprecated(AttrRaw {
+                        code: raw_code,
+                        bytes: attr_data,
+                    }),
+                    flag,
+                });
+                continue;
+            }
 
-        if is_raw_retained_attr(attr_type) {
-            debug!("raw-retained attribute type: {}", raw_code);
-            attributes.push(Attribute {
-                value: AttributeValue::Raw(AttrRaw {
-                    code: raw_code,
-                    bytes: attr_data,
-                }),
-                flag,
-            });
-            continue;
-        }
+            if matches!(attr_type, AttrType::Unknown(_)) {
+                debug!("unknown attribute type: {}", raw_code);
+                attributes.push(Attribute {
+                    value: AttributeValue::Unknown(AttrRaw {
+                        code: raw_code,
+                        bytes: attr_data,
+                    }),
+                    flag,
+                });
+                continue;
+            }
 
-        let attr = match attr_type {
-            AttrType::ORIGIN => parse_origin(attr_data),
-            AttrType::AS_PATH => parse_as_path(attr_data, asn_len).map(AttributeValue::AsPath),
-            AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
-            AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
-            AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
-            AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
-            AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
-                .map(|(asn, id)| AttributeValue::Aggregator { asn, id }),
-            AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
-            AttrType::CLUSTER_LIST => parse_clusters(attr_data),
-            AttrType::MP_REACHABLE_NLRI => {
-                parse_nlri(attr_data, &afi, &safi, &prefixes, true, add_path)
+            if is_raw_retained_attr(attr_type) {
+                debug!("raw-retained attribute type: {}", raw_code);
+                attributes.push(Attribute {
+                    value: AttributeValue::Raw(AttrRaw {
+                        code: raw_code,
+                        bytes: attr_data,
+                    }),
+                    flag,
+                });
+                continue;
             }
-            AttrType::MP_UNREACHABLE_NLRI => {
-                parse_nlri(attr_data, &afi, &safi, &prefixes, false, add_path)
-            }
-            AttrType::AS4_PATH => {
-                parse_as_path(attr_data, &AsnLength::Bits32).map(AttributeValue::As4Path)
-            }
-            AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32)
-                .map(|(asn, id)| AttributeValue::As4Aggregator { asn, id }),
 
-            // communities
-            AttrType::COMMUNITIES => parse_regular_communities(attr_data),
-            AttrType::LARGE_COMMUNITIES => parse_large_communities(attr_data),
-            AttrType::EXTENDED_COMMUNITIES => parse_extended_community(attr_data),
-            AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
-                parse_ipv6_extended_community(attr_data)
-            }
-            AttrType::DEVELOPMENT => {
-                let mut value = vec![];
-                for _i in 0..attr_length {
-                    value.push(attr_data.read_u8()?);
+            match attr_type {
+                AttrType::ORIGIN => parse_origin(attr_data),
+                AttrType::NEXT_HOP => parse_next_hop(attr_data, &afi),
+                AttrType::MULTI_EXIT_DISCRIMINATOR => parse_med(attr_data),
+                AttrType::LOCAL_PREFERENCE => parse_local_pref(attr_data),
+                AttrType::ATOMIC_AGGREGATE => Ok(AttributeValue::AtomicAggregate),
+                AttrType::AGGREGATOR => parse_aggregator(attr_data, asn_len)
+                    .map(|(asn, id)| AttributeValue::Aggregator { asn, id }),
+                AttrType::ORIGINATOR_ID => parse_originator_id(attr_data),
+                AttrType::CLUSTER_LIST => parse_clusters(attr_data),
+                AttrType::MP_REACHABLE_NLRI => {
+                    parse_nlri(attr_data, &afi, &safi, &prefixes, true, add_path)
                 }
-                Ok(AttributeValue::Development(value))
+                AttrType::MP_UNREACHABLE_NLRI => {
+                    parse_nlri(attr_data, &afi, &safi, &prefixes, false, add_path)
+                }
+                AttrType::AS4_AGGREGATOR => parse_aggregator(attr_data, &AsnLength::Bits32)
+                    .map(|(asn, id)| AttributeValue::As4Aggregator { asn, id }),
+
+                // communities
+                AttrType::COMMUNITIES => parse_regular_communities(attr_data),
+                AttrType::LARGE_COMMUNITIES => parse_large_communities(attr_data),
+                AttrType::EXTENDED_COMMUNITIES => parse_extended_community(attr_data),
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                    parse_ipv6_extended_community(attr_data)
+                }
+                AttrType::DEVELOPMENT => {
+                    let mut value = vec![];
+                    for _i in 0..attr_length {
+                        value.push(attr_data.read_u8()?);
+                    }
+                    Ok(AttributeValue::Development(value))
+                }
+                AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
+                AttrType::AIGP => parse_aigp(attr_data),
+                AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
+                AttrType::TRAFFIC_ENGINEERING => parse_traffic_engineering(attr_data),
+                AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
+                AttrType::BGP_DOMAIN_PATH => parse_domain_path(attr_data),
+                AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
+                AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
+                AttrType::BGP_PREFIX_SID => parse_bgp_prefix_sid(attr_data),
+                AttrType::BIER => parse_bier(attr_data),
+                _ => Err(ParserError::Unsupported(format!(
+                    "unsupported attribute type: {attr_type:?}"
+                ))),
             }
-            AttrType::ONLY_TO_CUSTOMER => parse_only_to_customer(attr_data),
-            AttrType::AIGP => parse_aigp(attr_data),
-            AttrType::TUNNEL_ENCAPSULATION => parse_tunnel_encapsulation_attribute(attr_data),
-            AttrType::TRAFFIC_ENGINEERING => parse_traffic_engineering(attr_data),
-            AttrType::BGP_LS_ATTRIBUTE => parse_link_state_attribute(attr_data),
-            AttrType::BGP_DOMAIN_PATH => parse_domain_path(attr_data),
-            AttrType::SFP_ATTRIBUTE => parse_sfp(attr_data),
-            AttrType::BFD_DISCRIMINATOR => parse_bfd_discriminator(attr_data),
-            AttrType::BGP_PREFIX_SID => parse_bgp_prefix_sid(attr_data),
-            AttrType::BIER => parse_bier(attr_data),
-            _ => Err(ParserError::Unsupported(format!(
-                "unsupported attribute type: {attr_type:?}"
-            ))),
         };
 
         match attr {
