@@ -118,7 +118,7 @@ every element, then discarding the result. The BGPStream probe and container are
 | RIS updates, 4.5 MB gz | records | 0.76 G | 4.17 G / 0.40 s | 5.5x instr |
 | RIS updates | elems (417788) | 0.93 G / 0.11 s | 4.89 G / 0.47 s | 5.3x instr, 4.2x wall |
 | RIB fixture | records | 3.64 G / 0.61 s | 5.53 G / 0.71 s | 1.5x instr, 1.2x wall |
-| RIB fixture | elems | 3.90 G / 0.58 s | 12.76 G / 3.67 s | 3.3x instr, 6.3x wall |
+| RIB fixture | elems | 3.90 G / 0.58 s | 6.49 G / 0.85 s | 1.7x instr, 1.5x wall |
 
 BGPStream is faster, and the gap is structural rather than a few instructions per record:
 
@@ -131,7 +131,10 @@ BGPStream is faster, and the gap is structural rather than a few instructions pe
 Caveats: element counts on a RIB match exactly (55,786,629), record counts differ by one (BGPStream
 does not surface the PEER_INDEX_TABLE record), the updates fixture yields 8,183 elems for BGPStream
 against 8,160 for bgpkit, and the probe never reads a field, so any lazily parsed BGPStream field is
-not charged to it.
+not charged to it. All bgpkit numbers here are the counting paths (`-r` / `-e`): the default output
+path also formats and writes every element, which roughly doubles the cost (12.35 G instead of
+6.49 G on the RIB fixture, 12.36 G instead of 4.89 G on the updates file) and is a different
+workload.
 
 ## What did not work
 
