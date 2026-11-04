@@ -99,11 +99,12 @@ time, and the real-archive path streams a bounded number of elems
    read from the error report. Covered now at 13, 14 and 15 header bytes, for an I/O error and for
    a clean EOF.
 
-5. `perf(parser): reserve six attribute slots instead of four` (8ab6c2e)
+5. `perf(parser): reserve eight attribute slots instead of four` (a8a5924)
 
-   A floor of four made 71% of RIB entries grow their attribute vector (measured over all 470,642
-   fixture entries); six covers about 96%. It removes one realloc-and-copy from most small records
-   and is neutral at full-feed scale.
+   A floor of four made 71.4% of RIB entries grow their attribute vector (measured over all 470,642
+   fixture entries); six leaves 3.7% short, so eight was chosen. Four, six and eight were measured
+   against the same binary and stayed within 0.5% of each other on the fixtures; the end-to-end
+   numbers quoted below were all measured with eight.
 
 ## Comparison with CAIDA BGPStream
 
