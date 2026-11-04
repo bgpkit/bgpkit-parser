@@ -451,8 +451,12 @@ pub fn parse_attributes(
     // length) and real attributes average far larger, so `len / 3` claimed one slot per three
     // bytes and over-allocated by an order of magnitude on short records. The floor keeps the
     // common five-attribute record from growing; the cap keeps a corrupt section from reserving
-    // hundreds of slots.
-    let estimated_attrs = (data.remaining() / 16).clamp(8, 32);
+    // hundreds of slots. An empty section (withdrawals, End-of-RIB) reserves nothing.
+    let estimated_attrs = if data.is_empty() {
+        0
+    } else {
+        (data.remaining() / 16).clamp(8, 32)
+    };
     let mut attributes: Vec<Attribute> = Vec::with_capacity(estimated_attrs);
     let mut validation = AttributeValidationState::new();
     // A handle on the whole attribute section, so an attribute that fails to parse can be kept
