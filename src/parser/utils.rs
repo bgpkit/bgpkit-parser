@@ -12,6 +12,7 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::ParserError::TruncatedMsg;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use log::debug;
 use regex::Regex;
 use std::net::IpAddr;
 
@@ -305,7 +306,7 @@ fn parse_nlri_list_exact(
 /// A block starting with `0x00` is ambiguous. RFC 4271 §4.3 reads it as a prefix length of 0, the
 /// default route. Some producers instead wrap an ADD-PATH message in a non-ADD-PATH record, where
 /// the same byte is the first octet of a path identifier (issue #31), and guessing matters there:
-/// without it two thirds of the elements of such a file disappear.
+/// without it almost three quarters of the elements of such a file disappear.
 ///
 /// The guess is made over the whole block, and a block the ADD-PATH reading cannot consume falls
 /// back to the flag. Retrying at the failure position, the previous behaviour, kept the prefixes
@@ -315,6 +316,7 @@ fn parse_nlri_list_exact(
 /// A plain block whose bytes also happen to frame exactly as ADD-PATH is still read as ADD-PATH:
 /// the bytes carry nothing that decides between them, and on the data that motivated the guess the
 /// ADD-PATH reading is the correct one (see `test_parse_nlri_list_ambiguous_block_prefers_add_path`).
+/// A short block of that shape, `0.0.0.0/0` followed by one prefix, is still misread.
 pub fn parse_nlri_list(
     input: Bytes,
     add_path: bool,
@@ -324,9 +326,11 @@ pub fn parse_nlri_list(
         return parse_nlri_list_exact(input, true, afi);
     }
     if input.first() == Some(&0) {
+        debug!("NLRI: block starts with 0x00, trying the ADD-PATH framing");
         if let Ok(prefixes) = parse_nlri_list_exact(input.clone(), true, afi) {
             return Ok(prefixes);
         }
+        debug!("NLRI: the ADD-PATH framing does not consume the block, decoding with the flag");
     }
     parse_nlri_list_exact(input, false, afi)
 }
@@ -1121,6 +1125,18 @@ mod tests {
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0].prefix.to_string(), "138.97.22.0/24");
         assert_eq!(plain[0].path_id, Some(482));
+    }
+
+    #[test]
+    fn test_parse_nlri_list_short_ambiguous_block_is_read_as_add_path() {
+        // 0.0.0.0/0 followed by one /24 also frames exactly as a single ADD-PATH entry, so the
+        // guess stays on and the /24 is lost. The bytes decide nothing here; the limitation is
+        // deliberate and recorded in the CHANGELOG.
+        let block = &[0x00, 0x18, 0x01, 0x00, 0x00];
+        let prefixes = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
+        assert_eq!(prefixes.len(), 1);
+        assert_eq!(prefixes[0].prefix.to_string(), "0.0.0.0/0");
+        assert!(prefixes[0].path_id.is_some());
     }
 
     #[test]
