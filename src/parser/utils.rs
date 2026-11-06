@@ -1121,6 +1121,10 @@ mod tests {
         // with them yields the real route. Both readings consume the block, and this is the reading
         // the data requires, so the guess stays on ties.
         let block = &[0x00, 0x00, 0x01, 0xe2, 0x18, 0x8a, 0x61, 0x16];
+        // Both readings have to consume the block for this to be the tie the wrapper resolves.
+        let framed = parse_nlri_list_exact(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
+        assert_eq!(framed.len(), 4);
+        assert!(framed.iter().all(|p| p.path_id.is_none()));
         let plain = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0].prefix.to_string(), "138.97.22.0/24");
