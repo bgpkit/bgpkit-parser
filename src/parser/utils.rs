@@ -12,7 +12,6 @@ use crate::error::ParserError;
 use crate::models::*;
 use crate::ParserError::TruncatedMsg;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::debug;
 use regex::Regex;
 use std::net::IpAddr;
 
@@ -283,46 +282,53 @@ fn try_parse_prefix(
     Ok((NetworkPrefix::new(prefix, path_id), pos))
 }
 
-pub fn parse_nlri_list(
+/// Decode an NLRI block with a known ADD-PATH setting.
+///
+/// Every entry is decoded the same way, and an error discards the whole block: partially decoded
+/// prefixes must not escape to the caller.
+fn parse_nlri_list_exact(
     mut input: Bytes,
     add_path: bool,
     afi: &Afi,
 ) -> Result<Vec<NetworkPrefix>, ParserError> {
     let mut prefixes = Vec::new();
-    let mut is_add_path = add_path;
-    let mut use_heuristic = false;
-
     while input.remaining() > 0 {
-        let data = input.as_ref();
-
-        // Check heuristic: if not add_path and first byte is 0, likely Add-Path format
-        if !is_add_path && !data.is_empty() && data[0] == 0 {
-            debug!("NLRI: first byte is 0, treating as Add-Path format");
-            is_add_path = true;
-            use_heuristic = true;
-        }
-
-        // Try parsing
-        let (prefix, consumed) = match try_parse_prefix(data, afi, is_add_path) {
-            Ok(result) => result,
-            Err(_) if use_heuristic => {
-                // Heuristic was wrong, retry with original add_path setting
-                debug!(
-                    "NLRI: Add-Path heuristic failed, retrying with add_path={}",
-                    add_path
-                );
-                is_add_path = add_path;
-                use_heuristic = false;
-                try_parse_prefix(data, afi, add_path)?
-            }
-            Err(e) => return Err(e),
-        };
-
+        let (prefix, consumed) = try_parse_prefix(input.as_ref(), afi, add_path)?;
         input.advance(consumed);
         prefixes.push(prefix);
     }
-
     Ok(prefixes)
+}
+
+/// Parse an NLRI block, resolving a leading `0x00` byte that the ADD-PATH flag cannot explain.
+///
+/// A block starting with `0x00` is ambiguous. RFC 4271 §4.3 reads it as a prefix length of 0, the
+/// default route. Some producers instead wrap an ADD-PATH message in a non-ADD-PATH record, where
+/// the same byte is the first octet of a path identifier (issue #31), and guessing matters there:
+/// without it two thirds of the elements of such a file disappear.
+///
+/// The guess is made over the whole block, and a block the ADD-PATH reading cannot consume falls
+/// back to the flag. Retrying at the failure position, the previous behaviour, kept the prefixes
+/// already decoded out of path-id bytes and dropped the real ones, which emptied or corrupted
+/// withdrawal lists that begin with the default route (#360).
+///
+/// A plain block whose bytes also happen to frame exactly as ADD-PATH is still read as ADD-PATH:
+/// the bytes carry nothing that decides between them, and on the data that motivated the guess the
+/// ADD-PATH reading is the correct one (see `test_parse_nlri_list_ambiguous_block_prefers_add_path`).
+pub fn parse_nlri_list(
+    input: Bytes,
+    add_path: bool,
+    afi: &Afi,
+) -> Result<Vec<NetworkPrefix>, ParserError> {
+    if add_path {
+        return parse_nlri_list_exact(input, true, afi);
+    }
+    if input.first() == Some(&0) {
+        if let Ok(prefixes) = parse_nlri_list_exact(input.clone(), true, afi) {
+            return Ok(prefixes);
+        }
+    }
+    parse_nlri_list_exact(input, false, afi)
 }
 
 pub fn encode_asn(asn: &Asn, asn_len: &AsnLength) -> Bytes {
@@ -1018,24 +1024,117 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_nlri_list_heuristic_then_retry() {
-        // This test verifies the retry mechanism works correctly
-        // We create data that looks like Add-Path (starts with 0) but isn't valid as such
-        // This should trigger heuristic, fail, then retry successfully
+    fn test_parse_nlri_list_single_default_route() {
+        // A lone 0x00 is a prefix length of 0 with no address octets: the default route.
+        let prefixes = parse_nlri_list(Bytes::from_static(&[0x00]), false, &Afi::Ipv4).unwrap();
+        assert_eq!(prefixes.len(), 1);
+        assert_eq!(prefixes[0].prefix.to_string(), "0.0.0.0/0");
+        assert_eq!(prefixes[0].path_id, None);
+    }
 
-        // Data: first byte is 0 (triggers heuristic for add-path)
-        // But if parsed as add-path: path_id=0, len=0, which is valid /0
-        // Actually this is a valid Add-Path format for default route
-        let input = Bytes::from(vec![
-            0x00, // Could be interpreted as:
-                 // - Non-Add-Path: prefix_len = 0 (/0 default)
-                 // - Add-Path: path_id[0] of 4-byte path_id
-        ]);
+    // A block whose first prefix is the default route is not an ADD-PATH block. Reading the 0x00 as
+    // a path identifier shifted the decode and dropped or invented withdrawals (#360).
+    fn assert_ipv4_block(block: &'static [u8], expected: &[&str]) {
+        let prefixes = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
+        let got: Vec<String> = prefixes.iter().map(|p| p.prefix.to_string()).collect();
+        assert_eq!(got, expected);
+        assert!(
+            prefixes.iter().all(|p| p.path_id.is_none()),
+            "non-ADD-PATH block must not produce path ids"
+        );
+    }
 
-        // Both interpretations should work for this simple case
-        let result = parse_nlri_list(input.clone(), false, &Afi::Ipv4);
-        // Should succeed with either interpretation
-        assert!(result.is_ok() || result.is_err());
-        // The key is: no panic, and if it succeeds, it should be consistent
+    #[test]
+    fn test_parse_nlri_list_non_addpath_default_route_at_head() {
+        assert_ipv4_block(
+            &[
+                0x00, // 0.0.0.0/0
+                0x18, 0x01, 0x00, 0x00, // 1.0.0.0/24
+                0x18, 0x01, 0x00, 0x04, // 1.0.4.0/24
+                0x18, 0x01, 0x00, 0x05, // 1.0.5.0/24
+                0x18, 0x01, 0x00, 0x06, // 1.0.6.0/24
+            ],
+            &[
+                "0.0.0.0/0",
+                "1.0.0.0/24",
+                "1.0.4.0/24",
+                "1.0.5.0/24",
+                "1.0.6.0/24",
+            ],
+        );
+    }
+
+    #[test]
+    fn test_parse_nlri_list_non_addpath_default_route_in_middle() {
+        assert_ipv4_block(
+            &[
+                0x18, 0x01, 0x00, 0x00, // 1.0.0.0/24
+                0x00, // 0.0.0.0/0
+                0x18, 0x01, 0x00, 0x04, // 1.0.4.0/24
+            ],
+            &["1.0.0.0/24", "0.0.0.0/0", "1.0.4.0/24"],
+        );
+    }
+
+    #[test]
+    fn test_parse_nlri_list_non_addpath_default_route_at_tail() {
+        assert_ipv4_block(
+            &[
+                0x18, 0x01, 0x00, 0x00, // 1.0.0.0/24
+                0x18, 0x01, 0x00, 0x04, // 1.0.4.0/24
+                0x00, // 0.0.0.0/0
+            ],
+            &["1.0.0.0/24", "1.0.4.0/24", "0.0.0.0/0"],
+        );
+    }
+
+    #[test]
+    fn test_parse_nlri_list_non_addpath_ipv6_default_route_at_head() {
+        let block = &[
+            0x00, // ::/0
+            0x30, 0x2a, 0x0a, 0x02, 0xc0, 0x00, 0x1a, // 2a0a:2c0:1a::/48
+            0x2a, 0x26, 0x20, 0x01, 0x29, 0x20, 0x00, // 2620:129:2000::/42
+            0x20, 0x28, 0x04, 0x50, 0x5c, // 2804:505c::/32
+        ];
+        let prefixes = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv6).unwrap();
+        let got: Vec<String> = prefixes.iter().map(|p| p.prefix.to_string()).collect();
+        assert_eq!(
+            got,
+            vec![
+                "::/0",
+                "2a0a:2c0:1a::/48",
+                "2620:129:2000::/42",
+                "2804:505c::/32"
+            ]
+        );
+        assert!(prefixes.iter().all(|p| p.path_id.is_none()));
+    }
+
+    #[test]
+    fn test_parse_nlri_list_ambiguous_block_prefers_add_path() {
+        // Bytes from route-views.amsix 2020-06-17 18:30 UTC: ADD-PATH data under a non-ADD-PATH
+        // subtype, one entry. Framing it without path ids yields a run of /0 prefixes, framing it
+        // with them yields the real route. Both readings consume the block, and this is the reading
+        // the data requires, so the guess stays on ties.
+        let block = &[0x00, 0x00, 0x01, 0xe2, 0x18, 0x8a, 0x61, 0x16];
+        let plain = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].prefix.to_string(), "138.97.22.0/24");
+        assert_eq!(plain[0].path_id, Some(482));
+    }
+
+    #[test]
+    fn test_parse_nlri_list_wrapped_addpath_block_keeps_path_ids() {
+        // ADD-PATH data under a non-ADD-PATH flag still has to decode with its path ids (#31).
+        let block = &[
+            0x00, 0x00, 0x00, 0x01, 0x18, 0xc0, 0xa8, 0x01, // path_id 1, 192.168.1.0/24
+            0x00, 0x00, 0x00, 0x02, 0x18, 0xc0, 0xa8, 0x02, // path_id 2, 192.168.2.0/24
+        ];
+        let prefixes = parse_nlri_list(Bytes::from_static(block), false, &Afi::Ipv4).unwrap();
+        assert_eq!(prefixes.len(), 2);
+        assert_eq!(prefixes[0].prefix.to_string(), "192.168.1.0/24");
+        assert_eq!(prefixes[1].prefix.to_string(), "192.168.2.0/24");
+        assert_eq!(prefixes[0].path_id, Some(1));
+        assert_eq!(prefixes[1].path_id, Some(2));
     }
 }

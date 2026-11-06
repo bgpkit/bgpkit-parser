@@ -2012,4 +2012,29 @@ mod tests {
             panic!("Expected Capacities in second parameter");
         }
     }
+
+    #[test]
+    fn test_parse_bgp_update_message_keeps_withdrawals_starting_with_default_route() {
+        // Withdrawn routes 0.0.0.0/0, 1.0.0.0/24, 1.0.4.0/24, no attributes, no announced NLRI.
+        // A leading default route must not be read as an ADD-PATH path identifier (#360).
+        let withdrawn: &[u8] = &[
+            0x00, // 0.0.0.0/0
+            0x18, 0x01, 0x00, 0x00, // 1.0.0.0/24
+            0x18, 0x01, 0x00, 0x04, // 1.0.4.0/24
+        ];
+        let mut buf = BytesMut::new();
+        buf.put_u16(withdrawn.len() as u16);
+        buf.put_slice(withdrawn);
+        buf.put_u16(0);
+
+        let msg = parse_bgp_update_message(buf.freeze(), false, &AsnLength::Bits32).unwrap();
+        let got: Vec<String> = msg
+            .withdrawn_prefixes
+            .iter()
+            .map(|p| p.prefix.to_string())
+            .collect();
+        assert_eq!(got, vec!["0.0.0.0/0", "1.0.0.0/24", "1.0.4.0/24"]);
+        assert!(msg.withdrawn_prefixes.iter().all(|p| p.path_id.is_none()));
+        assert!(msg.attributes.validation_warnings().is_empty());
+    }
 }
