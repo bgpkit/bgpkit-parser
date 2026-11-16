@@ -4,7 +4,10 @@ use crate::ParserError;
 use bytes::{Bytes, BytesMut};
 use std::net::IpAddr;
 
-pub fn parse_next_hop(mut input: Bytes, afi: &Option<Afi>) -> Result<AttributeValue, ParserError> {
+pub(crate) fn parse_next_hop(
+    mut input: &[u8],
+    afi: &Option<Afi>,
+) -> Result<AttributeValue, ParserError> {
     if let Some(afi) = afi {
         Ok(input.read_address(afi).map(AttributeValue::NextHop)?)
     } else {
@@ -112,12 +115,12 @@ mod tests {
         let ipv4_bytes = Bytes::from(ipv4.octets().to_vec());
         let ipv6_bytes = Bytes::from(ipv6.octets().to_vec());
 
-        let res = parse_next_hop(ipv4_bytes, &None).unwrap();
+        let res = parse_next_hop(&ipv4_bytes, &None).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string(), "10.0.0.1".to_string())
         }
 
-        let res = parse_next_hop(ipv6_bytes, &Some(Afi::Ipv6)).unwrap();
+        let res = parse_next_hop(&ipv6_bytes, &Some(Afi::Ipv6)).unwrap();
         if let AttributeValue::NextHop(n) = res {
             assert_eq!(n.to_string().to_ascii_uppercase(), "FC00::1".to_string())
         }
@@ -130,9 +133,9 @@ mod tests {
         let ipv4_bytes = Bytes::from(ipv4.octets().to_vec());
         let ipv6_bytes = Bytes::from(ipv6.octets().to_vec());
 
-        let _res = parse_next_hop(ipv4_bytes.clone(), &None).unwrap();
+        let _res = parse_next_hop(&ipv4_bytes, &None).unwrap();
         assert_eq!(ipv4_bytes, encode_next_hop(&ipv4.into()));
-        let _res = parse_next_hop(ipv6_bytes.clone(), &None).unwrap();
+        let _res = parse_next_hop(&ipv6_bytes, &None).unwrap();
         assert_eq!(ipv6_bytes, encode_next_hop(&ipv6.into()));
     }
 

@@ -3,7 +3,7 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::Bytes;
 
-pub fn parse_local_pref(mut input: Bytes) -> Result<AttributeValue, ParserError> {
+pub(crate) fn parse_local_pref(mut input: &[u8]) -> Result<AttributeValue, ParserError> {
     Ok(AttributeValue::LocalPreference(input.read_u32()?))
 }
 
@@ -18,7 +18,7 @@ mod tests {
     #[test]
     fn test_parse_local_pref() {
         assert_eq!(
-            parse_local_pref(Bytes::from(vec![0, 0, 0, 123])).unwrap(),
+            parse_local_pref(&[0, 0, 0, 123]).unwrap(),
             AttributeValue::LocalPreference(123)
         );
     }

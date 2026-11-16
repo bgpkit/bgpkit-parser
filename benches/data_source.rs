@@ -1,7 +1,6 @@
 use md5::Digest;
-use oneio::get_reader;
 use std::fs::{create_dir_all, File};
-use std::io::{self, BufWriter, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
@@ -30,6 +29,25 @@ pub fn test_data_file(name: &str) -> PathBuf {
     ONCE.call_once(download_test_data);
 
     test_data_dir().join(name)
+}
+
+/// Returns the path named by an environment variable pointing at a local corpus, or `None`.
+///
+/// Used for opt-in benchmarks against real archives, which are neither checked in nor downloaded
+/// by the benchmark itself.
+#[allow(dead_code)] // only the internals benchmark reads opt-in corpora; bench_main includes this module too
+pub fn env_corpus(var: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(var)?;
+    if value.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(value);
+    if path.is_file() {
+        Some(path)
+    } else {
+        eprintln!("ignoring {var}: {} is not a file", path.display());
+        None
+    }
 }
 
 /// Downloads any missing test data files listed in [DATA_SOURCES]. If an error is encountered
@@ -99,45 +117,46 @@ fn md5_checksum_for_file<P: AsRef<Path>>(path: P) -> io::Result<Digest> {
     Ok(context.finalize())
 }
 
-struct HashingWriter<W> {
-    writer: W,
-    hasher: md5::Context,
-}
-
-impl<W: Write> Write for HashingWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let length = self.writer.write(buf)?;
-        self.hasher.write_all(&buf[..length])?;
-        Ok(length)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
-    }
-}
-
+/// Download `url` to `target`, returning the md5 of the raw (still compressed) bytes.
+///
+/// The download goes to a sibling `.part` file that is renamed only after the checksum is
+/// computed, so an interrupted run leaves nothing a later run would accept as complete. The
+/// checksum is computed over the bytes as downloaded: decompressing first would both mismatch the
+/// published hashes and truncate the file being read.
 fn download_file<P: AsRef<Path>>(url: &str, target: P) -> io::Result<Digest> {
-    let target_path = target.as_ref().to_str().unwrap().to_string();
+    let target = target.as_ref();
+    let mut part = target.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
 
-    oneio::download(url, target_path.as_str()).map_err(io::Error::other)?;
+    let part_str = part
+        .to_str()
+        .ok_or_else(|| io::Error::other("test data path is not valid UTF-8"))?;
+    oneio::download(url, part_str).map_err(io::Error::other)?;
 
-    let mut reader = get_reader(target_path.as_str()).unwrap();
-    let mut writer = HashingWriter {
-        writer: BufWriter::new(File::create(target)?),
-        hasher: md5::Context::new(),
-    };
-
-    io::copy(&mut reader, &mut writer)?;
-    writer.flush()?;
-
-    Ok(writer.hasher.finalize())
+    let digest = md5_checksum_for_file(&part)?;
+    std::fs::rename(&part, target)?;
+    Ok(digest)
 }
 
 pub fn test_data_dir() -> PathBuf {
     locate_target_dir().join("test_data")
 }
 
+/// The cargo target directory this benchmark was built into.
+///
+/// Cargo exports `CARGO_TARGET_TMPDIR` (`<target>/tmp`) for benchmark targets, which keeps the
+/// lookup correct when `build.target-dir` or `CARGO_TARGET_DIR` moves artifacts out of the source
+/// tree. Falling back to the historical "walk up until a `target/` directory appears" keeps older
+/// toolchains working.
 pub fn locate_target_dir() -> PathBuf {
+    if let Some(tmp_dir) = option_env!("CARGO_TARGET_TMPDIR") {
+        let tmp_dir = PathBuf::from(tmp_dir);
+        if let Some(target_dir) = tmp_dir.parent() {
+            return target_dir.to_path_buf();
+        }
+    }
+
     // CARGO_MANIFEST_DIR is an absolute path that is always present at compile time when building
     // with cargo. We know the target directory is most likely in the same directory as the manifest
     // or in a parent directory in the case of a normal workspace.
@@ -156,7 +175,10 @@ pub fn locate_target_dir() -> PathBuf {
         } else {
             // If we still can't find it, then it is likely defined by a workspace in some strange
             // location. At this point, we just give up as it will be near impossible to find.
-            panic!("Unable to find cargo target directory")
+            panic!(
+                "Unable to find cargo target directory (set CARGO_TARGET_DIR, or use a toolchain \
+                 that exports CARGO_TARGET_TMPDIR for benchmark targets)"
+            )
         }
     }
 }
