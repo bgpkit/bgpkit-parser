@@ -172,6 +172,95 @@ fn frame_next<R: Read>(
     Ok((frame.header, frame.raw_header, frame.body.len()))
 }
 
+/// What the borrowed element engine produced for the next record.
+pub(crate) enum NextBatch<'a> {
+    /// A RIB record's elements, borrowed from the parser's record buffer.
+    Rib(RecordElems<'a>),
+    /// A record this engine does not serve. Its body is still in the parser's buffer, untouched.
+    Other {
+        header: CommonHeader,
+        body_len: usize,
+    },
+    /// End of input.
+    End,
+}
+
+/// Advance to the next record and report whether the borrowed element engine can serve it.
+///
+/// Unlike [`next_record_elems_impl`], this stops at the first record the engine cannot serve
+/// instead of skipping it, so a caller can hand that record to the owned path.
+pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_> {
+    use crate::parser::mrt::frame::{classify, RecordKind};
+
+    if parser.text_dump_iter.is_some() || parser.elem_view_state.finished {
+        return NextBatch::End;
+    }
+
+    loop {
+        let (header, raw_header, body_len) = match frame_next(parser) {
+            Ok(framed) => framed,
+            Err(failure) => {
+                if matches!(failure.error, ParserError::EofExpected) {
+                    parser.elem_view_state.finished = true;
+                    return NextBatch::End;
+                }
+                if !handle_record_parse_error(parser, failure.error, failure.bytes) {
+                    parser.elem_view_state.finished = true;
+                    return NextBatch::End;
+                }
+                continue;
+            }
+        };
+
+        let body = &parser.elem_view_state.body_buf[..body_len];
+        match classify(&header, body) {
+            RecordKind::PeerIndex => {
+                match parse_peer_index_vec(body) {
+                    Ok(peers) => parser.elem_view_state.peers = Some(peers),
+                    Err(err) => {
+                        let raw = parser
+                            .core_dump
+                            .then(|| assemble_error_bytes(raw_header.as_slice(), body));
+                        if !handle_record_parse_error(parser, err, raw) {
+                            parser.elem_view_state.finished = true;
+                            return NextBatch::End;
+                        }
+                    }
+                }
+                continue;
+            }
+            RecordKind::GeoPeer => continue,
+            RecordKind::Rib {
+                prefix,
+                entry_count,
+                flags,
+                entries_offset,
+            } => {
+                if parser.elem_view_state.peers.is_none() {
+                    error!("{}", ElemError::MissingPeerTable);
+                    continue;
+                }
+                let state = &mut parser.elem_view_state;
+                let peers = state.peers.as_deref().expect("checked peers is_some");
+                let entries_bytes = &state.body_buf[entries_offset..body_len];
+                let scratch = &mut state.scratch;
+                scratch.clear();
+                return NextBatch::Rib(RecordElems {
+                    header,
+                    entries_bytes,
+                    peers,
+                    prefix: prefix.prefix,
+                    entry_count,
+                    flags,
+                    scratch,
+                });
+            }
+            // Hand the record back untouched: the caller owns the fallback and its error handling.
+            RecordKind::Other => return NextBatch::Other { header, body_len },
+        }
+    }
+}
+
 pub(crate) fn next_record_elems_impl<R: Read>(
     parser: &mut BgpkitParser<R>,
 ) -> Option<RecordElems<'_>> {

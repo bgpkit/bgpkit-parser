@@ -131,7 +131,10 @@ builds a `BgpElem` for the rest of the record.
 - Therefore: typed views (`FrameBody`, `RibFrame`, `Bgp4MpFrame`) are proven by tests against parsed
   records for both a RIB dump and an updates file, and their first production consumer was the
   prefix pushdown, not the record path.
-- Materialising `BgpElem` from a borrowed entry (both sides reading every field, same checksum):
+- The default element path now runs on the borrowed engine for RIB dumps: 270.6G / 30.7s ->
+  173.5G / 17.7s on the uncompressed dump, 314.0G / 34.5s -> 218.0G / 21.3s compressed. Identical
+  output on the full fixture, a 20k-line sample of the dump, and a whole updates file.
+- Materialising `BgpElem` from a borrowed entry, isolated (both sides reading every field):
   536.6G / 55.9s from `into_elem_iter`, 404.4G / 38.8s from `ElemRef::to_bgp_elem`, so **1.33x**.
   The earlier 6.5x figure compared a four-field view walk against full element construction and was
   not like for like. Attribute decoding dominates both paths; the win comes from dropping the

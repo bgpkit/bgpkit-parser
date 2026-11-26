@@ -333,6 +333,37 @@ impl<R: Read> BgpkitParser<R> {
         }
     }
 
+    /// Advance to the next record, serving RIB records from the borrowed element engine.
+    ///
+    /// `Other` means the record is not a RIB dump record; its bytes are still in the record buffer,
+    /// and [`Self::parse_framed_record`] turns them into an owned record.
+    pub(crate) fn next_elem_batch(&mut self) -> iters::elem_ref::NextBatch<'_>
+    where
+        R: std::io::Read,
+    {
+        iters::elem_ref::next_batch(self)
+    }
+
+    /// Parse the record the last [`Self::next_elem_batch`] call left in the record buffer.
+    pub(crate) fn parse_framed_record(
+        &mut self,
+        header: crate::models::CommonHeader,
+        body_len: usize,
+    ) -> Result<MrtRecord, ParserErrorWithBytes> {
+        let body = bytes::Bytes::copy_from_slice(&self.elem_view_state.body_buf[..body_len]);
+        match mrt::mrt_record::parse_mrt_body(header.entry_type as u16, header.entry_subtype, body)
+        {
+            Ok(message) => Ok(MrtRecord {
+                common_header: header,
+                message,
+            }),
+            Err(error) => Err(ParserErrorWithBytes {
+                error,
+                bytes: Some(self.elem_view_state.body_buf[..body_len].to_vec()),
+            }),
+        }
+    }
+
     /// Advance to the next `TABLE_DUMP_V2` `RIB_AFI` record and return a borrowed view over its
     /// elements without per-element heap allocation.
     ///

@@ -330,7 +330,48 @@ pub(crate) fn rib_flags(v2_type: TableDumpV2Type) -> Option<(Afi, u8)> {
     }
 }
 
-#[inline]
+/// What a framed record is, with the offsets its consumer needs.
+pub(crate) enum RecordKind {
+    PeerIndex,
+    GeoPeer,
+    Rib {
+        prefix: NetworkPrefix,
+        entry_count: u16,
+        flags: u8,
+        entries_offset: usize,
+    },
+    /// Legacy types, updates, unknown subtypes, and RIB records that failed to parse.
+    Other,
+}
+
+/// Classify a framed record without lending its body out.
+pub(crate) fn classify(header: &CommonHeader, body: &[u8]) -> RecordKind {
+    if header.entry_type != EntryType::TABLE_DUMP_V2 {
+        return RecordKind::Other;
+    }
+    let Ok(v2_type) = TableDumpV2Type::try_from(header.entry_subtype) else {
+        return RecordKind::Other;
+    };
+    if v2_type == TableDumpV2Type::PeerIndexTable {
+        return RecordKind::PeerIndex;
+    }
+    if v2_type == TableDumpV2Type::GeoPeerTable {
+        return RecordKind::GeoPeer;
+    }
+    let Some((afi, flags)) = rib_flags(v2_type) else {
+        return RecordKind::Other;
+    };
+    match parse_rib_frame(body, afi, flags) {
+        Ok(rib) => RecordKind::Rib {
+            prefix: rib.prefix,
+            entry_count: rib.entry_count,
+            flags: rib.flags,
+            entries_offset: body.len() - rib.entries.len(),
+        },
+        Err(_) => RecordKind::Other,
+    }
+}
+
 /// The prefix this record covers, when it is a `TABLE_DUMP_V2` RIB record.
 ///
 /// This is the only record-level predicate a dump supports: every entry in the record carries

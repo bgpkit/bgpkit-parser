@@ -91,8 +91,23 @@ impl<R: Read> Iterator for RecordIterator<R> {
 BgpElem Iterator
 **********/
 
+/// What one refill attempt produced.
+enum Refill {
+    /// `batch` now holds elements to drain.
+    Batch,
+    /// One record was ingested into `pending`; continue with the owned path.
+    Owned,
+    /// No more records.
+    End,
+}
+
 pub struct ElemIterator<R> {
     pending: PendingElems,
+    /// Elements materialised from one borrowed RIB record, drained before the owned path.
+    batch: std::vec::IntoIter<BgpElem>,
+    /// Whether the borrowed RIB engine may still serve this stream. Turned off for good as soon as
+    /// a record it cannot serve appears, so a mixed stream never re-reads a record.
+    borrowed: bool,
     record_iter: RecordIterator<R>,
     elementor: Elementor,
     count: u64,
@@ -100,11 +115,64 @@ pub struct ElemIterator<R> {
 
 impl<R> ElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
+        // The borrowed engine applies no filters and needs the parser's own record buffer, so it is
+        // only used when nothing else has claimed either.
+        let borrowed = parser.filters.is_empty() && !parser.core_dump;
         ElemIterator {
             record_iter: RecordIterator::new(parser).without_prefilter(),
             count: 0,
             pending: PendingElems::Empty,
+            batch: Vec::new().into_iter(),
+            borrowed,
             elementor: Elementor::new(),
+        }
+    }
+}
+
+impl<R: Read> ElemIterator<R> {
+    /// Refill `batch` from the borrowed RIB engine, or fall back to the owned path for one record.
+    fn refill(&mut self) -> Refill {
+        use crate::parser::iters::elem_ref::NextBatch;
+
+        match self.record_iter.parser.next_elem_batch() {
+            NextBatch::Rib(mut record) => {
+                let mut elems = Vec::with_capacity(record.len());
+                for elem in record.iter() {
+                    elems.push(elem.to_bgp_elem());
+                }
+                self.batch = elems.into_iter();
+                Refill::Batch
+            }
+            NextBatch::Other { header, body_len } => {
+                // Not a RIB dump record: parse it the owned way and let the owned iterator take
+                // over the rest of the stream.
+                self.borrowed = false;
+                match self
+                    .record_iter
+                    .parser
+                    .parse_framed_record(header, body_len)
+                {
+                    Ok(record) => {
+                        self.pending = self.elementor.ingest(record);
+                        Refill::Owned
+                    }
+                    Err(failure) => {
+                        if handle_record_parse_error(
+                            &mut self.record_iter.parser,
+                            failure.error,
+                            failure.bytes,
+                        ) {
+                            Refill::Owned
+                        } else {
+                            Refill::End
+                        }
+                    }
+                }
+            }
+            NextBatch::End => {
+                self.borrowed = false;
+                Refill::End
+            }
         }
     }
 }
@@ -123,6 +191,25 @@ impl<R: Read> Iterator for ElemIterator<R> {
                 }
             }
             return None;
+        }
+
+        // Unfiltered RIB dumps are served straight from the borrowed record view: no intermediate
+        // MrtRecord, no per-entry attribute model.
+        if self.borrowed {
+            if let Some(elem) = self.batch.next() {
+                return Some(elem);
+            }
+            loop {
+                match self.refill() {
+                    Refill::Batch => {
+                        if let Some(elem) = self.batch.next() {
+                            return Some(elem);
+                        }
+                    }
+                    Refill::Owned => break,
+                    Refill::End => return None,
+                }
+            }
         }
 
         loop {
