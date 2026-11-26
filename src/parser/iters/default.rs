@@ -19,6 +19,12 @@ pub struct RecordIterator<R> {
     pub parser: BgpkitParser<R>,
     pub count: u64,
     elementor: Elementor,
+    /// Whether the parser's filters are applied once per record.
+    ///
+    /// Elem iterators test every elem they build, so a record-level pass costs
+    /// a full elem conversion per record (plus a record clone) that is thrown
+    /// away. They construct this iterator with the pass disabled.
+    prefilter: bool,
 }
 
 impl<R> RecordIterator<R> {
@@ -27,7 +33,15 @@ impl<R> RecordIterator<R> {
             parser,
             count: 0,
             elementor: Elementor::new(),
+            prefilter: true,
         }
+    }
+
+    /// Skip the record-level filter pass for an iterator whose consumer filters
+    /// the elems it builds anyway.
+    pub(crate) fn without_prefilter(mut self) -> Self {
+        self.prefilter = false;
+        self
     }
 }
 
@@ -44,7 +58,9 @@ impl<R: Read> Iterator for RecordIterator<R> {
         loop {
             return match self.parser.next_record() {
                 Ok(v) => {
-                    if record_matches_filters(&v, &self.parser.filters, &mut self.elementor) {
+                    if !self.prefilter
+                        || record_matches_filters(&v, &self.parser.filters, &mut self.elementor)
+                    {
                         Some(v)
                     } else {
                         continue;
@@ -75,7 +91,7 @@ pub struct ElemIterator<R> {
 impl<R> ElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         ElemIterator {
-            record_iter: RecordIterator::new(parser),
+            record_iter: RecordIterator::new(parser).without_prefilter(),
             count: 0,
             pending: PendingElems::Empty,
             elementor: Elementor::new(),
