@@ -416,29 +416,64 @@ fn run_elems<I>(
 where
     I: IntoIterator<Item = Result<RecoveryEvent<BgpElem>, String>>,
 {
-    let mut stdout = std::io::stdout();
     let mut elems_count = 0usize;
     let mut elem_index = 0usize;
     let mut stats = RecoveryStats::new(report_recovery);
     let mut terminal_error = None;
+    let psv = matches!(output_format, OutputFormat::Psv);
+    let streamed = psv || matches!(output_format, OutputFormat::Default);
 
-    for event in events {
-        match event {
-            Err(error) => {
-                terminal_error = Some(error);
-                break;
+    {
+        let stdout = std::io::stdout();
+        let mut writer = std::io::BufWriter::with_capacity(1 << 20, stdout.lock());
+        // One buffer for every row: the streaming formats never allocate per element.
+        let mut line = String::with_capacity(512);
+
+        for event in events {
+            match event {
+                Err(error) => {
+                    terminal_error = Some(error);
+                    break;
+                }
+                Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
+                Ok(RecoveryEvent::Item(elem)) => {
+                    elems_count += 1;
+                    if count_requested {
+                        continue;
+                    }
+                    if streamed {
+                        line.clear();
+                        if psv && elem_index == 0 {
+                            line.push_str(&BgpElem::get_psv_header());
+                            line.push('\n');
+                        }
+                        if psv {
+                            elem.write_psv(&mut line);
+                        } else {
+                            use std::fmt::Write as _;
+                            let _ = write!(line, "{elem}");
+                        }
+                        line.push('\n');
+                        if let Err(error) = writer.write_all(line.as_bytes()) {
+                            if error.kind() == std::io::ErrorKind::BrokenPipe {
+                                return Ok(());
+                            }
+                            return Err(error.to_string());
+                        }
+                    } else {
+                        let output = format_elem(&elem, output_format, elem_index);
+                        if !write_output(&mut writer, &output)? {
+                            return Ok(());
+                        }
+                    }
+                    elem_index += 1;
+                }
             }
-            Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
-            Ok(RecoveryEvent::Item(elem)) => {
-                elems_count += 1;
-                if count_requested {
-                    continue;
-                }
-                let output = format_elem(&elem, output_format, elem_index);
-                elem_index += 1;
-                if !write_output(&mut stdout, &output)? {
-                    return Ok(());
-                }
+        }
+
+        if let Err(error) = writer.flush() {
+            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(error.to_string());
             }
         }
     }
@@ -527,8 +562,8 @@ fn run_hex_records(
     Ok(())
 }
 
-fn write_output(stdout: &mut std::io::Stdout, output: &str) -> Result<bool, String> {
-    if let Err(error) = writeln!(stdout, "{output}") {
+fn write_output(writer: &mut impl std::io::Write, output: &str) -> Result<bool, String> {
+    if let Err(error) = writeln!(writer, "{output}") {
         if error.kind() == std::io::ErrorKind::BrokenPipe {
             return Ok(false);
         }

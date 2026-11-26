@@ -411,12 +411,24 @@ impl BgpElem {
     /// println!("{}", psv_string);
     /// ```
     pub fn to_psv(&self) -> String {
+        let mut out = String::with_capacity(256);
+        self.write_psv(&mut out);
+        out
+    }
+
+    /// Appends the PSV row to `out`.
+    ///
+    /// Streaming callers reuse one buffer and write it out themselves, which avoids a `String`
+    /// allocation per element. Communities are written in place for the same reason.
+    pub fn write_psv(&self, out: &mut String) {
+        use std::fmt::Write as _;
         let t = match self.elem_type {
             ElemType::ANNOUNCE => "A",
             ElemType::WITHDRAW => "W",
         };
-        format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        let _ = write!(
+            out,
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|",
             t,
             self.timestamp,
             self.peer_ip,
@@ -428,12 +440,23 @@ impl BgpElem {
             OptionToStr(&self.next_hop),
             OptionToStr(&self.local_pref),
             OptionToStr(&self.med),
-            option_to_string_communities(&self.communities),
+        );
+        if let Some(communities) = &self.communities {
+            for (index, community) in communities.iter().enumerate() {
+                if index > 0 {
+                    out.push(' ');
+                }
+                let _ = write!(out, "{community}");
+            }
+        }
+        let _ = write!(
+            out,
+            "|{}|{}|{}|{}",
             self.atomic,
             OptionToStr(&self.aggr_asn),
             OptionToStr(&self.aggr_ip),
             OptionToStr(&self.only_to_customer),
-        )
+        );
     }
 }
 
