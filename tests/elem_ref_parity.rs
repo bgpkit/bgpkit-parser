@@ -744,3 +744,19 @@ Default local pref 100, local AS 65001\n\n\
     }
     assert_eq!(total_rib_elems, 5);
 }
+
+/// A parser with filters must not fall through to this path: it would hand back unfiltered
+/// elements to a caller that asked for a filter, which is silent divergence from every other
+/// iterator in the crate.
+#[test]
+fn filtered_parser_refuses_the_borrowed_path() {
+    let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
+    let mut parser = BgpkitParser::new(url)
+        .expect("open RIB fixture")
+        .add_filter("prefix", "10.0.0.0/8")
+        .expect("valid filter");
+    assert!(
+        parser.next_record_elems().is_none(),
+        "a filtered parser must not return unfiltered borrowed elements"
+    );
+}

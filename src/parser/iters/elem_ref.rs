@@ -366,7 +366,10 @@ fn parse_rib_afi_header(mut body: &[u8], afi: &Afi) -> Result<(IpNet, u16, usize
 pub(crate) fn next_record_elems_impl<R: Read>(
     parser: &mut BgpkitParser<R>,
 ) -> Option<RecordElems<'_>> {
-    if parser.text_dump_iter.is_some() || parser.elem_view_state.finished {
+    if parser.text_dump_iter.is_some()
+        || !parser.filters.is_empty()
+        || parser.elem_view_state.finished
+    {
         return None;
     }
 

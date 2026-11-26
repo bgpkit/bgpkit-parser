@@ -277,8 +277,12 @@ impl<R: Read> BgpkitParser<R> {
     ///
     /// This first version serves `TABLE_DUMP_V2` `RIB_AFI` records only (`PeerIndexTable` records
     /// update the active peer table internally). Non-RIB MRT records (`BGP4MP` updates, legacy
-    /// `TABLE_DUMP` v1, legacy `BGP`) are skipped, text-dump parsers immediately return `None`,
-    /// and parser filters are not applied on this path.
+    /// `TABLE_DUMP` v1, legacy `BGP`) are skipped, and text-dump parsers immediately return
+    /// `None`.
+    ///
+    /// A parser with filters returns `None` on the first call and reads nothing: this path does
+    /// not apply them, and silently returning unfiltered elements to a caller that asked for a
+    /// filter is worse than refusing. Use [`into_elem_iter`](Self::into_elem_iter) with filters.
     pub fn next_record_elems(&mut self) -> Option<RecordElems<'_>> {
         iters::elem_ref::next_record_elems_impl(self)
     }
