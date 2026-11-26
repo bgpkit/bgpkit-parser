@@ -50,6 +50,8 @@ pub struct BgpkitParser<R> {
     /// Streaming element iterator for text dumps. `None` for MRT input,
     /// which is parsed lazily through [`Self::next_record`].
     text_dump_iter: Option<Box<dyn Iterator<Item = BgpElem> + Send>>,
+    /// Reusable buffer/table state for [`Self::next_record_elems`].
+    elem_view_state: iters::elem_ref::ElemViewState,
 }
 
 pub(crate) struct ParserOptions {
@@ -110,6 +112,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -142,6 +145,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -163,6 +167,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -241,6 +246,7 @@ impl<R: Read> BgpkitParser<R> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         }
     }
 
@@ -259,6 +265,26 @@ impl<R: Read> BgpkitParser<R> {
             self.warn_zebra_compat_once();
         }
         Ok(record)
+    }
+
+    /// Advance to the next `TABLE_DUMP_V2` `RIB_AFI` record and return a borrowed view over its
+    /// elements without per-element heap allocation.
+    ///
+    /// The returned [`RecordElems`] borrows this parser (its reusable record buffer and active
+    /// `PeerIndexTable`); drop `RecordElems` before calling `next_record_elems` again.
+    ///
+    /// # Scope
+    ///
+    /// This first version serves `TABLE_DUMP_V2` `RIB_AFI` records only (`PeerIndexTable` records
+    /// update the active peer table internally). Non-RIB MRT records (`BGP4MP` updates, legacy
+    /// `TABLE_DUMP` v1, legacy `BGP`) are skipped, and text-dump parsers immediately return
+    /// `None`.
+    ///
+    /// A parser with filters returns `None` on the first call and reads nothing: this path does
+    /// not apply them, and silently returning unfiltered elements to a caller that asked for a
+    /// filter is worse than refusing. Use [`into_elem_iter`](Self::into_elem_iter) with filters.
+    pub fn next_record_elems(&mut self) -> Option<RecordElems<'_>> {
+        iters::elem_ref::next_record_elems_impl(self)
     }
 }
 
@@ -287,6 +313,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: Some(Box::new(iter)),
+            elem_view_state: Default::default(),
         })
     }
 
@@ -317,6 +344,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
                 filters: vec![],
                 options: ParserOptions::default(),
                 text_dump_iter: Some(Box::new(iter)),
+                elem_view_state: Default::default(),
             })
         } else {
             Ok(BgpkitParser {
@@ -325,6 +353,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
                 filters: vec![],
                 options: ParserOptions::default(),
                 text_dump_iter: None,
+                elem_view_state: Default::default(),
             })
         }
     }
@@ -348,6 +377,7 @@ impl<R> BgpkitParser<R> {
             filters: self.filters,
             options: self.options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         }
     }
 
@@ -360,6 +390,7 @@ impl<R> BgpkitParser<R> {
             filters: self.filters,
             options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         }
     }
 
@@ -439,6 +470,7 @@ impl<R> BgpkitParser<R> {
             filters,
             options: self.options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         })
     }
 
