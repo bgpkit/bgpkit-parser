@@ -10,6 +10,7 @@ This module contains different iterator implementations for parsing BGP data:
   RecoveringElemIterator, RecoveryEvent)
 - `diagnostic`: Per-record dissection and validation reporting (DiagnosticIterator,
   DissectingDiagnosticIterator)
+- `parallel`: Multi-threaded, order-preserving element iteration (ParElemIter)
 - `raw`: Raw MRT records with their original bytes (RawRecordIterator,
   FilteredRawRecordIterator)
 
@@ -20,6 +21,7 @@ Rust's iterator syntax.
 pub mod default;
 mod diagnostic;
 pub mod fallible;
+mod parallel;
 mod raw;
 mod recovery;
 mod route;
@@ -32,6 +34,7 @@ pub use diagnostic::{
     DissectedDiagnosticEvent, DissectingDiagnosticIterator,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
+pub use parallel::ParElemIter;
 pub use raw::{FilteredRawRecordIterator, RawRecordIterator};
 pub use recovery::{
     RecoveringElemIterator, RecoveringRecordIterator, RecoveryConfig, RecoveryError, RecoveryEvent,

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+* **`BgpkitParser::into_par_elem_iter(threads)`: parallel element iteration over one MRT file**: one thread reads (and decompresses) and frames records, `threads - 1` threads plus the caller parse batches of records into elems, and the iterator yields them in file order. The element stream, warnings, error logging and core dumps are identical to `into_elem_iter`'s. `threads` of 0 or 1, a parser with filters, a text dump, or a platform that cannot spawn threads (such as `wasm32-unknown-unknown`) uses the sequential iterator and spawns nothing. On the rrc00 bview of 2026-10-14 (55,786,629 elems, glibc malloc, 16 cores) an elem count takes 7.6 s at 8 threads against 33.5 s sequentially, and 7.6 s from the decompressed file too; it costs 25% more instructions, mostly in a per-elem copy that keeps every allocation and its free on the same thread (see the method docs). `into_elem_iter` is unchanged.
+
 ### Changed
 
 * **A filter no longer doubles the elem conversion work**: an elem iterator now filters the elems it builds instead of making the record iterator test each record first. The record-level test cloned the record and converted every elem of it to decide whether the record matched, and the elem iterator then converted the same record again, so a filtered run parsed every record twice. On the rrc00 bview of 2026-10-14 a prefix filter cost 29.8% more instructions than no filter at all; it now costs 2.9%. Output is unchanged. Record iteration still drops records that produce no matching elem.

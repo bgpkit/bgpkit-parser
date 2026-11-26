@@ -163,7 +163,7 @@ pub(crate) fn chunk_mrt_record_with_context(
 }
 
 /// Read one MRT record, keeping the header bytes in a stack buffer.
-fn read_chunk(input: &mut impl Read) -> Result<ChunkedRecord, RawMrtRecordError> {
+pub(crate) fn read_chunk(input: &mut impl Read) -> Result<ChunkedRecord, RawMrtRecordError> {
     let mut header = HeaderBuf::new();
     let framed = match frame_common_header_captured(input, &mut header) {
         Ok(framed) => framed,
@@ -318,7 +318,18 @@ pub(crate) fn parse_mrt_record_with_zebra_compat(
         error: error.error,
         bytes: error.bytes,
     })?;
+    parse_chunk_with_zebra_compat(chunk)
+}
 
+/// Parse the body of a record framed by [`read_chunk`].
+///
+/// This is the second half of [`parse_mrt_record_with_zebra_compat`], split out so the parallel
+/// elem iterator can frame on one thread and parse on another with the same code, including the
+/// wire bytes attached to an error for core dumps.
+#[inline]
+pub(crate) fn parse_chunk_with_zebra_compat(
+    chunk: ChunkedRecord,
+) -> Result<(MrtRecord, bool), ParserErrorWithBytes> {
     let common_header = chunk.common_header;
     // Only the error path needs the wire bytes; cloning the `Bytes` handle below is a refcount
     // bump, while keeping the header on the stack avoids a per-record allocation on success.
