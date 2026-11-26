@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+* **A filter no longer doubles the elem conversion work**: an elem iterator now filters the elems it builds instead of making the record iterator test each record first. The record-level test cloned the record and converted every elem of it to decide whether the record matched, and the elem iterator then converted the same record again, so a filtered run parsed every record twice. On the rrc00 bview of 2026-10-14 a prefix filter cost 29.8% more instructions than no filter at all; it now costs 2.9%. Output is unchanged. Record iteration still drops records that produce no matching elem.
+
 ## v0.24.0 - 2026-11-06
 
 ### Breaking changes
