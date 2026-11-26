@@ -789,6 +789,42 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
     }
 }
 
+/// Whether `filters` contain a constraint that a record's single prefix can decide.
+///
+/// Only used to choose a parsing path: the result never changes which elements are returned.
+pub(crate) fn has_record_prefix_constraint(filters: &[Filter]) -> bool {
+    filters.iter().any(|filter| {
+        matches!(
+            filter,
+            Filter::Prefix(..) | Filter::Prefixes(..) | Filter::IpVersion(_)
+        )
+    })
+}
+
+/// Returns `true` only when no element of a record covering `prefix` can pass `filters`.
+///
+/// Every element of a `TABLE_DUMP_V2` RIB record shares this one prefix, so a definite failure here
+/// lets the record be dropped before any attribute is parsed. Undecidable filters return `false`.
+pub(crate) fn prefix_excludes_record(filters: &[Filter], prefix: &NetworkPrefix) -> bool {
+    let input = &prefix.prefix;
+    filters.iter().any(|filter| match filter {
+        Filter::Prefix(expected, kind) => !prefix_match(expected, input, kind),
+        Filter::Prefixes(expected, kind) => !expected
+            .iter()
+            .any(|candidate| prefix_match(candidate, input, kind)),
+        Filter::IpVersion(version) => (*version == IpVersion::Ipv4) != input.addr().is_ipv4(),
+        Filter::Negated(inner) => match inner.as_ref() {
+            // Negated: every element must fall outside the set, so a match here rejects them all.
+            Filter::Prefix(expected, kind) => prefix_match(expected, input, kind),
+            Filter::Prefixes(expected, kind) => expected
+                .iter()
+                .any(|candidate| prefix_match(candidate, input, kind)),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
 fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
     // All elem-only filters (both direct and negated) fail-closed on route-level views.
     // Without this guard, a non-negated filter like Atomic(false) would incorrectly

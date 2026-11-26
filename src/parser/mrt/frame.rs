@@ -24,10 +24,6 @@ use std::net::IpAddr;
 /// Upper bound on the MRT body length the parser will read into memory.
 pub(crate) const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
 
-/// Buffer growth allowed before switching to `read_to_end`, which keeps a single outlier record
-/// from pinning the reusable buffer at its size for the rest of the stream.
-const MAX_EAGER_GROWTH: usize = 64 * 1024;
-
 /// A framing failure with the bytes needed to report it.
 #[derive(Debug)]
 pub(crate) struct FrameError {
@@ -106,29 +102,19 @@ impl Framer {
         }
 
         let body_len = framed.body_length as usize;
-        if body_len <= body.len() {
-            let filled = fill(input, body, body_len, self.header)?;
-            if filled != body_len {
-                return Err(truncated_body(self.header, body, body_len, filled));
-            }
-        } else if body_len - body.len() <= MAX_EAGER_GROWTH {
-            body.resize(body_len, 0);
-            let filled = fill(input, body, body_len, self.header)?;
-            if filled != body_len {
-                return Err(truncated_body(self.header, body, body_len, filled));
-            }
-        } else {
-            body.clear();
-            if let Err(err) = input.take(body_len as u64).read_to_end(body) {
-                return Err(FrameError {
-                    error: ParserError::IoError(err),
-                    bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
-                });
-            }
-            if body.len() != body_len {
-                let filled = body.len();
-                return Err(truncated_body(self.header, body, body_len, filled));
-            }
+        // Decompressors return whatever they decoded per call, so reading into a pre-sized slice
+        // costs one call per chunk. `read_to_end` into the retained allocation behaves like the
+        // owned path on compressed input, and on uncompressed input it measures the same.
+        body.clear();
+        if let Err(err) = input.take(body_len as u64).read_to_end(body) {
+            return Err(FrameError {
+                error: ParserError::IoError(err),
+                bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
+            });
+        }
+        if body.len() != body_len {
+            let filled = body.len();
+            return Err(truncated_body(self.header, body, body_len, filled));
         }
 
         self.apply_legacy_length_correction(input, body, body_len)
@@ -201,21 +187,6 @@ impl Framer {
                 bytes: None,
             }),
         }
-    }
-}
-
-fn fill(
-    input: &mut impl Read,
-    body: &mut [u8],
-    body_len: usize,
-    header: HeaderBuf,
-) -> Result<usize, FrameError> {
-    match read_slice_full(input, &mut body[..body_len]) {
-        Ok(filled) => Ok(filled),
-        Err((err, filled)) => Err(FrameError {
-            error: ParserError::IoError(err),
-            bytes: Some(assemble_error_bytes(header.as_slice(), &body[..filled])),
-        }),
     }
 }
 
@@ -357,6 +328,21 @@ pub(crate) fn rib_flags(v2_type: TableDumpV2Type) -> Option<(Afi, u8)> {
         )),
         _ => None,
     }
+}
+
+#[inline]
+/// The prefix this record covers, when it is a `TABLE_DUMP_V2` RIB record.
+///
+/// This is the only record-level predicate a dump supports: every entry in the record carries
+/// this one prefix, so a record whose prefix cannot match can be dropped before any attribute is
+/// parsed.
+pub(crate) fn rib_prefix(header: &CommonHeader, body: &[u8]) -> Option<NetworkPrefix> {
+    if header.entry_type != EntryType::TABLE_DUMP_V2 {
+        return None;
+    }
+    let v2_type = TableDumpV2Type::try_from(header.entry_subtype).ok()?;
+    let (afi, flags) = rib_flags(v2_type)?;
+    parse_rib_frame(body, afi, flags).ok().map(|rib| rib.prefix)
 }
 
 #[inline]

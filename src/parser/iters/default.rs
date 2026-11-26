@@ -55,8 +55,17 @@ impl<R: Read> Iterator for RecordIterator<R> {
             return None;
         }
         self.count += 1;
+        // A record whose single RIB prefix cannot satisfy a prefix filter yields no matching
+        // elements, so it can be skipped before its body is parsed.
+        let prefix_pushdown =
+            crate::parser::filter::has_record_prefix_constraint(&self.parser.filters);
         loop {
-            return match self.parser.next_record() {
+            let next_record = if prefix_pushdown {
+                self.parser.next_record_prefiltered()
+            } else {
+                self.parser.next_record()
+            };
+            return match next_record {
                 Ok(v) => {
                     if !self.prefilter
                         || record_matches_filters(&v, &self.parser.filters, &mut self.elementor)

@@ -267,6 +267,65 @@ impl<R: Read> BgpkitParser<R> {
         Ok(record)
     }
 
+    /// Advance to the next record, skipping RIB records whose prefix cannot satisfy `filters`.
+    ///
+    /// A `TABLE_DUMP_V2` RIB record covers exactly one prefix, so when that prefix fails a prefix or
+    /// IP-version constraint, every element the record would yield fails it too. Skipping such a
+    /// record before parsing it returns the same elements as parsing and then filtering.
+    ///
+    /// Records whose prefix cannot be decided this way are parsed normally, including malformed
+    /// ones: a framing or parse error is reported exactly as [`Self::next_record`] reports it.
+    fn next_record_prefiltered(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
+        loop {
+            let (header, body_len) = {
+                let state = &mut self.elem_view_state;
+                match state.framer.next(&mut self.reader, &mut state.body_buf) {
+                    Ok(frame) => (frame.header, frame.body.len()),
+                    Err(failure) => {
+                        return Err(ParserErrorWithBytes {
+                            error: failure.error,
+                            bytes: failure.bytes,
+                        })
+                    }
+                }
+            };
+
+            let body_bytes = &self.elem_view_state.body_buf[..body_len];
+            if let Some(prefix) = mrt::frame::rib_prefix(&header, body_bytes) {
+                if filter::prefix_excludes_record(&self.filters, &prefix) {
+                    continue;
+                }
+            }
+
+            let body = bytes::Bytes::copy_from_slice(body_bytes);
+            let used_zebra_compat =
+                matches!(
+                    header.entry_type,
+                    crate::models::EntryType::BGP4MP | crate::models::EntryType::BGP4MP_ET
+                ) && mrt::messages::bgp4mp::uses_zebra_compat(header.entry_subtype, &body);
+            let message = match mrt::mrt_record::parse_mrt_body(
+                header.entry_type as u16,
+                header.entry_subtype,
+                body,
+            ) {
+                Ok(message) => message,
+                Err(error) => {
+                    return Err(ParserErrorWithBytes {
+                        error,
+                        bytes: Some(self.elem_view_state.body_buf[..body_len].to_vec()),
+                    })
+                }
+            };
+            if used_zebra_compat {
+                self.warn_zebra_compat_once();
+            }
+            return Ok(MrtRecord {
+                common_header: header,
+                message,
+            });
+        }
+    }
+
     /// Advance to the next `TABLE_DUMP_V2` `RIB_AFI` record and return a borrowed view over its
     /// elements without per-element heap allocation.
     ///
