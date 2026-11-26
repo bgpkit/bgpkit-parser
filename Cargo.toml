@@ -1,10 +1,11 @@
 [package]
 name = "bgpkit-parser"
-version = "0.23.0"
+version = "0.24.0"
 authors = ["Mingwei Zhang <mingwei@bgpkit.com>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/bgpkit/bgpkit-parser"
+homepage = "https://bgpkit.com/tools/parser/"
 documentation = "https://docs.rs/bgpkit-parser"
 description = "MRT/BGP/BMP data processing library"
 keywords = ["bgp", "bgpkit", "mrt"]
@@ -56,7 +57,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 bytes = { version = "1.7" }
 zerocopy = { version = "0.8", features = ["derive"], optional = true }
 hex = { version = "0.4.3", optional = true } # bmp/openbmp parsing
-oneio = { version = "0.26", default-features = false, features = ["http", "gz", "bz", "zstd"], optional = true }
+oneio = { version = "0.27", default-features = false, features = ["http", "gz", "bz", "zstd"], optional = true }
 regex = { version = "1", optional = true } # used in parser filter
 chrono = { version = "0.4.38", optional = true } # parser filter
 serde_json = { version = "1.0", optional = true } # RIS Live parsing
@@ -143,7 +144,7 @@ harness = false
 [dev-dependencies]
 regex = "1"
 anyhow = "1"
-bgpkit-broker = "0.12"
+bgpkit-broker = "0.15"
 env_logger = "0.11"
 kafka = "0.10.0"
 tungstenite = "0.30.0"
