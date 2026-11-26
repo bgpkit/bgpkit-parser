@@ -68,3 +68,16 @@ fn negated_prefix_keeps_the_rest() {
     assert!(!expected.is_empty());
     assert_eq!(filtered(&filters), expected);
 }
+
+#[test]
+fn rib_type_filter_matches_unfiltered_selection() {
+    let all = unfiltered();
+    // Every RIB entry is an announcement, so asking for withdrawals must yield nothing.
+    let withdraw = vec![Filter::Type(bgpkit_parser::models::ElemType::WITHDRAW)];
+    assert!(filtered(&withdraw).is_empty());
+
+    let announce = vec![Filter::Type(bgpkit_parser::models::ElemType::ANNOUNCE)];
+    let expected: Vec<String> = all.iter().map(|(_, line)| line.clone()).collect();
+    assert!(!expected.is_empty());
+    assert_eq!(filtered(&announce), expected);
+}

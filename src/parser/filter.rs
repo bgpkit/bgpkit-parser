@@ -789,6 +789,37 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
     }
 }
 
+/// Whether `filters` contain a time constraint that a record's own timestamp can decide.
+pub(crate) fn has_record_timestamp_constraint(filters: &[Filter]) -> bool {
+    filters
+        .iter()
+        .any(|filter| matches!(filter, Filter::TsStart(_) | Filter::TsEnd(_)))
+}
+
+/// Whether `filters` contain an element-type constraint a RIB record can decide.
+pub(crate) fn has_record_type_constraint(filters: &[Filter]) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::Type(_) => true,
+        Filter::Negated(inner) => matches!(inner.as_ref(), Filter::Type(_)),
+        _ => false,
+    })
+}
+
+/// Returns `true` only when every element stamped `timestamp` fails a time constraint.
+pub(crate) fn timestamp_excludes_record(filters: &[Filter], timestamp: f64) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::TsStart(start) => timestamp < *start,
+        Filter::TsEnd(end) => timestamp > *end,
+        Filter::Negated(inner) => match inner.as_ref() {
+            // A negated constraint keeps only the elements outside its range.
+            Filter::TsStart(start) => timestamp >= *start,
+            Filter::TsEnd(end) => timestamp <= *end,
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
 /// Whether `filters` contain a constraint that a record's single prefix can decide.
 ///
 /// Only used to choose a parsing path: the result never changes which elements are returned.
@@ -837,9 +868,14 @@ pub(crate) fn peer_excludes_record(filters: &[Filter], peer_ip: &IpAddr, peer_as
 ///
 /// Every element of a `TABLE_DUMP_V2` RIB record shares this one prefix, so a definite failure here
 /// lets the record be dropped before any attribute is parsed. Undecidable filters return `false`.
-pub(crate) fn prefix_excludes_record(filters: &[Filter], prefix: &NetworkPrefix) -> bool {
+pub(crate) fn rib_record_excluded(filters: &[Filter], prefix: &NetworkPrefix) -> bool {
     let input = &prefix.prefix;
     filters.iter().any(|filter| match filter {
+        // Every element of a RIB record is an announcement.
+        Filter::Type(kind) => *kind != ElemType::ANNOUNCE,
+        Filter::Negated(inner) if matches!(inner.as_ref(), Filter::Type(_)) => {
+            matches!(inner.as_ref(), Filter::Type(kind) if *kind == ElemType::ANNOUNCE)
+        }
         Filter::Prefix(expected, kind) => !prefix_match(expected, input, kind),
         Filter::Prefixes(expected, kind) => !expected
             .iter()

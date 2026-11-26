@@ -62,3 +62,34 @@ fn negated_peer_keeps_the_rest() {
 
     assert_eq!(filtered(&filters), expected);
 }
+
+#[test]
+fn timestamp_filter_matches_unfiltered_selection() {
+    let all: Vec<(f64, String)> = BgpkitParser::new(UPDATES_FIXTURE)
+        .expect("open fixture")
+        .into_elem_iter()
+        .map(|elem| (elem.timestamp, elem.to_string()))
+        .collect();
+    assert!(!all.is_empty());
+    let mut stamps: Vec<f64> = all.iter().map(|(ts, _)| *ts).collect();
+    stamps.sort_by(|a, b| a.partial_cmp(b).expect("finite timestamps"));
+    let cut = stamps[stamps.len() / 2];
+
+    let filters = vec![Filter::TsEnd(cut)];
+    let expected: Vec<String> = all
+        .iter()
+        .filter(|(ts, _)| *ts <= cut)
+        .map(|(_, line)| line.clone())
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(filtered(&filters), expected);
+
+    let filters = vec![Filter::TsStart(cut)];
+    let expected: Vec<String> = all
+        .iter()
+        .filter(|(ts, _)| *ts >= cut)
+        .map(|(_, line)| line.clone())
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(filtered(&filters), expected);
+}

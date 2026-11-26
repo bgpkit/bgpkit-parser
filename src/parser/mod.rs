@@ -292,14 +292,21 @@ impl<R: Read> BgpkitParser<R> {
 
             let body_bytes = &self.elem_view_state.body_buf[..body_len];
             if let Some(prefix) = mrt::frame::rib_prefix(&header, body_bytes) {
-                if filter::prefix_excludes_record(&self.filters, &prefix) {
+                if filter::rib_record_excluded(&self.filters, &prefix) {
                     continue;
                 }
             }
-            // The peer of an update is in the record header, so a peer filter can decide it here.
-            // A dump record has no peer of its own: its entries name peers through the table.
+            // An update carries its peer and its timestamp in the record header, so peer and time
+            // filters can decide it here. A dump record has neither: its entries name peers
+            // through the table, and its element time is the entry's own `originated_time`.
             if let Some((peer_ip, peer_asn)) = mrt::frame::bgp4mp_peer(&header, body_bytes) {
-                if filter::peer_excludes_record(&self.filters, &peer_ip, &peer_asn) {
+                let timestamp = match header.microsecond_timestamp {
+                    Some(micro) => header.timestamp as f64 + micro as f64 / 1_000_000.0,
+                    None => header.timestamp as f64,
+                };
+                if filter::peer_excludes_record(&self.filters, &peer_ip, &peer_asn)
+                    || filter::timestamp_excludes_record(&self.filters, timestamp)
+                {
                     continue;
                 }
             }

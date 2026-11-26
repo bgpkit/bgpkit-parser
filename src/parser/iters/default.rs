@@ -59,7 +59,9 @@ impl<R: Read> Iterator for RecordIterator<R> {
         // elements, so it can be skipped before its body is parsed.
         let record_pushdown =
             crate::parser::filter::has_record_prefix_constraint(&self.parser.filters)
-                || crate::parser::filter::has_record_peer_constraint(&self.parser.filters);
+                || crate::parser::filter::has_record_peer_constraint(&self.parser.filters)
+                || crate::parser::filter::has_record_timestamp_constraint(&self.parser.filters)
+                || crate::parser::filter::has_record_type_constraint(&self.parser.filters);
         loop {
             let next_record = if record_pushdown {
                 self.parser.next_record_prefiltered()
