@@ -296,6 +296,13 @@ impl<R: Read> BgpkitParser<R> {
                     continue;
                 }
             }
+            // The peer of an update is in the record header, so a peer filter can decide it here.
+            // A dump record has no peer of its own: its entries name peers through the table.
+            if let Some((peer_ip, peer_asn)) = mrt::frame::bgp4mp_peer(&header, body_bytes) {
+                if filter::peer_excludes_record(&self.filters, &peer_ip, &peer_asn) {
+                    continue;
+                }
+            }
 
             let body = bytes::Bytes::copy_from_slice(body_bytes);
             let used_zebra_compat =

@@ -358,6 +358,22 @@ fn parse_rib_frame(mut body: &[u8], afi: Afi, flags: u8) -> Result<RibFrame<'_>,
     })
 }
 
+/// The peer that sent this record, when it is a `BGP4MP` message record.
+///
+/// Updates carry peer identity in the record header, so a peer filter can drop the whole record
+/// before its BGP message is parsed. Dumps have no such header: their peer comes from the peer
+/// table and can only be resolved per entry.
+pub(crate) fn bgp4mp_peer(header: &CommonHeader, body: &[u8]) -> Option<(IpAddr, Asn)> {
+    match header.entry_type {
+        EntryType::BGP4MP | EntryType::BGP4MP_ET => {}
+        _ => return None,
+    }
+    parse_bgp4mp_frame(header.entry_subtype, body)
+        .ok()
+        .map(|frame| (frame.peer_ip, frame.peer_asn))
+}
+
+#[inline]
 fn parse_bgp4mp_frame(subtype: u16, mut body: &[u8]) -> Result<Bgp4MpFrame<'_>, ParserError> {
     use Bgp4MpType::*;
     let msg_type = Bgp4MpType::try_from(subtype)?;

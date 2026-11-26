@@ -801,6 +801,38 @@ pub(crate) fn has_record_prefix_constraint(filters: &[Filter]) -> bool {
     })
 }
 
+/// Whether `filters` contain a peer constraint that a `BGP4MP` record header can decide.
+pub(crate) fn has_record_peer_constraint(filters: &[Filter]) -> bool {
+    filters.iter().any(|filter| {
+        matches!(
+            filter,
+            Filter::PeerIp(_) | Filter::PeerIps(_) | Filter::PeerAsn(_) | Filter::PeerAsns(_)
+        )
+    })
+}
+
+/// Returns `true` only when no element of a `BGP4MP` record whose header names this peer can pass
+/// `filters`.
+///
+/// The peer of an update is fixed for the whole record, so a definite failure here lets the record
+/// be dropped before its BGP message is parsed. Undecidable filters return `false`.
+pub(crate) fn peer_excludes_record(filters: &[Filter], peer_ip: &IpAddr, peer_asn: &Asn) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::PeerIp(expected) => peer_ip != expected,
+        Filter::PeerIps(expected) => !expected.iter().any(|candidate| peer_ip == candidate),
+        Filter::PeerAsn(expected) => peer_asn != expected,
+        Filter::PeerAsns(expected) => !expected.iter().any(|candidate| peer_asn == candidate),
+        Filter::Negated(inner) => match inner.as_ref() {
+            Filter::PeerIp(expected) => peer_ip == expected,
+            Filter::PeerIps(expected) => expected.iter().any(|candidate| peer_ip == candidate),
+            Filter::PeerAsn(expected) => peer_asn == expected,
+            Filter::PeerAsns(expected) => expected.iter().any(|candidate| peer_asn == candidate),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
 /// Returns `true` only when no element of a record covering `prefix` can pass `filters`.
 ///
 /// Every element of a `TABLE_DUMP_V2` RIB record shares this one prefix, so a definite failure here
