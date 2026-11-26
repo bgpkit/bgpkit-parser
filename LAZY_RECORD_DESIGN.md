@@ -156,6 +156,19 @@ builds a `BgpElem` for the rest of the record.
 6. Filter pass on `Frame` for the decidable filters above (RIB prefix is the only high-value one);
    accept on byte-identical filtered output plus the measured drop on `-p`.
 
+## 8.1 Measured against BGPStream (same host, same files, output to /dev/null)
+
+| workload | bgpreader | bgpkit-parser |
+| --- | --- | --- |
+| RIB, all elements | 1158.6G / 94.3s | 218.3G / 21.7s |
+| RIB, `-p 8.8.8.0/24` | 117.3G / 8.8s | 46.7G / 4.5s |
+| updates, all elements | 47.7G / 3.9s | 10.1G / 1.2s |
+| updates, peer ASN 835 | 4.6G / 0.43s | 4.0G / 0.44s |
+| RIB, full PSV export | (not compared) | 1304.9G / 155.3s -> 901.0G / 80.7s |
+
+The field sets differ between the two tools, so these are approximate real-usage numbers, not
+identical-output comparisons. Filtered scans on compressed input are now bounded by inflate.
+
 ## 9. Acceptance numbers
 
 Same file and method as the baseline (`bview.20261014.0000.gz`, `perf stat` instructions, warm cache,
