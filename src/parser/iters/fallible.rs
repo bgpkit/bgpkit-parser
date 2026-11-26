@@ -20,6 +20,12 @@ pub struct FallibleRecordIterator<R> {
     parser: BgpkitParser<R>,
     elementor: Elementor,
     finished: bool,
+    /// Whether the parser's filters are applied once per record.
+    ///
+    /// Elem iterators test every elem they build, so a record-level pass costs
+    /// a full elem conversion per record (plus a record clone) that is thrown
+    /// away. They construct this iterator with the pass disabled.
+    prefilter: bool,
 }
 
 impl<R> FallibleRecordIterator<R> {
@@ -28,7 +34,15 @@ impl<R> FallibleRecordIterator<R> {
             parser,
             elementor: Elementor::new(),
             finished: false,
+            prefilter: true,
         }
+    }
+
+    /// Skip the record-level filter pass for an iterator whose consumer filters
+    /// the elems it builds anyway.
+    pub(crate) fn without_prefilter(mut self) -> Self {
+        self.prefilter = false;
+        self
     }
 }
 
@@ -44,6 +58,10 @@ impl<R: Read> Iterator for FallibleRecordIterator<R> {
         loop {
             match next_fallible_record(&mut self.parser, &mut self.finished) {
                 Some(Ok(record)) => {
+                    if !self.prefilter {
+                        return Some(Ok(record));
+                    }
+
                     // Apply filters if any are set
                     let filters = &self.parser.filters;
                     if filters.is_empty() {
@@ -89,7 +107,7 @@ pub struct FallibleElemIterator<R> {
 impl<R> FallibleElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
         FallibleElemIterator {
-            record_iter: FallibleRecordIterator::new(parser),
+            record_iter: FallibleRecordIterator::new(parser).without_prefilter(),
             cache_elems: vec![],
             elementor: Elementor::new(),
         }
