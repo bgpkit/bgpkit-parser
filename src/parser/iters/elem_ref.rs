@@ -10,17 +10,19 @@ active peer index table, decoding BGP attributes on demand without per-element h
 
 use crate::error::ParserError;
 use crate::models::{
-    Afi, AsPath, AsPathSegment, Asn, AsnLength, AttrFlags, AttrType, CommonHeader, Community,
-    ElemType, EntryType, ExtendedCommunity, ExtendedCommunityType, FlowSpecTrafficAction,
-    FlowSpecTrafficMarking, FlowSpecTrafficRate, FourOctetAsExtCommunity, Ipv4AddrExtCommunity,
-    Ipv6AddrExtCommunity, LargeCommunity, LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix,
-    NextHopAddress, OpaqueExtCommunity, Peer, PeerType, Safi, TableDumpV2Type,
-    TwoOctetAsExtCommunity,
+    get_deprecated_attr_type, Afi, AsPath, AsPathSegment, Asn, AsnLength, AttrFlags, AttrRaw,
+    AttrType, BgpIdentifier, CommonHeader, Community, ElemType, EntryType, ExtendedCommunity,
+    ExtendedCommunityType, FlowSpecTrafficAction, FlowSpecTrafficMarking, FlowSpecTrafficRate,
+    FourOctetAsExtCommunity, Ipv4AddrExtCommunity, Ipv6AddrExtCommunity, LargeCommunity,
+    LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix, NextHopAddress, OpaqueExtCommunity,
+    Origin, Peer, PeerType, Safi, TableDumpV2Type, TwoOctetAsExtCommunity,
 };
 use crate::parser::iters::handle_record_parse_error;
 use crate::parser::mrt::frame::{assemble_error_bytes, FrameError, Framer};
 use crate::parser::mrt::mrt_header::HeaderBuf;
 use crate::parser::{BgpkitParser, ElemError, ReadUtils};
+use crate::BgpElem;
+use bytes::Bytes;
 use ipnet::IpNet;
 use log::{error, warn};
 use std::cell::Cell;
@@ -57,9 +59,9 @@ pub(crate) struct ElemViewState {
     ///
     /// Note: `body_buf.len()` tracks the high-water initialized length across records; the active
     /// record body is `&body_buf[..active_len]`, avoiding per-record `memset` zero-initialization.
-    body_buf: Vec<u8>,
+    pub(crate) body_buf: Vec<u8>,
     /// Shared framing: common header plus the body read into `body_buf`.
-    framer: Framer,
+    pub(crate) framer: Framer,
     /// Active `TABLE_DUMP_V2` `PeerIndexTable` indexed directly by wire `peer_index`.
     peers: Option<Vec<Peer>>,
     /// Reusable scratch buffer lent to [`RecordElems`].
@@ -816,6 +818,87 @@ impl<'a> ElemRef<'a> {
             self.scan_u32_attr(u8::from(AttrType::LOCAL_PREFERENCE))
                 .unwrap_or(0),
         )
+    }
+
+    /// Materialise this entry as an owned [`BgpElem`].
+    ///
+    /// One pass over the attribute TLVs for the scalar attributes, then the borrowed views for the
+    /// AS path and communities. Values match an elem built from a parsed `MrtRecord`, including the
+    /// `Some(0)` defaults for MED and LOCAL_PREF.
+    pub fn to_bgp_elem(&self) -> BgpElem {
+        let mut origin: Option<Origin> = None;
+        let mut atomic = false;
+        let mut aggregator: Option<(Asn, BgpIdentifier)> = None;
+        let mut only_to_customer: Option<Asn> = None;
+        let mut unknown: Vec<AttrRaw> = Vec::new();
+        let mut deprecated: Vec<AttrRaw> = Vec::new();
+
+        let mut rest = self.usable_attr_prefix();
+        while let Some((code, val, next)) = next_attr_tlv(rest) {
+            rest = next;
+            if get_deprecated_attr_type(code).is_some() {
+                deprecated.push(AttrRaw {
+                    code,
+                    bytes: Bytes::copy_from_slice(val),
+                });
+                continue;
+            }
+            match AttrType::from(code) {
+                AttrType::ORIGIN => {
+                    origin = val.first().and_then(|value| Origin::try_from(*value).ok())
+                }
+                AttrType::ATOMIC_AGGREGATE => atomic = true,
+                AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
+                    aggregator = decode_aggregator_slice(val);
+                }
+                AttrType::ONLY_TO_CUSTOMER => {
+                    if val.len() == 4 {
+                        only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
+                            val[0], val[1], val[2], val[3],
+                        ])));
+                    }
+                }
+                // Types the elem path keeps as raw bytes, mirroring `get_relevant_attributes`.
+                AttrType::Unknown(_)
+                | AttrType::RESERVED
+                | AttrType::PMSI_TUNNEL
+                | AttrType::PE_DISTINGUISHER_LABELS
+                | AttrType::BGPSEC_PATH
+                | AttrType::ATTR_SET => unknown.push(AttrRaw {
+                    code,
+                    bytes: Bytes::copy_from_slice(val),
+                }),
+                _ => {}
+            }
+        }
+
+        let as_path = self.as_path().to_as_path();
+        let origin_asns = as_path
+            .as_ref()
+            .map(|path| path.iter_origins().collect::<Vec<Asn>>());
+        let communities: Vec<MetaCommunity> = self.communities().iter().collect();
+
+        BgpElem {
+            timestamp: self.timestamp(),
+            elem_type: self.elem_type(),
+            peer_ip: self.peer.peer_ip,
+            peer_asn: self.peer.peer_asn,
+            peer_bgp_id: Some(self.peer.peer_bgp_id),
+            prefix: self.prefix(),
+            next_hop: self.next_hop(),
+            as_path,
+            origin,
+            origin_asns,
+            local_pref: self.local_pref(),
+            med: self.med(),
+            communities: (!communities.is_empty()).then_some(communities),
+            atomic,
+            aggr_asn: aggregator.map(|value| value.0),
+            aggr_ip: aggregator.map(|value| value.1),
+            only_to_customer,
+            unknown: (!unknown.is_empty()).then_some(unknown),
+            deprecated: (!deprecated.is_empty()).then_some(deprecated),
+        }
     }
 
     /// Returns the RIB entry's originated Unix timestamp as seconds (`f64`).
@@ -1615,6 +1698,22 @@ impl<'a> Iterator for AsnsIter<'a> {
 }
 
 impl ExactSizeIterator for AsnsIter<'_> {}
+
+/// AGGREGATOR / AS4_AGGREGATOR: the ASN width follows the attribute length (6 or 8 octets).
+#[inline]
+fn decode_aggregator_slice(val: &[u8]) -> Option<(Asn, BgpIdentifier)> {
+    match val.len() {
+        8 => Some((
+            Asn::new_32bit(u32::from_be_bytes([val[0], val[1], val[2], val[3]])),
+            Ipv4Addr::new(val[4], val[5], val[6], val[7]),
+        )),
+        6 => Some((
+            Asn::new_16bit(u16::from_be_bytes([val[0], val[1]])),
+            Ipv4Addr::new(val[2], val[3], val[4], val[5]),
+        )),
+        _ => None,
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Communities View

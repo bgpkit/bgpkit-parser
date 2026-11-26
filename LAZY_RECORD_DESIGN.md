@@ -154,7 +154,10 @@ Same file and method as the baseline (`bview.20261014.0000.gz`, `perf stat` inst
 alternating runs):
 
 - unfiltered elem iteration: ≤ 293.9 G / 33.2 s today; target ≤ today, byte-identical stream;
-- `-p 8.8.8.0/24`: 307.4 G / 33.8 s today; target under ~30 G / ~4 s (framing floor is 26.0 G);
+- `-p 8.8.8.0/24` on the gz file: 310.0 G / 35.6 s today, now 46.6 G / 4.52 s (6.7x instructions,
+  7.9x wall). On the same stream uncompressed: 265 G / 31 s, now 2.14 G / 0.92 s (124x). The gz
+  residual is decompression plus the per-record read, not record parsing; the uncompressed number is
+  the ceiling this change reaches.
 - `-o <origin_asn>`: 307.4 G today; target below 250 G (saves elem construction, keeps attribute
   parsing) and stops at the first matching entry per record;
 - `into_record_iter`: ≤ 184.7 G / 21.1 s today, unchanged output;
