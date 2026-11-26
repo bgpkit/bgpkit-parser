@@ -129,8 +129,13 @@ builds a `BgpElem` for the rest of the record.
   **+9%** (30.36G). The walk has to stay in the consumer's hot loop; the shared piece is the layout
   constants, not an iterator object. Keep this in mind before factoring the element path again.
 - Therefore: typed views (`FrameBody`, `RibFrame`, `Bgp4MpFrame`) are proven by tests against parsed
-  records for both a RIB dump and an updates file, and their first production consumer will be the
-  record path, where framing is a small share of the work.
+  records for both a RIB dump and an updates file, and their first production consumer was the
+  prefix pushdown, not the record path.
+- Materialising `BgpElem` from a borrowed entry (both sides reading every field, same checksum):
+  536.6G / 55.9s from `into_elem_iter`, 404.4G / 38.8s from `ElemRef::to_bgp_elem`, so **1.33x**.
+  The earlier 6.5x figure compared a four-field view walk against full element construction and was
+  not like for like. Attribute decoding dominates both paths; the win comes from dropping the
+  intermediate `Attributes` model, not from the element itself.
 
 ## 8. Migration, each step shippable and measured
 
