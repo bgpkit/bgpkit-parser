@@ -4,6 +4,7 @@ Parse MRT header and content, provides [BgpElem][BgpElem] struct for per-prefix 
 [BgpElem]: crate::BgpElem
 */
 pub mod dissect;
+pub mod frame;
 pub mod messages;
 pub mod mrt_elem;
 pub mod mrt_header;

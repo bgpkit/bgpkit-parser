@@ -18,23 +18,17 @@ use crate::models::{
     TwoOctetAsExtCommunity,
 };
 use crate::parser::iters::handle_record_parse_error;
-use crate::parser::mrt::mrt_header::{frame_common_header_captured, HeaderBuf};
+use crate::parser::mrt::frame::{assemble_error_bytes, FrameError, Framer};
+use crate::parser::mrt::mrt_header::HeaderBuf;
 use crate::parser::{BgpkitParser, ElemError, ReadUtils};
 use ipnet::IpNet;
-use log::{debug, error, warn};
+use log::{error, warn};
 use std::cell::Cell;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use zerocopy::big_endian::U32 as BeU32;
 use zerocopy::FromBytes;
-
-/// Upper bound on the MRT body length the parser will read into memory (matches `mrt_record.rs`).
-const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024;
-
-/// Maximum incremental growth before falling back to streaming `read_to_end` so a corrupt header
-/// claiming megabytes on a short input cannot pre-allocate memory the stream does not carry.
-const MAX_EAGER_GROWTH: usize = 64 * 1024;
 
 const AS_PATH_AS_SET: u8 = 1;
 const AS_PATH_AS_SEQUENCE: u8 = 2;
@@ -64,211 +58,14 @@ pub(crate) struct ElemViewState {
     /// Note: `body_buf.len()` tracks the high-water initialized length across records; the active
     /// record body is `&body_buf[..active_len]`, avoiding per-record `memset` zero-initialization.
     body_buf: Vec<u8>,
+    /// Shared framing: common header plus the body read into `body_buf`.
+    framer: Framer,
     /// Active `TABLE_DUMP_V2` `PeerIndexTable` indexed directly by wire `peer_index`.
     peers: Option<Vec<Peer>>,
     /// Reusable scratch buffer lent to [`RecordElems`].
     scratch: Vec<u32>,
     /// Set once EOF or a non-recoverable framing/core-dump error ends iteration.
     finished: bool,
-}
-
-struct FramingFailure {
-    error: ParserError,
-    bytes: Option<Vec<u8>>,
-}
-
-/// Read up to `buf.len()` bytes, retrying `Interrupted` and preserving the count read on error.
-fn read_slice_full(
-    input: &mut impl Read,
-    buf: &mut [u8],
-) -> Result<usize, (std::io::Error, usize)> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match input.read(&mut buf[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err((e, filled)),
-        }
-    }
-    Ok(filled)
-}
-
-fn assemble_error_bytes(header: &[u8], body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(header.len() + body.len());
-    out.extend_from_slice(header);
-    out.extend_from_slice(body);
-    out
-}
-
-/// Frame one MRT record into `body_buf`, returning `(common_header, body_len)` while keeping raw
-/// header bytes in `header_buf` for error/core-dump reporting.
-fn read_record_into(
-    input: &mut impl Read,
-    header_buf: &mut HeaderBuf,
-    body_buf: &mut Vec<u8>,
-) -> Result<(CommonHeader, usize), FramingFailure> {
-    let framed = match frame_common_header_captured(input, header_buf) {
-        Ok(framed) => framed,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::UnexpectedEof && header_buf.as_slice().is_empty()
-            {
-                return Err(FramingFailure {
-                    error: ParserError::EofExpected,
-                    bytes: None,
-                });
-            }
-            return Err(FramingFailure {
-                error: error.into(),
-                bytes: Some(header_buf.as_slice().to_vec()),
-            });
-        }
-    };
-
-    if framed.body_length > MAX_MRT_MESSAGE_LEN {
-        return Err(FramingFailure {
-            error: ParserError::OversizedRecord {
-                length: framed.body_length,
-            },
-            bytes: Some(framed.raw_bytes.to_vec()),
-        });
-    }
-
-    let body_len = framed.body_length as usize;
-    if body_len <= body_buf.len() {
-        let filled = match read_slice_full(input, &mut body_buf[..body_len]) {
-            Ok(filled) => filled,
-            Err((err, filled)) => {
-                return Err(FramingFailure {
-                    error: ParserError::IoError(err),
-                    bytes: Some(assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &body_buf[..filled],
-                    )),
-                });
-            }
-        };
-        if filled != body_len {
-            return Err(FramingFailure {
-                error: ParserError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!("truncated MRT body: expected {body_len} bytes, read {filled}"),
-                )),
-                bytes: Some(assemble_error_bytes(
-                    header_buf.as_slice(),
-                    &body_buf[..filled],
-                )),
-            });
-        }
-    } else if body_len - body_buf.len() <= MAX_EAGER_GROWTH {
-        body_buf.resize(body_len, 0);
-        let filled = match read_slice_full(input, &mut body_buf[..body_len]) {
-            Ok(filled) => filled,
-            Err((err, filled)) => {
-                return Err(FramingFailure {
-                    error: ParserError::IoError(err),
-                    bytes: Some(assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &body_buf[..filled],
-                    )),
-                });
-            }
-        };
-        if filled != body_len {
-            return Err(FramingFailure {
-                error: ParserError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!("truncated MRT body: expected {body_len} bytes, read {filled}"),
-                )),
-                bytes: Some(assemble_error_bytes(
-                    header_buf.as_slice(),
-                    &body_buf[..filled],
-                )),
-            });
-        }
-    } else {
-        body_buf.clear();
-        if let Err(err) = input.take(body_len as u64).read_to_end(body_buf) {
-            return Err(FramingFailure {
-                error: ParserError::IoError(err),
-                bytes: Some(assemble_error_bytes(header_buf.as_slice(), body_buf)),
-            });
-        }
-        if body_buf.len() != body_len {
-            return Err(FramingFailure {
-                error: ParserError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!(
-                        "truncated MRT body: expected {body_len} bytes, read {}",
-                        body_buf.len()
-                    ),
-                )),
-                bytes: Some(assemble_error_bytes(header_buf.as_slice(), body_buf)),
-            });
-        }
-    }
-
-    let common_header = match framed.header {
-        Ok(h) => h,
-        Err(error) => {
-            return Err(FramingFailure {
-                error,
-                bytes: Some(assemble_error_bytes(
-                    header_buf.as_slice(),
-                    &body_buf[..body_len],
-                )),
-            });
-        }
-    };
-
-    // Preserve stream alignment across historical TABLE_DUMP v1 records that under-declared their
-    // body length by 4 bytes when skipping non-TABLE_DUMP_V2 records.
-    let mut final_body_len = body_len;
-    if common_header.entry_type == EntryType::TABLE_DUMP
-        && crate::parser::mrt::messages::table_dump::needs_legacy_length_correction(
-            common_header.entry_subtype,
-            &body_buf[..body_len],
-        )
-    {
-        let needed = body_len + 4;
-        if body_buf.len() < needed {
-            body_buf.resize(needed, 0);
-        }
-        match read_slice_full(input, &mut body_buf[body_len..needed]) {
-            Ok(4) => {
-                final_body_len = needed;
-                debug!(
-                    "recovered historical TABLE_DUMP record whose declared length was four bytes short (timestamp={}, subtype={}, declared_length={})",
-                    common_header.timestamp,
-                    common_header.entry_subtype,
-                    common_header.length
-                );
-            }
-            Ok(read) => {
-                return Err(FramingFailure {
-                    error: ParserError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
-                        "truncated historical TABLE_DUMP length correction",
-                    )),
-                    bytes: Some(assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &body_buf[..body_len + read],
-                    )),
-                });
-            }
-            Err((err, read)) => {
-                return Err(FramingFailure {
-                    error: ParserError::IoError(err),
-                    bytes: Some(assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &body_buf[..body_len + read],
-                    )),
-                });
-            }
-        }
-    }
-
-    Ok((common_header, final_body_len))
 }
 
 fn parse_peer_index_vec(mut data: &[u8]) -> Result<Vec<Peer>, ParserError> {
@@ -363,6 +160,16 @@ fn parse_rib_afi_header(mut body: &[u8], afi: &Afi) -> Result<(IpNet, u16, usize
     Ok((net_prefix.prefix, entry_count, entries_offset))
 }
 
+/// Frame the next record, returning owned framing metadata and leaving the body in
+/// `elem_view_state.body_buf`, so no borrow outlives the call.
+fn frame_next<R: Read>(
+    parser: &mut BgpkitParser<R>,
+) -> Result<(CommonHeader, HeaderBuf, usize), FrameError> {
+    let state = &mut parser.elem_view_state;
+    let frame = state.framer.next(&mut parser.reader, &mut state.body_buf)?;
+    Ok((frame.header, frame.raw_header, frame.body.len()))
+}
+
 pub(crate) fn next_record_elems_impl<R: Read>(
     parser: &mut BgpkitParser<R>,
 ) -> Option<RecordElems<'_>> {
@@ -373,13 +180,8 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         return None;
     }
 
-    let mut header_buf = HeaderBuf::new();
     let (common_header, prefix, entry_count, flags, entries_offset, body_len) = loop {
-        let (common_header, body_len) = match read_record_into(
-            &mut parser.reader,
-            &mut header_buf,
-            &mut parser.elem_view_state.body_buf,
-        ) {
+        let (common_header, header_buf, body_len) = match frame_next(parser) {
             Ok(framed) => framed,
             Err(failure) => {
                 if matches!(failure.error, ParserError::EofExpected) {
