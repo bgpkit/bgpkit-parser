@@ -70,10 +70,11 @@ pub fn parse_rib_afi_entries(
     let prefix = data.read_nlri_prefix(&afi, false)?;
 
     let entry_count = data.read_u16()?;
-    // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs
+    // Pre-allocate cautiously to avoid overflow/OOM with malformed inputs. One slot per entry:
+    // the RIB wire format never carries more entries than the remaining bytes can express.
     let min_entry_size = rib_entry_min_len(is_add_path);
     let max_possible = data.remaining() / min_entry_size;
-    let reserve = (entry_count as usize).min(max_possible).saturating_mul(2);
+    let reserve = (entry_count as usize).min(max_possible);
     let mut rib_entries = Vec::with_capacity(reserve);
 
     // get the u8 slice of the rest of the data
