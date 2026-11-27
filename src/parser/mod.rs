@@ -8,6 +8,7 @@ pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIte
 
 #[macro_use]
 pub mod utils;
+pub mod attr_scan;
 pub mod bgp;
 pub mod bmp;
 pub mod filter;
@@ -294,10 +295,24 @@ impl<R: Read> BgpkitParser<R> {
             // and one time in its header. A record whose predicate is not decidable here falls
             // through to the general parser unchanged.
             match mrt::frame::classify(&header, &self.elem_view_state.body_buf[..body_len]) {
-                mrt::frame::RecordKind::Rib { prefix, .. }
-                    if filter::rib_record_excluded(&self.filters, &prefix) =>
-                {
-                    continue
+                mrt::frame::RecordKind::Rib {
+                    prefix,
+                    flags,
+                    entries_offset,
+                    ..
+                } => {
+                    // A dump record whose every entry fails a prefix or origin constraint
+                    // contributes no element, so it is skipped before its body is parsed.
+                    if filter::rib_record_excluded(&self.filters, &prefix)
+                        || attr_scan::rib_record_excluded_by_origin(
+                            &self.filters,
+                            &self.elem_view_state.body_buf[..body_len],
+                            entries_offset,
+                            flags,
+                        )
+                    {
+                        continue;
+                    }
                 }
                 mrt::frame::RecordKind::Bgp4Mp {
                     peer_ip,

@@ -795,7 +795,10 @@ pub(crate) fn has_record_level_constraint(filters: &[Filter]) -> bool {
         | Filter::PeerAsn(_)
         | Filter::PeerAsns(_)
         | Filter::TsStart(_)
-        | Filter::TsEnd(_) => true,
+        | Filter::TsEnd(_)
+        | Filter::OriginAsn(_)
+        | Filter::OriginAsns(_)
+        | Filter::Origin(_) => true,
         Filter::Negated(inner) => matches!(
             inner.as_ref(),
             Filter::Prefix(..)
