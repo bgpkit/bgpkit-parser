@@ -388,16 +388,8 @@ impl BgpElem {
     /// ```
     pub fn to_psv(&self) -> String {
         let mut out = String::with_capacity(256);
-        self.write_psv(&mut out);
+        crate::render::psv::write_elem(self, &mut out);
         out
-    }
-
-    /// Appends the PSV row to `out`.
-    ///
-    /// Streaming callers reuse one buffer and write it out themselves, which avoids a `String`
-    /// allocation per element. The field rendering lives in [`crate::render::psv`].
-    pub fn write_psv(&self, out: &mut String) {
-        crate::render::psv::write_elem(self, out);
     }
 }
 

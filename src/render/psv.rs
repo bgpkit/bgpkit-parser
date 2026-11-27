@@ -13,7 +13,7 @@ use std::fmt::{Display, Write as _};
 use std::net::IpAddr;
 
 /// Append one PSV row, without a trailing newline.
-pub fn write_elem(elem: &BgpElem, out: &mut String) {
+pub(crate) fn write_elem(elem: &BgpElem, out: &mut String) {
     out.push_str(match elem.elem_type {
         ElemType::ANNOUNCE => "A",
         ElemType::WITHDRAW => "W",

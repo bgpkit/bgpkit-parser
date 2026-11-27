@@ -448,7 +448,7 @@ where
                             line.push('\n');
                         }
                         if psv {
-                            elem.write_psv(&mut line);
+                            line.push_str(&elem.to_psv());
                         } else {
                             use std::fmt::Write as _;
                             let _ = write!(line, "{elem}");

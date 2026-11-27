@@ -34,5 +34,5 @@ for record in parser.into_record_iter() {
 */
 
 pub mod hex;
-pub mod psv;
+pub(crate) mod psv;
 pub mod text;

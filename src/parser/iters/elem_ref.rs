@@ -914,7 +914,7 @@ impl<'a> ElemRef<'a> {
     /// One pass over the attribute TLVs for the scalar attributes, then the borrowed views for the
     /// AS path and communities. Values match an elem built from a parsed `MrtRecord`, including the
     /// `Some(0)` defaults for MED and LOCAL_PREF.
-    pub fn to_bgp_elem(&self) -> BgpElem {
+    pub(crate) fn to_bgp_elem(&self) -> BgpElem {
         let mut origin: Option<Origin> = None;
         let mut atomic = false;
         let mut aggregator: Option<(Asn, BgpIdentifier)> = None;
@@ -2414,5 +2414,37 @@ mod tests {
         // Non-multiple-of-4 length is rejected cleanly as empty rather than panicking.
         assert!(bytes_as_be_u32_words(&backing[1..8]).is_empty());
         assert!(bytes_as_be_u32_words(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod materialise_tests {
+    use super::*;
+
+    /// A real TABLE_DUMP_V2 slice: one PEER_INDEX_TABLE followed by 399 RIB records.
+    const RIB_FIXTURE: &str = "tests/fixtures/routeviews/bview.slice.gz";
+
+    /// Every field of a materialised element must equal the owned path's element for the same
+    /// entry, so the borrowed engine cannot drift from the general parser.
+    #[test]
+    fn borrowed_elems_match_owned_elems() {
+        let owned: Vec<_> = BgpkitParser::new(RIB_FIXTURE)
+            .expect("open fixture")
+            .into_elem_iter()
+            .collect();
+        assert!(!owned.is_empty(), "fixture produced no elems");
+
+        let mut parser = BgpkitParser::new(RIB_FIXTURE).expect("open fixture");
+        let mut borrowed = Vec::new();
+        while let Some(mut record) = parser.next_record_elems() {
+            for elem in record.iter() {
+                borrowed.push(elem.to_bgp_elem());
+            }
+        }
+
+        assert_eq!(owned.len(), borrowed.len(), "element count differs");
+        for (index, (owned_elem, borrowed_elem)) in owned.iter().zip(borrowed.iter()).enumerate() {
+            assert_eq!(owned_elem, borrowed_elem, "elem {index} differs");
+        }
     }
 }

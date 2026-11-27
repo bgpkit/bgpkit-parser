@@ -6,7 +6,6 @@
 //! - `owned-count`: count-only walk via `into_elem_iter`
 //! - `owned-fields`: walk reading `prefix + peer + as_path + origin_asns` via `into_elem_iter`
 //! - `owned-echo`: walk materialising every owned elem and mixing all its fields
-//! - `view-owned`: walk materialising every elem from the borrowed view (`ElemRef::to_bgp_elem`)
 
 use bgpkit_parser::BgpkitParser;
 use std::hint::black_box;
@@ -45,19 +44,6 @@ fn main() {
                     for origin in elem.origin_asns() {
                         acc = acc.wrapping_add(u32::from(origin) as u64);
                     }
-                    count += 1;
-                }
-            }
-            black_box(acc);
-            println!("elems: {count} (checksum: {acc})");
-        }
-        "view-owned" => {
-            let mut parser = BgpkitParser::new(&path).expect("open input");
-            let mut count = 0usize;
-            let mut acc = 0u64;
-            while let Some(mut rec) = parser.next_record_elems() {
-                for elem in rec.iter() {
-                    acc = mix_elem(&elem.to_bgp_elem(), acc);
                     count += 1;
                 }
             }
