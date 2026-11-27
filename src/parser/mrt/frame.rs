@@ -130,6 +130,10 @@ impl Framer {
         // costs one call per chunk. `read_to_end` into the retained allocation behaves like the
         // owned path on compressed input, and on uncompressed input it measures the same.
         body.clear();
+        // A caller that hands in a fresh buffer would otherwise grow it from zero on every record;
+        // reserving the declared length makes the read a single allocation, and is a no-op for the
+        // reusable buffers the iterators keep.
+        body.reserve(body_len);
         if let Err(err) = input.take(body_len as u64).read_to_end(body) {
             return Err(FrameError {
                 error: ParserError::IoError(err),
