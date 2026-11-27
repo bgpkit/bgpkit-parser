@@ -177,27 +177,40 @@ error text, bytes and `consumed` flag, so the two cannot drift apart again.
 
 ## 8.1 Measured against BGPStream
 
-Same host, same files, both tools rendering every element and writing to `/dev/null`. `cores` is
-`task-clock / wall` from `perf stat`, i.e. how many cores the tool actually kept busy.
+Three repetitions per case, tools alternating, medians. Same host, same files, `cores` is
+`task-clock / wall`. Both tools single-threaded except where noted.
 
-| workload | bgpreader | bgpkit-parser | wall | per-core CPU |
-| --- | --- | --- | --- | --- |
-| RIB, all elements | 1158.6G, 95.15s, 1.05 cores | 540.0G, 50.56s, 1.00 cores | 1.88x | 1.98x |
-| RIB, `-p 8.8.8.0/24` | 118.8G, 9.47s, 1.56 cores | 46.7G, 4.60s, 1.00 cores | 2.06x | 3.22x |
-| updates, all elements | 47.7G, 3.88s, 1.06 cores | 26.1G, 2.71s, 0.99 cores | 1.43x | 1.52x |
-| updates, peer ASN 835 | 4.6G, 0.40s, 1.49 cores | 4.0G, 0.47s, 0.96 cores | **0.85x** | 1.33x |
+Library level, nothing rendered:
 
-Reading this honestly:
+| workload | bgpkit-parser | bgpreader / BGPStream | ratio |
+| --- | --- | --- | --- |
+| RIB, parsed records | 191.1G, 21.65s, 1.00 cores | 46.4G, 5.26s, 1.12 cores | 0.24x |
+| RIB, elements | 145.8G, 15.03s, 1.00 cores | 75.5G, 8.70s, 1.08 cores | 0.58x |
+| updates, elements | 10.4G, 1.26s, 0.99 cores | 4.0G, 0.34s, 1.57 cores | 0.27x |
 
-- bgpkit-parser is single-threaded in every scenario; bgpreader keeps about one core when it does
-  not filter, and about one and a half when it does.
-- On CPU time per core, bgpkit-parser is ahead in all four scenarios.
-- On wall time it is ahead in three of four. The updates-with-a-peer-filter case loses, because the
-  file is small enough that inflate dominates and bgpreader's second thread covers part of it. Only
-  overlapping inflate with parsing would win that one back.
-- The field sets differ between the two tools, so this is approximate real usage, not an
-  identical-output comparison. Counting elements instead of rendering them flatters bgpkit-parser
-  by a wide margin and is not a fair row; the table above renders in both tools.
+Rendering every element to `/dev/null`:
+
+| workload | bgpkit-parser | bgpreader | ratio |
+| --- | --- | --- | --- |
+| RIB, all elements | 539.5G, 50.62s, 1.00 cores | 1158.1G, 95.07s, 1.06 cores | 1.88x |
+| RIB, `-p 8.8.8.0/24` | 46.7G, 4.52s, 1.00 cores | 118.8G, 9.27s, 1.58 cores | 2.05x |
+| updates, all elements | 26.2G, 2.75s, 0.99 cores | 47.7G, 3.81s, 1.06 cores | 1.39x |
+
+What this says, without rounding it up:
+
+- **At the library level BGPStream is still faster than this crate**: 4.1x on parsed records,
+  1.7x on elements, 3.7x on an updates file. Our wins are in rendering, where their formatting
+  costs more than twice what ours does (1158G against 540G for the whole job).
+- Part of the library-level gap is an API difference, not waste: our record path returns an owned
+  `MrtRecord` (a `Vec<Attribute>` whose values own `Bytes`) and our element path returns an owned
+  `BgpElem` (owned `AsPath`, `Vec<MetaCommunity>`, `Vec<Asn>`), while BGPStream hands out borrowed
+  elements over a compact internal record. Producing owned values costs what it costs.
+- The lazy consumer shows the floor under that model: counting elements through
+  `next_record_elems` without reading fields costs 4.96G / 1.12s on the same uncompressed dump.
+  That is not the same work as BGPStream's element iteration, which decodes a record eagerly, so it
+  is quoted here as a ceiling for a lazy API, not as a comparison.
+- Closing the library-level gap means not building the owned attribute model, which is a public
+  API decision, or shipping the lazy iterator as the default, which is the same decision.
 
 ## 9. Acceptance numbers
 
