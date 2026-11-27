@@ -113,7 +113,7 @@ builds a `BgpElem` for the rest of the record.
 1. No public API change; with no filters, output is byte-identical to today for every iterator.
 2. `Frame` borrows the body and cannot outlive the next fill. Internal consumers are push-style;
    public iterators are unaffected because they hand out owned values.
-3. One peer table owned by `ReaderState`, replaced when a `PeerIndex` frame is framed, never copied
+3. One peer table owned by the parser, replaced when a `PeerIndex` frame is framed, never copied
    per record, and never reachable from a `Frame`.
 4. A record skipped by a filter is not parsed, so it produces no attribute warnings and no RFC 7606
    findings. This is a documented behaviour change for filtered runs and goes in the changelog.
@@ -138,6 +138,21 @@ builds a `BgpElem` for the rest of the record.
   The earlier 6.5x figure compared a four-field view walk against full element construction and was
   not like for like. Attribute decoding dominates both paths; the win comes from dropping the
   intermediate `Attributes` model, not from the element itself.
+
+## 7.2 One framing path, one error shape
+
+`frame.rs` owns the wire framing for every consumer: header capture, the 16 MiB limit, the body
+read and the historical `TABLE_DUMP` length repair. `mrt_record::read_chunk` calls `Framer` and
+keeps only the ownership move into a `RawMrtRecord`, so the layout exists once.
+
+A framing failure is a `FrameError` carrying three things: the bytes read so far, the parsed
+header when there is one, and `consumed`, meaning the declared body was read in full so the
+reader is already past this record. The recovery path needs that last bit to choose between
+continuing at the next record and scanning for a boundary; it is answered where the bytes are
+read rather than guessed by each caller.
+
+`frame::error_parity_tests` feeds five broken streams to both entry points and requires the same
+error text, bytes and `consumed` flag, so the two cannot drift apart again.
 
 ## 8. Migration, each step shippable and measured
 
