@@ -385,6 +385,18 @@ Against the numbers this line of work started from, AS174's community went 563.3
 that can reject nothing is now cheaper than no filter, because a record the predicate excludes never
 builds its elements.
 
+### 8.3.6 The broker-shaped workload
+
+Fifty 23 MB updates files, one parser per file, the way a broker consumer reads a day of a collector:
+counting every element costs 541.7G and rendering them 2096.8G (64.2s and 211.3s), against 2386.0G and
+207.6s for BGPStream's one-process-per-file render loop. Both sides see 138,320,500 elements and the
+same prefix hash.
+
+This is the case where the parser's advantage is smallest, because rendering dominates: about 15.2k
+instructions per element on our side against 17.3k on theirs, so a 14% instruction edge and parity in
+wall time. A render of an update also still goes through the owned element iterator; only the
+count-only path uses the borrowed view.
+
 ### 8.3.5 The borrowed view serves updates
 
 `next_record_elems` used to skip every non-RIB record, so a caller reading an updates file got no
