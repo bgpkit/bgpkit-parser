@@ -75,20 +75,19 @@ struct Attrs<'a> { bytes: &'a [u8] }   // TLV walk; find(code) -> Option<&'a [u8
 - **Other entry types**: `Opaque`, consumable only as bytes; every consumer falls back to today's
   behaviour.
 
-## 5. Consumers
+## 5. Consumers, as built
 
-| public surface | expansion of the frame |
+| public surface | what it does now |
 | --- | --- |
-| `into_raw_record_iter` | `RawMrtRecord` (copies header and body into `Bytes`, as its contract requires) |
-| `into_record_iter` | `Frame::to_record()` → owned `MrtRecord` |
-| `into_elem_iter` | `FrameBody::elems()` → materialise one `BgpElem` per entry, one TLV pass per entry |
-| `into_diagnostic_iter` | same `Frame`, findings retained per record |
-| filter pass | `FrameBody::may_match(&[Filter])` → `Reject` / `Accept` / `Unknown`, stops at the first match |
-| future view iterator | `FrameBody::entries()` → `ElemRef` |
+| `into_elem_iter`, unfiltered RIB dump | reads one framed record, materialises the elements of its entries from the borrowed view (`ElemRef::to_bgp_elem`), never builds an `MrtRecord` |
+| `into_elem_iter`, any other record | the framed bytes are handed to `parse_mrt_body` and the owned path serves that record |
+| `into_record_iter` | unchanged: frames through `read_chunk` and returns an owned `MrtRecord`; frames add nothing here because `MrtRecord` must own its `Bytes` |
+| `into_raw_record_iter` | unchanged: owned `RawMrtRecord` |
+| filter pass | skips a record before parsing when `frame::classify` gives a field that fails a filter, and the element filter then runs unchanged |
 
-The materialiser is the load-bearing piece: it must fill every `BgpElem` field from **one** pass over
-the entry's attribute TLVs. Calling per-field accessors instead would walk the attribute list several
-times per entry and make the new default slower than the old one.
+The materialiser walks the entry's attribute TLVs once for the scalar attributes and reuses the
+borrowed views for the path, communities, next hop and the two u32 attributes. It is not a single
+pass, and the doc no longer claims one; see §7.1 for what that costs.
 
 ## 6. Filter pushdown on top of it
 
