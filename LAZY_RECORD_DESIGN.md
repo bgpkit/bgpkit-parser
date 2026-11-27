@@ -337,6 +337,18 @@ deliberately does not decide, so a user who types it sees the old cost.
 Whole-dump PSV renders are byte-identical to the previous binary for seven shapes: `^15169:`,
 `^3356:`, `^15169:1$`, `^174:`, ` 3356 `, ` 65001 `, and `^3356 `.
 
+Two follow-ups were considered on 2026-11-27 and rejected, so that the cost model stays honest about
+what will not change:
+
+- rewriting `ASN:VALUE` to `^ASN:VALUE$` inside the filter constructor, so the shape the CLI
+  documents would take the fast path;
+- a `community_asn` key that matches plain, large, and extended communities in one expression.
+
+The first changes what an existing filter string selects (`15169:` also matches an extended community
+whose global administrator is 15169, which is 498 elements on this dump), and the second adds filter
+surface. Compatibility outranks both, so the fast path stays reachable only through the anchored
+form, and every existing spelling keeps the elements it always returned.
+
 ## 9. Acceptance numbers
 
 Same file and method as the baseline (`bview.20261014.0000.gz`, `perf stat` instructions, warm cache,
