@@ -30,16 +30,14 @@ measure() {
     label=$1
     binary=$2
     shift 2
+    # Wall time is taken around the same run the counters come from, so both describe one execution.
+    start=$(date +%s%N)
     perf stat -x, -e instructions,task-clock -o /tmp/measure.perf \
         "$binary" "$@" >/dev/null 2>/dev/null
+    end=$(date +%s%N)
+    wall_ms=$(((end - start) / 1000000))
     instr=$(awk -F, '$3=="instructions"{printf "%.0f", $1}' /tmp/measure.perf)
     task_ms=$(awk -F, '$3=="task-clock"{printf "%.0f", $1}' /tmp/measure.perf)
-    wall_ms=$(
-        start=$(date +%s%N)
-        "$binary" "$@" >/dev/null 2>/dev/null
-        end=$(date +%s%N)
-        echo $(((end - start) / 1000000))
-    )
     echo "$label,$instr,$task_ms,$wall_ms" >>"$csv"
     printf '  %-26s %8.1fG %7s ms cpu\n' "$label" "$(echo "$instr" | awk '{print $1/1e9}')" "$task_ms"
 }
