@@ -265,94 +265,6 @@ impl<T: Display> Display for OptionToStr<'_, T> {
     }
 }
 
-/// Append a `u32` as decimal digits without going through `core::fmt`.
-#[inline]
-fn push_u32(out: &mut String, mut value: u32) {
-    if value < 10 {
-        out.push((b'0' + value as u8) as char);
-        return;
-    }
-    let mut buffer = [0u8; 10];
-    let mut start = buffer.len();
-    while value > 0 {
-        start -= 1;
-        buffer[start] = b'0' + (value % 10) as u8;
-        value /= 10;
-    }
-    // Only ASCII digits were written.
-    out.push_str(std::str::from_utf8(&buffer[start..]).unwrap_or_default());
-}
-
-#[inline]
-fn push_opt_u32(out: &mut String, value: Option<u32>) {
-    if let Some(value) = value {
-        push_u32(out, value);
-    }
-}
-
-#[inline]
-fn push_opt_asn(out: &mut String, value: Option<Asn>) {
-    if let Some(value) = value {
-        push_u32(out, u32::from(value));
-    }
-}
-
-/// Mirror of `AsPath`'s `Display`, written straight into the buffer. Every ASN would otherwise
-/// cost one `core::fmt` call.
-fn push_as_path(out: &mut String, path: &AsPath) {
-    for (index, segment) in path.iter_segments().enumerate() {
-        if index != 0 {
-            out.push(' ');
-        }
-        match segment {
-            AsPathSegment::AsSequence(values) | AsPathSegment::ConfedSequence(values) => {
-                let mut asns = values.iter();
-                if let Some(first) = asns.next() {
-                    push_u32(out, u32::from(*first));
-                    for asn in asns {
-                        out.push(' ');
-                        push_u32(out, u32::from(*asn));
-                    }
-                }
-            }
-            AsPathSegment::AsSet(values) | AsPathSegment::ConfedSet(values) => {
-                out.push('{');
-                let mut asns = values.iter();
-                if let Some(first) = asns.next() {
-                    push_u32(out, u32::from(*first));
-                    for asn in asns {
-                        out.push(',');
-                        push_u32(out, u32::from(*asn));
-                    }
-                }
-                out.push('}');
-            }
-        }
-    }
-}
-
-/// Space-separated ASNs, matching `OptionToStrVec` without the per-ASN `String`.
-fn push_asns(out: &mut String, asns: Option<&[Asn]>) {
-    let Some(asns) = asns else { return };
-    for (index, asn) in asns.iter().enumerate() {
-        if index > 0 {
-            out.push(' ');
-        }
-        push_u32(out, u32::from(*asn));
-    }
-}
-
-/// Append the element timestamp: integers stay integers, fractional values keep full precision.
-#[inline]
-fn push_timestamp(out: &mut String, timestamp: f64) {
-    use std::fmt::Write as _;
-    if timestamp >= 0.0 && timestamp < u32::MAX as f64 && timestamp.fract() == 0.0 {
-        push_u32(out, timestamp as u32);
-    } else {
-        let _ = write!(out, "{timestamp}");
-    }
-}
-
 pub fn option_to_string_communities(o: &Option<Vec<MetaCommunity>>) -> String {
     if let Some(v) = o {
         v.iter().join(" ")
@@ -483,55 +395,9 @@ impl BgpElem {
     /// Appends the PSV row to `out`.
     ///
     /// Streaming callers reuse one buffer and write it out themselves, which avoids a `String`
-    /// allocation per element. Communities are written in place for the same reason.
+    /// allocation per element. The field rendering lives in [`crate::render::psv`].
     pub fn write_psv(&self, out: &mut String) {
-        use std::fmt::Write as _;
-        let t = match self.elem_type {
-            ElemType::ANNOUNCE => "A",
-            ElemType::WITHDRAW => "W",
-        };
-        // Numeric fields dominate the render cost when written through `core::fmt`, which pays
-        // padding and integer-formatting machinery per field. Digits go straight into the buffer.
-        out.push_str(t);
-        out.push('|');
-        push_timestamp(out, self.timestamp);
-        out.push('|');
-        let _ = write!(out, "{}|", self.peer_ip);
-        push_u32(out, u32::from(self.peer_asn));
-        out.push('|');
-        let _ = write!(out, "{}|", self.prefix);
-        if let Some(path) = &self.as_path {
-            push_as_path(out, path);
-        }
-        out.push('|');
-        push_asns(out, self.origin_asns.as_deref());
-        out.push('|');
-        let _ = write!(
-            out,
-            "{}|{}|",
-            OptionToStr(&self.origin),
-            OptionToStr(&self.next_hop),
-        );
-        push_opt_u32(out, self.local_pref);
-        out.push('|');
-        push_opt_u32(out, self.med);
-        out.push('|');
-        if let Some(communities) = &self.communities {
-            for (index, community) in communities.iter().enumerate() {
-                if index > 0 {
-                    out.push(' ');
-                }
-                let _ = write!(out, "{community}");
-            }
-        }
-        out.push('|');
-        out.push_str(if self.atomic { "true" } else { "false" });
-        out.push('|');
-        push_opt_asn(out, self.aggr_asn);
-        out.push('|');
-        let _ = write!(out, "{}", OptionToStr(&self.aggr_ip));
-        out.push('|');
-        push_opt_asn(out, self.only_to_customer);
+        crate::render::psv::write_elem(self, out);
     }
 }
 
@@ -653,12 +519,5 @@ mod tests {
         assert_eq!(OptionToStr(&asn_opt).to_string(), "12");
         let none_opt: Option<u32> = None;
         assert_eq!(OptionToStr(&none_opt).to_string(), "");
-        let asns_opt = Some(vec![Asn::new_32bit(12), Asn::new_32bit(34)]);
-        let mut joined = String::new();
-        push_asns(&mut joined, asns_opt.as_deref());
-        assert_eq!(joined, "12 34");
-        let mut empty = String::new();
-        push_asns(&mut empty, None);
-        assert_eq!(empty, "");
     }
 }

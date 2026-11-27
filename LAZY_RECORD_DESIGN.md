@@ -164,7 +164,7 @@ builds a `BgpElem` for the rest of the record.
 | RIB, `-p 8.8.8.0/24` | 117.3G / 8.8s | 46.7G / 4.5s |
 | updates, all elements | 47.7G / 3.9s | 10.1G / 1.2s |
 | updates, peer ASN 835 | 4.6G / 0.43s | 4.0G / 0.44s |
-| RIB, full PSV export | (not compared) | 1305.0G / 153.9s -> 695.1G / 64.0s |
+| RIB, full PSV export | (not compared) | 1304.9G / 154.9s -> 501.6G / 46.4s |
 
 The field sets differ between the two tools, so these are approximate real-usage numbers, not
 identical-output comparisons. Filtered scans on compressed input are now bounded by inflate.
