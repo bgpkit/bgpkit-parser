@@ -10,7 +10,7 @@
 //! The one rule here is that a reject must be certain: whenever this module cannot decide an entry
 //! it reports that, and the caller parses the record the general way.
 
-use crate::models::{AsPath, AsPathSegment, Asn, AttributeValue, Attributes, Community, Origin};
+use crate::models::{Asn, Origin};
 use crate::parser::mrt::frame::FLAG_ADD_PATH;
 use crate::Filter;
 use smallvec::SmallVec;
@@ -220,13 +220,6 @@ impl EntryScreen {
         (!predicates.is_empty()).then_some(EntryScreen { predicates })
     }
 
-    /// False only when this entry cannot satisfy the filters, whatever element it would become.
-    pub(crate) fn admits(&self, attributes: &Attributes) -> bool {
-        self.predicates
-            .iter()
-            .all(|predicate| decoded_satisfies(attributes, predicate) != Some(false))
-    }
-
     /// The same answer from the entry's raw attribute block, for the borrowed path.
     pub(crate) fn admits_bytes(&self, attrs: &[u8]) -> bool {
         let facts = read_entry(attrs);
@@ -236,153 +229,6 @@ impl EntryScreen {
         self.predicates
             .iter()
             .all(|predicate| entry_satisfies(&facts, predicate) != Some(false))
-    }
-}
-
-/// The decoded twin of [`entry_satisfies`], over the same predicates and with the same three-state
-/// answer. `None` means this entry cannot be decided without building the element.
-fn decoded_satisfies(attributes: &Attributes, predicate: &AttrPredicate) -> Option<bool> {
-    match predicate {
-        AttrPredicate::OriginAsn(asn) => Some(
-            decoded_origins(attributes)?
-                .iter()
-                .any(|origin| *origin == Asn::from(*asn)),
-        ),
-        AttrPredicate::OriginAsns(asns) => {
-            let origins = decoded_origins(attributes)?;
-            Some(
-                origins
-                    .iter()
-                    .any(|origin| asns.iter().any(|asn| Asn::from(*asn) == *origin)),
-            )
-        }
-        AttrPredicate::OriginValue(origin) => Some(decoded_origin(attributes) == Some(*origin)),
-        // A two-field exact pattern only ever matches a plain community.
-        AttrPredicate::CommunityExact { asn, value } => {
-            Some(decoded_community(attributes, *asn, Some(*value)))
-        }
-        AttrPredicate::CommunityAsn { asn } => decoded_community_asn(attributes, *asn),
-        AttrPredicate::PathAsn {
-            asn,
-            at_start,
-            at_end,
-        } => {
-            let elements = decoded_path_elements(attributes)?;
-            Some(positions_match(&elements, *asn, *at_start, *at_end))
-        }
-    }
-}
-
-/// The origin ASNs of a decoded path, with the same rules as [`path_origin`].
-fn decoded_origins(attributes: &Attributes) -> Option<SmallVec<[Asn; 4]>> {
-    let path = decoded_as_path(attributes)?;
-    let mut origins: SmallVec<[Asn; 4]> = SmallVec::new();
-    let Some(last) = path.segments.last() else {
-        return Some(origins);
-    };
-    match last {
-        AsPathSegment::AsSequence(members) => {
-            if let Some(last) = members.last() {
-                origins.push(*last);
-            }
-        }
-        AsPathSegment::AsSet(members) => {
-            if members.len() != 1 {
-                return None;
-            }
-            origins.push(members[0]);
-        }
-        // Confederations never contribute an origin.
-        _ => {}
-    }
-    Some(origins)
-}
-
-/// The `ORIGIN` attribute as it appears on the element, or `None` when it is absent.
-fn decoded_origin(attributes: &Attributes) -> Option<Origin> {
-    attributes
-        .inner
-        .iter()
-        .find_map(|attribute| match &attribute.value {
-            AttributeValue::Origin(origin) => Some(*origin),
-            _ => None,
-        })
-}
-
-/// The `AS_PATH` of a decoded record, unless an `AS4_PATH` could replace it.
-fn decoded_as_path(attributes: &Attributes) -> Option<&AsPath> {
-    let mut path = None;
-    for attribute in &attributes.inner {
-        match &attribute.value {
-            AttributeValue::AsPath(value) => path = Some(value),
-            AttributeValue::As4Path(_) => return None,
-            _ => {}
-        }
-    }
-    path
-}
-
-/// The rendered element list of a decoded path, in the shape [`positions_match`] expects.
-fn decoded_path_elements(attributes: &Attributes) -> Option<SmallVec<[Option<u32>; 32]>> {
-    let path = decoded_as_path(attributes)?;
-    let mut elements: SmallVec<[Option<u32>; 32]> = SmallVec::new();
-    for segment in &path.segments {
-        match segment {
-            AsPathSegment::AsSequence(members) | AsPathSegment::ConfedSequence(members) => {
-                for member in members {
-                    if elements.len() == elements.capacity() {
-                        return None;
-                    }
-                    elements.push(Some(u32::from(*member)));
-                }
-            }
-            AsPathSegment::AsSet(_) | AsPathSegment::ConfedSet(_) => {
-                if elements.len() == elements.capacity() {
-                    return None;
-                }
-                elements.push(None);
-            }
-        }
-    }
-    Some(elements)
-}
-
-fn decoded_community(attributes: &Attributes, asn: u16, value: Option<u16>) -> bool {
-    attributes
-        .inner
-        .iter()
-        .any(|attribute| match &attribute.value {
-            AttributeValue::Communities(communities) => communities.iter().any(|community| {
-                matches!(community, Community::Custom(community_asn, community_value)
-                if u32::from(*community_asn) == u32::from(asn)
-                    && value.is_none_or(|wanted| wanted == *community_value))
-            }),
-            _ => false,
-        })
-}
-
-fn decoded_community_asn(attributes: &Attributes, asn: u16) -> Option<bool> {
-    let mut matched = false;
-    let mut has_extended = false;
-    for attribute in &attributes.inner {
-        match &attribute.value {
-            AttributeValue::Communities(_) => matched |= decoded_community(attributes, asn, None),
-            AttributeValue::LargeCommunities(communities) => {
-                matched |= communities
-                    .iter()
-                    .any(|community| community.global_admin == u32::from(asn));
-            }
-            AttributeValue::ExtendedCommunities(_)
-            | AttributeValue::Ipv6AddressSpecificExtendedCommunities(_) => has_extended = true,
-            _ => {}
-        }
-    }
-    if matched {
-        Some(true)
-    } else if has_extended && asn <= u8::MAX as u16 {
-        None
-    } else {
-        Some(false)
     }
 }
 

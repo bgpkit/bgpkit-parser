@@ -232,7 +232,8 @@ impl<R: Read> Iterator for ElemIterator<R> {
                 }
             }
             let record = self.record_iter.next()?;
-            self.pending = self.elementor.ingest_screened(record, self.screen.clone());
+            // This branch is core-dump mode: it builds every element and lets the filter decide.
+            self.pending = self.elementor.ingest(record);
         }
     }
 }

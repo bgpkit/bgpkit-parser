@@ -255,25 +255,17 @@ fn next_rib_elem(
     peer_table: &PeerIndexTable,
     prefix: NetworkPrefix,
     entries: &mut std::vec::IntoIter<RibEntry>,
-    screen: Option<&crate::parser::attr_scan::EntryScreen>,
 ) -> Result<Option<BgpElem>, ()> {
-    loop {
-        let Some(entry) = entries.next() else {
-            return Ok(None);
-        };
-        // The peer lookup stays ahead of the screen so an entry naming a peer the table does not
-        // have still stops the record, exactly as it did before screening existed.
-        let pid = entry.peer_index;
-        let Some(peer) = peer_table.get_peer_by_id(&pid) else {
+    let Some(entry) = entries.next() else {
+        return Ok(None);
+    };
+    let pid = entry.peer_index;
+    match peer_table.get_peer_by_id(&pid) {
+        Some(peer) => Ok(Some(rib_entry_to_elem(prefix, peer, entry))),
+        None => {
             error!("peer ID {} not found in peer_index table", pid);
-            return Err(());
-        };
-        if let Some(screen) = screen {
-            if !screen.admits(&entry.attributes) {
-                continue;
-            }
+            Err(())
         }
-        return Ok(Some(rib_entry_to_elem(prefix, peer, entry)));
     }
 }
 
@@ -289,8 +281,6 @@ pub(crate) enum PendingElems {
     RibAfi {
         prefix: NetworkPrefix,
         entries: std::vec::IntoIter<RibEntry>,
-        /// Entries this screen rejects are dropped before their element is built.
-        screen: Option<std::sync::Arc<crate::parser::attr_scan::EntryScreen>>,
     },
     Bgp4Mp(BgpUpdateElemIter),
 }
@@ -303,15 +293,11 @@ impl PendingElems {
             PendingElems::TableDump(elem) => elem.take(),
             PendingElems::TableDumpBatch(entries) => entries.next().map(table_dump_to_elem),
             PendingElems::Bgp4Mp(iter) => iter.next(),
-            PendingElems::RibAfi {
-                prefix,
-                entries,
-                screen,
-            } => {
+            PendingElems::RibAfi { prefix, entries } => {
                 // a RIB record only becomes pending while a peer table is set
                 let next = peer_table
                     .ok_or(())
-                    .and_then(|t| next_rib_elem(t, *prefix, entries, screen.as_deref()));
+                    .and_then(|t| next_rib_elem(t, *prefix, entries));
                 next.unwrap_or_else(|()| {
                     *self = PendingElems::Empty;
                     None
@@ -334,7 +320,7 @@ impl Iterator for RecordElemIter<'_> {
                 peer_table,
                 prefix,
                 entries,
-            } => next_rib_elem(peer_table, *prefix, entries, None).unwrap_or_else(|()| {
+            } => next_rib_elem(peer_table, *prefix, entries).unwrap_or_else(|()| {
                 *self = RecordElemIter::Empty;
                 None
             }),
@@ -594,7 +580,6 @@ impl Elementor {
                     Ok(PendingElems::RibAfi {
                         prefix: t.prefix,
                         entries: t.rib_entries.into_iter(),
-                        screen: None,
                     })
                 }
                 TableDumpV2Message::RibGeneric(_) => Err(ElemError::UnsupportedRibGeneric),
@@ -634,20 +619,6 @@ impl Elementor {
     /// its elems for lazy draining with [`PendingElems::next_elem`] instead of a `Vec`.
     ///
     /// A [`PeerIndexTable`] record sets the peer table; errors are logged.
-    /// Like [`ingest`](Elementor::ingest), but a RIB record's entries are screened first so the
-    /// ones that cannot satisfy the filters never become elements.
-    pub(crate) fn ingest_screened(
-        &mut self,
-        record: MrtRecord,
-        screen: Option<std::sync::Arc<crate::parser::attr_scan::EntryScreen>>,
-    ) -> PendingElems {
-        let mut pending = self.ingest(record);
-        if let (PendingElems::RibAfi { screen: slot, .. }, Some(screen)) = (&mut pending, screen) {
-            *slot = Some(screen);
-        }
-        pending
-    }
-
     pub(crate) fn ingest(&mut self, record: MrtRecord) -> PendingElems {
         match record.message {
             MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)) => {
@@ -1468,7 +1439,6 @@ mod tests {
                 })
                 .to_vec()
                 .into_iter(),
-            screen: None,
         };
 
         // an unknown peer ends the record, like RecordElemIter does

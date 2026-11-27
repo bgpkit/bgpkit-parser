@@ -8,8 +8,8 @@ validation warnings. The format is designed around this crate's own models
 (reusing the leaf `Display` implementations), not around any external tool's
 output; it is *inspired by bgpdump's human-readable output*.
 
-The [`psv`] module renders one [`BgpElem`](crate::BgpElem) as a single PSV row, appending every
-field to a caller-supplied buffer so a streaming caller reuses one allocation.
+The crate-private `psv` writer renders one [`BgpElem`](crate::BgpElem) as a single PSV row,
+appending every field to a caller-supplied buffer so a streaming caller reuses one allocation.
 
 The [`hex`] module encodes raw record bytes (as yielded by
 [`BgpkitParser::into_filtered_raw_record_iter`](crate::BgpkitParser::into_filtered_raw_record_iter))
