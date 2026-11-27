@@ -319,7 +319,12 @@ impl<R: Read> BgpkitParser<R> {
                     peer_asn,
                     timestamp,
                 } if filter::peer_excludes_record(&self.filters, &peer_ip, &peer_asn)
-                    || filter::timestamp_excludes_record(&self.filters, timestamp) =>
+                    || filter::timestamp_excludes_record(&self.filters, timestamp)
+                    || attr_scan::bgp4mp_record_excluded(
+                        &self.filters,
+                        &self.elem_view_state.body_buf[..body_len],
+                        header.entry_subtype,
+                    ) =>
                 {
                     continue
                 }

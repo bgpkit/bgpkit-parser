@@ -118,9 +118,9 @@ pub struct ElemIterator<R> {
 
 impl<R> ElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
-        // The framed path reads records through the parser's own buffer and does not apply filters
-        // itself, so it is only used when nothing else has claimed either.
-        let framed = parser.filters.is_empty() && !parser.core_dump;
+        // The framed path reads records through the parser's own buffer; the element loop applies
+        // the screen and the filters to what it produces.
+        let framed = !parser.core_dump;
         let screen =
             crate::parser::attr_scan::EntryScreen::new(&parser.filters).map(std::sync::Arc::new);
         ElemIterator {
@@ -146,8 +146,21 @@ impl<R: Read> ElemIterator<R> {
                 // The declared entry count is attacker-controlled; cap the reservation so a
                 // malformed record cannot ask for a large allocation per record.
                 let mut elems = Vec::with_capacity(record.len().min(1024));
+                let screen = self.screen.clone();
                 for elem in record.iter() {
+                    // An entry the screen can reject from its bytes never becomes an element.
+                    if let Some(screen) = screen.as_deref() {
+                        if !screen.admits_bytes(elem.attrs_bytes()) {
+                            continue;
+                        }
+                    }
                     elems.push(elem.to_bgp_elem());
+                }
+                // The loop above is the last use of `record`, so its borrow of the parser's
+                // buffers has ended and the filters can be read here.
+                let filters = &self.record_iter.parser.filters;
+                if !filters.is_empty() {
+                    elems.retain(|elem| elem.match_filters(filters));
                 }
                 self.batch = elems.into_iter();
                 Refill::Batch

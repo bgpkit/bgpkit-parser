@@ -226,6 +226,17 @@ impl EntryScreen {
             .iter()
             .all(|predicate| decoded_satisfies(attributes, predicate) != Some(false))
     }
+
+    /// The same answer from the entry's raw attribute block, for the borrowed path.
+    pub(crate) fn admits_bytes(&self, attrs: &[u8]) -> bool {
+        let facts = read_entry(attrs);
+        if facts.truncated {
+            return true;
+        }
+        self.predicates
+            .iter()
+            .all(|predicate| entry_satisfies(&facts, predicate) != Some(false))
+    }
 }
 
 /// The decoded twin of [`entry_satisfies`], over the same predicates and with the same three-state
@@ -520,6 +531,63 @@ fn entry_satisfies(facts: &EntryFacts<'_>, predicate: &AttrPredicate) -> Option<
     }
 }
 
+/// Where a `BGP4MP` UPDATE record keeps its path attributes, or `None` when this module should not
+/// guess. Only the fixed header and the two length prefixes are walked; nothing is decoded.
+fn bgp4mp_attributes(body: &[u8], subtype: u16) -> Option<&[u8]> {
+    let asn_len = match crate::parser::mrt::frame::bgp4mp_asn_len(subtype)? {
+        crate::models::AsnLength::Bits16 => 2,
+        crate::models::AsnLength::Bits32 => 4,
+    };
+    let mut rest = body.get(asn_len * 2..)?;
+    if rest.len() < 4 {
+        return None;
+    }
+    let ip_len = match u16::from_be_bytes([rest[2], rest[3]]) {
+        1 => 4,
+        2 => 16,
+        _ => return None,
+    };
+    rest = rest.get(4 + ip_len * 2..)?;
+    // The BGP message: 16-byte marker, two-byte length, one-byte type.
+    if rest.len() < 19 || rest[18] != 2 {
+        return None;
+    }
+    rest = &rest[19..];
+    if rest.len() < 2 {
+        return None;
+    }
+    let withdrawn_len = read_u16(rest) as usize;
+    rest = rest.get(2 + withdrawn_len..)?;
+    if rest.len() < 2 {
+        return None;
+    }
+    let attr_len = read_u16(rest) as usize;
+    rest.get(2..2 + attr_len)
+}
+
+/// Whether a `BGP4MP` UPDATE record provably yields no element that any of `filters` would keep.
+///
+/// Every element such a record yields shares one attribute block, so one decision covers the record.
+/// Withdrawals carry no attributes and therefore fail an attribute predicate as well, which is what
+/// makes the record-level answer safe.
+pub(crate) fn bgp4mp_record_excluded(filters: &[Filter], body: &[u8], subtype: u16) -> bool {
+    let predicates: SmallVec<[AttrPredicate; 4]> =
+        filters.iter().filter_map(predicate_for).collect();
+    if predicates.is_empty() {
+        return false;
+    }
+    let Some(attrs) = bgp4mp_attributes(body, subtype) else {
+        return false;
+    };
+    let facts = read_entry(attrs);
+    if facts.truncated {
+        return false;
+    }
+    predicates
+        .iter()
+        .any(|predicate| entry_satisfies(&facts, predicate) == Some(false))
+}
+
 /// Whether a RIB record provably yields no element that any of `filters` would keep.
 ///
 /// `false` is the answer whenever the record cannot be decided, so callers may skip the record on
@@ -799,6 +867,56 @@ mod tests {
         // An unanchored community pattern is not decided here.
         let filters = [Filter::Community(ComparableRegex::new("15169:").unwrap())];
         assert!(!rib_record_excluded(&filters, &body, offset, 0));
+    }
+
+    /// A BGP4MP UPDATE body: peer 65001, local 65002, IPv4, then one announced /24 with attributes.
+    fn bgp4mp_update(attrs: &[u8]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&65001u32.to_be_bytes());
+        body.extend_from_slice(&65002u32.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&1u16.to_be_bytes());
+        body.extend_from_slice(&[10, 0, 0, 1]);
+        body.extend_from_slice(&[10, 0, 0, 2]);
+        // BGP header: marker, length, type = UPDATE
+        body.extend_from_slice(&[0xff; 16]);
+        body.extend_from_slice(&(19u16 + 2 + 2 + attrs.len() as u16 + 4).to_be_bytes());
+        body.push(2);
+        // withdrawn routes: none
+        body.extend_from_slice(&0u16.to_be_bytes());
+        // path attributes
+        body.extend_from_slice(&(attrs.len() as u16).to_be_bytes());
+        body.extend_from_slice(attrs);
+        // NLRI: 8.8.8.0/24
+        body.extend_from_slice(&[24, 8, 8, 8]);
+        body
+    }
+
+    #[test]
+    fn a_bgp4mp_update_locates_its_attributes() {
+        let attrs = attrs(&[(2, &as_path(&[(2, &[174, 15169])]))]);
+        let body = bgp4mp_update(&attrs);
+        // 0x0004 is BGP4MP_MESSAGE_AS4.
+        let located = bgp4mp_attributes(&body, 4).expect("attributes located");
+        assert_eq!(located, attrs.as_slice());
+        assert!(!bgp4mp_record_excluded(
+            &[Filter::OriginAsn(15169)],
+            &body,
+            4
+        ));
+        assert!(bgp4mp_record_excluded(&[Filter::OriginAsn(3356)], &body, 4));
+        // A subtype whose layout this module does not model stays undecided, and so does a body
+        // whose header does not line up with the subtype's widths.
+        assert!(bgp4mp_attributes(&body, 99).is_none());
+        assert!(!bgp4mp_record_excluded(
+            &[Filter::OriginAsn(3356)],
+            &body,
+            99
+        ));
+        assert!(
+            bgp4mp_attributes(&body, 6).is_none(),
+            "2-byte header against a 4-byte body"
+        );
     }
 
     #[test]

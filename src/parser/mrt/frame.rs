@@ -386,18 +386,25 @@ fn rib_header(mut body: &[u8], afi: Afi) -> Result<(NetworkPrefix, u16, usize), 
     Ok((prefix, entry_count, total - body.len()))
 }
 
-/// The peer named by a BGP4MP record header.
-fn bgp4mp_peer(subtype: u16, body: &[u8]) -> Result<(IpAddr, Asn), ParserError> {
+/// How many bytes one AS number takes in this `BGP4MP` subtype's header.
+pub(crate) fn bgp4mp_asn_len(subtype: u16) -> Option<AsnLength> {
     use Bgp4MpType::*;
-    let msg_type = Bgp4MpType::try_from(subtype)?;
-    let asn_len = match msg_type {
+    Some(match Bgp4MpType::try_from(subtype).ok()? {
         MessageAs4
         | StateChangeAs4
         | MessageAs4Local
         | MessageAs4Addpath
         | MessageLocalAs4Addpath => AsnLength::Bits32,
-        _ => AsnLength::Bits16,
-    };
+        Message | MessageLocal | MessageAddpath | MessageLocalAddpath | StateChange => {
+            AsnLength::Bits16
+        }
+    })
+}
+
+/// The peer named by a BGP4MP record header.
+fn bgp4mp_peer(subtype: u16, body: &[u8]) -> Result<(IpAddr, Asn), ParserError> {
+    let asn_len = bgp4mp_asn_len(subtype)
+        .ok_or_else(|| ParserError::Unsupported(format!("BGP4MP subtype {subtype}")))?;
     let mut body = body;
     let peer_asn = body.read_asn(asn_len)?;
     let _local_asn = body.read_asn(asn_len)?;

@@ -207,6 +207,18 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 flags,
                 entries_offset,
             } => {
+                // The same two record-level predicates the owned path applies, so a filtered run
+                // keeps the skips it had before it moved onto the framed path.
+                if crate::parser::filter::rib_record_excluded(&parser.filters, &prefix)
+                    || crate::parser::attr_scan::rib_record_excluded(
+                        &parser.filters,
+                        body,
+                        entries_offset,
+                        flags,
+                    )
+                {
+                    continue;
+                }
                 if parser.elem_view_state.peers.is_none() {
                     error!("{}", ElemError::MissingPeerTable);
                     continue;
@@ -224,7 +236,30 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 });
             }
             // Hand the record back untouched: the caller owns the fallback and its error handling.
-            RecordKind::Bgp4Mp { .. } | RecordKind::Other => {
+            RecordKind::Bgp4Mp {
+                peer_ip,
+                peer_asn,
+                timestamp,
+            } => {
+                // The updates header answers the peer and time predicates, so a record they
+                // exclude is dropped without ever being parsed.
+                if crate::parser::filter::peer_excludes_record(&parser.filters, &peer_ip, &peer_asn)
+                    || crate::parser::filter::timestamp_excludes_record(&parser.filters, timestamp)
+                    || crate::parser::attr_scan::bgp4mp_record_excluded(
+                        &parser.filters,
+                        body,
+                        header.entry_subtype,
+                    )
+                {
+                    continue;
+                }
+                return NextBatch::Other {
+                    header,
+                    raw_header,
+                    body_len,
+                };
+            }
+            RecordKind::Other => {
                 return NextBatch::Other {
                     header,
                     raw_header,
@@ -831,6 +866,13 @@ impl<'a> ElemRef<'a> {
     /// built from a parsed `MrtRecord`, including the `Some(0)` defaults for MED and LOCAL_PREF,
     /// with one documented difference: a known attribute that fails to parse is dropped here,
     /// while the owned path keeps it in `BgpElem::unknown`.
+    /// This entry's attribute block, for the predicates that can decide an entry from bytes.
+    pub(crate) fn attrs_bytes(&self) -> &'a [u8] {
+        self.attr_bytes
+    }
+
+    #[doc = ""]
+    #[doc = "Materialise this entry as an owned [`BgpElem`]."]
     pub(crate) fn to_bgp_elem(&self) -> BgpElem {
         let bytes = self.usable_attr_prefix();
         let afi = self.afi();
