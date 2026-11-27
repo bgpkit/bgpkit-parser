@@ -420,14 +420,11 @@ where
     let mut elem_index = 0usize;
     let mut stats = RecoveryStats::new(report_recovery);
     let mut terminal_error = None;
-    let psv = matches!(output_format, OutputFormat::Psv);
-    let streamed = psv || matches!(output_format, OutputFormat::Default);
 
     {
         let stdout = std::io::stdout();
+        // Elements are many; one buffered writer keeps the per-row syscall cost off the hot path.
         let mut writer = std::io::BufWriter::with_capacity(1 << 20, stdout.lock());
-        // One buffer for every row: the streaming formats never allocate per element.
-        let mut line = String::with_capacity(512);
 
         for event in events {
             match event {
@@ -441,32 +438,11 @@ where
                     if count_requested {
                         continue;
                     }
-                    if streamed {
-                        line.clear();
-                        if psv && elem_index == 0 {
-                            line.push_str(&BgpElem::get_psv_header());
-                            line.push('\n');
-                        }
-                        if psv {
-                            line.push_str(&elem.to_psv());
-                        } else {
-                            use std::fmt::Write as _;
-                            let _ = write!(line, "{elem}");
-                        }
-                        line.push('\n');
-                        if let Err(error) = writer.write_all(line.as_bytes()) {
-                            if error.kind() == std::io::ErrorKind::BrokenPipe {
-                                return Ok(());
-                            }
-                            return Err(error.to_string());
-                        }
-                    } else {
-                        let output = format_elem(&elem, output_format, elem_index);
-                        if !write_output(&mut writer, &output)? {
-                            return Ok(());
-                        }
-                    }
+                    let output = format_elem(&elem, output_format, elem_index);
                     elem_index += 1;
+                    if !write_output(&mut writer, &output)? {
+                        return Ok(());
+                    }
                 }
             }
         }

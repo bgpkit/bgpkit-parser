@@ -5,7 +5,7 @@
 //! [`Frame`] whose body is borrowed from a caller-owned buffer, so no path allocates per record.
 //!
 //! The body buffer is lent by the consumer rather than owned here: it lets the consumer keep its
-//! own buffer alive across records (the high-water trick) and keeps the returned frame borrowing
+//! own buffer alive across records and keeps the returned frame borrowing
 //! only that buffer, so the consumer can still mutate other state while the frame is live.
 //!
 //! The peer index table is deliberately *not* part of a [`Frame`]: `PEER_INDEX_TABLE` records
@@ -49,8 +49,8 @@ pub(crate) struct Framer {
 impl Framer {
     /// Frame the next record into `body`, borrowing it for the frame's lifetime.
     ///
-    /// `body.len()` is treated as the high-water mark across records: a shorter record reuses the
-    /// already-initialised prefix and never zeroes the tail.
+    /// The body buffer keeps its allocation across records; each record clears and refills it, so
+    /// a stream of same-sized records does not reallocate.
     #[inline]
     pub(crate) fn next<'a>(
         &mut self,
@@ -348,6 +348,13 @@ fn bgp4mp_peer(subtype: u16, body: &[u8]) -> Result<(IpAddr, Asn), ParserError> 
     let _local_asn = body.read_asn(asn_len)?;
     let _interface_index = body.read_u16()?;
     let afi = body.read_afi()?;
+    // Only the unicast and multicast families name an address; other families leave the peer
+    // address unread, so the record needs the general parser.
+    if !matches!(afi, Afi::Ipv4 | Afi::Ipv6) {
+        return Err(ParserError::Unsupported(format!(
+            "BGP4MP record with address family {afi:?}"
+        )));
+    }
     let peer_ip = body.read_address(&afi)?;
     Ok((peer_ip, peer_asn))
 }

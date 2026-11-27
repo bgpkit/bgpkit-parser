@@ -57,15 +57,13 @@ const SLOT_MERGED: u64 = u64::MAX - 2;
 pub(crate) struct ElemViewState {
     /// Reusable buffer holding the wire body of the active MRT record.
     ///
-    /// Note: `body_buf.len()` tracks the high-water initialized length across records; the active
-    /// record body is `&body_buf[..active_len]`, avoiding per-record `memset` zero-initialization.
+    /// The buffer keeps its allocation across records; the active record body is
+    /// `&body_buf[..active_len]`.
     pub(crate) body_buf: Vec<u8>,
     /// Shared framing: common header plus the body read into `body_buf`.
     pub(crate) framer: Framer,
     /// Active `TABLE_DUMP_V2` `PeerIndexTable` indexed directly by wire `peer_index`.
     peers: Option<Vec<Peer>>,
-    /// Reusable scratch buffer lent to [`RecordElems`].
-    scratch: Vec<u32>,
     /// Set once EOF or a non-recoverable framing/core-dump error ends iteration.
     finished: bool,
 }
@@ -216,8 +214,6 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 let state = &mut parser.elem_view_state;
                 let peers = state.peers.as_deref().expect("checked peers is_some");
                 let entries_bytes = &state.body_buf[entries_offset..body_len];
-                let scratch = &mut state.scratch;
-                scratch.clear();
                 return NextBatch::Rib(RecordElems {
                     header,
                     entries_bytes,
@@ -225,7 +221,6 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                     prefix: prefix.prefix,
                     entry_count,
                     flags,
-                    scratch,
                 });
             }
             // Hand the record back untouched: the caller owns the fallback and its error handling.
@@ -335,9 +330,6 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         .as_deref()
         .expect("checked peers is_some before breaking");
     let entries_bytes = &state.body_buf[entries_offset..body_len];
-    let scratch = &mut state.scratch;
-    scratch.clear();
-
     Some(RecordElems {
         header: common_header,
         entries_bytes,
@@ -345,7 +337,6 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         prefix: prefix.prefix,
         entry_count,
         flags,
-        scratch,
     })
 }
 
@@ -360,8 +351,6 @@ pub struct RecordElems<'a> {
     prefix: IpNet,
     entry_count: u16,
     flags: u8,
-    #[allow(dead_code)]
-    scratch: &'a mut Vec<u32>,
 }
 
 impl<'a> RecordElems<'a> {
@@ -837,9 +826,11 @@ impl<'a> ElemRef<'a> {
 
     /// Materialise this entry as an owned [`BgpElem`].
     ///
-    /// One pass over the attribute TLVs for the scalar attributes, then the borrowed views for the
-    /// AS path and communities. Values match an elem built from a parsed `MrtRecord`, including the
-    /// `Some(0)` defaults for MED and LOCAL_PREF.
+    /// Walks the attribute TLVs once for the scalar attributes, then reuses the borrowed views for
+    /// the AS path, the communities, the next hop and the two u32 attributes. Values match an elem
+    /// built from a parsed `MrtRecord`, including the `Some(0)` defaults for MED and LOCAL_PREF,
+    /// with one documented difference: a known attribute that fails to parse is dropped here,
+    /// while the owned path keeps it in `BgpElem::unknown`.
     pub(crate) fn to_bgp_elem(&self) -> BgpElem {
         let mut origin: Option<Origin> = None;
         let mut atomic = false;

@@ -98,7 +98,11 @@ fn push_opt_display<T: Display>(out: &mut String, value: Option<&T>) {
 /// Integers stay integers; fractional values keep the standard float formatting.
 #[inline]
 fn push_timestamp(out: &mut String, timestamp: f64) {
-    if timestamp >= 0.0 && timestamp < u32::MAX as f64 && timestamp.fract() == 0.0 {
+    if timestamp >= 0.0
+        && timestamp.is_sign_positive()
+        && timestamp < u32::MAX as f64
+        && timestamp.fract() == 0.0
+    {
         push_u32(out, timestamp as u32);
     } else {
         let _ = write!(out, "{timestamp}");

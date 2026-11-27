@@ -869,6 +869,7 @@ pub(crate) fn rib_record_excluded(filters: &[Filter], prefix: &NetworkPrefix) ->
         Filter::IpVersion(version) => (*version == IpVersion::Ipv4) != input.addr().is_ipv4(),
         Filter::Negated(inner) => match inner.as_ref() {
             // Negated: every element must fall outside the set, so a match here rejects them all.
+            Filter::IpVersion(version) => (*version == IpVersion::Ipv4) == input.addr().is_ipv4(),
             Filter::Prefix(expected, kind) => prefix_match(expected, input, kind),
             Filter::Prefixes(expected, kind) => expected
                 .iter()
