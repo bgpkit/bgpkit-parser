@@ -832,16 +832,52 @@ impl<'a> ElemRef<'a> {
     /// with one documented difference: a known attribute that fails to parse is dropped here,
     /// while the owned path keeps it in `BgpElem::unknown`.
     pub(crate) fn to_bgp_elem(&self) -> BgpElem {
+        let bytes = self.usable_attr_prefix();
+        let afi = self.afi();
+        let safi = self.safi();
+        let is_add_path = self.is_add_path();
+
         let mut origin: Option<Origin> = None;
         let mut atomic = false;
         let mut aggregator: Option<(Asn, BgpIdentifier)> = None;
         let mut only_to_customer: Option<Asn> = None;
+        let mut med: Option<u32> = None;
+        let mut local_pref: Option<u32> = None;
+        let mut next_hop: Option<IpAddr> = None;
+        let mut mp_next_hop: Option<IpAddr> = None;
+        let mut as_path_wire: Option<&[u8]> = None;
+        let mut as4_path_wire: Option<&[u8]> = None;
+        // Community attributes in wire order, decoded after the walk so the order of the produced
+        // values matches the attribute order, as the owned path extends them.
+        let mut community_attrs: Vec<(u8, &[u8])> = Vec::with_capacity(4);
         let mut unknown: Vec<AttrRaw> = Vec::new();
         let mut deprecated: Vec<AttrRaw> = Vec::new();
 
-        let mut rest = self.usable_attr_prefix();
-        while let Some((code, val, next)) = next_attr_tlv(rest) {
-            rest = next;
+        let len = bytes.len();
+        let mut pos = 0usize;
+        while pos + 3 <= len {
+            let flags = bytes[pos];
+            let code = bytes[pos + 1];
+            let (header_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
+                (3usize, bytes[pos + 2] as usize)
+            } else {
+                if pos + 4 > len {
+                    break;
+                }
+                (
+                    4usize,
+                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
+                )
+            };
+            let val_start = pos + header_len;
+            let val_end = val_start + attr_len;
+            if val_end > len {
+                self.warn_truncated_attr_once(code, attr_len, len - val_start);
+                break;
+            }
+            let val = &bytes[val_start..val_end];
+            pos = val_end;
+
             if get_deprecated_attr_type(code).is_some() {
                 deprecated.push(AttrRaw {
                     code,
@@ -849,22 +885,60 @@ impl<'a> ElemRef<'a> {
                 });
                 continue;
             }
+
             match AttrType::from(code) {
                 AttrType::ORIGIN => {
                     origin = val.first().and_then(|value| Origin::try_from(*value).ok())
                 }
+                AttrType::AS_PATH => {
+                    if validate_as_path_wire(val) {
+                        as_path_wire = Some(val);
+                    }
+                }
+                AttrType::AS4_PATH => {
+                    if validate_as_path_wire(val) {
+                        as4_path_wire = Some(val);
+                    }
+                }
+                AttrType::NEXT_HOP => {
+                    let mut value = val;
+                    if let Ok(address) = value.read_address(&afi) {
+                        next_hop = Some(address);
+                    }
+                }
+                AttrType::MULTI_EXIT_DISCRIMINATOR => {
+                    let mut value = val;
+                    if let Ok(number) = value.read_u32() {
+                        med = Some(number);
+                    }
+                }
+                AttrType::LOCAL_PREFERENCE => {
+                    let mut value = val;
+                    if let Ok(number) = value.read_u32() {
+                        local_pref = Some(number);
+                    }
+                }
                 AttrType::ATOMIC_AGGREGATE => atomic = true,
                 AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
-                    aggregator = decode_aggregator_slice(val);
+                    aggregator = decode_aggregator_slice(val)
                 }
+                AttrType::COMMUNITIES
+                | AttrType::EXTENDED_COMMUNITIES
+                | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+                | AttrType::LARGE_COMMUNITIES => community_attrs.push((code, val)),
                 AttrType::ONLY_TO_CUSTOMER => {
-                    if val.len() == 4 {
+                    if val.len() >= 4 {
                         only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
                             val[0], val[1], val[2], val[3],
                         ])));
                     }
                 }
-                // Types the elem path keeps as raw bytes, mirroring `get_relevant_attributes`.
+                AttrType::MP_REACHABLE_NLRI => {
+                    if let Ok(address) = parse_mp_reach_next_hop(val, afi, safi, is_add_path) {
+                        mp_next_hop = address;
+                    }
+                }
+                // Types the element path keeps as raw bytes, mirroring `get_relevant_attributes`.
                 AttrType::Unknown(_)
                 | AttrType::RESERVED
                 | AttrType::PMSI_TUNNEL
@@ -878,11 +952,64 @@ impl<'a> ElemRef<'a> {
             }
         }
 
-        let as_path = self.as_path().to_as_path();
-        let origin_asns = as_path
-            .as_ref()
-            .map(|path| path.iter_origins().collect::<Vec<Asn>>());
-        let communities: Vec<MetaCommunity> = self.communities().iter().collect();
+        // RFC 6793 §4.2.3: when AS_PATH is shorter than AS4_PATH, AS4_PATH is ignored.
+        let source = match (as_path_wire, as4_path_wire) {
+            (None, None) => AsPathSource::Absent,
+            (Some(path), None) => AsPathSource::Single(path),
+            (None, Some(path)) => AsPathSource::Single(path),
+            (Some(path), Some(as4_path)) => {
+                if wire_route_len(path) < wire_route_len(as4_path) {
+                    AsPathSource::Single(path)
+                } else {
+                    AsPathSource::Merged {
+                        as_path: path,
+                        as4_path,
+                    }
+                }
+            }
+        };
+        let as_path = AsPathView { source }.to_as_path();
+        let origin_asns = match source {
+            AsPathSource::Absent => None,
+            AsPathSource::Single(wire) => Some(single_wire_origins(wire).to_vec()),
+            AsPathSource::Merged { as_path, as4_path } => {
+                Some(merged_wire_origins(as_path, as4_path).to_vec())
+            }
+        };
+
+        let mut communities: Vec<MetaCommunity> = Vec::new();
+        for (code, val) in community_attrs {
+            match AttrType::from(code) {
+                AttrType::COMMUNITIES if val.len().is_multiple_of(4) => {
+                    for word in bytes_as_be_u32_words(val) {
+                        communities.push(MetaCommunity::Plain(decode_plain_community(word.get())));
+                    }
+                }
+                AttrType::EXTENDED_COMMUNITIES => {
+                    for chunk in val.as_chunks::<8>().0 {
+                        communities
+                            .push(MetaCommunity::Extended(decode_extended_community(*chunk)));
+                    }
+                }
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                    for chunk in val.as_chunks::<20>().0 {
+                        communities.push(MetaCommunity::Ipv6Extended(
+                            decode_ipv6_extended_community(chunk),
+                        ));
+                    }
+                }
+                AttrType::LARGE_COMMUNITIES if val.len().is_multiple_of(12) => {
+                    for chunk in val.as_chunks::<12>().0 {
+                        let words = bytes_as_be_u32_words(chunk);
+                        communities.push(MetaCommunity::Large(LargeCommunity::new(
+                            words[0].get(),
+                            [words[1].get(), words[2].get()],
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
 
         BgpElem {
             timestamp: self.timestamp(),
@@ -891,12 +1018,12 @@ impl<'a> ElemRef<'a> {
             peer_asn: self.peer.peer_asn,
             peer_bgp_id: Some(self.peer.peer_bgp_id),
             prefix: self.prefix(),
-            next_hop: self.next_hop(),
+            next_hop: next_hop.or(mp_next_hop),
             as_path,
             origin,
             origin_asns,
-            local_pref: self.local_pref(),
-            med: self.med(),
+            local_pref: Some(local_pref.unwrap_or(0)),
+            med: Some(med.unwrap_or(0)),
             communities: (!communities.is_empty()).then_some(communities),
             atomic,
             aggr_asn: aggregator.map(|value| value.0),
