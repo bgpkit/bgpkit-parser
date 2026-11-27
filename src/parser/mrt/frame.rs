@@ -1,8 +1,20 @@
-//! One framing path for every MRT consumer.
+//! The one framing path for every MRT consumer.
 //!
-//! Every reader of an MRT stream needs the same three steps: read the common header, read the
-//! declared body, and decide what the record is. This module owns those steps and hands out a
-//! [`Frame`] whose body is borrowed from a caller-owned buffer, so no path allocates per record.
+//! Every reader of an MRT stream needs the same steps: read the common header, reject an
+//! unreasonable declared length, read the declared body, and repair the historical `TABLE_DUMP`
+//! records that under-declared their length by four bytes. This module owns those steps, and this
+//! module only. Two consumers sit on it:
+//!
+//! - [`Framer`], which lends the body from a caller-owned buffer to the borrowed element path and
+//!   to the prefiltered record path;
+//! - `mrt_record::read_chunk`, which moves the body into an owned `RawMrtRecord` for the record
+//!   iterators. It calls [`Framer`] and keeps only the ownership move, so the wire layout, the
+//!   size limit and the legacy repair exist once.
+//!
+//! Both report a broken stream through [`FrameError`], which carries the bytes read so far, the
+//! parsed header when there is one, and whether the reader is already past the record. A consumer
+//! that recovers by scanning for the next boundary needs that last bit, so framing has to answer
+//! it rather than leave each caller to guess.
 //!
 //! The body buffer is lent by the consumer rather than owned here: it lets the consumer keep its
 //! own buffer alive across records and keeps the returned frame borrowing
@@ -28,7 +40,12 @@ pub(crate) const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
 #[derive(Debug)]
 pub(crate) struct FrameError {
     pub(crate) error: ParserError,
+    /// The header, when it parsed but the rest of the record did not.
+    pub(crate) header: Option<CommonHeader>,
     pub(crate) bytes: Option<Vec<u8>>,
+    /// The declared body was read in full, so the reader starts after this record. Only then may a
+    /// consumer continue at the next record instead of scanning for a boundary.
+    pub(crate) consumed: bool,
 }
 
 /// A framed record whose body borrows the consumer's buffer.
@@ -51,6 +68,13 @@ impl Framer {
     ///
     /// The body buffer keeps its allocation across records; each record clears and refills it, so
     /// a stream of same-sized records does not reallocate.
+    /// The header parsed during framing, when it parsed.
+    fn parsed(&self) -> Option<CommonHeader> {
+        self.parsed_header
+            .as_ref()
+            .and_then(|result| result.as_ref().ok().copied())
+    }
+
     #[inline]
     pub(crate) fn next<'a>(
         &mut self,
@@ -80,16 +104,22 @@ impl Framer {
                 {
                     return Err(FrameError {
                         error: ParserError::EofExpected,
+                        header: None,
                         bytes: None,
+                        consumed: false,
                     });
                 }
                 return Err(FrameError {
                     error: error.into(),
+                    header: None,
                     bytes: Some(self.header.as_slice().to_vec()),
+                    consumed: false,
                 });
             }
         };
 
+        // Copy the parsed header out before `framed` keeps borrowing the header buffer.
+        let parsed_header = framed.header.as_ref().ok().copied();
         self.parsed_header = Some(framed.header);
 
         if framed.body_length > MAX_MRT_MESSAGE_LEN {
@@ -97,7 +127,9 @@ impl Framer {
                 error: ParserError::OversizedRecord {
                     length: framed.body_length,
                 },
+                header: parsed_header,
                 bytes: Some(framed.raw_bytes.to_vec()),
+                consumed: false,
             });
         }
 
@@ -109,12 +141,20 @@ impl Framer {
         if let Err(err) = input.take(body_len as u64).read_to_end(body) {
             return Err(FrameError {
                 error: ParserError::IoError(err),
+                header: self.parsed(),
                 bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
+                consumed: false,
             });
         }
         if body.len() != body_len {
             let filled = body.len();
-            return Err(truncated_body(self.header, body, body_len, filled));
+            return Err(truncated_body(
+                self.header,
+                self.parsed(),
+                body,
+                body_len,
+                filled,
+            ));
         }
 
         self.apply_legacy_length_correction(input, body, body_len)
@@ -160,6 +200,8 @@ impl Framer {
                     std::io::ErrorKind::UnexpectedEof,
                     "truncated historical TABLE_DUMP length correction",
                 )),
+                header: Some(common_header),
+                consumed: false,
                 bytes: Some(assemble_error_bytes(
                     self.header.as_slice(),
                     &body[..body_len + read],
@@ -167,6 +209,8 @@ impl Framer {
             }),
             Err((err, read)) => Err(FrameError {
                 error: ParserError::IoError(err),
+                header: Some(common_header),
+                consumed: false,
                 bytes: Some(assemble_error_bytes(
                     self.header.as_slice(),
                     &body[..body_len + read],
@@ -178,24 +222,37 @@ impl Framer {
     fn take_header(&mut self, body: &[u8]) -> Result<CommonHeader, FrameError> {
         match self.parsed_header.take() {
             Some(Ok(header)) => Ok(header),
+            // A rejected header's body was read in full, so the reader is past this record.
             Some(Err(error)) => Err(FrameError {
                 error,
+                header: None,
                 bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
+                consumed: true,
             }),
             None => Err(FrameError {
                 error: ParserError::EofExpected,
+                header: None,
                 bytes: None,
+                consumed: false,
             }),
         }
     }
 }
 
-fn truncated_body(header: HeaderBuf, body: &[u8], expected: usize, read: usize) -> FrameError {
+fn truncated_body(
+    header: HeaderBuf,
+    parsed_header: Option<CommonHeader>,
+    body: &[u8],
+    expected: usize,
+    read: usize,
+) -> FrameError {
     FrameError {
         error: ParserError::IoError(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             format!("truncated MRT body: expected {expected} bytes, read {read}"),
         )),
+        header: parsed_header,
+        consumed: false,
         bytes: Some(assemble_error_bytes(
             header.as_slice(),
             &body[..read.min(body.len())],
@@ -455,6 +512,61 @@ mod tests {
             } else {
                 assert!(bgp4mp_records > 0, "{path}: no BGP4MP record classified");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod error_parity_tests {
+    use super::*;
+    use crate::parser::mrt::mrt_record::chunk_mrt_record_with_context;
+    use std::io::Cursor;
+
+    fn header(entry_type: u16, subtype: u16, length: u32, extra: &[u8]) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1u32.to_be_bytes());
+        wire.extend_from_slice(&entry_type.to_be_bytes());
+        wire.extend_from_slice(&subtype.to_be_bytes());
+        wire.extend_from_slice(&length.to_be_bytes());
+        wire.extend_from_slice(extra);
+        wire
+    }
+
+    /// The owned record path and the borrowing element path must report a broken stream the same
+    /// way: same error text, same bytes, and the same answer to "is the reader past this record".
+    #[test]
+    fn both_paths_report_identical_framing_errors() {
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("truncated header", vec![0u8; 6]),
+            ("empty input", Vec::new()),
+            (
+                "oversized length",
+                header(16, 4, MAX_MRT_MESSAGE_LEN + 1, &[]),
+            ),
+            ("truncated body", header(16, 4, 10, &[1, 2, 3])),
+            ("unknown entry type", header(199, 1, 4, &[0xaa; 4])),
+        ];
+
+        for (label, input) in cases {
+            let owned =
+                chunk_mrt_record_with_context(&mut Cursor::new(input.clone())).expect_err(label);
+            let mut body = Vec::new();
+            let framed = match Framer::default().next(&mut Cursor::new(input), &mut body) {
+                Ok(_) => panic!("{label}: the framed path should fail too"),
+                Err(error) => error,
+            };
+
+            assert_eq!(
+                owned.error.to_string(),
+                framed.error.to_string(),
+                "{label}: error text"
+            );
+            assert_eq!(owned.bytes, framed.bytes, "{label}: error bytes");
+            assert_eq!(
+                owned.record_consumed, framed.consumed,
+                "{label}: record consumed"
+            );
+            assert_eq!(owned.common_header, framed.header, "{label}: parsed header");
         }
     }
 }

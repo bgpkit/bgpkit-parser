@@ -1,4 +1,4 @@
-use super::mrt_header::{frame_common_header_captured, HeaderBuf};
+use super::mrt_header::HeaderBuf;
 use crate::bmp::messages::{BmpMessage, BmpMessageBody};
 use crate::error::{check_max, EncodingError, ParserError};
 use crate::models::*;
@@ -8,16 +8,13 @@ use crate::parser::{
 };
 use crate::utils::convert_timestamp;
 use bytes::{BufMut, Bytes, BytesMut};
-use log::{debug, warn};
+use log::warn;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
-
-/// Upper bound on the MRT body length the parser will read into memory.
-const MAX_MRT_MESSAGE_LEN: u32 = 16 * 1024 * 1024; // 16 MiB
 
 /// Raw MRT record containing the common header and unparsed message bytes.
 /// This allows for lazy parsing of the MRT message body, and provides
@@ -163,138 +160,28 @@ pub(crate) fn chunk_mrt_record_with_context(
 }
 
 /// Read one MRT record, keeping the header bytes in a stack buffer.
+/// Frame the next record into an owned body, using the same framing path as every other consumer.
 fn read_chunk(input: &mut impl Read) -> Result<ChunkedRecord, RawMrtRecordError> {
-    let mut header = HeaderBuf::new();
-    let framed = match frame_common_header_captured(input, &mut header) {
-        Ok(framed) => framed,
-        Err(error) => {
-            if error.kind() == std::io::ErrorKind::UnexpectedEof && header.as_slice().is_empty() {
-                return Err(RawMrtRecordError {
-                    error: ParserError::EofExpected,
-                    common_header: None,
-                    bytes: None,
-                    record_consumed: false,
-                });
-            }
-            return Err(RawMrtRecordError {
-                error: error.into(),
-                common_header: None,
-                bytes: Some(header.as_slice().to_vec()),
-                record_consumed: false,
-            });
-        }
+    let mut framer = crate::parser::mrt::frame::Framer::default();
+    let mut body = Vec::new();
+    let (common_header, header, body_len) = {
+        let frame = framer
+            .next(input, &mut body)
+            .map_err(|error| RawMrtRecordError {
+                error: error.error,
+                common_header: error.header,
+                bytes: error.bytes,
+                record_consumed: error.consumed,
+            })?;
+        (frame.header, frame.raw_header, frame.body.len())
     };
-
-    let header_bytes = framed.raw_bytes;
-    let parsed_header = framed.header.as_ref().ok().copied();
-
-    // Protect against unreasonable allocations from corrupt headers
-    if framed.body_length > MAX_MRT_MESSAGE_LEN {
-        return Err(RawMrtRecordError {
-            error: ParserError::OversizedRecord {
-                length: framed.body_length,
-            },
-            common_header: parsed_header,
-            bytes: Some(header_bytes.to_vec()),
-            record_consumed: false,
-        });
-    }
-
-    // Read the declared body while retaining partial bytes on failure.
-    let mut buffer = Vec::with_capacity(framed.body_length as usize + 4);
-    if let Err(error) = input
-        .take(framed.body_length as u64)
-        .read_to_end(&mut buffer)
-    {
-        return Err(record_io_error(error, parsed_header, header_bytes, &buffer));
-    }
-    if buffer.len() != framed.body_length as usize {
-        return Err(record_io_error(
-            std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!(
-                    "truncated MRT body: expected {} bytes, read {}",
-                    framed.body_length,
-                    buffer.len()
-                ),
-            ),
-            parsed_header,
-            header_bytes,
-            &buffer,
-        ));
-    }
-
-    // A rejected header is reported only now, so its body is not left in the stream.
-    let common_header = match framed.header {
-        Ok(common_header) => common_header,
-        Err(error) => {
-            return Err(RawMrtRecordError {
-                error,
-                common_header: None,
-                bytes: Some([header_bytes, &buffer].concat()),
-                record_consumed: true,
-            })
-        }
-    };
-
-    if common_header.entry_type == EntryType::TABLE_DUMP
-        && super::messages::table_dump::needs_legacy_length_correction(
-            common_header.entry_subtype,
-            &buffer,
-        )
-    {
-        let mut correction = Vec::with_capacity(4);
-        if let Err(error) = input.take(4).read_to_end(&mut correction) {
-            buffer.extend_from_slice(&correction);
-            return Err(record_io_error(
-                error,
-                Some(common_header),
-                header_bytes,
-                &buffer,
-            ));
-        }
-        buffer.extend_from_slice(&correction);
-        if correction.len() != 4 {
-            return Err(record_io_error(
-                std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "truncated historical TABLE_DUMP length correction",
-                ),
-                Some(common_header),
-                header_bytes,
-                &buffer,
-            ));
-        }
-        debug!(
-            "recovered historical TABLE_DUMP record whose declared length was four bytes short (timestamp={}, subtype={}, declared_length={})",
-            common_header.timestamp,
-            common_header.entry_subtype,
-            common_header.length
-        );
-    }
-
+    let mut owned = std::mem::take(&mut body);
+    owned.truncate(body_len);
     Ok(ChunkedRecord {
         common_header,
         header,
-        body: buffer,
+        body: owned,
     })
-}
-
-fn record_io_error(
-    error: std::io::Error,
-    common_header: Option<CommonHeader>,
-    header: &[u8],
-    body: &[u8],
-) -> RawMrtRecordError {
-    let mut bytes = Vec::with_capacity(header.len() + body.len());
-    bytes.extend_from_slice(header);
-    bytes.extend_from_slice(body);
-    RawMrtRecordError {
-        error: ParserError::IoError(error),
-        common_header,
-        bytes: Some(bytes),
-        record_consumed: false,
-    }
 }
 
 pub fn parse_mrt_record(input: &mut impl Read) -> Result<MrtRecord, ParserErrorWithBytes> {
@@ -532,6 +419,7 @@ mod tests {
     use crate::bmp::messages::headers::{BmpPeerType, PeerFlags, PerPeerFlags};
     use crate::bmp::messages::{BmpCommonHeader, BmpMsgType, BmpPerPeerHeader, RouteMonitoring};
     use crate::models::{AttributeValue, Origin};
+    use crate::parser::mrt::frame::MAX_MRT_MESSAGE_LEN;
     use crate::parser::mrt::messages::table_dump::encode_table_dump_batch;
     use std::io::Cursor;
     use std::net::Ipv4Addr;
