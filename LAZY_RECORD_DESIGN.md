@@ -212,6 +212,25 @@ What this says, without rounding it up:
 - Closing the library-level gap means not building the owned attribute model, which is a public
   API decision, or shipping the lazy iterator as the default, which is the same decision.
 
+## 8.1.1 Against the previous version
+
+The same binary shape either side: `main` at `3e2bce1` built with the CLI feature, against this
+branch. Three alternating repetitions per case, medians, one core throughout.
+
+| case | `main` | this branch | wall | instructions |
+| --- | --- | --- | --- | --- |
+| RIB elem iteration, uncompressed | 271.3G, 30.84s | 144.8G, 14.89s | 2.07x | 1.87x |
+| RIB elem iteration, gzip | 326.8G, 35.70s | 190.1G, 19.05s | 1.87x | 1.72x |
+| RIB full PSV render, gzip | 1360.7G, 156.86s | 539.6G, 50.34s | 3.12x | 2.52x |
+| RIB `-p 8.8.8.0/24`, gzip | 320.7G, 35.12s | 46.7G, 4.57s | 7.68x | 6.86x |
+| updates elem iteration, gzip | 15.0G, 1.62s | 10.4G, 1.28s | 1.27x | 1.45x |
+
+The filtered case is the record-level pushdown: no filter costs 190G on gzip, so a query that keeps
+one record still pays for framing and inflate (about 46G) and nothing else.
+
+The updates case gains least because an updates record is small: inflate and per-file setup are a
+larger share, and there is no 4GB of attribute decoding to skip.
+
 ## 8.2 Application workloads (no output)
 
 The honest comparison is a task, not a rendering: read one field per element and do something
