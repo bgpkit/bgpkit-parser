@@ -385,6 +385,31 @@ Against the numbers this line of work started from, AS174's community went 563.3
 that can reject nothing is now cheaper than no filter, because a record the predicate excludes never
 builds its elements.
 
+### 8.3.5 The borrowed view serves updates
+
+`next_record_elems` used to skip every non-RIB record, so a caller reading an updates file got no
+elements and no signal. It now serves the `BGP4MP` AS4 message subtypes: the record's NLRI is read
+from the body (withdrawals, announcements, `MP_REACH_NLRI`, `MP_UNREACH_NLRI`, with or without
+ADD-PATH), the peer and time come from the record header, and one element type serves both record
+kinds. A 2-byte ASN record or a non-UPDATE record is skipped with one warning naming it.
+
+Two details make the borrowed answer match the owned one. A reachable `MP_REACH_NLRI` carries a
+reserved octet ahead of its prefixes, and the NLRI families that are not IP prefixes (EVPN, link
+state) contribute no elements on the owned path either, so they are ignored rather than reinterpreted.
+
+| workload on the 2.77M-element updates file | owned path | borrowed view |
+| --- | --- | --- |
+| hash every prefix | 10.78G | 5.49G |
+| sum every AS path length | 10.32G | 5.32G |
+
+Both paths produce the same element count and the same prefix hash over that file, and the borrowed
+elements equal the owned ones field by field on a 2010 RIPE update file (with its 2-byte records
+excluded from the comparison, since those stay on the owned path by design).
+
+Carrying the peer inline makes `ElemRef` larger, and the RIB view workload moved from 15.9G to 17.2G
+(8%) as a result; the owned element scan is unchanged within noise. If that 8% ever matters, the fix
+is a per-record peer pointer rather than the inline fields, not a second element type.
+
 ### 8.3.4 Updates records answer the same predicates
 
 A `BGP4MP` UPDATE carries one attribute block for all of its announcements, so origin, community and
