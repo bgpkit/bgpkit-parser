@@ -737,12 +737,14 @@ Default local pref 100, local AS 65001\n\n\
     mixed.extend_from_slice(&build_exhaustive_rib_stream());
     mixed.extend_from_slice(&td_v1.encode().unwrap());
 
+    // The AS4 update and the RIB slice are both served; the legacy TABLE_DUMP v1 record is the
+    // only one this path cannot read, and it is skipped with a warning.
     let mut mixed_parser = BgpkitParser::from_reader(Cursor::new(mixed));
-    let mut total_rib_elems = 0usize;
+    let mut total_elems = 0usize;
     while let Some(mut rec) = mixed_parser.next_record_elems() {
-        total_rib_elems += rec.iter().count();
+        total_elems += rec.iter().count();
     }
-    assert_eq!(total_rib_elems, 5);
+    assert_eq!(total_elems, 6);
 }
 
 /// A parser with filters must not fall through to this path: it would hand back unfiltered

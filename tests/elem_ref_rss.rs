@@ -155,7 +155,8 @@ fn rss_stays_flat_across_one_million_borrowed_elems() {
     assert!(!std::mem::needs_drop::<AsPathView<'_>>());
     assert!(!std::mem::needs_drop::<AsnsView<'_>>());
     assert!(!std::mem::needs_drop::<CommunitiesView<'_>>());
-    assert!(std::mem::size_of::<ElemRef<'_>>() <= 64);
+    // The peer travels inline so one borrowed element type serves dumps and updates.
+    assert!(std::mem::size_of::<ElemRef<'_>>() <= 96);
 
     // Stream 1,000,000 RIB elements (10,000 records x 100 entries) reading every field.
     let reader = RepeatingRibReader::new(100, 10_000);

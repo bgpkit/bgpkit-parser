@@ -11,7 +11,7 @@ active peer index table, decoding BGP attributes on demand without per-element h
 use crate::error::ParserError;
 use crate::models::{
     get_deprecated_attr_type, Afi, AsPath, AsPathSegment, Asn, AsnLength, AttrFlags, AttrRaw,
-    AttrType, BgpIdentifier, CommonHeader, Community, ElemType, ExtendedCommunity,
+    AttrType, Bgp4MpType, BgpIdentifier, CommonHeader, Community, ElemType, ExtendedCommunity,
     ExtendedCommunityType, FlowSpecTrafficAction, FlowSpecTrafficMarking, FlowSpecTrafficRate,
     FourOctetAsExtCommunity, Ipv4AddrExtCommunity, Ipv6AddrExtCommunity, LargeCommunity,
     LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix, NextHopAddress, OpaqueExtCommunity,
@@ -64,6 +64,8 @@ pub(crate) struct ElemViewState {
     pub(crate) framer: Framer,
     /// Active `TABLE_DUMP_V2` `PeerIndexTable` indexed directly by wire `peer_index`.
     peers: Option<Vec<Peer>>,
+    /// NLRI of the `BGP4MP` update the current [`RecordElems`] batch covers.
+    pub(crate) update_entries: Vec<UpdateEntry>,
     /// Set once EOF or a non-recoverable framing/core-dump error ends iteration.
     finished: bool,
 }
@@ -226,14 +228,14 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 let state = &mut parser.elem_view_state;
                 let peers = state.peers.as_deref().expect("checked peers is_some");
                 let entries_bytes = &state.body_buf[entries_offset..body_len];
-                return NextBatch::Rib(RecordElems {
+                return NextBatch::Rib(RecordElems::rib(
                     header,
                     entries_bytes,
                     peers,
-                    prefix: prefix.prefix,
+                    prefix.prefix,
                     entry_count,
                     flags,
-                });
+                ));
             }
             // Hand the record back untouched: the caller owns the fallback and its error handling.
             RecordKind::Bgp4Mp {
@@ -282,7 +284,25 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         return None;
     }
 
-    let (common_header, prefix, entry_count, flags, entries_offset, body_len) = loop {
+    enum Framed {
+        Rib {
+            header: CommonHeader,
+            prefix: IpNet,
+            entry_count: u16,
+            flags: u8,
+            entries_offset: usize,
+            body_len: usize,
+        },
+        Update {
+            header: CommonHeader,
+            peer_ip: IpAddr,
+            peer_asn: Asn,
+            timestamp: f64,
+            body_len: usize,
+        },
+    }
+
+    let framed = loop {
         let (common_header, raw_header, body_len) = match frame_next(parser) {
             Ok(framed) => framed,
             Err(failure) => {
@@ -345,19 +365,43 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                     error!("{}", ElemError::MissingPeerTable);
                     continue;
                 }
-                break (
-                    common_header,
-                    prefix,
+                break Framed::Rib {
+                    header: common_header,
+                    prefix: prefix.prefix,
                     entry_count,
                     flags,
                     entries_offset,
                     body_len,
-                );
+                };
             }
-            // This entry point serves RIB dumps only; other records are skipped, as documented.
-            RecordKind::Bgp4Mp { .. } => {
-                parser.options.warn_view_scope_once("BGP4MP");
-                continue;
+            RecordKind::Bgp4Mp {
+                peer_ip,
+                peer_asn,
+                timestamp,
+            } => {
+                // Only the AS4 message subtypes are served; anything else says so once and moves on.
+                let supported = {
+                    let state = &mut parser.elem_view_state;
+                    fill_update_entries(
+                        &state.body_buf[..body_len],
+                        common_header.entry_subtype,
+                        &mut state.update_entries,
+                    )
+                    .is_some()
+                };
+                if !supported {
+                    parser
+                        .options
+                        .warn_view_scope_once("BGP4MP (non-AS4 or non-UPDATE)");
+                    continue;
+                }
+                break Framed::Update {
+                    header: common_header,
+                    peer_ip,
+                    peer_asn,
+                    timestamp,
+                    body_len,
+                };
             }
             RecordKind::Other => {
                 parser.options.warn_view_scope_once("other");
@@ -366,63 +410,383 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         }
     };
 
-    let state = &mut parser.elem_view_state;
-    let peers = state
-        .peers
-        .as_deref()
-        .expect("checked peers is_some before breaking");
-    let entries_bytes = &state.body_buf[entries_offset..body_len];
-    Some(RecordElems {
-        header: common_header,
-        entries_bytes,
-        peers,
-        prefix: prefix.prefix,
-        entry_count,
-        flags,
-    })
+    match framed {
+        Framed::Rib {
+            header,
+            prefix,
+            entry_count,
+            flags,
+            entries_offset,
+            body_len,
+        } => {
+            let state = &mut parser.elem_view_state;
+            let peers = state
+                .peers
+                .as_deref()
+                .expect("checked peers is_some before breaking");
+            let entries_bytes = &state.body_buf[entries_offset..body_len];
+            Some(RecordElems::rib(
+                header,
+                entries_bytes,
+                peers,
+                prefix,
+                entry_count,
+                flags,
+            ))
+        }
+        Framed::Update {
+            header,
+            peer_ip,
+            peer_asn,
+            timestamp,
+            body_len,
+        } => update_record_elems(
+            &mut parser.elem_view_state,
+            body_len,
+            header,
+            peer_ip,
+            peer_asn,
+            timestamp,
+        ),
+    }
 }
 
-/// A borrowed batch of elements from one `TABLE_DUMP_V2` `RIB_AFI` MRT record.
+/// Walk the NLRI section of an update into `out`.
+fn parse_nlri(
+    mut bytes: &[u8],
+    afi: Afi,
+    safi: Safi,
+    add_path: bool,
+    elem_type: ElemType,
+    out: &mut Vec<UpdateEntry>,
+) -> Option<()> {
+    let mut flags = 0u8;
+    if afi == Afi::Ipv6 {
+        flags |= FLAG_AFI_IPV6;
+    }
+    if safi == Safi::Multicast {
+        flags |= FLAG_SAFI_MULTICAST;
+    }
+    while !bytes.is_empty() {
+        let (prefix, consumed) =
+            crate::parser::utils::try_parse_prefix(bytes, &afi, add_path).ok()?;
+        if consumed == 0 || consumed > bytes.len() {
+            return None;
+        }
+        out.push(UpdateEntry {
+            prefix,
+            elem_type,
+            flags,
+        });
+        bytes = &bytes[consumed..];
+    }
+    Some(())
+}
+
+/// Walk one `MP_REACH_NLRI` or `MP_UNREACH_NLRI` body.
 ///
-/// Holds a mutable borrow of the [`BgpkitParser`] (and its active peer table and record buffer);
-/// drop `RecordElems` before advancing the parser to the next record.
+/// Families whose NLRI is not an IP prefix (EVPN, link state) contribute no elements on the owned
+/// path either, so they are ignored rather than turned into something else. An MPLS-labeled
+/// withdrawal is a plain prefix (RFC 8277 §2.4) and is read like one.
+fn parse_mp_nlri(
+    body: &[u8],
+    reachable: bool,
+    add_path: bool,
+    out: &mut Vec<UpdateEntry>,
+) -> Option<()> {
+    if body.len() < 3 {
+        return None;
+    }
+    let afi = match u16::from_be_bytes([body[0], body[1]]) {
+        1 => Afi::Ipv4,
+        2 => Afi::Ipv6,
+        _ => return Some(()),
+    };
+    let safi = Safi::try_from(body[2]).ok()?;
+    let mut rest = &body[3..];
+    if reachable {
+        let next_hop_len = *rest.first()? as usize;
+        rest = rest.get(1 + next_hop_len..)?;
+        // RFC 4760 puts a reserved octet in front of reachable NLRI; the owned parser reads it too.
+        let reserved = *rest.first()?;
+        rest = rest.get(1..)?;
+        if reserved != 0 {
+            return None;
+        }
+    }
+    let prefix_shaped =
+        matches!(safi, Safi::Unicast | Safi::Multicast) || (!reachable && safi == Safi::MplsLabel);
+    if !prefix_shaped {
+        return Some(());
+    }
+    let elem_type = if reachable {
+        ElemType::ANNOUNCE
+    } else {
+        ElemType::WITHDRAW
+    };
+    parse_nlri(rest, afi, safi, add_path, elem_type, out)
+}
+
+/// The borrowed elements of the update record currently in the frame buffer.
+fn update_record_elems<'a>(
+    state: &'a mut ElemViewState,
+    body_len: usize,
+    header: CommonHeader,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    timestamp: f64,
+) -> Option<RecordElems<'a>> {
+    let attrs = fill_update_entries(
+        &state.body_buf[..body_len],
+        header.entry_subtype,
+        &mut state.update_entries,
+    )?;
+    Some(RecordElems::update(
+        header,
+        &state.update_entries,
+        attrs,
+        peer_ip,
+        peer_asn,
+        timestamp,
+    ))
+}
+
+/// Fill `out` with the elements of one `BGP4MP` update and return its attribute block.
+///
+/// Only the AS4 message subtypes are served: the borrowed attribute views read 4-byte AS numbers,
+/// which is what those subtypes carry. Anything else returns `None` so the caller can say so and
+/// leave the record to the owned path.
+///
+/// The order matches the owned iterator: announcements (plain NLRI, then `MP_REACH_NLRI`), then
+/// withdrawals (plain, then `MP_UNREACH_NLRI`).
+pub(crate) fn fill_update_entries<'a>(
+    body: &'a [u8],
+    subtype: u16,
+    out: &mut Vec<UpdateEntry>,
+) -> Option<&'a [u8]> {
+    out.clear();
+    let add_path = match Bgp4MpType::try_from(subtype).ok()? {
+        Bgp4MpType::MessageAs4 | Bgp4MpType::MessageAs4Local => false,
+        Bgp4MpType::MessageAs4Addpath | Bgp4MpType::MessageLocalAs4Addpath => true,
+        _ => return None,
+    };
+    let mut rest = body.get(4 * 2..)?;
+    if rest.len() < 4 {
+        return None;
+    }
+    let ip_len = match u16::from_be_bytes([rest[2], rest[3]]) {
+        1 => 4,
+        2 => 16,
+        _ => return None,
+    };
+    rest = rest.get(4 + ip_len * 2..)?;
+    // The BGP message: 16-byte marker, two-byte length, one-byte type; only UPDATE carries NLRI.
+    if rest.len() < 19 || rest[18] != 2 {
+        return None;
+    }
+    rest = &rest[19..];
+    if rest.len() < 2 {
+        return None;
+    }
+    let withdrawn_len = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+    rest = rest.get(2..)?;
+    if rest.len() < withdrawn_len + 2 {
+        return None;
+    }
+    let withdrawn = &rest[..withdrawn_len];
+    rest = &rest[withdrawn_len..];
+    let attr_len = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+    rest = rest.get(2..)?;
+    if rest.len() < attr_len {
+        return None;
+    }
+    let attrs = &rest[..attr_len];
+    let announced = &rest[attr_len..];
+
+    // MP_REACH and MP_UNREACH sit in the attribute block; find them without decoding anything else.
+    let mut mp_reach: Option<&[u8]> = None;
+    let mut mp_unreach: Option<&[u8]> = None;
+    let mut pos = 0usize;
+    while pos + 3 <= attrs.len() {
+        let flags = attrs[pos];
+        let code = attrs[pos + 1];
+        let (header_len, body_len) = if flags & 0x10 != 0 {
+            if pos + 4 > attrs.len() {
+                break;
+            }
+            (
+                4usize,
+                u16::from_be_bytes([attrs[pos + 2], attrs[pos + 3]]) as usize,
+            )
+        } else {
+            (3usize, attrs[pos + 2] as usize)
+        };
+        let start = pos + header_len;
+        let end = start + body_len;
+        if end > attrs.len() {
+            break;
+        }
+        match code {
+            14 => mp_reach = Some(&attrs[start..end]),
+            15 => mp_unreach = Some(&attrs[start..end]),
+            _ => {}
+        }
+        pos = end;
+    }
+
+    parse_nlri(
+        announced,
+        Afi::Ipv4,
+        Safi::Unicast,
+        add_path,
+        ElemType::ANNOUNCE,
+        out,
+    )?;
+    if let Some(body) = mp_reach {
+        parse_mp_nlri(body, true, add_path, out)?;
+    }
+    parse_nlri(
+        withdrawn,
+        Afi::Ipv4,
+        Safi::Unicast,
+        add_path,
+        ElemType::WITHDRAW,
+        out,
+    )?;
+    if let Some(body) = mp_unreach {
+        parse_mp_nlri(body, false, add_path, out)?;
+    }
+    Some(attrs)
+}
+
+/// A borrowed batch of elements from one MRT record.
+///
+/// Holds a mutable borrow of the [`BgpkitParser`] (its reusable record buffer, and the active peer
+/// table for a dump); drop it before advancing the parser to the next record.
 pub struct RecordElems<'a> {
     header: CommonHeader,
-    entries_bytes: &'a [u8],
-    peers: &'a [Peer],
-    prefix: IpNet,
-    entry_count: u16,
-    flags: u8,
+    source: RecordSource<'a>,
+}
+
+/// Where a [`RecordElems`] batch takes its elements from.
+enum RecordSource<'a> {
+    /// `TABLE_DUMP_V2` `RIB_AFI`: one prefix, and entries that name a peer and carry attributes.
+    Rib {
+        entries_bytes: &'a [u8],
+        peers: &'a [Peer],
+        prefix: IpNet,
+        entry_count: u16,
+        flags: u8,
+    },
+    /// `BGP4MP` update: one attribute block, and the NLRI this record announced or withdrew.
+    Update {
+        entries: &'a [UpdateEntry],
+        attrs: &'a [u8],
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        timestamp: f64,
+    },
 }
 
 impl<'a> RecordElems<'a> {
+    #[inline]
+    pub(crate) fn rib(
+        header: CommonHeader,
+        entries_bytes: &'a [u8],
+        peers: &'a [Peer],
+        prefix: IpNet,
+        entry_count: u16,
+        flags: u8,
+    ) -> Self {
+        RecordElems {
+            header,
+            source: RecordSource::Rib {
+                entries_bytes,
+                peers,
+                prefix,
+                entry_count,
+                flags,
+            },
+        }
+    }
+
+    #[inline]
+    pub(crate) fn update(
+        header: CommonHeader,
+        entries: &'a [UpdateEntry],
+        attrs: &'a [u8],
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        timestamp: f64,
+    ) -> Self {
+        RecordElems {
+            header,
+            source: RecordSource::Update {
+                entries,
+                attrs,
+                peer_ip,
+                peer_asn,
+                timestamp,
+            },
+        }
+    }
+
     /// Returns the MRT [`CommonHeader`] of this record.
     #[inline]
     pub fn header(&self) -> &CommonHeader {
         &self.header
     }
 
-    /// Returns the exact RIB entry count declared in the `RIB_AFI` header.
+    /// Returns how many elements the record declares: the RIB entry count, or the number of NLRI
+    /// this update announced and withdrew.
     #[inline]
     pub fn len(&self) -> usize {
-        self.entry_count as usize
+        match &self.source {
+            RecordSource::Rib { entry_count, .. } => *entry_count as usize,
+            RecordSource::Update { entries, .. } => entries.len(),
+        }
     }
 
-    /// Returns `true` if the `RIB_AFI` header declares zero entries.
+    /// Returns `true` when the record declares no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.entry_count == 0
+        self.len() == 0
     }
 
-    /// Returns an iterator yielding borrowed [`ElemRef`] views over the record's RIB entries.
+    /// Returns an iterator yielding borrowed [`ElemRef`] views over the record's elements.
     #[inline]
     pub fn iter(&mut self) -> ElemRefIter<'_> {
+        let source = match &self.source {
+            RecordSource::Rib {
+                entries_bytes,
+                peers,
+                prefix,
+                entry_count,
+                flags,
+            } => IterSource::Rib {
+                data: entries_bytes,
+                peers,
+                prefix: *prefix,
+                remaining: *entry_count,
+                flags: *flags,
+            },
+            RecordSource::Update {
+                entries,
+                attrs,
+                peer_ip,
+                peer_asn,
+                timestamp,
+            } => IterSource::Update {
+                entries,
+                attrs,
+                peer_ip: *peer_ip,
+                peer_asn: *peer_asn,
+                timestamp: *timestamp,
+                next: 0,
+            },
+        };
         ElemRefIter {
-            data: self.entries_bytes,
-            peers: self.peers,
-            prefix: self.prefix,
-            remaining: self.entry_count,
-            flags: self.flags,
+            source,
             _borrow: PhantomData,
         }
     }
@@ -438,40 +802,36 @@ impl<'a, 'b> IntoIterator for &'b mut RecordElems<'a> {
     }
 }
 
+/// One element of a `BGP4MP` update, as the record declared it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UpdateEntry {
+    prefix: NetworkPrefix,
+    elem_type: ElemType,
+    flags: u8,
+}
+
 /// Iterator over borrowed [`ElemRef`]s within a single [`RecordElems`] record.
 pub struct ElemRefIter<'a> {
-    data: &'a [u8],
-    peers: &'a [Peer],
-    prefix: IpNet,
-    remaining: u16,
-    flags: u8,
+    source: IterSource<'a>,
     _borrow: PhantomData<&'a mut ()>,
 }
 
-impl<'a> ElemRefIter<'a> {
-    #[cold]
-    #[inline(never)]
-    fn finish_truncated_header(&mut self) {
-        warn!("early break due to error Truncated message: truncated msg while parsing RIB AFI entries");
-        self.remaining = 0;
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn finish_truncated_attrs(&mut self, required: usize, remaining: usize) {
-        warn!(
-            "early break due to error Truncated message: not enough bytes to read. remaining: {}, required: {} while parsing RIB AFI entries",
-            remaining, required
-        );
-        self.remaining = 0;
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn finish_missing_peer(&mut self, peer_index: u16) {
-        error!("peer ID {} not found in peer_index table", peer_index);
-        self.remaining = 0;
-    }
+enum IterSource<'a> {
+    Rib {
+        data: &'a [u8],
+        peers: &'a [Peer],
+        prefix: IpNet,
+        remaining: u16,
+        flags: u8,
+    },
+    Update {
+        entries: &'a [UpdateEntry],
+        attrs: &'a [u8],
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        timestamp: f64,
+        next: usize,
+    },
 }
 
 impl<'a> Iterator for ElemRefIter<'a> {
@@ -479,69 +839,84 @@ impl<'a> Iterator for ElemRefIter<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        let data = self.data;
-        if (self.flags & FLAG_ADD_PATH) == 0 {
-            if data.len() < 8 {
-                self.finish_truncated_header();
-                return None;
+        match &mut self.source {
+            IterSource::Rib {
+                data,
+                peers,
+                prefix,
+                remaining,
+                flags,
+            } => {
+                if *remaining == 0 {
+                    return None;
+                }
+                let with_path_id = (*flags & FLAG_ADD_PATH) != 0;
+                let header_len = if with_path_id { 12 } else { 8 };
+                if data.len() < header_len {
+                    warn!("early break due to error Truncated message: truncated msg while parsing RIB AFI entries");
+                    *remaining = 0;
+                    return None;
+                }
+                let peer_index = u16::from_be_bytes([data[0], data[1]]);
+                let originated_time = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
+                // With add-path, bytes 6..10 hold the path id; the element keeps the record's prefix.
+                let attr_len =
+                    u16::from_be_bytes([data[header_len - 2], data[header_len - 1]]) as usize;
+                let end = header_len + attr_len;
+                if data.len() < end {
+                    warn!(
+                        "early break due to error Truncated message: not enough bytes to read. remaining: {}, required: {} while parsing RIB AFI entries",
+                        data.len() - header_len,
+                        attr_len
+                    );
+                    *remaining = 0;
+                    return None;
+                }
+                let attrs = &data[header_len..end];
+                *data = &data[end..];
+                *remaining -= 1;
+                let Some(peer) = peers.get(peer_index as usize) else {
+                    error!("peer ID {} not found in peer_index table", peer_index);
+                    *remaining = 0;
+                    return None;
+                };
+                Some(ElemRef::new(*prefix, peer, originated_time, *flags, attrs))
             }
-            let peer_index = u16::from_be_bytes([data[0], data[1]]);
-            let originated_time = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
-            let attr_len = u16::from_be_bytes([data[6], data[7]]) as usize;
-            let end = 8 + attr_len;
-            if data.len() < end {
-                self.finish_truncated_attrs(attr_len, data.len() - 8);
-                return None;
+            IterSource::Update {
+                entries,
+                attrs,
+                peer_ip,
+                peer_asn,
+                timestamp,
+                next,
+            } => {
+                let entry = entries.get(*next)?;
+                *next += 1;
+                // A withdrawal carries no attributes, exactly as the owned path leaves them unset.
+                let attr_bytes: &[u8] = match entry.elem_type {
+                    ElemType::ANNOUNCE => attrs,
+                    ElemType::WITHDRAW => &[],
+                };
+                Some(ElemRef::new_update(
+                    entry.prefix.prefix,
+                    *peer_ip,
+                    *peer_asn,
+                    *timestamp,
+                    entry.flags,
+                    entry.elem_type,
+                    attr_bytes,
+                ))
             }
-            self.data = &data[end..];
-            self.remaining -= 1;
-            let Some(peer) = self.peers.get(peer_index as usize) else {
-                self.finish_missing_peer(peer_index);
-                return None;
-            };
-            Some(ElemRef::new(
-                self.prefix,
-                peer,
-                originated_time,
-                self.flags,
-                &data[8..end],
-            ))
-        } else {
-            if data.len() < 12 {
-                self.finish_truncated_header();
-                return None;
-            }
-            let peer_index = u16::from_be_bytes([data[0], data[1]]);
-            let originated_time = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
-            // Bytes 6..10 hold the optional ADD-PATH path_id; BgpElem retains the RIB_AFI prefix.
-            let attr_len = u16::from_be_bytes([data[10], data[11]]) as usize;
-            let end = 12 + attr_len;
-            if data.len() < end {
-                self.finish_truncated_attrs(attr_len, data.len() - 12);
-                return None;
-            }
-            self.data = &data[end..];
-            self.remaining -= 1;
-            let Some(peer) = self.peers.get(peer_index as usize) else {
-                self.finish_missing_peer(peer_index);
-                return None;
-            };
-            Some(ElemRef::new(
-                self.prefix,
-                peer,
-                originated_time,
-                self.flags,
-                &data[12..end],
-            ))
         }
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.remaining as usize))
+        let remaining = match &self.source {
+            IterSource::Rib { remaining, .. } => *remaining as usize,
+            IterSource::Update { entries, next, .. } => entries.len().saturating_sub(*next),
+        };
+        (0, Some(remaining))
     }
 }
 
@@ -552,11 +927,14 @@ impl<'a> Iterator for ElemRefIter<'a> {
 #[derive(Clone, Debug)]
 pub struct ElemRef<'a> {
     attr_bytes: &'a [u8],
-    peer: &'a Peer,
+    peer_ip: IpAddr,
+    peer_asn: Asn,
+    peer_bgp_id: Option<BgpIdentifier>,
     as_path_slot: Cell<u64>,
-    originated_time: u32,
+    timestamp: f64,
     prefix: IpNet,
     flags: u8,
+    elem_type: ElemType,
     warned_truncation: Cell<bool>,
 }
 
@@ -565,7 +943,8 @@ const _: () = assert!(!std::mem::needs_drop::<ElemRef<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<AsPathView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<AsnsView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<CommunitiesView<'static>>());
-const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 64);
+// A borrowed element carries its peer inline so one type serves both dumps and updates.
+const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 96);
 
 impl<'a> ElemRef<'a> {
     #[inline]
@@ -578,11 +957,39 @@ impl<'a> ElemRef<'a> {
     ) -> Self {
         Self {
             attr_bytes,
-            peer,
+            peer_ip: peer.peer_ip,
+            peer_asn: peer.peer_asn,
+            peer_bgp_id: Some(peer.peer_bgp_id),
             as_path_slot: Cell::new(SLOT_UNSCANNED),
-            originated_time,
+            timestamp: originated_time as f64,
             prefix,
             flags,
+            elem_type: ElemType::ANNOUNCE,
+            warned_truncation: Cell::new(false),
+        }
+    }
+
+    /// An element of a `BGP4MP` update: the peer and the time come from the record header.
+    #[inline]
+    fn new_update(
+        prefix: IpNet,
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        timestamp: f64,
+        flags: u8,
+        elem_type: ElemType,
+        attr_bytes: &'a [u8],
+    ) -> Self {
+        Self {
+            attr_bytes,
+            peer_ip,
+            peer_asn,
+            peer_bgp_id: None,
+            as_path_slot: Cell::new(SLOT_UNSCANNED),
+            timestamp,
+            prefix,
+            flags,
+            elem_type,
             warned_truncation: Cell::new(false),
         }
     }
@@ -761,13 +1168,13 @@ impl<'a> ElemRef<'a> {
     /// Returns the IP address of the peer that exported this RIB entry.
     #[inline]
     pub fn peer_ip(&self) -> IpAddr {
-        self.peer.peer_ip
+        self.peer_ip
     }
 
     /// Returns the AS number of the peer that exported this RIB entry.
     #[inline]
     pub fn peer_asn(&self) -> Asn {
-        self.peer.peer_asn
+        self.peer_asn
     }
 
     /// Returns a zero-allocation borrowed view over the entry's effective `AS_PATH`.
@@ -1060,19 +1467,22 @@ impl<'a> ElemRef<'a> {
             }
         }
 
+        let is_withdrawal = self.elem_type() == ElemType::WITHDRAW;
         BgpElem {
             timestamp: self.timestamp(),
             elem_type: self.elem_type(),
-            peer_ip: self.peer.peer_ip,
-            peer_asn: self.peer.peer_asn,
-            peer_bgp_id: Some(self.peer.peer_bgp_id),
+            peer_ip: self.peer_ip,
+            peer_asn: self.peer_asn,
+            peer_bgp_id: self.peer_bgp_id,
             prefix: self.prefix(),
             next_hop: next_hop.or(mp_next_hop),
             as_path,
             origin,
             origin_asns,
-            local_pref: Some(local_pref.unwrap_or(0)),
-            med: Some(med.unwrap_or(0)),
+            // A withdrawal carries no attributes, so the owned path leaves these unset; every other
+            // case keeps the `Some(0)` default the owned path applies too.
+            local_pref: (!is_withdrawal).then(|| local_pref.unwrap_or(0)),
+            med: (!is_withdrawal).then(|| med.unwrap_or(0)),
             communities: (!communities.is_empty()).then_some(communities),
             atomic,
             aggr_asn: aggregator.map(|value| value.0),
@@ -1083,16 +1493,17 @@ impl<'a> ElemRef<'a> {
         }
     }
 
-    /// Returns the RIB entry's originated Unix timestamp as seconds (`f64`).
+    /// Returns this element's Unix timestamp as seconds (`f64`): the entry's originated time for
+    /// a dump, the record's time for an update.
     #[inline]
     pub fn timestamp(&self) -> f64 {
-        self.originated_time as f64
+        self.timestamp
     }
 
-    /// Returns [`ElemType::ANNOUNCE`] (all `TABLE_DUMP_V2` RIB entries are announcements).
+    /// Returns whether this element is an announcement or a withdrawal.
     #[inline]
     pub fn elem_type(&self) -> ElemType {
-        ElemType::ANNOUNCE
+        self.elem_type
     }
 
     fn scan_u32_attr(&self, target_code: u8) -> Option<u32> {
@@ -2516,6 +2927,50 @@ mod materialise_tests {
 
     /// A real TABLE_DUMP_V2 slice: one PEER_INDEX_TABLE followed by 399 RIB records.
     const RIB_FIXTURE: &str = "tests/fixtures/routeviews/bview.slice.gz";
+
+    /// The borrowed view serves updates as well as dumps, and must produce the same elements the
+    /// owned record path produces for the same file.
+    #[test]
+    fn borrowed_update_elems_match_owned_elems() {
+        // A 15-minute RIPE update file: BGP4MP messages with 4-byte AS numbers.
+        let fixture = "tests/fixtures/ripe/rrc15/2010.02/updates.20100227.1600.gz";
+        // The borrowed view serves the AS4 message subtypes; the fixture also carries 2-byte ASN
+        // records from 2010, which stay on the owned path and are excluded from the comparison.
+        let (owned, legacy_records): (Vec<_>, usize) = {
+            let mut elementor = crate::parser::mrt::mrt_elem::Elementor::new();
+            let mut owned = Vec::new();
+            let mut legacy = 0;
+            for record in BgpkitParser::new(fixture)
+                .expect("open fixture")
+                .into_record_iter()
+            {
+                if !matches!(record.common_header.entry_subtype, 4 | 5 | 9 | 10) {
+                    legacy += 1;
+                    continue;
+                }
+                owned.extend(elementor.record_to_elems(record));
+            }
+            (owned, legacy)
+        };
+        assert!(!owned.is_empty(), "fixture produced no elems");
+        assert!(
+            legacy_records > 0,
+            "fixture should exercise the 2-byte skip"
+        );
+
+        let mut parser = BgpkitParser::new(fixture).expect("open fixture");
+        let mut borrowed = Vec::new();
+        while let Some(mut record) = parser.next_record_elems() {
+            assert!(!record.is_empty(), "an update record declared no elements");
+            for elem in record.iter() {
+                borrowed.push(elem.to_bgp_elem());
+            }
+        }
+        assert_eq!(owned.len(), borrowed.len(), "element count differs");
+        for (index, (owned_elem, borrowed_elem)) in owned.iter().zip(&borrowed).enumerate() {
+            assert_eq!(owned_elem, borrowed_elem, "element {index} differs");
+        }
+    }
 
     /// Every field of a materialised element must equal what the owned record path produces for
     /// the same entry. The reference is the record iterator plus `Elementor`, not `into_elem_iter`,
