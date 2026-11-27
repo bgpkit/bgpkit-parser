@@ -355,7 +355,14 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 );
             }
             // This entry point serves RIB dumps only; other records are skipped, as documented.
-            RecordKind::Bgp4Mp { .. } | RecordKind::Other => continue,
+            RecordKind::Bgp4Mp { .. } => {
+                parser.options.warn_view_scope_once("BGP4MP");
+                continue;
+            }
+            RecordKind::Other => {
+                parser.options.warn_view_scope_once("other");
+                continue;
+            }
         }
     };
 
