@@ -96,7 +96,11 @@ pass, and the doc no longer claims one; see §7.1 for what that costs.
 
 ## 6. Filter pushdown on top of it
 
-A frame can answer record-level questions before any attribute is parsed:
+Two tiers sit above the general path, and each answers a different question. The first reads the
+record header the frame already holds; the second reads attribute TLV headers without decoding any
+attribute value.
+
+**Tier 1, from the frame header** (no attribute bytes are read):
 
 | filter | RIB | updates | from |
 | --- | --- | --- | --- |
@@ -105,13 +109,28 @@ A frame can answer record-level questions before any attribute is parsed:
 | `ip_version` | yes | **no** | RIB subtype; the BGP4MP AFI is the peering transport family, while the filter tests the NLRI prefix (MP-BGP can differ) |
 | `ts_start`, `ts_end` | **no** | yes | RIB elem time is the entry's `originated_time`, not the record header |
 | `type` (a/w) | yes | needs the NLRI sections, not the attributes | entry type |
-| stop at first match | only for the record predicate | only for the record predicate | elem iteration must visit every entry; stopping early loses the remaining peers |
-| `origin*`, `as_path`, `community`, `otc`, `next_hop`, `local_pref`, `med`, `atomic`, `aggr_*`, `field present`, `peer_bgp_id` | no | no | attributes / peer table |
+
+**Tier 2, from the attribute TLV headers** (`attr_scan`, RIB records; one walk per entry, no
+attribute value is decoded and nothing is allocated):
+
+| filter | decidable | why |
+| --- | --- | --- |
+| `origin_asn`, `origin_asns` | yes | the origin is the last ASN of the path segment, so the segment headers are enough |
+| `origin` (igp/egp/incomplete) | yes | one attribute, one byte |
+| `as_path`, `community` | **no** | both are regexes over the rendered string, so the value has to be formatted |
+| `next_hop`, `local_pref`, `med`, `atomic`, `aggr_*`, `otc`, `field present`, `peer_bgp_id` | not implemented | decidable in principle; no consumer has needed the walk yet |
 
 Rule: a record is skipped only when **some conjunct is certain to fail for every element it would
-yield**. Undecidable means parse, never guess. For the undecidable ones the frame still helps: walking
-`entries()` parses one entry at a time and stops at the first match, so an `origin_asn` filter never
-builds a `BgpElem` for the rest of the record.
+yield**. Undecidable means parse, never guess: a truncated block, an `AS4_PATH` (which can replace
+the origin), or a path ending in a multi-member set all keep the record on the general path.
+
+The tiers compose: a prefix predicate rejects the record from the header, and an origin predicate
+rejects it after the walk; whichever fires first wins, and any predicate the tiers cannot decide is
+left to the element-level filter, which runs unchanged on what survives. Two consequences worth
+keeping: skipping a record means its attribute warnings and RFC 7606 findings never surface on a
+filtered run (a documented behaviour change, in the changelog), and the walk reads each entry's own
+attribute block because a dump record's entries are allowed to disagree.
+
 
 ## 7. Invariants
 
