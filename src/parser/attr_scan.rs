@@ -46,6 +46,9 @@ struct EntryFacts<'a> {
     ext_communities: Option<&'a [u8]>,
     /// `AS4_PATH` can replace the origin and the AS path.
     has_as4_path: bool,
+    /// A community attribute appears more than once. The owned path merges every instance into one
+    /// list, so this module cannot answer from a single slice.
+    duplicate_community: bool,
     truncated: bool,
 }
 
@@ -81,9 +84,20 @@ fn read_entry(attrs: &[u8]) -> EntryFacts<'_> {
         match attr_type {
             1 => facts.origin_at = body.first().copied(),
             2 => facts.path = Some(body),
-            8 => facts.communities = Some(body),
-            16 => facts.ext_communities = Some(body),
-            32 => facts.large_communities = Some(body),
+            8 => {
+                facts.duplicate_community |= facts.communities.is_some();
+                facts.communities = Some(body);
+            }
+            // 16 is the extended community and 25 the IPv6 address-specific form; both render with
+            // a leading type field, so both can satisfy an anchored pattern.
+            16 | 25 => {
+                facts.duplicate_community |= facts.ext_communities.is_some();
+                facts.ext_communities = Some(body);
+            }
+            32 => {
+                facts.duplicate_community |= facts.large_communities.is_some();
+                facts.large_communities = Some(body);
+            }
             17 => facts.has_as4_path = true,
             _ => {}
         }
@@ -150,6 +164,10 @@ fn path_elements(body: &[u8]) -> Result<SmallVec<[Option<u32>; 32]>, ()> {
         }
         let segment_type = rest[0];
         let count = rest[1] as usize;
+        // An empty segment still renders its separator, which shifts every later position.
+        if count == 0 {
+            return Err(());
+        }
         let len = count * 4;
         if rest.len() < 2 + len {
             return Err(());
@@ -345,12 +363,20 @@ fn entry_satisfies(facts: &EntryFacts<'_>, predicate: &AttrPredicate) -> Option<
         AttrPredicate::OriginValue(origin) => Some(facts.origin_at == Some(*origin as u8)),
         // A two-field exact pattern cannot be satisfied by a large (three fields) or extended
         // (four fields) community, so those attributes do not affect the answer.
-        AttrPredicate::CommunityExact { asn, value } => Some(
-            facts
-                .communities
-                .is_some_and(|body| community_matches(body, *asn, Some(*value))),
-        ),
+        AttrPredicate::CommunityExact { asn, value } => {
+            if facts.duplicate_community {
+                return None;
+            }
+            Some(
+                facts
+                    .communities
+                    .is_some_and(|body| community_matches(body, *asn, Some(*value))),
+            )
+        }
         AttrPredicate::CommunityAsn { asn } => {
+            if facts.duplicate_community {
+                return None;
+            }
             let plain = facts
                 .communities
                 .is_some_and(|body| community_matches(body, *asn, None));
@@ -422,6 +448,12 @@ pub(crate) fn bgp4mp_record_excluded(filters: &[Filter], body: &[u8], subtype: u
     if predicates.is_empty() {
         return false;
     }
+    // A record whose AS numbers are two bytes wide carries a two-byte AS_PATH; this module reads the
+    // four-byte form, so the path-based predicates are left to the general path there.
+    let four_byte_asns = matches!(
+        crate::parser::mrt::frame::bgp4mp_asn_len(subtype),
+        Some(crate::models::AsnLength::Bits32)
+    );
     let Some(attrs) = bgp4mp_attributes(body, subtype) else {
         return false;
     };
@@ -429,9 +461,18 @@ pub(crate) fn bgp4mp_record_excluded(filters: &[Filter], body: &[u8], subtype: u
     if facts.truncated {
         return false;
     }
-    predicates
-        .iter()
-        .any(|predicate| entry_satisfies(&facts, predicate) == Some(false))
+    predicates.iter().any(|predicate| {
+        let reads_path = matches!(
+            predicate,
+            AttrPredicate::OriginAsn(_)
+                | AttrPredicate::OriginAsns(_)
+                | AttrPredicate::PathAsn { .. }
+        );
+        if reads_path && !four_byte_asns {
+            return false;
+        }
+        entry_satisfies(&facts, predicate) == Some(false)
+    })
 }
 
 /// Whether a RIB record provably yields no element that any of `filters` would keep.
@@ -536,6 +577,93 @@ mod tests {
     fn confederation_segments_contribute_no_origin() {
         let path = as_path(&[(2, &[64512]), (3, &[65001])]);
         assert_eq!(path_origin(&path), Ok(None));
+    }
+
+    /// A BGP4MP record whose AS numbers are two bytes wide carries a two-byte AS_PATH. Reading it
+    /// with the four-byte layout invents an origin, so the path predicates must bow out while the
+    /// predicates that never touch the path keep deciding.
+    #[test]
+    fn two_byte_bgp4mp_records_are_undecidable_for_path_predicates() {
+        use crate::models::Bgp4MpType;
+
+        // Envelope: peer AS 64512, local AS 64513, interface index, AFI 1, two IPv4 addresses.
+        let mut body = Vec::new();
+        body.extend_from_slice(&64512u16.to_be_bytes());
+        body.extend_from_slice(&64513u16.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&1u16.to_be_bytes());
+        body.extend_from_slice(&[192, 0, 2, 1]);
+        body.extend_from_slice(&[192, 0, 2, 2]);
+        // A BGP UPDATE: ORIGIN IGP, AS_PATH `3356 13335` in two-byte form, one IPv4 NLRI.
+        body.extend_from_slice(&[0xFF; 16]);
+        // 19 header octets plus 21 of UPDATE: two length fields, thirteen attribute octets, one NLRI.
+        body.extend_from_slice(&40u16.to_be_bytes());
+        body.push(2);
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&13u16.to_be_bytes());
+        body.extend_from_slice(&[0x40, 1, 1, 0]);
+        body.extend_from_slice(&[0x40, 2, 6, 2, 2]);
+        body.extend_from_slice(&3356u16.to_be_bytes());
+        body.extend_from_slice(&13335u16.to_be_bytes());
+        body.extend_from_slice(&[24, 203, 0, 113]);
+
+        // Read as four-byte ASNs the path is one ASN, 3356 << 16 | 13335, so a four-byte reading
+        // would exclude this record for AS3356.
+        assert!(
+            !bgp4mp_record_excluded(
+                &[Filter::OriginAsn(3356)],
+                &body,
+                Bgp4MpType::Message as u16
+            ),
+            "a two-byte record must not be excluded on a path predicate"
+        );
+        // The community predicate reads no path at all and still decides: no community matches.
+        assert!(bgp4mp_record_excluded(
+            &[Filter::Community(ComparableRegex::new("^3356:").unwrap())],
+            &body,
+            Bgp4MpType::Message as u16
+        ));
+    }
+
+    /// An empty AS_PATH segment still renders a separator, so the rendered positions no longer
+    /// line up with the elements; the module must decline instead of answering.
+    #[test]
+    fn empty_path_segments_are_undecidable() {
+        let block = attrs(&[(2, &as_path(&[(2, &[] as &[u32]), (2, &[174, 3356, 15169])]))]);
+        let facts = read_entry(&block);
+        assert!(!facts.truncated);
+        let needle = AttrPredicate::PathAsn {
+            asn: 3356,
+            at_start: false,
+            at_end: false,
+        };
+        assert_eq!(entry_satisfies(&facts, &needle), None);
+    }
+
+    /// The owned path merges every COMMUNITIES attribute into one list; one slice cannot say
+    /// whether an earlier attribute would have matched, so a duplicate makes the answer uncertain.
+    #[test]
+    fn duplicate_community_attributes_are_undecidable() {
+        let first = 65000u32 << 16 | 1;
+        let second = 65000u32 << 16 | 2;
+        let block = attrs(&[(8, &first.to_be_bytes()), (8, &second.to_be_bytes())]);
+        let facts = read_entry(&block);
+        let needle = AttrPredicate::CommunityExact {
+            asn: 65000,
+            value: 2,
+        };
+        assert_eq!(entry_satisfies(&facts, &needle), None);
+    }
+
+    /// Attribute 25 is the IPv6 address-specific extended community: it renders with a leading
+    /// type field, so an anchored `^N:` pattern can match it and it must not be ignored.
+    #[test]
+    fn ipv6_extended_communities_count_for_community_predicates() {
+        let block = attrs(&[(25, &[0, 0, 0, 0, 0, 0, 0, 1])]);
+        let facts = read_entry(&block);
+        let needle = AttrPredicate::CommunityAsn { asn: 0 };
+        // Not `Some(false)`: a record carrying only attribute 25 could still satisfy `^0:`.
+        assert_ne!(entry_satisfies(&facts, &needle), Some(false));
     }
 
     #[test]
