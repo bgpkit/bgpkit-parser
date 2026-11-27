@@ -155,18 +155,29 @@ builds a `BgpElem` for the rest of the record.
 6. Filter pass on `Frame` for the decidable filters above (RIB prefix is the only high-value one);
    accept on byte-identical filtered output plus the measured drop on `-p`.
 
-## 8.1 Measured against BGPStream (same host, same files, output to /dev/null)
+## 8.1 Measured against BGPStream
 
-| workload | bgpreader | bgpkit-parser |
-| --- | --- | --- |
-| RIB, all elements | 1158.6G / 94.3s | 218.3G / 21.7s |
-| RIB, `-p 8.8.8.0/24` | 117.3G / 8.8s | 46.7G / 4.5s |
-| updates, all elements | 47.7G / 3.9s | 10.1G / 1.2s |
-| updates, peer ASN 835 | 4.6G / 0.43s | 4.0G / 0.44s |
-| RIB, full PSV export | (not compared) | 1304.9G / 154.9s -> 501.6G / 46.4s |
+Same host, same files, both tools rendering every element and writing to `/dev/null`. `cores` is
+`task-clock / wall` from `perf stat`, i.e. how many cores the tool actually kept busy.
 
-The field sets differ between the two tools, so these are approximate real-usage numbers, not
-identical-output comparisons. Filtered scans on compressed input are now bounded by inflate.
+| workload | bgpreader | bgpkit-parser | wall | per-core CPU |
+| --- | --- | --- | --- | --- |
+| RIB, all elements | 1158.6G, 95.15s, 1.05 cores | 540.0G, 50.56s, 1.00 cores | 1.88x | 1.98x |
+| RIB, `-p 8.8.8.0/24` | 118.8G, 9.47s, 1.56 cores | 46.7G, 4.60s, 1.00 cores | 2.06x | 3.22x |
+| updates, all elements | 47.7G, 3.88s, 1.06 cores | 26.1G, 2.71s, 0.99 cores | 1.43x | 1.52x |
+| updates, peer ASN 835 | 4.6G, 0.40s, 1.49 cores | 4.0G, 0.47s, 0.96 cores | **0.85x** | 1.33x |
+
+Reading this honestly:
+
+- bgpkit-parser is single-threaded in every scenario; bgpreader keeps about one core when it does
+  not filter, and about one and a half when it does.
+- On CPU time per core, bgpkit-parser is ahead in all four scenarios.
+- On wall time it is ahead in three of four. The updates-with-a-peer-filter case loses, because the
+  file is small enough that inflate dominates and bgpreader's second thread covers part of it. Only
+  overlapping inflate with parsing would win that one back.
+- The field sets differ between the two tools, so this is approximate real usage, not an
+  identical-output comparison. Counting elements instead of rendering them flatters bgpkit-parser
+  by a wide margin and is not a fair row; the table above renders in both tools.
 
 ## 9. Acceptance numbers
 
