@@ -212,6 +212,32 @@ What this says, without rounding it up:
 - Closing the library-level gap means not building the owned attribute model, which is a public
   API decision, or shipping the lazy iterator as the default, which is the same decision.
 
+## 8.2 Application workloads (no output)
+
+The honest comparison is a task, not a rendering: read one field per element and do something
+cheap with it. Both tools run on the uncompressed dump, single-threaded except where noted, three
+repetitions, medians.
+
+| workload | owned `BgpElem` | `ElemRef` view | BGPStream |
+| --- | --- | --- | --- |
+| hash every prefix | 154.3G, 15.43s | **15.9G, 1.64s** | 79.1G, 8.86s (1.10 cores) |
+| sum every AS path length | 145.4G, 14.67s | **15.3G, 1.51s** | 78.8G, 8.88s (1.08 cores) |
+
+Both tools walked the same 55,786,629 prefixes: the prefix checksum is
+`13041708055640325709` on both sides. The AS path sums differ by 0.0006%
+(267,055,504 against 267,053,998) because BGPStream's path length counts AS sets differently.
+
+What this settles:
+
+- The default owned API costs 1.7x against BGPStream on these workloads, because it materialises
+  every field whether the task reads it or not.
+- The borrowed view already public as `next_record_elems` wins **5.4x to 5.9x** on wall and
+  instructions, single-threaded, for exactly the same task and the same answer.
+- BGPStream's floor is one eager record decode (about 79G); our view's floor is framing plus the
+  fields the task reads (about 15G here). That difference is the ref-type idea, measured.
+- A ref record would apply the same idea to record-level consumers. It is not needed for these
+  workloads, and it is a separate public type.
+
 ## 9. Acceptance numbers
 
 Same file and method as the baseline (`bview.20261014.0000.gz`, `perf stat` instructions, warm cache,
