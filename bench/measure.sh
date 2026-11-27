@@ -15,9 +15,9 @@ REPS=${REPS:-3}
 
 mkdir -p "$OUT"
 case "$MODE" in
-before-after | render | workloads | filters) ;;
+before-after | render | workloads | filters | many) ;;
 *)
-    echo "usage: $0 <before-after|render|workloads|filters>" >&2
+    echo "usage: $0 <before-after|render|workloads|filters|many>" >&2
     exit 2
     ;;
 esac
@@ -82,6 +82,13 @@ workloads)
     repeat prefix-view "$WORKLOAD_BIN" "$RIB" prefix-view
     repeat aspath-owned "$WORKLOAD_BIN" "$RIB" aspath-owned
     repeat aspath-view "$WORKLOAD_BIN" "$RIB" aspath-view
+    ;;
+many)
+    # Broker-shaped: a directory of small files, one parser per file.
+    : "${MANY_DIR:?set MANY_DIR to a directory of .gz MRT files}"
+    MANY_BIN=${MANY_BIN:-$(dirname "$BGPKIT_BIN")/examples/many_files}
+    repeat many-count "$MANY_BIN" "$MANY_DIR"
+    repeat many-render "$MANY_BIN" "$MANY_DIR" --render
     ;;
 filters)
     # count mode: no output cost, so the number is the filter's own price
