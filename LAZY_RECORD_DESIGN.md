@@ -363,6 +363,36 @@ and a community filter combined, and the unfiltered export keeps its sha256 (`52
 What is left in the 241G row is attribute decoding for every entry plus the screen's own scan of every
 entry's communities; only the frame-level path can remove the decoding, so that stays the next step.
 
+### 8.3.3 Filtered runs on the framed path
+
+Filtered element iteration used to fall back to the owned parser, so a filter that could reject
+nothing cost more than no filter at all. The framed dispatch now applies the record-level predicates
+itself, screens each borrowed entry from its bytes, and materialises only what survives.
+
+Count mode on the uncompressed dump, three repetitions:
+
+| query | owned path | framed path |
+| --- | --- | --- |
+| no filter | 144.8G, 14.7s | 145.5G, 14.7s |
+| `-p 0.0.0.0/0 -S` (47.3M elements) | 228.7G, 26.2s | 128.4G, 12.8s |
+| `-p 8.8.8.0/24` | 2.0G, 0.80s | 2.0G, 0.82s |
+| community `^174:` | 241.5G, 27.2s | 79.1G, 8.0s |
+| community `^15169:` | 27.7G, 3.46s | 20.7G, 2.46s |
+| as path ` 3356 ` | 244.1G, 27.1s | 92.1G, 9.3s |
+
+Against the numbers this line of work started from, AS174's community went 563.3G to 79.1G, AS15169's
+563.3G to 20.7G, and an AS path needle 481.8G to 92.1G, with the same elements every time. A filter
+that can reject nothing is now cheaper than no filter, because a record the predicate excludes never
+builds its elements.
+
+### 8.3.4 Updates records answer the same predicates
+
+A `BGP4MP` UPDATE carries one attribute block for all of its announcements, so origin, community and
+path predicates decide the whole record from that block. `bgp4mp_attributes` walks the fixed header and
+the two length prefixes to find it; a subtype whose widths it does not model, or a message that is not
+an UPDATE, leaves the record to the general path. On the 15-minute updates file: origin 10.4G to 4.56G,
+an AS path needle 10.2G to 5.74G, with six shapes rendering byte-identically to the previous binary.
+
 Two follow-ups were considered on 2026-11-27 and rejected, so that the cost model stays honest about
 what will not change:
 
