@@ -1,5 +1,10 @@
 # Lazy record: the internal parsing unit
 
+> **Scope.** This is the authoritative design for the `perf/lazy-frame` branch: the framing rules,
+> the record-level filter pushdown, the borrowed element path, the one-pass materialiser, and the
+> measured numbers. `REF_ELEM_DESIGN.md` records the earlier element-view design that this builds
+> on.
+
 ## 1. Goal
 
 One internal representation of a framed MRT record, from which every public iterator expands only

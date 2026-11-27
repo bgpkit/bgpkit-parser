@@ -1,5 +1,11 @@
 # Borrowed element views
 
+> **Status.** Shipped as the borrowed element engine: `next_record_elems` / `RecordElems` /
+> `ElemRef` are public, and the default element iterator uses the same engine for RIB dumps. The
+> numbers in section 1 are from before that work landed; the current figures, the filter pushdown
+> and the framing rules are in `LAZY_RECORD_DESIGN.md`, which is the authoritative document for
+> this branch.
+
 ## 1. What the measurements say
 
 On the rrc00 bview of 2026-10-14 (420 MB gz, 55,786,629 elems), instructions, one thread:
