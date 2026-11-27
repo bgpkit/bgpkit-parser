@@ -337,6 +337,32 @@ deliberately does not decide, so a user who types it sees the old cost.
 Whole-dump PSV renders are byte-identical to the previous binary for seven shapes: `^15169:`,
 `^3356:`, `^15169:1$`, `^174:`, ` 3356 `, ` 65001 `, and `^3356 `.
 
+### 8.3.2 Screening entries inside a kept record
+
+A record-level prefilter can only drop a record. Once a record survived, the old path still built an
+element for every entry in it and then ran the element filter, so a community predicate paid for
+rendering every community of every entry to a string. The entry screen (`attr_scan::EntryScreen`)
+evaluates the same predicates against the decoded attributes and drops an entry before its element
+exists.
+
+The rule is the same as at the record level: drop only when a conjunct is certain to fail for that
+entry, and build everything else so the element filter still decides. The peer lookup stays ahead of
+the screen, so an entry naming a peer the table does not have still stops the record. Count mode on
+the uncompressed dump, three repetitions:
+
+| query | record-level only | with the entry screen |
+| --- | --- | --- |
+| community `^174:` | 538.4G, 55.4s | 241.5G, 27.2s |
+| community `^15169:` | 55.3G, 5.96s | 27.7G, 3.46s |
+| as path ` 3356 ` | 411.0G, 43.5s | 244.1G, 27.1s |
+| community `^13335:` | 19.5G, 2.44s | 18.5G, 2.42s |
+
+Nine shapes render byte-identically to the previous binary over the whole dump, including an origin
+and a community filter combined, and the unfiltered export keeps its sha256 (`5285ec12...`).
+
+What is left in the 241G row is attribute decoding for every entry plus the screen's own scan of every
+entry's communities; only the frame-level path can remove the decoding, so that stays the next step.
+
 Two follow-ups were considered on 2026-11-27 and rejected, so that the cost model stays honest about
 what will not change:
 
