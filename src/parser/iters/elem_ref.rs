@@ -275,12 +275,13 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
 pub(crate) fn next_record_elems_impl<R: Read>(
     parser: &mut BgpkitParser<R>,
 ) -> Option<RecordElems<'_>> {
-    use crate::parser::mrt::frame::{classify, RecordKind};
+    use crate::parser::mrt::frame::{bgp4mp_is_update, classify, RecordKind};
 
-    if parser.text_dump_iter.is_some()
-        || !parser.filters.is_empty()
-        || parser.elem_view_state.finished
-    {
+    if parser.text_dump_iter.is_some() || parser.elem_view_state.finished {
+        return None;
+    }
+    if !parser.filters.is_empty() {
+        parser.options.warn_view_filters_once();
         return None;
     }
 
@@ -380,19 +381,22 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 timestamp,
             } => {
                 // Only the AS4 message subtypes are served; anything else says so once and moves on.
-                let supported = {
+                let (supported, would_yield) = {
                     let state = &mut parser.elem_view_state;
-                    fill_update_entries(
-                        &state.body_buf[..body_len],
-                        common_header.entry_subtype,
-                        &mut state.update_entries,
-                    )
-                    .is_some()
+                    let subtype = common_header.entry_subtype;
+                    let body = &state.body_buf[..body_len];
+                    let supported =
+                        fill_update_entries(body, subtype, &mut state.update_entries).is_some();
+                    (supported, bgp4mp_is_update(subtype, body))
                 };
                 if !supported {
-                    parser
-                        .options
-                        .warn_view_scope_once("BGP4MP (non-AS4 or non-UPDATE)");
+                    // A record that carries no prefixes by design is not a gap in the view; only a
+                    // record that would have produced elements and did not is worth a warning.
+                    if would_yield {
+                        parser
+                            .options
+                            .warn_view_scope_once("BGP4MP record with 2-byte AS numbers");
+                    }
                     continue;
                 }
                 break Framed::Update {
@@ -451,80 +455,109 @@ pub(crate) fn next_record_elems_impl<R: Read>(
     }
 }
 
-/// Walk the NLRI section of an update into `out`.
-fn parse_nlri(
-    mut bytes: &[u8],
-    afi: Afi,
-    safi: Safi,
-    add_path: bool,
-    elem_type: ElemType,
-    out: &mut Vec<UpdateEntry>,
-) -> Option<()> {
-    let mut flags = 0u8;
-    if afi == Afi::Ipv6 {
-        flags |= FLAG_AFI_IPV6;
-    }
-    if safi == Safi::Multicast {
-        flags |= FLAG_SAFI_MULTICAST;
-    }
-    while !bytes.is_empty() {
-        let (prefix, consumed) =
-            crate::parser::utils::try_parse_prefix(bytes, &afi, add_path).ok()?;
-        if consumed == 0 || consumed > bytes.len() {
-            return None;
-        }
-        out.push(UpdateEntry {
-            prefix,
-            elem_type,
-            flags,
-        });
-        bytes = &bytes[consumed..];
-    }
-    Some(())
-}
-
-/// Walk one `MP_REACH_NLRI` or `MP_UNREACH_NLRI` body.
+/// Append the prefixes of one `MP_REACH_NLRI` or `MP_UNREACH_NLRI` body.
 ///
-/// Families whose NLRI is not an IP prefix (EVPN, link state) contribute no elements on the owned
-/// path either, so they are ignored rather than turned into something else. An MPLS-labeled
-/// withdrawal is a plain prefix (RFC 8277 §2.4) and is read like one.
-fn parse_mp_nlri(
-    body: &[u8],
-    reachable: bool,
-    add_path: bool,
-    out: &mut Vec<UpdateEntry>,
-) -> Option<()> {
+/// Families that are not IP prefixes contribute nothing on the owned path either, so they contribute
+/// nothing here; a body this cannot read contributes nothing, like a failed attribute there.
+fn append_mp_nlri(body: &[u8], reachable: bool, add_path: bool, out: &mut Vec<UpdateEntry>) {
     if body.len() < 3 {
-        return None;
+        return;
     }
     let afi = match u16::from_be_bytes([body[0], body[1]]) {
         1 => Afi::Ipv4,
         2 => Afi::Ipv6,
-        _ => return Some(()),
+        _ => return,
     };
-    let safi = Safi::try_from(body[2]).ok()?;
+    let Ok(safi) = Safi::try_from(body[2]) else {
+        return;
+    };
     let mut rest = &body[3..];
     if reachable {
-        let next_hop_len = *rest.first()? as usize;
-        rest = rest.get(1 + next_hop_len..)?;
-        // RFC 4760 puts a reserved octet in front of reachable NLRI; the owned parser reads it too.
-        let reserved = *rest.first()?;
-        rest = rest.get(1..)?;
-        if reserved != 0 {
-            return None;
-        }
-    }
-    let prefix_shaped =
-        matches!(safi, Safi::Unicast | Safi::Multicast) || (!reachable && safi == Safi::MplsLabel);
-    if !prefix_shaped {
-        return Some(());
+        let Some(&next_hop_len) = rest.first() else {
+            return;
+        };
+        let Some(after_next_hop) = rest.get(1 + next_hop_len as usize..) else {
+            return;
+        };
+        // RFC 4760 puts a reserved octet in front of reachable NLRI. The owned parser reads it and
+        // carries on regardless of its value; so does this.
+        rest = after_next_hop.get(1..).unwrap_or(&[]);
     }
     let elem_type = if reachable {
         ElemType::ANNOUNCE
     } else {
         ElemType::WITHDRAW
     };
-    parse_nlri(rest, afi, safi, add_path, elem_type, out)
+    match safi {
+        Safi::Unicast | Safi::Multicast => append_nlri(rest, afi, safi, add_path, elem_type, out),
+        // RFC 8277 §2.4: a labelled withdrawal carries a three-byte compatibility field ahead of the
+        // prefix, which the owned parser strips with the same helper used here.
+        Safi::MplsLabel if !reachable => {
+            let mut input = bytes::Bytes::copy_from_slice(rest);
+            // Same configuration the owned attribute parser builds for SAFI 4.
+            let config = crate::models::LabeledNlriConfig {
+                add_path,
+                mode: crate::models::LabeledNlriMode::MultiLabel,
+                max_labels: 16,
+                peer_max_labels: None,
+            };
+            let Ok(prefixes) =
+                crate::models::parse_labeled_withdrawal_nlri(&mut input, afi, &config)
+            else {
+                return;
+            };
+            let flags = afi_flags(&afi, safi);
+            out.extend(prefixes.into_iter().map(|prefix| UpdateEntry {
+                prefix,
+                elem_type,
+                flags,
+            }));
+        }
+        // EVPN, link state and a labelled announcement produce no elements on the owned path either.
+        _ => {}
+    }
+}
+
+/// Append the prefixes of one NLRI section, using the same parser the owned path uses.
+///
+/// Sharing that parser is the point: it carries the ADD-PATH heuristic for a block that starts with
+/// `0x00`, and a section it cannot read contributes no prefixes here exactly as it contributes none
+/// there.
+fn append_nlri(
+    section: &[u8],
+    afi: Afi,
+    safi: Safi,
+    add_path: bool,
+    elem_type: ElemType,
+    out: &mut Vec<UpdateEntry>,
+) {
+    if section.is_empty() {
+        return;
+    }
+    let Ok(prefixes) = crate::parser::utils::parse_nlri_list(
+        bytes::Bytes::copy_from_slice(section),
+        add_path,
+        &afi,
+    ) else {
+        return;
+    };
+    let flags = afi_flags(&afi, safi);
+    out.extend(prefixes.into_iter().map(|prefix| UpdateEntry {
+        prefix,
+        elem_type,
+        flags,
+    }));
+}
+
+fn afi_flags(afi: &Afi, safi: Safi) -> u8 {
+    let mut flags = 0u8;
+    if *afi == Afi::Ipv6 {
+        flags |= FLAG_AFI_IPV6;
+    }
+    if safi == Safi::Multicast {
+        flags |= FLAG_SAFI_MULTICAST;
+    }
+    flags
 }
 
 /// The borrowed elements of the update record currently in the frame buffer.
@@ -634,27 +667,27 @@ pub(crate) fn fill_update_entries<'a>(
         pos = end;
     }
 
-    parse_nlri(
+    append_nlri(
         announced,
         Afi::Ipv4,
         Safi::Unicast,
         add_path,
         ElemType::ANNOUNCE,
         out,
-    )?;
+    );
     if let Some(body) = mp_reach {
-        parse_mp_nlri(body, true, add_path, out)?;
+        append_mp_nlri(body, true, add_path, out);
     }
-    parse_nlri(
+    append_nlri(
         withdrawn,
         Afi::Ipv4,
         Safi::Unicast,
         add_path,
         ElemType::WITHDRAW,
         out,
-    )?;
+    );
     if let Some(body) = mp_unreach {
-        parse_mp_nlri(body, false, add_path, out)?;
+        append_mp_nlri(body, false, add_path, out);
     }
     Some(attrs)
 }
@@ -898,13 +931,7 @@ impl<'a> Iterator for ElemRefIter<'a> {
                     ElemType::WITHDRAW => &[],
                 };
                 Some(ElemRef::new_update(
-                    entry.prefix.prefix,
-                    *peer_ip,
-                    *peer_asn,
-                    *timestamp,
-                    entry.flags,
-                    entry.elem_type,
-                    attr_bytes,
+                    entry, *peer_ip, *peer_asn, *timestamp, attr_bytes,
                 ))
             }
         }
@@ -933,6 +960,8 @@ pub struct ElemRef<'a> {
     as_path_slot: Cell<u64>,
     timestamp: f64,
     prefix: IpNet,
+    /// The ADD-PATH identifier the announcement carried, if any. A dump's entry has none.
+    path_id: Option<u32>,
     flags: u8,
     elem_type: ElemType,
     warned_truncation: Cell<bool>,
@@ -944,7 +973,7 @@ const _: () = assert!(!std::mem::needs_drop::<AsPathView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<AsnsView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<CommunitiesView<'static>>());
 // A borrowed element carries its peer inline so one type serves both dumps and updates.
-const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 96);
+const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 104);
 
 impl<'a> ElemRef<'a> {
     #[inline]
@@ -963,6 +992,7 @@ impl<'a> ElemRef<'a> {
             as_path_slot: Cell::new(SLOT_UNSCANNED),
             timestamp: originated_time as f64,
             prefix,
+            path_id: None,
             flags,
             elem_type: ElemType::ANNOUNCE,
             warned_truncation: Cell::new(false),
@@ -972,12 +1002,10 @@ impl<'a> ElemRef<'a> {
     /// An element of a `BGP4MP` update: the peer and the time come from the record header.
     #[inline]
     fn new_update(
-        prefix: IpNet,
+        entry: &UpdateEntry,
         peer_ip: IpAddr,
         peer_asn: Asn,
         timestamp: f64,
-        flags: u8,
-        elem_type: ElemType,
         attr_bytes: &'a [u8],
     ) -> Self {
         Self {
@@ -987,9 +1015,10 @@ impl<'a> ElemRef<'a> {
             peer_bgp_id: None,
             as_path_slot: Cell::new(SLOT_UNSCANNED),
             timestamp,
-            prefix,
-            flags,
-            elem_type,
+            prefix: entry.prefix.prefix,
+            path_id: entry.prefix.path_id,
+            flags: entry.flags,
+            elem_type: entry.elem_type,
             warned_truncation: Cell::new(false),
         }
     }
@@ -1237,8 +1266,10 @@ impl<'a> ElemRef<'a> {
                 break;
             }
             if code == u8::from(AttrType::NEXT_HOP) {
+                // RFC 4271 defines NEXT_HOP as an IPv4 address; decoding it with the entry's family
+                // would read sixteen bytes out of a four-byte value on every IPv6 entry.
                 let mut val = &bytes[val_start..val_end];
-                if let Ok(addr) = val.read_address(&afi) {
+                if let Ok(addr) = val.read_address(&Afi::Ipv4) {
                     next_hop = Some(addr);
                 }
             } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
@@ -1257,6 +1288,9 @@ impl<'a> ElemRef<'a> {
     /// Returns the Multi-Exit Discriminator (`MULTI_EXIT_DISCRIMINATOR`), matching
     /// [`BgpElem::med`](crate::BgpElem::med) (`Some(0)` on RIB announcements without MED).
     pub fn med(&self) -> Option<u32> {
+        if self.elem_type == ElemType::WITHDRAW {
+            return None;
+        }
         Some(
             self.scan_u32_attr(u8::from(AttrType::MULTI_EXIT_DISCRIMINATOR))
                 .unwrap_or(0),
@@ -1267,6 +1301,9 @@ impl<'a> ElemRef<'a> {
     /// [`BgpElem::local_pref`](crate::BgpElem::local_pref) (`Some(0)` on RIB announcements without
     /// `LOCAL_PREFERENCE`).
     pub fn local_pref(&self) -> Option<u32> {
+        if self.elem_type == ElemType::WITHDRAW {
+            return None;
+        }
         Some(
             self.scan_u32_attr(u8::from(AttrType::LOCAL_PREFERENCE))
                 .unwrap_or(0),
@@ -1342,41 +1379,47 @@ impl<'a> ElemRef<'a> {
                 continue;
             }
 
+            // A known attribute this cannot decode keeps its bytes in `unknown`, which is what the
+            // owned path does with an attribute it falls back to `AttributeValue::Raw`.
+            let mut undecoded = false;
             match AttrType::from(code) {
                 AttrType::ORIGIN => {
-                    origin = val.first().and_then(|value| Origin::try_from(*value).ok())
+                    origin = val.first().and_then(|value| Origin::try_from(*value).ok());
+                    undecoded = origin.is_none();
                 }
                 AttrType::AS_PATH => {
-                    if validate_as_path_wire(val) {
-                        as_path_wire = Some(val);
-                    }
+                    as_path_wire = validate_as_path_wire(val).then_some(val);
+                    undecoded = as_path_wire.is_none();
                 }
                 AttrType::AS4_PATH => {
-                    if validate_as_path_wire(val) {
-                        as4_path_wire = Some(val);
-                    }
+                    as4_path_wire = validate_as_path_wire(val).then_some(val);
+                    undecoded = as4_path_wire.is_none();
                 }
                 AttrType::NEXT_HOP => {
                     let mut value = val;
-                    if let Ok(address) = value.read_address(&afi) {
-                        next_hop = Some(address);
+                    match value.read_address(&Afi::Ipv4) {
+                        Ok(address) => next_hop = Some(address),
+                        Err(_) => undecoded = true,
                     }
                 }
                 AttrType::MULTI_EXIT_DISCRIMINATOR => {
                     let mut value = val;
-                    if let Ok(number) = value.read_u32() {
-                        med = Some(number);
+                    match value.read_u32() {
+                        Ok(number) => med = Some(number),
+                        Err(_) => undecoded = true,
                     }
                 }
                 AttrType::LOCAL_PREFERENCE => {
                     let mut value = val;
-                    if let Ok(number) = value.read_u32() {
-                        local_pref = Some(number);
+                    match value.read_u32() {
+                        Ok(number) => local_pref = Some(number),
+                        Err(_) => undecoded = true,
                     }
                 }
                 AttrType::ATOMIC_AGGREGATE => atomic = true,
                 AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
-                    aggregator = decode_aggregator_slice(val)
+                    aggregator = decode_aggregator_slice(val);
+                    undecoded = aggregator.is_none();
                 }
                 AttrType::COMMUNITIES
                 | AttrType::EXTENDED_COMMUNITIES
@@ -1405,6 +1448,12 @@ impl<'a> ElemRef<'a> {
                     bytes: Bytes::copy_from_slice(val),
                 }),
                 _ => {}
+            }
+            if undecoded {
+                unknown.push(AttrRaw {
+                    code,
+                    bytes: Bytes::copy_from_slice(val),
+                });
             }
         }
 
@@ -1474,7 +1523,10 @@ impl<'a> ElemRef<'a> {
             peer_ip: self.peer_ip,
             peer_asn: self.peer_asn,
             peer_bgp_id: self.peer_bgp_id,
-            prefix: self.prefix(),
+            prefix: NetworkPrefix {
+                prefix: self.prefix,
+                path_id: self.path_id,
+            },
             next_hop: next_hop.or(mp_next_hop),
             as_path,
             origin,
@@ -2999,5 +3051,267 @@ mod materialise_tests {
         for (index, (owned_elem, borrowed_elem)) in owned.iter().zip(borrowed.iter()).enumerate() {
             assert_eq!(owned_elem, borrowed_elem, "elem {index} differs");
         }
+    }
+}
+
+#[cfg(test)]
+mod wire_parity_tests {
+    use crate::models::*;
+    use std::io::Cursor;
+    use std::str::FromStr;
+
+    /// Wrap a BGP4MP body in an MRT common header.
+    fn mrt(subtype: Bgp4MpType, body: Vec<u8>) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1_600_000_000u32.to_be_bytes());
+        wire.extend_from_slice(&(EntryType::BGP4MP as u16).to_be_bytes());
+        wire.extend_from_slice(&(subtype as u16).to_be_bytes());
+        wire.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&body);
+        wire
+    }
+
+    /// A BGP4MP message body: envelope, then a BGP message of the given type.
+    fn bgp4mp_body(asn_len: AsnLength, afi: Afi, msg_type: u8, payload: &[u8]) -> Vec<u8> {
+        let mut body = Vec::new();
+        match asn_len {
+            AsnLength::Bits16 => {
+                body.extend_from_slice(&64496u16.to_be_bytes());
+                body.extend_from_slice(&64497u16.to_be_bytes());
+            }
+            AsnLength::Bits32 => {
+                body.extend_from_slice(&64496u32.to_be_bytes());
+                body.extend_from_slice(&64497u32.to_be_bytes());
+            }
+        }
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&u16::from(afi).to_be_bytes());
+        match afi {
+            Afi::Ipv4 => {
+                body.extend_from_slice(&[192, 0, 2, 1]);
+                body.extend_from_slice(&[192, 0, 2, 2]);
+            }
+            Afi::Ipv6 => {
+                body.extend_from_slice(&[
+                    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                ]);
+                body.extend_from_slice(&[
+                    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+                ]);
+            }
+            other => panic!("test does not build BGP4MP records for {other:?}"),
+        }
+        let mut message = vec![0xFF; 16];
+        message.extend_from_slice(&((19 + payload.len()) as u16).to_be_bytes());
+        message.push(msg_type);
+        message.extend_from_slice(payload);
+        body.extend_from_slice(&message);
+        body
+    }
+
+    /// An UPDATE payload: withdrawn NLRI, attribute block, announced NLRI.
+    fn update_payload(withdrawn: &[u8], attributes: &[u8], announced: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&(withdrawn.len() as u16).to_be_bytes());
+        payload.extend_from_slice(withdrawn);
+        payload.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        payload.extend_from_slice(attributes);
+        payload.extend_from_slice(announced);
+        payload
+    }
+
+    /// One path attribute with a one-octet length. Optional attributes need the optional bit, or
+    /// the parser treats the flag byte as a validation finding and drops the attribute.
+    fn attr(code: u8, body: &[u8]) -> Vec<u8> {
+        let optional = matches!(code, 14 | 15);
+        let flags = if optional { 0x80 } else { 0x40 };
+        let mut out = vec![flags, code, body.len() as u8];
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn origin_igp() -> Vec<u8> {
+        attr(1, &[0])
+    }
+
+    fn next_hop() -> Vec<u8> {
+        attr(3, &[192, 0, 2, 254])
+    }
+
+    /// AS_SEQUENCE of length zero followed by a real one: the owned renderer writes a separator for
+    /// the empty segment, so a view that skipped it would compare positions differently.
+    fn as_path_with_empty_segment() -> Vec<u8> {
+        let mut body = vec![2u8, 0];
+        body.extend_from_slice(&[2u8, 2]);
+        body.extend_from_slice(&3356u32.to_be_bytes());
+        body.extend_from_slice(&174u32.to_be_bytes());
+        attr(2, &body)
+    }
+
+    fn as_path(asns: &[u32], width: AsnLength) -> Vec<u8> {
+        let mut body = vec![2u8, asns.len() as u8];
+        for asn in asns {
+            match width {
+                AsnLength::Bits16 => body.extend_from_slice(&(*asn as u16).to_be_bytes()),
+                AsnLength::Bits32 => body.extend_from_slice(&asn.to_be_bytes()),
+            }
+        }
+        attr(2, &body)
+    }
+
+    /// MP_UNREACH_NLRI for AFI 1, SAFI 4 (labelled unicast): one NLRI whose first 24 of 48 bits are
+    /// the compatibility field, leaving 203.0.113.0/24.
+    fn labelled_withdrawal_attr() -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&1u16.to_be_bytes());
+        body.push(4);
+        body.push(48);
+        body.extend_from_slice(&[0x00, 0x01, 0x02]);
+        body.extend_from_slice(&[203, 0, 113]);
+        attr(15, &body)
+    }
+
+    /// A one-octet NLRI encoding of an IPv4 prefix.
+    fn nlri(prefix: &str) -> Vec<u8> {
+        let network = NetworkPrefix::from_str(prefix).expect("parse prefix");
+        let bits = network.prefix.prefix_len();
+        let mut out = vec![bits];
+        match network.prefix {
+            ipnet::IpNet::V4(v4) => {
+                let octets = v4.addr().octets();
+                out.extend_from_slice(&octets[..usize::from(bits).div_ceil(8)]);
+            }
+            ipnet::IpNet::V6(_) => panic!("test builds IPv4 NLRI here"),
+        }
+        out
+    }
+
+    fn owned_elems(wire: &[u8]) -> Vec<BgpElem> {
+        crate::BgpkitParser::from_reader(Cursor::new(wire.to_vec()))
+            .into_elem_iter()
+            .collect()
+    }
+
+    fn borrowed_elems(wire: &[u8]) -> Vec<BgpElem> {
+        let mut parser = crate::BgpkitParser::from_reader(Cursor::new(wire.to_vec()));
+        let mut elems = Vec::new();
+        while let Some(mut record) = parser.next_record_elems() {
+            for elem in &mut record {
+                elems.push(elem.to_bgp_elem());
+            }
+        }
+        elems
+    }
+
+    /// Both paths must produce the same elements for a shape that is legal but rare in real traffic.
+    fn assert_same(wire: &[u8]) -> Vec<BgpElem> {
+        let owned = owned_elems(wire);
+        let borrowed = borrowed_elems(wire);
+        assert_eq!(owned, borrowed, "owned and borrowed elements differ");
+        owned
+    }
+
+    #[test]
+    fn empty_as_path_segment() {
+        let attributes: Vec<u8> = [origin_igp(), as_path_with_empty_segment(), next_hop()].concat();
+        let wire = mrt(
+            Bgp4MpType::MessageAs4,
+            bgp4mp_body(
+                AsnLength::Bits32,
+                Afi::Ipv4,
+                2,
+                &update_payload(&[], &attributes, &nlri("198.51.100.0/24")),
+            ),
+        );
+        let elems = assert_same(&wire);
+        assert_eq!(elems.len(), 1);
+        let rendered = elems[0].as_path.as_ref().map(|path| path.to_string());
+        assert!(
+            rendered
+                .as_deref()
+                .is_some_and(|path| path.contains(" 3356 174")),
+            "as_path was {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn labelled_withdrawal() {
+        let attributes: Vec<u8> = [
+            origin_igp(),
+            as_path(&[3356, 174], AsnLength::Bits32),
+            labelled_withdrawal_attr(),
+        ]
+        .concat();
+        let wire = mrt(
+            Bgp4MpType::MessageAs4,
+            bgp4mp_body(
+                AsnLength::Bits32,
+                Afi::Ipv4,
+                2,
+                &update_payload(&[], &attributes, &[]),
+            ),
+        );
+        let elems = assert_same(&wire);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].prefix.prefix.to_string(), "203.0.113.0/24");
+        assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    }
+
+    /// A 2-byte-ASN BGP4MP record is outside the borrowed view's scope: it produces no elements
+    /// there while the owned path parses it. This pins the documented boundary.
+    #[test]
+    fn two_byte_asn_record_is_not_served_by_the_view() {
+        let attributes: Vec<u8> = [
+            origin_igp(),
+            as_path(&[3356, 174], AsnLength::Bits16),
+            next_hop(),
+        ]
+        .concat();
+        let wire = mrt(
+            Bgp4MpType::Message,
+            bgp4mp_body(
+                AsnLength::Bits16,
+                Afi::Ipv4,
+                2,
+                &update_payload(&[], &attributes, &nlri("198.51.100.0/24")),
+            ),
+        );
+        assert_eq!(owned_elems(&wire).len(), 1);
+        assert!(borrowed_elems(&wire).is_empty());
+    }
+
+    /// An IPv6 announcement in a record that also carries an IPv4 NEXT_HOP: the owned path prefers
+    /// the attribute, so the view must read it as IPv4 rather than with the entry's family.
+    #[test]
+    fn ipv6_announcement_with_ipv4_next_hop_attribute() {
+        let mut mp_reach = Vec::new();
+        mp_reach.extend_from_slice(&2u16.to_be_bytes());
+        mp_reach.push(1);
+        mp_reach.push(16);
+        mp_reach.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xfe,
+        ]);
+        mp_reach.push(0);
+        mp_reach.push(32);
+        mp_reach.extend_from_slice(&[0x20, 0x01, 0x0d, 0xb8]);
+        let attributes: Vec<u8> = [
+            origin_igp(),
+            as_path(&[3356, 174], AsnLength::Bits32),
+            next_hop(),
+            attr(14, &mp_reach),
+        ]
+        .concat();
+        let wire = mrt(
+            Bgp4MpType::MessageAs4,
+            bgp4mp_body(
+                AsnLength::Bits32,
+                Afi::Ipv4,
+                2,
+                &update_payload(&[], &attributes, &[]),
+            ),
+        );
+        let elems = assert_same(&wire);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].next_hop, Some("192.0.2.254".parse().unwrap()));
     }
 }

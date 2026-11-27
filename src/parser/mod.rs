@@ -60,6 +60,7 @@ pub(crate) struct ParserOptions {
     warned_zebra_compat: bool,
     logged_parse_error: bool,
     warned_view_scope: bool,
+    warned_view_filters: bool,
 }
 impl Default for ParserOptions {
     fn default() -> Self {
@@ -68,6 +69,7 @@ impl Default for ParserOptions {
             warned_zebra_compat: false,
             logged_parse_error: false,
             warned_view_scope: false,
+            warned_view_filters: false,
         }
     }
 }
@@ -77,9 +79,19 @@ impl ParserOptions {
     pub(crate) fn warn_view_scope_once(&mut self, kind: &str) {
         if self.show_warnings && !self.warned_view_scope {
             warn!(
-                "next_record_elems serves TABLE_DUMP_V2 RIB records only; skipping {kind} records (further occurrences for this parser will not be logged). Use into_elem_iter for every record kind."
+                "next_record_elems cannot serve {kind}; skipping them (further occurrences for this parser will not be logged). Use into_elem_iter for every record kind."
             );
             self.warned_view_scope = true;
+        }
+    }
+
+    /// Say once, per parser, that the borrowed view refuses a parser that carries filters.
+    pub(crate) fn warn_view_filters_once(&mut self) {
+        if self.show_warnings && !self.warned_view_filters {
+            warn!(
+                "next_record_elems does not apply filters, so it returns no records for this parser; use into_elem_iter when filters are set (further calls will not be logged)."
+            );
+            self.warned_view_filters = true;
         }
     }
 
@@ -426,16 +438,19 @@ impl<R: Read> BgpkitParser<R> {
     ///
     /// # Scope
     ///
-    /// This first version serves `TABLE_DUMP_V2` `RIB_AFI` records only (`PeerIndexTable` records
-    /// update the active peer table internally). A record of another kind (`BGP4MP` updates, legacy
-    /// `TABLE_DUMP` v1, legacy `BGP`) is skipped and logs one warning naming the kind, so a caller
-    /// cannot mistake "this path does not cover this file" for "this file has no elements"; use
-    /// [`into_elem_iter`](Self::into_elem_iter) for every record kind. Text-dump parsers return
-    /// `None` immediately.
+    /// Serves `TABLE_DUMP_V2` `RIB_AFI` records (`PeerIndexTable` records update the active peer
+    /// table internally) and `BGP4MP_AS4` message records, for both dumps and updates. Records that
+    /// carry no elements by design (a `KEEPALIVE`, a state change, another family) are skipped
+    /// silently. A record that would produce elements but is not served here, today a `BGP4MP`
+    /// record with 2-byte AS numbers, is skipped and logs one warning naming that reason, so a
+    /// caller cannot mistake "this path does not cover this file" for "this file has no
+    /// elements"; use [`into_elem_iter`](Self::into_elem_iter) for every record kind. Text-dump
+    /// parsers return `None` immediately.
     ///
-    /// A parser with filters returns `None` on the first call and reads nothing: this path does
-    /// not apply them, and silently returning unfiltered elements to a caller that asked for a
-    /// filter is worse than refusing.
+    /// A parser with filters returns `None` on the first call, reads nothing, and logs one warning:
+    /// this path does not apply them, and silently returning unfiltered elements to a caller that
+    /// asked for a filter is worse than refusing. Use [`into_elem_iter`](Self::into_elem_iter) when
+    /// the parser carries filters.
     pub fn next_record_elems(&mut self) -> Option<RecordElems<'_>> {
         iters::elem_ref::next_record_elems_impl(self)
     }

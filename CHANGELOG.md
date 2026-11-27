@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+* **Element iteration is faster, with unchanged output**: MRT records are now framed once into a reusable buffer and elements are built from borrowed views of that buffer instead of from an owned decode of every attribute. On the rrc00 `bview` of 2026-10-14, a RIB element scan costs 145 G instructions against 271 G before (1.87x), a full PSV export 540 G against 1361 G (2.52x), and a single-prefix query 47 G against 321 G (6.86x); the 15-minute updates file improves 1.45x. Every rendered byte is identical to the previous release.
+* **Filters are pushed down before elements are built**: a filter that can be decided from the record header (prefix, address family, peer, timestamp, type) now skips the record, and a filter that can be decided from the attribute bytes (origin, origin ASN, community pattern, AS path position) now skips the entry. The decision refuses to answer whenever the bytes cannot decide it (a truncated attribute, `AS4_PATH`, an `AS_SET` at the end of the path, an extended community, a non-anchored pattern, an empty path segment, a repeated community attribute, a 2-byte-ASN `BGP4MP` record), so it only ever skips work that could not have produced a match. Record iteration still drops records that produce no matching element.
+
 * **A filter no longer doubles the elem conversion work**: an elem iterator now filters the elems it builds instead of making the record iterator test each record first. The record-level test cloned the record and converted every elem of it to decide whether the record matched, and the elem iterator then converted the same record again, so a filtered run parsed every record twice. On the rrc00 bview of 2026-10-14 a prefix filter cost 29.8% more instructions than no filter at all; it now costs 2.9%. Output is unchanged. Record iteration still drops records that produce no matching elem.
 
 ## v0.24.0 - 2026-11-06

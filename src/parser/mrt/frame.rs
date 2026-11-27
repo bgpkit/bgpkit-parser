@@ -405,6 +405,42 @@ pub(crate) fn bgp4mp_asn_len(subtype: u16) -> Option<AsnLength> {
     })
 }
 
+/// Whether a `BGP4MP` record carries a BGP message that can produce elements.
+///
+/// Only an `UPDATE` has network prefixes. Reading the message type here keeps the caller from
+/// reporting a `KEEPALIVE` or a state change, which carry none by design, as a record the borrowed
+/// view cannot serve.
+pub(crate) fn bgp4mp_is_update(subtype: u16, body: &[u8]) -> bool {
+    let Some(asn_len) = bgp4mp_asn_len(subtype) else {
+        return false;
+    };
+    let asn_bytes = match asn_len {
+        AsnLength::Bits16 => 2,
+        AsnLength::Bits32 => 4,
+    };
+    // The envelope is peer and local AS, an interface index, an address family and two addresses.
+    let Some(after_asns) = body.get(asn_bytes * 2..) else {
+        return false;
+    };
+    let Some(after_index) = after_asns.get(2..) else {
+        return false;
+    };
+    let Some(afi) = after_index.get(..2) else {
+        return false;
+    };
+    let addr_len = match u16::from_be_bytes([afi[0], afi[1]]) {
+        1 => 4,
+        2 => 16,
+        _ => return false,
+    };
+    // Skip the address family, both addresses, and read the BGP message type, which sits after the
+    // sixteen-octet marker and the two-octet length.
+    match after_index.get(2 + addr_len * 2..) {
+        Some(message) => message.get(18) == Some(&2),
+        None => false,
+    }
+}
+
 /// The peer named by a BGP4MP record header.
 fn bgp4mp_peer(subtype: u16, body: &[u8]) -> Result<(IpAddr, Asn), ParserError> {
     let asn_len = bgp4mp_asn_len(subtype)
