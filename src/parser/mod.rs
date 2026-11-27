@@ -304,7 +304,7 @@ impl<R: Read> BgpkitParser<R> {
                     // A dump record whose every entry fails a prefix or origin constraint
                     // contributes no element, so it is skipped before its body is parsed.
                     if filter::rib_record_excluded(&self.filters, &prefix)
-                        || attr_scan::rib_record_excluded_by_origin(
+                        || attr_scan::rib_record_excluded(
                             &self.filters,
                             &self.elem_view_state.body_buf[..body_len],
                             entries_offset,
