@@ -276,6 +276,35 @@ What this settles:
 - A ref record would apply the same idea to record-level consumers. It is not needed for these
   workloads, and it is a separate public type.
 
+## 8.3 What each filter tier costs
+
+Uncompressed dump, PSV export to /dev/null, one core, three repetitions, medians. bgpreader reads
+the same file with the same intent (`-a` origin, `-k` prefix).
+
+| query | this branch | bgpreader | ratio |
+| --- | --- | --- | --- |
+| export, no filter | 494.8G, 45.67s | 1118.5G, 95.48s | 2.26x |
+| prefix `8.8.8.0/24` | 2.0G, 0.79s | 78.9G, 9.88s | 39.1x |
+| origin `15169` | 11.8G, 1.56s | 77.4G, 9.52s | 6.57x |
+| AS path regex ` 3356 ` | 481.8G, 51.74s | not measured | |
+| community regex `15169:` | 563.3G, 59.00s | not measured | |
+
+The origin row is the attribute tier: 264.5G before the walk existed, 11.8G after, 22.4x. bgpreader
+sits at 77-79G on both of its filtered rows, the same as its unfiltered floor, because it decodes
+every record and filters the elements afterwards.
+
+Selectivity of the header tier, count mode: zero-hit prefix 2.0G, one record 2.0G, `8.0.0.0/8` with
+subs (102,288 elements) 2.5G, `0.0.0.0/0` with subs (47.3M elements) 228.7G, no filter 144.8G.
+
+That last pair is a real defect rather than noise: a filter that cannot reject anything costs 58%
+more than no filter, because any filter currently claims the owned iterator while an unfiltered run
+takes the framed RIB path. Making the framed path accept filters is the next step; until then a
+selective filter is the only case where filtering pays.
+
+The two regex rows are element-tier by construction: `Filter::AsPath` and `Filter::Community` match a
+render of the value, so they cost the export plus the formatting, and no byte-level walk can decide
+them without changing the filter from a regex to a structured predicate.
+
 ## 9. Acceptance numbers
 
 Same file and method as the baseline (`bview.20261014.0000.gz`, `perf stat` instructions, warm cache,
