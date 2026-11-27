@@ -60,7 +60,6 @@ pub(crate) struct Frame<'a> {
 #[derive(Default)]
 pub(crate) struct Framer {
     header: HeaderBuf,
-    parsed_header: Option<Result<CommonHeader, ParserError>>,
 }
 
 impl Framer {
@@ -68,21 +67,14 @@ impl Framer {
     ///
     /// The body buffer keeps its allocation across records; each record clears and refills it, so
     /// a stream of same-sized records does not reallocate.
-    /// The header parsed during framing, when it parsed.
-    fn parsed(&self) -> Option<CommonHeader> {
-        self.parsed_header
-            .as_ref()
-            .and_then(|result| result.as_ref().ok().copied())
-    }
-
     #[inline]
     pub(crate) fn next<'a>(
         &mut self,
         input: &mut impl Read,
         body: &'a mut Vec<u8>,
     ) -> Result<Frame<'a>, FrameError> {
-        let body_len = self.read_body(input, body)?;
-        let header = self.take_header(body)?;
+        let (body_len, parsed_header) = self.read_body(input, body)?;
+        let header = take_header(parsed_header, self.header.as_slice(), &body[..body_len])?;
         Ok(Frame {
             header,
             raw_header: self.header,
@@ -95,7 +87,7 @@ impl Framer {
         &mut self,
         input: &mut impl Read,
         body: &mut Vec<u8>,
-    ) -> Result<usize, FrameError> {
+    ) -> Result<(usize, Option<Result<CommonHeader, ParserError>>), FrameError> {
         let framed = match frame_common_header_captured(input, &mut self.header) {
             Ok(framed) => framed,
             Err(error) => {
@@ -120,7 +112,7 @@ impl Framer {
 
         // Copy the parsed header out before `framed` keeps borrowing the header buffer.
         let parsed_header = framed.header.as_ref().ok().copied();
-        self.parsed_header = Some(framed.header);
+        let header_outcome = Some(framed.header);
 
         if framed.body_length > MAX_MRT_MESSAGE_LEN {
             return Err(FrameError {
@@ -141,7 +133,7 @@ impl Framer {
         if let Err(err) = input.take(body_len as u64).read_to_end(body) {
             return Err(FrameError {
                 error: ParserError::IoError(err),
-                header: self.parsed(),
+                header: parsed_header,
                 bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
                 consumed: false,
             });
@@ -150,14 +142,15 @@ impl Framer {
             let filled = body.len();
             return Err(truncated_body(
                 self.header,
-                self.parsed(),
+                parsed_header,
                 body,
                 body_len,
                 filled,
             ));
         }
 
-        self.apply_legacy_length_correction(input, body, body_len)
+        let body_len = self.apply_legacy_length_correction(input, body, body_len, parsed_header)?;
+        Ok((body_len, header_outcome))
     }
 
     /// Preserve stream alignment across historical TABLE_DUMP v1 records that under-declared their
@@ -167,11 +160,11 @@ impl Framer {
         input: &mut impl Read,
         body: &mut Vec<u8>,
         body_len: usize,
+        parsed_header: Option<CommonHeader>,
     ) -> Result<usize, FrameError> {
-        let Some(Ok(common_header)) = self.parsed_header.as_ref() else {
+        let Some(common_header) = parsed_header else {
             return Ok(body_len);
         };
-        let common_header = *common_header;
         if common_header.entry_type != EntryType::TABLE_DUMP
             || !crate::parser::mrt::messages::table_dump::needs_legacy_length_correction(
                 common_header.entry_subtype,
@@ -218,24 +211,29 @@ impl Framer {
             }),
         }
     }
+}
 
-    fn take_header(&mut self, body: &[u8]) -> Result<CommonHeader, FrameError> {
-        match self.parsed_header.take() {
-            Some(Ok(header)) => Ok(header),
-            // A rejected header's body was read in full, so the reader is past this record.
-            Some(Err(error)) => Err(FrameError {
-                error,
-                header: None,
-                bytes: Some(assemble_error_bytes(self.header.as_slice(), body)),
-                consumed: true,
-            }),
-            None => Err(FrameError {
-                error: ParserError::EofExpected,
-                header: None,
-                bytes: None,
-                consumed: false,
-            }),
-        }
+/// Turn the header outcome of a framing attempt into the header, or the error to report.
+fn take_header(
+    parsed: Option<Result<CommonHeader, ParserError>>,
+    raw_header: &[u8],
+    body: &[u8],
+) -> Result<CommonHeader, FrameError> {
+    match parsed {
+        Some(Ok(header)) => Ok(header),
+        // A rejected header's body was read in full, so the reader is past this record.
+        Some(Err(error)) => Err(FrameError {
+            error,
+            header: None,
+            bytes: Some(assemble_error_bytes(raw_header, body)),
+            consumed: true,
+        }),
+        None => Err(FrameError {
+            error: ParserError::EofExpected,
+            header: None,
+            bytes: None,
+            consumed: false,
+        }),
     }
 }
 
