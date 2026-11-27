@@ -227,83 +227,6 @@ pub(crate) fn assemble_error_bytes(header: &[u8], body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The typed interpretation of a framed record, decided by its entry type and subtype.
-///
-/// A frame is always valid as bytes; this view only adds the offsets a consumer would otherwise
-/// re-derive. Consumers that cannot use a view fall back to parsing the record the old way, so a
-/// view is never the only path to an answer.
-#[allow(dead_code)] // Consumed by the record and filter paths in the next change.
-pub(crate) enum FrameBody<'a> {
-    /// `TABLE_DUMP_V2` / `PEER_INDEX_TABLE`: replaces the dump's peer table.
-    PeerIndex,
-    /// `TABLE_DUMP_V2` / `GEO_PEER_TABLE`: validated, then ignored.
-    GeoPeer,
-    /// `TABLE_DUMP_V2` RIB record: one prefix and N peer entries.
-    Rib(RibFrame<'a>),
-    /// `BGP4MP` / `BGP4MP_ET` record: peer identity plus one BGP message.
-    Bgp4Mp(Bgp4MpFrame<'a>),
-    /// Anything else: legacy `TABLE_DUMP`, legacy `BGP`, `BMP`, unknown subtypes.
-    Opaque,
-}
-
-/// A RIB record: the prefix it covers and the entries that follow.
-#[allow(dead_code)] // Consumed by the record and filter paths in the next change.
-pub(crate) struct RibFrame<'a> {
-    pub(crate) prefix: NetworkPrefix,
-    pub(crate) entry_count: u16,
-    pub(crate) entries: &'a [u8],
-    /// AFI/SAFI/ADD-PATH bits, shared with the borrowed element views.
-    pub(crate) flags: u8,
-}
-
-/// A BGP4MP record: the peer that sent this message, plus the message itself.
-///
-/// Updates carry peer identity in this header, which is why `peer_ip` / `peer_asn` filters can be
-/// decided before any attribute is parsed. Dumps have no such header and use the peer table
-/// instead.
-#[allow(dead_code)] // Consumed by the record and filter paths in the next change.
-pub(crate) struct Bgp4MpFrame<'a> {
-    pub(crate) peer_asn: Asn,
-    pub(crate) local_asn: Asn,
-    pub(crate) peer_ip: IpAddr,
-    pub(crate) local_ip: IpAddr,
-    pub(crate) afi: Afi,
-    /// From the entry subtype, as `check_add_path_consistency` does today.
-    pub(crate) add_path: bool,
-    pub(crate) message: &'a [u8],
-}
-
-impl<'a> Frame<'a> {
-    /// Interpret this frame. `Err` means the record needs the general parser, which also handles
-    /// historical compatibility cases (for example short Zebra OPEN envelopes).
-    #[inline]
-    #[allow(dead_code)] // Consumed by the record and filter paths in the next change.
-    pub(crate) fn kind(&self) -> Result<FrameBody<'a>, ParserError> {
-        match self.header.entry_type {
-            EntryType::TABLE_DUMP_V2 => {
-                let v2_type = TableDumpV2Type::try_from(self.header.entry_subtype)?;
-                if v2_type == TableDumpV2Type::PeerIndexTable {
-                    return Ok(FrameBody::PeerIndex);
-                }
-                if v2_type == TableDumpV2Type::GeoPeerTable {
-                    return Ok(FrameBody::GeoPeer);
-                }
-                match rib_flags(v2_type) {
-                    Some((afi, flags)) => {
-                        Ok(FrameBody::Rib(parse_rib_frame(self.body, afi, flags)?))
-                    }
-                    None => Ok(FrameBody::Opaque),
-                }
-            }
-            EntryType::BGP4MP | EntryType::BGP4MP_ET => Ok(FrameBody::Bgp4Mp(parse_bgp4mp_frame(
-                self.header.entry_subtype,
-                self.body,
-            )?)),
-            _ => Ok(FrameBody::Opaque),
-        }
-    }
-}
-
 /// Address family and RIB flags packed for the borrowed element views.
 pub(crate) const FLAG_AFI_IPV6: u8 = 1 << 0;
 pub(crate) const FLAG_SAFI_MULTICAST: u8 = 1 << 1;
@@ -330,92 +253,86 @@ pub(crate) fn rib_flags(v2_type: TableDumpV2Type) -> Option<(Afi, u8)> {
     }
 }
 
-/// What a framed record is, with the offsets its consumer needs.
+/// What a framed record is, with the fields a record-level consumer needs.
+///
+/// This is the one place that maps an entry type and subtype to those fields. A consumer either
+/// uses them or parses the record the general way; nothing here is the only path to an answer.
 pub(crate) enum RecordKind {
+    /// `TABLE_DUMP_V2` / `PEER_INDEX_TABLE`: replaces the dump's peer table.
     PeerIndex,
+    /// `TABLE_DUMP_V2` / `GEO_PEER_TABLE`: validated, then ignored.
     GeoPeer,
+    /// `TABLE_DUMP_V2` RIB record: one prefix, and entries that follow the header.
     Rib {
         prefix: NetworkPrefix,
         entry_count: u16,
         flags: u8,
         entries_offset: usize,
     },
-    /// Legacy types, updates, unknown subtypes, and RIB records that failed to parse.
+    /// `BGP4MP` / `BGP4MP_ET` record: the peer and the time are in the record header.
+    Bgp4Mp {
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        timestamp: f64,
+    },
+    /// Legacy types, unknown subtypes, and records the general parser must handle.
     Other,
 }
 
-/// Classify a framed record without lending its body out.
+/// Classify a framed record.
 pub(crate) fn classify(header: &CommonHeader, body: &[u8]) -> RecordKind {
-    if header.entry_type != EntryType::TABLE_DUMP_V2 {
-        return RecordKind::Other;
+    if header.entry_type == EntryType::TABLE_DUMP_V2 {
+        let Ok(v2_type) = TableDumpV2Type::try_from(header.entry_subtype) else {
+            return RecordKind::Other;
+        };
+        if v2_type == TableDumpV2Type::PeerIndexTable {
+            return RecordKind::PeerIndex;
+        }
+        if v2_type == TableDumpV2Type::GeoPeerTable {
+            return RecordKind::GeoPeer;
+        }
+        let Some((afi, flags)) = rib_flags(v2_type) else {
+            return RecordKind::Other;
+        };
+        return match rib_header(body, afi) {
+            Ok((prefix, entry_count, header_len)) => RecordKind::Rib {
+                prefix,
+                entry_count,
+                flags,
+                entries_offset: header_len,
+            },
+            Err(_) => RecordKind::Other,
+        };
     }
-    let Ok(v2_type) = TableDumpV2Type::try_from(header.entry_subtype) else {
-        return RecordKind::Other;
-    };
-    if v2_type == TableDumpV2Type::PeerIndexTable {
-        return RecordKind::PeerIndex;
+
+    if matches!(header.entry_type, EntryType::BGP4MP | EntryType::BGP4MP_ET) {
+        let timestamp = match header.microsecond_timestamp {
+            Some(micro) => header.timestamp as f64 + micro as f64 / 1_000_000.0,
+            None => header.timestamp as f64,
+        };
+        if let Ok((peer_ip, peer_asn)) = bgp4mp_peer(header.entry_subtype, body) {
+            return RecordKind::Bgp4Mp {
+                peer_ip,
+                peer_asn,
+                timestamp,
+            };
+        }
     }
-    if v2_type == TableDumpV2Type::GeoPeerTable {
-        return RecordKind::GeoPeer;
-    }
-    let Some((afi, flags)) = rib_flags(v2_type) else {
-        return RecordKind::Other;
-    };
-    match parse_rib_frame(body, afi, flags) {
-        Ok(rib) => RecordKind::Rib {
-            prefix: rib.prefix,
-            entry_count: rib.entry_count,
-            flags: rib.flags,
-            entries_offset: body.len() - rib.entries.len(),
-        },
-        Err(_) => RecordKind::Other,
-    }
+    RecordKind::Other
 }
 
-/// The prefix this record covers, when it is a `TABLE_DUMP_V2` RIB record.
-///
-/// This is the only record-level predicate a dump supports: every entry in the record carries
-/// this one prefix, so a record whose prefix cannot match can be dropped before any attribute is
-/// parsed.
-pub(crate) fn rib_prefix(header: &CommonHeader, body: &[u8]) -> Option<NetworkPrefix> {
-    if header.entry_type != EntryType::TABLE_DUMP_V2 {
-        return None;
-    }
-    let v2_type = TableDumpV2Type::try_from(header.entry_subtype).ok()?;
-    let (afi, flags) = rib_flags(v2_type)?;
-    parse_rib_frame(body, afi, flags).ok().map(|rib| rib.prefix)
-}
-
+/// Prefix, entry count and header length of a RIB record.
 #[inline]
-fn parse_rib_frame(mut body: &[u8], afi: Afi, flags: u8) -> Result<RibFrame<'_>, ParserError> {
+fn rib_header(mut body: &[u8], afi: Afi) -> Result<(NetworkPrefix, u16, usize), ParserError> {
+    let total = body.len();
     let _sequence = body.read_u32()?;
     let prefix = body.read_nlri_prefix(&afi, false)?;
     let entry_count = body.read_u16()?;
-    Ok(RibFrame {
-        prefix,
-        entry_count,
-        entries: body,
-        flags,
-    })
+    Ok((prefix, entry_count, total - body.len()))
 }
 
-/// The peer that sent this record, when it is a `BGP4MP` message record.
-///
-/// Updates carry peer identity in the record header, so a peer filter can drop the whole record
-/// before its BGP message is parsed. Dumps have no such header: their peer comes from the peer
-/// table and can only be resolved per entry.
-pub(crate) fn bgp4mp_peer(header: &CommonHeader, body: &[u8]) -> Option<(IpAddr, Asn)> {
-    match header.entry_type {
-        EntryType::BGP4MP | EntryType::BGP4MP_ET => {}
-        _ => return None,
-    }
-    parse_bgp4mp_frame(header.entry_subtype, body)
-        .ok()
-        .map(|frame| (frame.peer_ip, frame.peer_asn))
-}
-
-#[inline]
-fn parse_bgp4mp_frame(subtype: u16, mut body: &[u8]) -> Result<Bgp4MpFrame<'_>, ParserError> {
+/// The peer named by a BGP4MP record header.
+fn bgp4mp_peer(subtype: u16, body: &[u8]) -> Result<(IpAddr, Asn), ParserError> {
     use Bgp4MpType::*;
     let msg_type = Bgp4MpType::try_from(subtype)?;
     let asn_len = match msg_type {
@@ -426,27 +343,13 @@ fn parse_bgp4mp_frame(subtype: u16, mut body: &[u8]) -> Result<Bgp4MpFrame<'_>, 
         | MessageLocalAs4Addpath => AsnLength::Bits32,
         _ => AsnLength::Bits16,
     };
-    let add_path = matches!(
-        msg_type,
-        MessageAddpath | MessageAs4Addpath | MessageLocalAddpath | MessageLocalAs4Addpath
-    );
-
+    let mut body = body;
     let peer_asn = body.read_asn(asn_len)?;
-    let local_asn = body.read_asn(asn_len)?;
+    let _local_asn = body.read_asn(asn_len)?;
     let _interface_index = body.read_u16()?;
     let afi = body.read_afi()?;
     let peer_ip = body.read_address(&afi)?;
-    let local_ip = body.read_address(&afi)?;
-
-    Ok(Bgp4MpFrame {
-        peer_asn,
-        local_asn,
-        peer_ip,
-        local_ip,
-        afi,
-        add_path,
-        message: body,
-    })
+    Ok((peer_ip, peer_asn))
 }
 
 #[cfg(test)]
@@ -456,7 +359,8 @@ mod tests {
     use crate::BgpkitParser;
     use std::io::Cursor;
 
-    const RIB_FIXTURE: &str = "tests/fixtures/ripe/rrc00/2000.01/bview.20000111.0032.gz";
+    /// A real TABLE_DUMP_V2 slice: one PEER_INDEX_TABLE and 399 RIB records.
+    const RIB_FIXTURE: &str = "tests/fixtures/routeviews/bview.slice.gz";
     const UPDATES_FIXTURE: &str = "tests/fixtures/ripe/rrc15/2010.02/updates.20100227.1600.gz";
 
     /// All records of a fixture as one byte stream, plus the records the parser produced.
@@ -475,7 +379,9 @@ mod tests {
         (bytes, records)
     }
 
-    /// Every framed record must agree with the record the parser produced for the same position.
+    /// Every framed record must agree with the record the parser produced for the same position,
+    /// and the classification must agree with the record type, so a classifier that always said
+    /// `Other` would fail here.
     #[test]
     fn frames_match_parsed_records() {
         for path in [RIB_FIXTURE, UPDATES_FIXTURE] {
@@ -484,58 +390,64 @@ mod tests {
             let mut body = Vec::new();
             let mut input = Cursor::new(bytes);
             let mut checked = 0usize;
+            let mut rib_records = 0usize;
+            let mut bgp4mp_records = 0usize;
 
             for expected in records {
                 let frame = framer
                     .next(&mut input, &mut body)
                     .unwrap_or_else(|_| panic!("framing failed for {path}"));
                 assert_eq!(frame.header, expected.common_header, "{path}");
+                let kind = classify(&frame.header, frame.body);
 
-                match (&expected.message, frame.kind()) {
+                match (&expected.message, kind) {
                     (
                         MrtMessage::TableDumpV2Message(TableDumpV2Message::RibAfi(message)),
-                        Ok(FrameBody::Rib(rib)),
+                        RecordKind::Rib {
+                            prefix,
+                            entry_count,
+                            ..
+                        },
                     ) => {
-                        assert_eq!(rib.prefix, message.prefix, "{path}");
-                        assert_eq!(
-                            rib.entry_count as usize,
-                            message.rib_entries.len(),
-                            "{path}"
-                        );
+                        assert_eq!(prefix, message.prefix, "{path}");
+                        assert_eq!(entry_count as usize, message.rib_entries.len(), "{path}");
+                        rib_records += 1;
                     }
                     (
                         MrtMessage::TableDumpV2Message(TableDumpV2Message::PeerIndexTable(_)),
-                        Ok(FrameBody::PeerIndex),
+                        RecordKind::PeerIndex,
                     ) => {}
                     (
                         MrtMessage::TableDumpV2Message(TableDumpV2Message::GeoPeerTable(_)),
-                        Ok(FrameBody::GeoPeer),
+                        RecordKind::GeoPeer,
                     ) => {}
-                    (MrtMessage::Bgp4Mp(record), Ok(FrameBody::Bgp4Mp(message))) => {
-                        let Bgp4MpEnum::Message(record) = record else {
-                            continue;
+                    (
+                        MrtMessage::Bgp4Mp(record),
+                        RecordKind::Bgp4Mp {
+                            peer_asn, peer_ip, ..
+                        },
+                    ) => {
+                        // Both message and state-change records carry the peer in the header.
+                        let (expected_asn, expected_ip) = match record {
+                            Bgp4MpEnum::Message(message) => (message.peer_asn, message.peer_ip),
+                            Bgp4MpEnum::StateChange(state) => (state.peer_asn, state.peer_ip),
                         };
-                        assert_eq!(message.peer_asn, record.peer_asn, "{path}");
-                        assert_eq!(message.local_asn, record.local_asn, "{path}");
-                        assert_eq!(message.peer_ip, record.peer_ip, "{path}");
-                        assert_eq!(message.local_ip, record.local_ip, "{path}");
-                        assert_eq!(
-                            message.afi,
-                            if record.peer_ip.is_ipv4() {
-                                Afi::Ipv4
-                            } else {
-                                Afi::Ipv6
-                            },
-                            "{path}"
-                        );
+                        assert_eq!(peer_asn, expected_asn, "{path}");
+                        assert_eq!(peer_ip, expected_ip, "{path}");
+                        bgp4mp_records += 1;
                     }
-                    // Records the frame view leaves to the general parser are still framed.
-                    (_, Ok(FrameBody::Opaque)) | (_, Err(_)) => {}
-                    (_, Ok(_)) => panic!("{path}: frame kind does not match the parsed record"),
+                    (_, RecordKind::Other) => {}
+                    (_, _) => panic!("{path}: classification does not match the parsed record"),
                 }
                 checked += 1;
             }
             assert!(checked > 0, "{path} framed no records");
+            // Each fixture must exercise the classifier for its record family.
+            if path == RIB_FIXTURE {
+                assert!(rib_records > 0, "{path}: no RIB record classified");
+            } else {
+                assert!(bgp4mp_records > 0, "{path}: no BGP4MP record classified");
+            }
         }
     }
 }

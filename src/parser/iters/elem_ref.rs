@@ -11,11 +11,11 @@ active peer index table, decoding BGP attributes on demand without per-element h
 use crate::error::ParserError;
 use crate::models::{
     get_deprecated_attr_type, Afi, AsPath, AsPathSegment, Asn, AsnLength, AttrFlags, AttrRaw,
-    AttrType, BgpIdentifier, CommonHeader, Community, ElemType, EntryType, ExtendedCommunity,
+    AttrType, BgpIdentifier, CommonHeader, Community, ElemType, ExtendedCommunity,
     ExtendedCommunityType, FlowSpecTrafficAction, FlowSpecTrafficMarking, FlowSpecTrafficRate,
     FourOctetAsExtCommunity, Ipv4AddrExtCommunity, Ipv6AddrExtCommunity, LargeCommunity,
     LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix, NextHopAddress, OpaqueExtCommunity,
-    Origin, Peer, PeerType, Safi, TableDumpV2Type, TwoOctetAsExtCommunity,
+    Origin, Peer, PeerType, Safi, TwoOctetAsExtCommunity,
 };
 use crate::parser::iters::handle_record_parse_error;
 use crate::parser::mrt::frame::{assemble_error_bytes, FrameError, Framer};
@@ -134,34 +134,6 @@ fn validate_geo_peer_table(mut data: &[u8]) -> Result<(), ParserError> {
     Ok(())
 }
 
-fn rib_subtype_flags(rib_type: TableDumpV2Type) -> Option<(Afi, u8)> {
-    match rib_type {
-        TableDumpV2Type::RibIpv4Unicast => Some((Afi::Ipv4, 0)),
-        TableDumpV2Type::RibIpv4Multicast => Some((Afi::Ipv4, FLAG_SAFI_MULTICAST)),
-        TableDumpV2Type::RibIpv6Unicast => Some((Afi::Ipv6, FLAG_AFI_IPV6)),
-        TableDumpV2Type::RibIpv6Multicast => Some((Afi::Ipv6, FLAG_AFI_IPV6 | FLAG_SAFI_MULTICAST)),
-        TableDumpV2Type::RibIpv4UnicastAddPath => Some((Afi::Ipv4, FLAG_ADD_PATH)),
-        TableDumpV2Type::RibIpv4MulticastAddPath => {
-            Some((Afi::Ipv4, FLAG_SAFI_MULTICAST | FLAG_ADD_PATH))
-        }
-        TableDumpV2Type::RibIpv6UnicastAddPath => Some((Afi::Ipv6, FLAG_AFI_IPV6 | FLAG_ADD_PATH)),
-        TableDumpV2Type::RibIpv6MulticastAddPath => Some((
-            Afi::Ipv6,
-            FLAG_AFI_IPV6 | FLAG_SAFI_MULTICAST | FLAG_ADD_PATH,
-        )),
-        _ => None,
-    }
-}
-
-fn parse_rib_afi_header(mut body: &[u8], afi: &Afi) -> Result<(IpNet, u16, usize), ParserError> {
-    let total_len = body.len();
-    let _sequence_number = body.read_u32()?;
-    let net_prefix = body.read_nlri_prefix(afi, false)?;
-    let entry_count = body.read_u16()?;
-    let entries_offset = total_len - body.len();
-    Ok((net_prefix.prefix, entry_count, entries_offset))
-}
-
 /// Frame the next record, returning owned framing metadata and leaving the body in
 /// `elem_view_state.body_buf`, so no borrow outlives the call.
 fn frame_next<R: Read>(
@@ -179,6 +151,7 @@ pub(crate) enum NextBatch<'a> {
     /// A record this engine does not serve. Its body is still in the parser's buffer, untouched.
     Other {
         header: CommonHeader,
+        raw_header: crate::parser::mrt::mrt_header::HeaderBuf,
         body_len: usize,
     },
     /// End of input.
@@ -256,7 +229,13 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 });
             }
             // Hand the record back untouched: the caller owns the fallback and its error handling.
-            RecordKind::Other => return NextBatch::Other { header, body_len },
+            RecordKind::Bgp4Mp { .. } | RecordKind::Other => {
+                return NextBatch::Other {
+                    header,
+                    raw_header,
+                    body_len,
+                }
+            }
         }
     }
 }
@@ -264,6 +243,8 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
 pub(crate) fn next_record_elems_impl<R: Read>(
     parser: &mut BgpkitParser<R>,
 ) -> Option<RecordElems<'_>> {
+    use crate::parser::mrt::frame::{classify, RecordKind};
+
     if parser.text_dump_iter.is_some()
         || !parser.filters.is_empty()
         || parser.elem_view_state.finished
@@ -272,7 +253,7 @@ pub(crate) fn next_record_elems_impl<R: Read>(
     }
 
     let (common_header, prefix, entry_count, flags, entries_offset, body_len) = loop {
-        let (common_header, header_buf, body_len) = match frame_next(parser) {
+        let (common_header, raw_header, body_len) = match frame_next(parser) {
             Ok(framed) => framed,
             Err(failure) => {
                 if matches!(failure.error, ParserError::EofExpected) {
@@ -287,39 +268,15 @@ pub(crate) fn next_record_elems_impl<R: Read>(
             }
         };
 
-        if common_header.entry_type != EntryType::TABLE_DUMP_V2 {
-            // First version serves TABLE_DUMP_V2 / RIB_AFI records only; skip other MRT records.
-            continue;
-        }
-
-        let v2_type = match TableDumpV2Type::try_from(common_header.entry_subtype) {
-            Ok(t) => t,
-            Err(err) => {
-                let raw = parser.core_dump.then(|| {
-                    assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &parser.elem_view_state.body_buf[..body_len],
-                    )
-                });
-                if !handle_record_parse_error(parser, err.into(), raw) {
-                    parser.elem_view_state.finished = true;
-                    return None;
-                }
-                continue;
-            }
-        };
-
-        match v2_type {
-            TableDumpV2Type::PeerIndexTable => {
+        let kind = classify(&common_header, &parser.elem_view_state.body_buf[..body_len]);
+        match kind {
+            RecordKind::PeerIndex => {
                 match parse_peer_index_vec(&parser.elem_view_state.body_buf[..body_len]) {
-                    Ok(peers) => {
-                        parser.elem_view_state.peers = Some(peers);
-                        continue;
-                    }
+                    Ok(peers) => parser.elem_view_state.peers = Some(peers),
                     Err(err) => {
                         let raw = parser.core_dump.then(|| {
                             assemble_error_bytes(
-                                header_buf.as_slice(),
+                                raw_header.as_slice(),
                                 &parser.elem_view_state.body_buf[..body_len],
                             )
                         });
@@ -327,17 +284,17 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                             parser.elem_view_state.finished = true;
                             return None;
                         }
-                        continue;
                     }
                 }
+                continue;
             }
-            TableDumpV2Type::GeoPeerTable => {
+            RecordKind::GeoPeer => {
                 if let Err(err) =
                     validate_geo_peer_table(&parser.elem_view_state.body_buf[..body_len])
                 {
                     let raw = parser.core_dump.then(|| {
                         assemble_error_bytes(
-                            header_buf.as_slice(),
+                            raw_header.as_slice(),
                             &parser.elem_view_state.body_buf[..body_len],
                         )
                     });
@@ -348,58 +305,27 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 }
                 continue;
             }
-            TableDumpV2Type::RibGeneric | TableDumpV2Type::RibGenericAddPath => {
-                let raw = parser.core_dump.then(|| {
-                    assemble_error_bytes(
-                        header_buf.as_slice(),
-                        &parser.elem_view_state.body_buf[..body_len],
-                    )
-                });
-                if !handle_record_parse_error(
-                    parser,
-                    ParserError::Unsupported(
-                        "TableDumpV2 RibGeneric is not currently supported".to_string(),
-                    ),
-                    raw,
-                ) {
-                    parser.elem_view_state.finished = true;
-                    return None;
+            RecordKind::Rib {
+                prefix,
+                entry_count,
+                flags,
+                entries_offset,
+            } => {
+                if parser.elem_view_state.peers.is_none() {
+                    error!("{}", ElemError::MissingPeerTable);
+                    continue;
                 }
-                continue;
+                break (
+                    common_header,
+                    prefix,
+                    entry_count,
+                    flags,
+                    entries_offset,
+                    body_len,
+                );
             }
-            rib_type => {
-                let (afi, flags) =
-                    rib_subtype_flags(rib_type).expect("all non-RIB TableDumpV2 variants handled");
-                match parse_rib_afi_header(&parser.elem_view_state.body_buf[..body_len], &afi) {
-                    Ok((prefix, entry_count, entries_offset)) => {
-                        if parser.elem_view_state.peers.is_none() {
-                            error!("{}", ElemError::MissingPeerTable);
-                            continue;
-                        }
-                        break (
-                            common_header,
-                            prefix,
-                            entry_count,
-                            flags,
-                            entries_offset,
-                            body_len,
-                        );
-                    }
-                    Err(err) => {
-                        let raw = parser.core_dump.then(|| {
-                            assemble_error_bytes(
-                                header_buf.as_slice(),
-                                &parser.elem_view_state.body_buf[..body_len],
-                            )
-                        });
-                        if !handle_record_parse_error(parser, err, raw) {
-                            parser.elem_view_state.finished = true;
-                            return None;
-                        }
-                        continue;
-                    }
-                }
-            }
+            // This entry point serves RIB dumps only; other records are skipped, as documented.
+            RecordKind::Bgp4Mp { .. } | RecordKind::Other => continue,
         }
     };
 
@@ -416,7 +342,7 @@ pub(crate) fn next_record_elems_impl<R: Read>(
         header: common_header,
         entries_bytes,
         peers,
-        prefix,
+        prefix: prefix.prefix,
         entry_count,
         flags,
         scratch,
@@ -2424,14 +2350,19 @@ mod materialise_tests {
     /// A real TABLE_DUMP_V2 slice: one PEER_INDEX_TABLE followed by 399 RIB records.
     const RIB_FIXTURE: &str = "tests/fixtures/routeviews/bview.slice.gz";
 
-    /// Every field of a materialised element must equal the owned path's element for the same
-    /// entry, so the borrowed engine cannot drift from the general parser.
+    /// Every field of a materialised element must equal what the owned record path produces for
+    /// the same entry. The reference is the record iterator plus `Elementor`, not `into_elem_iter`,
+    /// which now goes through this same borrowed engine.
     #[test]
     fn borrowed_elems_match_owned_elems() {
-        let owned: Vec<_> = BgpkitParser::new(RIB_FIXTURE)
-            .expect("open fixture")
-            .into_elem_iter()
-            .collect();
+        let owned: Vec<_> = {
+            let mut elementor = crate::parser::mrt::mrt_elem::Elementor::new();
+            BgpkitParser::new(RIB_FIXTURE)
+                .expect("open fixture")
+                .into_record_iter()
+                .flat_map(|record| elementor.record_to_elems(record))
+                .collect()
+        };
         assert!(!owned.is_empty(), "fixture produced no elems");
 
         let mut parser = BgpkitParser::new(RIB_FIXTURE).expect("open fixture");

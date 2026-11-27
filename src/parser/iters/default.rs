@@ -57,11 +57,10 @@ impl<R: Read> Iterator for RecordIterator<R> {
         self.count += 1;
         // A record whose single RIB prefix cannot satisfy a prefix filter yields no matching
         // elements, so it can be skipped before its body is parsed.
-        let record_pushdown =
-            crate::parser::filter::has_record_prefix_constraint(&self.parser.filters)
-                || crate::parser::filter::has_record_peer_constraint(&self.parser.filters)
-                || crate::parser::filter::has_record_timestamp_constraint(&self.parser.filters)
-                || crate::parser::filter::has_record_type_constraint(&self.parser.filters);
+        // A record skipped here never raises its parse error, and core-dump mode stops at the
+        // first one, so pushdown is off while dumping.
+        let record_pushdown = !self.parser.core_dump
+            && crate::parser::filter::has_record_level_constraint(&self.parser.filters);
         loop {
             let next_record = if record_pushdown {
                 self.parser.next_record_prefiltered()
@@ -93,23 +92,23 @@ impl<R: Read> Iterator for RecordIterator<R> {
 BgpElem Iterator
 **********/
 
-/// What one refill attempt produced.
+/// What one framed record produced for the element iterator.
 enum Refill {
     /// `batch` now holds elements to drain.
     Batch,
-    /// One record was ingested into `pending`; continue with the owned path.
+    /// The record went to the owned path, which filled `pending`.
     Owned,
-    /// No more records.
+    /// End of input, or an error the parser cannot recover from.
     End,
 }
 
 pub struct ElemIterator<R> {
     pending: PendingElems,
-    /// Elements materialised from one borrowed RIB record, drained before the owned path.
+    /// Elements materialised from one borrowed RIB record, drained before anything else.
     batch: std::vec::IntoIter<BgpElem>,
-    /// Whether the borrowed RIB engine may still serve this stream. Turned off for good as soon as
-    /// a record it cannot serve appears, so a mixed stream never re-reads a record.
-    borrowed: bool,
+    /// Whether records are dispatched per frame. False when filters or core dumps need the owned
+    /// iterator to read the stream itself.
+    framed: bool,
     record_iter: RecordIterator<R>,
     elementor: Elementor,
     count: u64,
@@ -117,43 +116,47 @@ pub struct ElemIterator<R> {
 
 impl<R> ElemIterator<R> {
     pub(crate) fn new(parser: BgpkitParser<R>) -> Self {
-        // The borrowed engine applies no filters and needs the parser's own record buffer, so it is
-        // only used when nothing else has claimed either.
-        let borrowed = parser.filters.is_empty() && !parser.core_dump;
+        // The framed path reads records through the parser's own buffer and does not apply filters
+        // itself, so it is only used when nothing else has claimed either.
+        let framed = parser.filters.is_empty() && !parser.core_dump;
         ElemIterator {
             record_iter: RecordIterator::new(parser).without_prefilter(),
             count: 0,
             pending: PendingElems::Empty,
             batch: Vec::new().into_iter(),
-            borrowed,
+            framed,
             elementor: Elementor::new(),
         }
     }
 }
 
 impl<R: Read> ElemIterator<R> {
-    /// Refill `batch` from the borrowed RIB engine, or fall back to the owned path for one record.
+    /// Read one framed record and route it: RIB dump records are materialised from the borrowed
+    /// view, everything else is parsed by the owned path.
     fn refill(&mut self) -> Refill {
         use crate::parser::iters::elem_ref::NextBatch;
 
         match self.record_iter.parser.next_elem_batch() {
             NextBatch::Rib(mut record) => {
-                let mut elems = Vec::with_capacity(record.len());
+                // The declared entry count is attacker-controlled; cap the reservation so a
+                // malformed record cannot ask for a large allocation per record.
+                let mut elems = Vec::with_capacity(record.len().min(1024));
                 for elem in record.iter() {
                     elems.push(elem.to_bgp_elem());
                 }
                 self.batch = elems.into_iter();
                 Refill::Batch
             }
-            NextBatch::Other { header, body_len } => {
-                // Not a RIB dump record: parse it the owned way and let the owned iterator take
-                // over the rest of the stream.
-                self.borrowed = false;
-                match self
-                    .record_iter
-                    .parser
-                    .parse_framed_record(header, body_len)
-                {
+            NextBatch::Other {
+                header,
+                raw_header,
+                body_len,
+            } => {
+                match self.record_iter.parser.parse_framed_record(
+                    header,
+                    raw_header.as_slice(),
+                    body_len,
+                ) {
                     Ok(record) => {
                         self.pending = self.elementor.ingest(record);
                         Refill::Owned
@@ -171,10 +174,7 @@ impl<R: Read> ElemIterator<R> {
                     }
                 }
             }
-            NextBatch::End => {
-                self.borrowed = false;
-                Refill::End
-            }
+            NextBatch::End => Refill::End,
         }
     }
 }
@@ -195,33 +195,24 @@ impl<R: Read> Iterator for ElemIterator<R> {
             return None;
         }
 
-        // Unfiltered RIB dumps are served straight from the borrowed record view: no intermediate
-        // MrtRecord, no per-entry attribute model.
-        if self.borrowed {
+        loop {
+            // Anything already produced comes out first: materialised RIB elements, then the owned
+            // iterator's pending elements.
             if let Some(elem) = self.batch.next() {
                 return Some(elem);
             }
-            loop {
-                match self.refill() {
-                    Refill::Batch => {
-                        if let Some(elem) = self.batch.next() {
-                            return Some(elem);
-                        }
-                    }
-                    Refill::Owned => break,
-                    Refill::End => return None,
-                }
-            }
-        }
-
-        loop {
-            // drain the current record's elems before reading the next record
             while let Some(elem) = self.pending.next_elem(self.elementor.peer_table.as_ref()) {
                 if elem.match_filters(&self.record_iter.parser.filters) {
                     return Some(elem);
                 }
             }
-            // records without elems leave nothing pending, and the loop moves on to the next
+
+            if self.framed {
+                match self.refill() {
+                    Refill::Batch | Refill::Owned => continue,
+                    Refill::End => return None,
+                }
+            }
             let record = self.record_iter.next()?;
             self.pending = self.elementor.ingest(record);
         }

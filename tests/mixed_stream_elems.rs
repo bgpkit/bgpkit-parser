@@ -78,3 +78,19 @@ fn elem_stream_matches_record_expansion() {
         assert_eq!(by_elem, by_record, "{path}");
     }
 }
+
+/// A dump that resumes after non-dump records must keep producing elements: the peer table lives
+/// in the borrowed engine, so routing a later dump record to the owned path would lose it.
+#[test]
+fn dump_resumes_after_updates() {
+    let mut mixed = raw_stream(RIB_FIXTURE);
+    mixed.extend(raw_stream(UPDATES_FIXTURE));
+    mixed.extend(raw_stream(RIB_FIXTURE));
+
+    let mut expected = elems_of(raw_stream(RIB_FIXTURE), &[]);
+    expected.extend(elems_of(raw_stream(UPDATES_FIXTURE), &[]));
+    expected.extend(elems_of(raw_stream(RIB_FIXTURE), &[]));
+    assert!(!expected.is_empty());
+
+    assert_eq!(elems_of(mixed, &[]), expected);
+}
