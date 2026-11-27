@@ -117,8 +117,21 @@ attribute value is decoded and nothing is allocated):
 | --- | --- | --- |
 | `origin_asn`, `origin_asns` | yes | the origin is the last ASN of the path segment, so the segment headers are enough |
 | `origin` (igp/egp/incomplete) | yes | one attribute, one byte |
-| `as_path`, `community` | **no** | both are regexes over the rendered string, so the value has to be formatted |
+| `community=^ASN:VALUE$`, `community=^ASN:` | yes | plain communities are two `u16`; the anchored shapes pin the whole rendered field |
+| `as_path=' ASN '`, `'^ASN '`, `' ASN$'`, `'^ASN$'` | yes | one ASN pinned to element boundaries, compared against the rendered element list |
+| `community` other shapes, `as_path` bare numbers or multi-ASN needles | **no** | an unanchored pattern may match part of a longer number or of a large community; emulating that is not worth it |
 | `next_hop`, `local_pref`, `med`, `atomic`, `aggr_*`, `otc`, `field present`, `peer_bgp_id` | not implemented | decidable in principle; no consumer has needed the walk yet |
+
+The community rows are exact because the rendered field count pins the type: `^ASN:` is checked
+against plain communities and against a large community's global administrator, while `^ASN:VALUE$`
+can only ever match a plain community. An extended community renders as `type:subtype:global:local`
+with a type value of at most 255, so it can only interfere with a pattern at or below 255, and only
+then is the entry undecidable. The path row is exact because a bare number can match part of a longer
+ASN, so a needle that is not pinned at both ends is left to the regex.
+
+What the tier cannot do is help a predicate that most records satisfy. A kept record is still parsed
+in full, so a community present on a fifth of the routing table gains little: the cost then moves to
+the element build and to the element-level filter, which formats communities as strings.
 
 Rule: a record is skipped only when **some conjunct is certain to fail for every element it would
 yield**. Undecidable means parse, never guess: a truncated block, an `AS4_PATH` (which can replace
@@ -301,9 +314,28 @@ more than no filter, because any filter currently claims the owned iterator whil
 takes the framed RIB path. Making the framed path accept filters is the next step; until then a
 selective filter is the only case where filtering pays.
 
-The two regex rows are element-tier by construction: `Filter::AsPath` and `Filter::Community` match a
-render of the value, so they cost the export plus the formatting, and no byte-level walk can decide
-them without changing the filter from a regex to a structured predicate.
+### 8.3.1 Community and AS path, once their shapes are recognised
+
+Count mode (`-e`), uncompressed dump, three repetitions, medians:
+
+| query | before | now | gain |
+| --- | --- | --- | --- |
+| community `^9999:`, zero hit | 563.3G, 59.0s | 14.8G, 1.94s | 38x |
+| community `^13335:`, 252k elements | 563.3G | 19.5G, 2.44s | 29x |
+| community `^15169:`, 119k elements | 563.3G | 55.3G, 5.96s | 10x |
+| community `^174:`, 3.1M elements | 563.3G | 538.4G, 55.4s | 1.05x |
+| community `15169:`, unanchored | 563.3G | 555.2G, 56.1s | 1.01x |
+| as path ` 65001 `, rare | 481.8G, 51.7s | 23.6G, 2.69s | 20x |
+| as path ` 3356 `, common | 481.8G | 411.0G, 43.5s | 1.17x |
+
+The gain is selectivity, not predicate type. A record that survives the prefilter is still parsed in
+full and still pays the element-level filter, which renders every community to a string; when a
+predicate is satisfied by a large share of the table, that path dominates and the prefilter buys
+almost nothing. The unanchored row is the shape the CLI documents (`64512:100`), which this module
+deliberately does not decide, so a user who types it sees the old cost.
+
+Whole-dump PSV renders are byte-identical to the previous binary for seven shapes: `^15169:`,
+`^3356:`, `^15169:1$`, `^174:`, ` 3356 `, ` 65001 `, and `^3356 `.
 
 ## 9. Acceptance numbers
 
