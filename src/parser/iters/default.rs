@@ -104,6 +104,8 @@ enum Refill {
 
 pub struct ElemIterator<R> {
     pending: PendingElems,
+    /// Rejects an entry before its element is built, when a predicate can decide it from attributes.
+    screen: Option<std::sync::Arc<crate::parser::attr_scan::EntryScreen>>,
     /// Elements materialised from one borrowed RIB record, drained before anything else.
     batch: std::vec::IntoIter<BgpElem>,
     /// Whether records are dispatched per frame. False when filters or core dumps need the owned
@@ -119,7 +121,10 @@ impl<R> ElemIterator<R> {
         // The framed path reads records through the parser's own buffer and does not apply filters
         // itself, so it is only used when nothing else has claimed either.
         let framed = parser.filters.is_empty() && !parser.core_dump;
+        let screen =
+            crate::parser::attr_scan::EntryScreen::new(&parser.filters).map(std::sync::Arc::new);
         ElemIterator {
+            screen,
             record_iter: RecordIterator::new(parser).without_prefilter(),
             count: 0,
             pending: PendingElems::Empty,
@@ -214,7 +219,7 @@ impl<R: Read> Iterator for ElemIterator<R> {
                 }
             }
             let record = self.record_iter.next()?;
-            self.pending = self.elementor.ingest(record);
+            self.pending = self.elementor.ingest_screened(record, self.screen.clone());
         }
     }
 }
