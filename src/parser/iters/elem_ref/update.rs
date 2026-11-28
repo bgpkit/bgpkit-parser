@@ -31,7 +31,7 @@ fn append_mp_nlri(body: &[u8], reachable: bool, add_path: bool, out: &mut Vec<Up
     } else {
         ElemType::WITHDRAW
     };
-    let flags = afi_flags(&nlri.afi, nlri.safi);
+    let flags = afi_flags(&nlri.afi, nlri.safi, add_path);
     out.extend(nlri.prefixes.into_iter().map(|prefix| UpdateEntry {
         prefix,
         elem_type,
@@ -76,11 +76,10 @@ pub(super) fn parse_peer_index_vec(data: &[u8]) -> Result<Vec<Peer>, ParserError
 /// and records a finding — so that ends the walk instead of failing it.
 pub(super) fn attribute_block_walks(mut attrs: &[u8]) -> bool {
     loop {
-        if attrs.is_empty() {
-            return true;
-        }
+        // The owned walker stops when fewer than three octets remain and accepts what it has, so a
+        // trailing fragment is not a defect; only an unreadable header is.
         if attrs.len() < 3 {
-            return false;
+            return true;
         }
         let (header_len, body_len) = if attrs[0] & 0x10 != 0 {
             if attrs.len() < 4 {
@@ -120,7 +119,7 @@ fn append_nlri(
     ) else {
         return;
     };
-    let flags = afi_flags(&afi, safi);
+    let flags = afi_flags(&afi, safi, add_path);
     out.extend(prefixes.into_iter().map(|prefix| UpdateEntry {
         prefix,
         elem_type,
@@ -128,8 +127,11 @@ fn append_nlri(
     }));
 }
 
-fn afi_flags(afi: &Afi, safi: Safi) -> u8 {
+fn afi_flags(afi: &Afi, safi: Safi, add_path: bool) -> u8 {
     let mut flags = 0u8;
+    if add_path {
+        flags |= crate::parser::mrt::frame::FLAG_ADD_PATH;
+    }
     if *afi == Afi::Ipv6 {
         flags |= FLAG_AFI_IPV6;
     }

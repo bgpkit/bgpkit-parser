@@ -20,29 +20,41 @@ pub(super) fn wire_route_len(mut wire: &[u8]) -> usize {
     total
 }
 
-/// Decode `MP_REACH_NLRI` in a `TABLE_DUMP_V2` `RIB_AFI` entry to its resolved global next-hop IP,
 /// The global next hop of an `MP_REACH_NLRI` value.
 ///
-/// A `RIB_AFI` entry may omit the attribute's own address family and SAFI (RFC 6396 §4.3.4), which
-/// is what a leading zero decides. The next-hop field itself is decoded by the owned parser, so the
-/// widths it accepts and rejects are the same on both paths.
-pub(super) fn parse_mp_reach_next_hop(
-    mut input: &[u8],
-    _rib_afi: Afi,
-    _rib_safi: Safi,
-    _is_add_path: bool,
+/// The owned NLRI parser decides it: the families it accepts, the reserved octet, the next-hop
+/// widths, and the RFC 6396 §4.3.4 rule that a dump's entry may omit the attribute's own address
+/// family all behave here exactly as they do there. A body it rejects has no next hop, which is what
+/// the owned element path reports too.
+pub(super) fn mp_reach_next_hop(
+    value: &[u8],
+    prefix: NetworkPrefix,
+    afi: Afi,
+    safi: Safi,
+    add_path: bool,
+    from_update: bool,
 ) -> Result<Option<IpAddr>, ()> {
-    if input.first().copied() == Some(0) {
-        input.read_afi().map_err(|_| ())?;
-        input.read_safi().map_err(|_| ())?;
-    }
-    let nh_len = input.read_u8().map_err(|_| ())? as usize;
-    let nh_bytes = input.get(..nh_len).ok_or(())?;
-    let next_hop = crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop(
-        bytes::Bytes::copy_from_slice(nh_bytes),
+    let prefix_list = [prefix];
+    let (afi, safi, prefixes) = if from_update {
+        (None, None, None)
+    } else {
+        (Some(afi), Some(safi), Some(&prefix_list[..]))
+    };
+    let decoded = crate::parser::bgp::attributes::parse_nlri(
+        bytes::Bytes::copy_from_slice(value),
+        &afi,
+        &safi,
+        &prefixes,
+        true,
+        add_path,
     )
     .map_err(|_| ())?;
-    Ok(next_hop.map(|next_hop| next_hop.global_addr()))
+    match decoded {
+        crate::models::AttributeValue::MpReachNlri(nlri) => {
+            Ok(nlri.next_hop.map(|next_hop| next_hop.global_addr()))
+        }
+        _ => Err(()),
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -76,7 +88,9 @@ impl AsPathSegmentType {
             AS_PATH_AS_SEQUENCE => Self::AsSequence,
             AS_PATH_CONFED_SEQUENCE => Self::ConfedSequence,
             AS_PATH_CONFED_SET => Self::ConfedSet,
-            _ => unreachable!("wire AS_PATH segments are pre-validated to codes 1..=4"),
+            // Every caller validates the path first, so this is unreachable today; a segment type
+            // added later must not turn that into a panic.
+            _ => Self::AsSequence,
         }
     }
 }
@@ -176,9 +190,21 @@ impl<'a> AsPathView<'a> {
         self.iter().next().is_none()
     }
 
-    /// Returns an iterator over the wire [`AsPathSegmentRef`]s without allocating.
+    /// Returns the path's segments after the same RFC 6793 merge and coalesce the owned [`AsPath`]
+    /// applies, so their boundaries match `elem.as_path` exactly.
+    ///
+    /// ASNs stay inline in each segment, so the common path allocates nothing.
     #[inline]
-    pub fn segments(&self) -> AsPathSegments<'a> {
+    pub fn segments(&self) -> impl Iterator<Item = AsPathSegment> {
+        match self.to_as_path() {
+            Some(path) => path.segments.into_iter().collect::<Vec<_>>().into_iter(),
+            None => Vec::new().into_iter(),
+        }
+    }
+
+    /// The wire segments this path is made of, without merging or coalescing them.
+    #[inline]
+    fn wire_segments(&self) -> AsPathSegments<'a> {
         match self.source {
             AsPathSource::Absent => AsPathSegments {
                 lead: &[],
@@ -239,7 +265,7 @@ impl<'a> AsPathView<'a> {
             }
             AsPathSource::Merged { .. } => AsPathIter {
                 cur_words: &[],
-                segs: self.segments(),
+                segs: self.wire_segments(),
             },
         }
     }
@@ -275,13 +301,17 @@ fn wire_to_owned_as_path(wire: &[u8]) -> AsPath {
             .map(|w| Asn::new_32bit(w.get()))
             .collect();
         let seg = match code {
-            AS_PATH_AS_SET => AsPathSegment::AsSet(asns),
-            AS_PATH_AS_SEQUENCE => AsPathSegment::AsSequence(asns),
-            AS_PATH_CONFED_SEQUENCE => AsPathSegment::ConfedSequence(asns),
-            AS_PATH_CONFED_SET => AsPathSegment::ConfedSet(asns),
-            _ => unreachable!("wire AS_PATH segments are pre-validated"),
+            AS_PATH_AS_SET => Some(AsPathSegment::AsSet(asns)),
+            AS_PATH_AS_SEQUENCE => Some(AsPathSegment::AsSequence(asns)),
+            AS_PATH_CONFED_SEQUENCE => Some(AsPathSegment::ConfedSequence(asns)),
+            AS_PATH_CONFED_SET => Some(AsPathSegment::ConfedSet(asns)),
+            // Validated before this runs, so this arm is unreachable today; skipping is safer than
+            // panicking if a later segment type reaches here.
+            _ => None,
         };
-        out.append_segment(seg);
+        if let Some(seg) = seg {
+            out.append_segment(seg);
+        }
         rest = &rest[end..];
     }
     out
@@ -708,8 +738,7 @@ impl ExactSizeIterator for WordSliceIter<'_> {}
 /// across distinct TLV attributes. Consequently, a native `&[u32]` slice cannot borrow the wire
 /// bytes directly on little-endian hosts without copying. Instead, `CommunitiesView` borrows the
 /// attribute bytes directly and exposes zero-allocation 32-bit word accessors ([`words`](Self::words),
-/// [`plain_words`](Self::plain_words), [`extended_words`](Self::extended_words),
-/// [`large_words`](Self::large_words)) alongside typed in-place adapters
+/// alongside typed in-place adapters
 /// ([`as_plain`](Self::as_plain), [`as_extended`](Self::as_extended),
 /// [`as_ipv6_extended`](Self::as_ipv6_extended), [`as_large`](Self::as_large), and
 /// [`iter`](Self::iter)).
@@ -734,26 +763,6 @@ impl<'a> CommunitiesView<'a> {
             rest_attrs: self.attr_bytes,
             cur_words: &[],
         }
-    }
-
-    /// Zero-copy view over the 32-bit words of the `COMMUNITIES` (type 8) attribute.
-    #[inline]
-    pub fn plain_words(&self) -> CommunityWords<'a> {
-        self.first_valid_words(u8::from(AttrType::COMMUNITIES), 4)
-    }
-
-    /// Zero-copy view over the 32-bit words of the `EXTENDED_COMMUNITIES` (type 16) attribute
-    /// (two `u32` words per 8-octet extended community).
-    #[inline]
-    pub fn extended_words(&self) -> CommunityWords<'a> {
-        self.first_valid_words(u8::from(AttrType::EXTENDED_COMMUNITIES), 8)
-    }
-
-    /// Zero-copy view over the 32-bit words of the `LARGE_COMMUNITIES` (type 32) attribute
-    /// (three `u32` words per 12-octet large community).
-    #[inline]
-    pub fn large_words(&self) -> CommunityWords<'a> {
-        self.first_valid_words(u8::from(AttrType::LARGE_COMMUNITIES), 12)
     }
 
     /// Iterates over standard RFC 1997 [`Community`] values (`COMMUNITIES`, type 8).
@@ -801,19 +810,6 @@ impl<'a> CommunitiesView<'a> {
             rest_attrs: self.attr_bytes,
             cur_kind: ActiveCommunityAttr::None,
         }
-    }
-
-    fn first_valid_words(&self, target_code: u8, unit_bytes: usize) -> CommunityWords<'a> {
-        let mut rest = self.attr_bytes;
-        while let Some((code, val, next_rest)) = next_attr_tlv(rest) {
-            rest = next_rest;
-            if code == target_code && val.len().is_multiple_of(unit_bytes) {
-                return CommunityWords {
-                    words: bytes_as_be_u32_words(val),
-                };
-            }
-        }
-        CommunityWords { words: &[] }
     }
 }
 
@@ -936,7 +932,7 @@ impl Iterator for ExtendedCommunitiesIter<'_> {
     fn next(&mut self) -> Option<ExtendedCommunity> {
         loop {
             if self.cur_bytes.len() >= 8 {
-                let mut chunk = bytes::Bytes::copy_from_slice(&self.cur_bytes[..8]);
+                let mut chunk = &self.cur_bytes[..8];
                 self.cur_bytes = &self.cur_bytes[8..];
                 return Some(
                     crate::parser::bgp::attributes::parse_extended_community_one(&mut chunk)
@@ -966,7 +962,7 @@ impl Iterator for Ipv6ExtendedCommunitiesIter<'_> {
     fn next(&mut self) -> Option<Ipv6AddrExtCommunity> {
         loop {
             if self.cur_bytes.len() >= 20 {
-                let mut chunk = bytes::Bytes::copy_from_slice(&self.cur_bytes[..20]);
+                let mut chunk = &self.cur_bytes[..20];
                 self.cur_bytes = &self.cur_bytes[20..];
                 return crate::parser::bgp::attributes::parse_ipv6_extended_community_one(
                     &mut chunk,
@@ -1046,7 +1042,7 @@ impl Iterator for MetaCommunitiesIter<'_> {
                 }
                 ActiveCommunityAttr::Extended(bytes) => {
                     if bytes.len() >= 8 {
-                        let mut chunk = bytes::Bytes::copy_from_slice(&bytes[..8]);
+                        let mut chunk = &bytes[..8];
                         *bytes = &bytes[8..];
                         return Some(MetaCommunity::Extended(
                             crate::parser::bgp::attributes::parse_extended_community_one(
@@ -1058,7 +1054,7 @@ impl Iterator for MetaCommunitiesIter<'_> {
                 }
                 ActiveCommunityAttr::Ipv6Extended(bytes) => {
                     if bytes.len() >= 20 {
-                        let mut chunk = bytes::Bytes::copy_from_slice(&bytes[..20]);
+                        let mut chunk = &bytes[..20];
                         *bytes = &bytes[20..];
                         if let Ok(item) =
                             crate::parser::bgp::attributes::parse_ipv6_extended_community_one(

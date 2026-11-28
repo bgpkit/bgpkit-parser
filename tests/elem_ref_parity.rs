@@ -10,7 +10,7 @@ use bgpkit_parser::models::{
     Origin, Peer, PeerIndexTable, RibAfiEntries, RibEntry, RouteDistinguisher, TableDumpMessage,
     TableDumpV2Message, TableDumpV2Type, TwoOctetAsExtCommunity,
 };
-use bgpkit_parser::{AsPathSegmentType, BgpkitParser, CommunitiesView, ElemRef};
+use bgpkit_parser::{BgpkitParser, CommunitiesView, ElemRef};
 use bytes::{BufMut, BytesMut};
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -518,20 +518,22 @@ fn exhaustive_rib_variants_parity_and_segment_views() {
         for elem_ref in rec.iter() {
             assert_elem_parity(idx, &owned_elems[idx], &elem_ref);
             if idx == 0 {
-                let segs: Vec<(AsPathSegmentType, Vec<Asn>)> = elem_ref
+                let segs: Vec<(u8, Vec<Asn>)> = elem_ref
                     .as_path()
                     .segments()
-                    .map(|s| (s.segment_type(), s.asns().collect()))
+                    .map(|segment| match segment {
+                        AsPathSegment::AsSequence(asns) => (2, asns.into_iter().collect()),
+                        AsPathSegment::AsSet(asns) => (1, asns.into_iter().collect()),
+                        AsPathSegment::ConfedSequence(asns) => (3, asns.into_iter().collect()),
+                        AsPathSegment::ConfedSet(asns) => (4, asns.into_iter().collect()),
+                    })
                     .collect();
                 assert_eq!(
                     segs,
                     vec![
+                        (3, vec![Asn::new_32bit(65010)]),
                         (
-                            AsPathSegmentType::ConfedSequence,
-                            vec![Asn::new_32bit(65010)]
-                        ),
-                        (
-                            AsPathSegmentType::AsSequence,
+                            2,
                             vec![
                                 Asn::new_32bit(64501),
                                 Asn::new_32bit(3356),
@@ -539,7 +541,7 @@ fn exhaustive_rib_variants_parity_and_segment_views() {
                             ]
                         ),
                         (
-                            AsPathSegmentType::AsSet,
+                            1,
                             vec![
                                 Asn::new_32bit(13335),
                                 Asn::new_32bit(15169),
@@ -548,9 +550,10 @@ fn exhaustive_rib_variants_parity_and_segment_views() {
                         ),
                     ]
                 );
-                assert_eq!(elem_ref.communities().plain_words().len(), 4);
-                assert_eq!(elem_ref.communities().extended_words().len(), 20);
-                assert_eq!(elem_ref.communities().large_words().len(), 6);
+                // Counts are of communities now, not of the u32 words they are encoded in.
+                assert_eq!(elem_ref.communities().as_plain().count(), 4);
+                assert_eq!(elem_ref.communities().as_extended().count(), 10);
+                assert_eq!(elem_ref.communities().as_large().count(), 2);
             }
             idx += 1;
         }

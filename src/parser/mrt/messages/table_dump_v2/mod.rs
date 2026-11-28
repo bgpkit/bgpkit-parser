@@ -1,4 +1,4 @@
-mod geo_peer_table;
+pub(crate) mod geo_peer_table;
 pub(crate) mod peer_index_table;
 mod rib_afi_entries;
 

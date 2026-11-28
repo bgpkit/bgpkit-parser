@@ -18,14 +18,13 @@ pub use view::*;
 use update::{
     attribute_block_walks, fill_update_entries, parse_peer_index_vec, update_record_elems,
 };
-use view::parse_mp_reach_next_hop;
+use view::mp_reach_next_hop;
 
 use crate::error::ParserError;
 use crate::models::{
     get_deprecated_attr_type, Afi, AsPath, AsPathSegment, Asn, AsnLength, AttrFlags, AttrRaw,
     AttrType, Bgp4MpType, BgpIdentifier, CommonHeader, Community, ElemType, ExtendedCommunity,
-    Ipv6AddrExtCommunity, LargeCommunity, MetaCommunity, NetworkPrefix, Origin, Peer, PeerType,
-    Safi,
+    Ipv6AddrExtCommunity, LargeCommunity, MetaCommunity, NetworkPrefix, Origin, Peer, Safi,
 };
 use crate::parser::iters::handle_record_parse_error;
 use crate::parser::mrt::frame::{assemble_error_bytes, FrameError, Framer};
@@ -47,9 +46,7 @@ const AS_PATH_AS_SEQUENCE: u8 = 2;
 const AS_PATH_CONFED_SEQUENCE: u8 = 3;
 const AS_PATH_CONFED_SET: u8 = 4;
 
-const FLAG_AFI_IPV6: u8 = 1 << 0;
-const FLAG_SAFI_MULTICAST: u8 = 1 << 1;
-const FLAG_ADD_PATH: u8 = 1 << 2;
+use crate::parser::mrt::frame::{FLAG_ADD_PATH, FLAG_AFI_IPV6, FLAG_SAFI_MULTICAST};
 /// Set for an element of a `BGP4MP` update. A dump's entry decodes `NEXT_HOP` with the record's
 /// family; an update's `NEXT_HOP` is always the IPv4 address RFC 4271 defines.
 const FLAG_UPDATE: u8 = 1 << 3;
@@ -79,31 +76,13 @@ pub(crate) struct ElemViewState {
     finished: bool,
 }
 
-fn validate_geo_peer_table(mut data: &[u8]) -> Result<(), ParserError> {
-    let _collector_bgp_id = data.read_u32()?;
-    let view_name_len = data.read_u16()? as usize;
-    data.has_n_remaining(view_name_len)?;
-    data = &data[view_name_len..];
-    data.has_n_remaining(8)?;
-    data = &data[8..];
-    let peer_count = data.read_u16()? as usize;
-    for _ in 0..peer_count {
-        let peer_type = PeerType::from_bits_retain(data.read_u8()?);
-        let ip_bytes = if peer_type.contains(PeerType::ADDRESS_FAMILY_IPV6) {
-            16
-        } else {
-            4
-        };
-        let asn_bytes = if peer_type.contains(PeerType::AS_SIZE_32BIT) {
-            4
-        } else {
-            2
-        };
-        let skip = 4 + ip_bytes + asn_bytes + 8;
-        data.has_n_remaining(skip)?;
-        data = &data[skip..];
-    }
-    Ok(())
+/// Whether a `GEO_PEER_TABLE` body decodes, decided by the owned parser so the RFC 6397 layout has
+/// one owner.
+fn validate_geo_peer_table(data: &[u8]) -> Result<(), ParserError> {
+    crate::parser::mrt::messages::table_dump_v2::geo_peer_table::parse_geo_peer_table(
+        &mut bytes::Bytes::copy_from_slice(data),
+    )
+    .map(|_| ())
 }
 
 /// Frame the next record, returning owned framing metadata and leaving the body in
@@ -741,7 +720,7 @@ impl<'a> Iterator for ElemRefIter<'a> {
 /// The owned segment parser decides this: a segment type it rejects, or a count that runs past the
 /// payload, fails there exactly as it must here.
 fn validate_as_path_wire(wire: &[u8]) -> bool {
-    crate::parser::bgp::attributes::parse_as_path_slice(wire, &AsnLength::Bits32).is_ok()
+    crate::parser::bgp::attributes::validate_as_path_slice(wire, &AsnLength::Bits32)
 }
 
 #[cfg(test)]

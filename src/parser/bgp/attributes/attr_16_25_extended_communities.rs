@@ -4,7 +4,6 @@
 //! IANA Codes: <https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml>
 
 use crate::models::*;
-use crate::parser::ReadUtils;
 use crate::ParserError;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -12,8 +11,8 @@ use std::net::Ipv4Addr;
 
 /// Decode one 8-octet extended community, which is the unit both the attribute parser and the
 /// borrowed element view read.
-pub(crate) fn parse_extended_community_one(
-    input: &mut Bytes,
+pub(crate) fn parse_extended_community_one<R: crate::parser::ReadUtils>(
+    input: &mut R,
 ) -> Result<ExtendedCommunity, ParserError> {
     let ec_type_u8 = input.read_u8()?;
     let ec: ExtendedCommunity = match ExtendedCommunityType::from(ec_type_u8) {
@@ -228,8 +227,8 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
 
 /// Decode one 20-octet IPv6 address-specific extended community, the unit both the attribute
 /// parser and the borrowed element view read.
-pub(crate) fn parse_ipv6_extended_community_one(
-    input: &mut Bytes,
+pub(crate) fn parse_ipv6_extended_community_one<R: crate::parser::ReadUtils>(
+    input: &mut R,
 ) -> Result<Ipv6AddrExtCommunity, ParserError> {
     let ec_type_u8 = input.read_u8()?;
     let sub_type = input.read_u8()?;

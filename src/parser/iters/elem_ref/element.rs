@@ -352,10 +352,17 @@ impl<'a> ElemRef<'a> {
                     next_hop = Some(addr);
                 }
             } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
-                if let Ok(addr_opt) =
-                    parse_mp_reach_next_hop(&bytes[val_start..val_end], afi, safi, is_add_path)
-                {
-                    mp_next_hop = addr_opt;
+                match mp_reach_next_hop(
+                    &bytes[val_start..val_end],
+                    self.prefix(),
+                    afi,
+                    safi,
+                    is_add_path,
+                    (self.flags & FLAG_UPDATE) != 0,
+                ) {
+                    Ok(address) => mp_next_hop = address,
+                    // A body the owned parser rejects carries no usable next hop.
+                    Err(()) => mp_next_hop = None,
                 }
             }
             pos = val_end;
@@ -419,9 +426,7 @@ impl<'a> ElemRef<'a> {
         let mut mp_next_hop: Option<IpAddr> = None;
         let mut as_path_wire: Option<&[u8]> = None;
         let mut as4_path_wire: Option<&[u8]> = None;
-        // Community attributes in wire order, decoded after the walk so the order of the produced
-        // values matches the attribute order, as the owned path extends them.
-        let mut community_attrs: Vec<(u8, &[u8])> = Vec::with_capacity(4);
+        let mut communities: Vec<MetaCommunity> = Vec::new();
         let mut unknown: Vec<AttrRaw> = Vec::new();
         let mut deprecated: Vec<AttrRaw> = Vec::new();
 
@@ -506,6 +511,12 @@ impl<'a> ElemRef<'a> {
                     }
                 }
                 AttrType::ATOMIC_AGGREGATE => atomic = true,
+                // The owned parsers reject these two unless their length is exact.
+                AttrType::ORIGINATOR_ID | AttrType::CLUSTER_LIST => {
+                    if val.len() < 4 || !val.len().is_multiple_of(4) {
+                        undecoded = true;
+                    }
+                }
                 AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
                     match crate::parser::bgp::attributes::parse_aggregator_slice(
                         bytes::Bytes::copy_from_slice(val),
@@ -517,10 +528,62 @@ impl<'a> ElemRef<'a> {
                         None => undecoded = true,
                     }
                 }
+                // Each community attribute is decoded by the owned parser for that attribute, at the
+                // position it appears, so an unsupported sub-type, a length that is not a whole
+                // element, and the special values all follow the owned rules and the raw bytes of a
+                // malformed one land in `unknown` where the owned path puts them.
                 AttrType::COMMUNITIES
                 | AttrType::EXTENDED_COMMUNITIES
                 | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
-                | AttrType::LARGE_COMMUNITIES => community_attrs.push((code, val)),
+                | AttrType::LARGE_COMMUNITIES => {
+                    let input = bytes::Bytes::copy_from_slice(val);
+                    let decoded = match AttrType::from(code) {
+                        AttrType::COMMUNITIES => {
+                            crate::parser::bgp::attributes::parse_communities_attribute(input).map(
+                                |value| match value {
+                                    crate::models::AttributeValue::Communities(v) => {
+                                        communities.extend(v.into_iter().map(MetaCommunity::Plain));
+                                        true
+                                    }
+                                    _ => false,
+                                },
+                            )
+                        }
+                        AttrType::EXTENDED_COMMUNITIES => {
+                            crate::parser::bgp::attributes::parse_extended_communities_attribute(
+                                input,
+                            )
+                            .map(|value| match value {
+                                crate::models::AttributeValue::ExtendedCommunities(v) => {
+                                    communities
+                                        .extend(v.into_iter().map(MetaCommunity::Extended));
+                                    true
+                                }
+                                _ => false,
+                            })
+                        }
+                        AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => crate::parser::bgp::attributes::parse_ipv6_extended_communities_attribute(input)
+                            .map(|value| match value {
+                                crate::models::AttributeValue::Ipv6AddressSpecificExtendedCommunities(v) => {
+                                    communities
+                                        .extend(v.into_iter().map(MetaCommunity::Ipv6Extended));
+                                    true
+                                }
+                                _ => false,
+                            }),
+                        _ => crate::parser::bgp::attributes::parse_large_communities_attribute(input)
+                            .map(|value| match value {
+                                crate::models::AttributeValue::LargeCommunities(v) => {
+                                    communities.extend(v.into_iter().map(MetaCommunity::Large));
+                                    true
+                                }
+                                _ => false,
+                            }),
+                    };
+                    if !decoded.unwrap_or(false) {
+                        undecoded = true;
+                    }
+                }
                 AttrType::ONLY_TO_CUSTOMER => {
                     if val.len() >= 4 {
                         only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
@@ -531,13 +594,31 @@ impl<'a> ElemRef<'a> {
                     }
                 }
                 AttrType::MP_REACHABLE_NLRI => {
-                    if let Ok(address) = parse_mp_reach_next_hop(val, afi, safi, is_add_path) {
-                        mp_next_hop = address;
+                    match mp_reach_next_hop(
+                        val,
+                        self.prefix(),
+                        afi,
+                        safi,
+                        is_add_path,
+                        (self.flags & FLAG_UPDATE) != 0,
+                    ) {
+                        Ok(address) => mp_next_hop = address,
+                        Err(()) => undecoded = true,
                     }
                 }
                 // Types the element path keeps as raw bytes, mirroring `get_relevant_attributes`.
+                // A valid traffic-engineering attribute is parsed by the owned path and then
+                // discarded from the element, so only a malformed one is kept raw.
+                AttrType::TRAFFIC_ENGINEERING => {
+                    if crate::parser::bgp::attributes::parse_traffic_engineering(
+                        bytes::Bytes::copy_from_slice(val),
+                    )
+                    .is_err()
+                    {
+                        undecoded = true;
+                    }
+                }
                 AttrType::Unknown(_)
-                | AttrType::TRAFFIC_ENGINEERING
                 | AttrType::RESERVED
                 | AttrType::PMSI_TUNNEL
                 | AttrType::PE_DISTINGUISHER_LABELS
@@ -580,70 +661,6 @@ impl<'a> ElemRef<'a> {
                 Some(merged_wire_origins(as_path, as4_path).to_vec())
             }
         };
-
-        let mut communities: Vec<MetaCommunity> = Vec::new();
-        // Each community attribute is decoded by the owned parser for that attribute, so an
-        // unsupported sub-type, a length that is not a whole element, and the special values all
-        // follow the same rules the owned path uses.
-        for (code, val) in community_attrs {
-            let input = bytes::Bytes::copy_from_slice(val);
-            let decoded = match AttrType::from(code) {
-                AttrType::COMMUNITIES => {
-                    crate::parser::bgp::attributes::parse_communities_attribute(input).map(
-                        |value| match value {
-                            crate::models::AttributeValue::Communities(v) => {
-                                communities.extend(v.into_iter().map(MetaCommunity::Plain));
-                                true
-                            }
-                            _ => false,
-                        },
-                    )
-                }
-                AttrType::EXTENDED_COMMUNITIES => {
-                    crate::parser::bgp::attributes::parse_extended_communities_attribute(input).map(
-                        |value| match value {
-                            crate::models::AttributeValue::ExtendedCommunities(v) => {
-                                communities.extend(v.into_iter().map(MetaCommunity::Extended));
-                                true
-                            }
-                            _ => false,
-                        },
-                    )
-                }
-                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
-                    crate::parser::bgp::attributes::parse_ipv6_extended_communities_attribute(input)
-                        .map(|value| {
-                            match value {
-                            crate::models::AttributeValue::Ipv6AddressSpecificExtendedCommunities(
-                                v,
-                            ) => {
-                                communities.extend(v.into_iter().map(MetaCommunity::Ipv6Extended));
-                                true
-                            }
-                            _ => false,
-                        }
-                        })
-                }
-                AttrType::LARGE_COMMUNITIES => {
-                    crate::parser::bgp::attributes::parse_large_communities_attribute(input).map(
-                        |value| match value {
-                            crate::models::AttributeValue::LargeCommunities(v) => {
-                                communities.extend(v.into_iter().map(MetaCommunity::Large));
-                                true
-                            }
-                            _ => false,
-                        },
-                    )
-                }
-                _ => Ok(false),
-            };
-            if !decoded.unwrap_or(false) {
-                unknown.push(AttrRaw {
-                    code,
-                    bytes: bytes::Bytes::copy_from_slice(val),
-                });
-            }
-        }
 
         let is_withdrawal = self.elem_type() == ElemType::WITHDRAW;
         BgpElem {

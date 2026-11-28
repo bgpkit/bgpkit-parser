@@ -31,6 +31,7 @@ use crate::encoder::sink::{with_u16_len, with_u8_len};
 use crate::error::{BgpValidationWarning, EncodingError, ParserError};
 use crate::parser::bgp::attributes::attr_01_origin::{encode_origin, parse_origin};
 use crate::parser::bgp::attributes::attr_02_17_as_path::encode_as_path;
+pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::validate_as_path_slice;
 pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::{
     parse_as_path, parse_as_path_slice,
 };
@@ -63,9 +64,8 @@ pub(crate) use crate::parser::bgp::attributes::attr_16_25_extended_communities::
 use crate::parser::bgp::attributes::attr_23_tunnel_encap::{
     encode_tunnel_encapsulation_attribute, parse_tunnel_encapsulation_attribute,
 };
-use crate::parser::bgp::attributes::attr_24_traffic_engineering::{
-    encode_traffic_engineering, parse_traffic_engineering,
-};
+use crate::parser::bgp::attributes::attr_24_traffic_engineering::encode_traffic_engineering;
+pub(crate) use crate::parser::bgp::attributes::attr_24_traffic_engineering::parse_traffic_engineering;
 use crate::parser::bgp::attributes::attr_26_aigp::{encode_aigp, parse_aigp};
 use crate::parser::bgp::attributes::attr_29_linkstate::{
     encode_link_state_attribute, parse_link_state_attribute,

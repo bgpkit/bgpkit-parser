@@ -1,11 +1,12 @@
 use crate::models::*;
-use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Decode one 12-octet large community, the unit both the attribute parser and the borrowed element
 /// view read.
-pub(crate) fn decode_large_community(input: &mut Bytes) -> Result<LargeCommunity, ParserError> {
+pub(crate) fn decode_large_community<R: crate::parser::ReadUtils>(
+    input: &mut R,
+) -> Result<LargeCommunity, ParserError> {
     let global_administrator = input.read_u32()?;
     let local_data = [input.read_u32()?, input.read_u32()?];
     Ok(LargeCommunity::new(global_administrator, local_data))
