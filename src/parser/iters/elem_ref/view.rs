@@ -1,7 +1,8 @@
 //! Borrowed attribute views over one element's attribute block.
 //!
-//! Each type here reads the bytes the record already holds and yields values on demand, so a caller
-//! that walks a dump allocates nothing per element.
+//! Each type here reads the bytes the record already holds and yields values on demand. The
+//! iterators over a single attribute allocate nothing; the ones that merge or coalesce (`segments`)
+//! reuse the owned model's inline storage and allocate only past it.
 
 use super::*;
 
@@ -18,6 +19,26 @@ pub(super) fn wire_route_len(mut wire: &[u8]) -> usize {
         wire = &wire[2 + count * 4..];
     }
     total
+}
+
+/// The next hop of an `MP_REACH_NLRI` value that carries its own address family and SAFI, which is
+/// what a `BGP4MP` update has.
+pub(super) fn update_mp_reach_next_hop(value: &[u8], add_path: bool) -> Option<IpAddr> {
+    let decoded = crate::parser::bgp::attributes::parse_nlri(
+        bytes::Bytes::copy_from_slice(value),
+        &None,
+        &None,
+        &None,
+        true,
+        add_path,
+    )
+    .ok()?;
+    match decoded {
+        crate::models::AttributeValue::MpReachNlri(nlri) => {
+            nlri.next_hop.map(|next_hop| next_hop.global_addr())
+        }
+        _ => None,
+    }
 }
 
 /// The global next hop of an `MP_REACH_NLRI` value.
@@ -103,24 +124,6 @@ pub struct AsPathSegmentRef<'a> {
 }
 
 impl<'a> AsPathSegmentRef<'a> {
-    /// Returns the segment type (`AS_SEQUENCE`, `AS_SET`, `AS_CONFED_SEQUENCE`, `AS_CONFED_SET`).
-    #[inline]
-    pub fn segment_type(&self) -> AsPathSegmentType {
-        self.seg_type
-    }
-
-    /// Returns the number of ASNs in this segment.
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.asn_bytes.len() / 4
-    }
-
-    /// Returns `true` if this segment carries zero ASNs.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.asn_bytes.is_empty()
-    }
-
     /// Iterates over the [`Asn`]s in this segment in wire order without allocating.
     #[inline]
     pub fn asns(&self) -> SegmentAsns<'a> {
@@ -193,12 +196,13 @@ impl<'a> AsPathView<'a> {
     /// Returns the path's segments after the same RFC 6793 merge and coalesce the owned [`AsPath`]
     /// applies, so their boundaries match `elem.as_path` exactly.
     ///
-    /// ASNs stay inline in each segment, so the common path allocates nothing.
+    /// A single-segment path keeps its ASNs inline; a path with more than one segment, or with a
+    /// segment of more than six ASNs, allocates for the part that does not fit.
     #[inline]
-    pub fn segments(&self) -> impl Iterator<Item = AsPathSegment> {
+    pub fn segments(&self) -> crate::models::SegmentIntoIter {
         match self.to_as_path() {
-            Some(path) => path.segments.into_iter().collect::<Vec<_>>().into_iter(),
-            None => Vec::new().into_iter(),
+            Some(path) => path.into_segments_iter(),
+            None => AsPath::default().into_segments_iter(),
         }
     }
 
@@ -661,73 +665,6 @@ pub(super) fn bytes_as_be_u32_words(bytes: &[u8]) -> &[BeU32] {
     }
     <[BeU32]>::ref_from_bytes(bytes).unwrap_or(&[])
 }
-
-/// Zero-copy slice view over unaligned big-endian 32-bit community words in the record body.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CommunityWords<'a> {
-    words: &'a [BeU32],
-}
-
-impl<'a> CommunityWords<'a> {
-    /// Number of 32-bit words in this slice.
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.words.len()
-    }
-
-    /// Returns `true` if the slice contains no 32-bit words.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
-    }
-
-    /// Reads the `index`-th big-endian 32-bit word as a host `u32`.
-    #[inline]
-    pub fn get(&self, index: usize) -> Option<u32> {
-        self.words.get(index).map(|w| w.get())
-    }
-
-    /// Iterates over host-endian `u32` words decoded in place.
-    #[inline]
-    pub fn iter(&self) -> WordSliceIter<'a> {
-        WordSliceIter { words: self.words }
-    }
-}
-
-impl<'a> IntoIterator for CommunityWords<'a> {
-    type Item = u32;
-    type IntoIter = WordSliceIter<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-/// Iterator over host-endian `u32` words from a [`CommunityWords`] slice.
-#[derive(Clone, Debug)]
-pub struct WordSliceIter<'a> {
-    words: &'a [BeU32],
-}
-
-impl Iterator for WordSliceIter<'_> {
-    type Item = u32;
-
-    #[inline]
-    fn next(&mut self) -> Option<u32> {
-        let (first, rest) = self.words.split_first()?;
-        self.words = rest;
-        Some(first.get())
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = self.words.len();
-        (n, Some(n))
-    }
-}
-
-impl ExactSizeIterator for WordSliceIter<'_> {}
 
 /// Borrowed view over an element's BGP community attributes (`COMMUNITIES`,
 /// `EXTENDED_COMMUNITIES`, `IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES`, and

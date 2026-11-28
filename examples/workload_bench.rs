@@ -62,7 +62,7 @@ fn main() {
             let mut parser = BgpkitParser::new(&path).expect("open input");
             let mut hash = FNV_OFFSET;
             let mut asn_sum = 0u64;
-            while let Some(mut record) = parser.next_record_elems() {
+            while let Some(record) = parser.next_record_elems() {
                 for elem in record.iter() {
                     if mode == "prefix-view" {
                         let (bytes, mask) = prefix_bytes(&elem.prefix());

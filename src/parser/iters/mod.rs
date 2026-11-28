@@ -33,10 +33,9 @@ pub use diagnostic::{
     DissectedDiagnosticEvent, DissectingDiagnosticIterator,
 };
 pub use elem_ref::{
-    AsPathIter, AsPathSegmentRef, AsPathSegmentType, AsPathSegments, AsPathView, AsnsIter,
-    AsnsView, CommunitiesView, CommunityWords, CommunityWordsIter, ElemRef, ElemRefIter,
+    AsPathIter, AsPathView, AsnsIter, AsnsView, CommunitiesView, ElemRef, ElemRefIter,
     ExtendedCommunitiesIter, Ipv6ExtendedCommunitiesIter, LargeCommunitiesIter,
-    MetaCommunitiesIter, PlainCommunitiesIter, RecordElems, SegmentAsns, WordSliceIter,
+    PlainCommunitiesIter, RecordElems,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::{FilteredRawRecordIterator, RawRecordIterator};

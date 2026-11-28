@@ -5,7 +5,8 @@ Borrowed element views over MRT `TABLE_DUMP_V2` RIB records.
 [`BgpkitParser::next_record_elems`](crate::BgpkitParser::next_record_elems) reads one record body
 into a reusable buffer owned by the parser and lends a [`RecordElems`] batch over its RIB entries.
 Each [`ElemRef`] yielded by [`RecordElems::iter`] borrows directly from the record body and the
-active peer index table, decoding BGP attributes on demand without per-element heap allocation.
+active peer index table. Its accessors decode on demand; a next hop or a merged AS path is decoded
+at most once per element, and materialising the element allocates.
 */
 
 mod element;
@@ -18,7 +19,7 @@ pub use view::*;
 use update::{
     attribute_block_walks, fill_update_entries, parse_peer_index_vec, update_record_elems,
 };
-use view::mp_reach_next_hop;
+use view::{mp_reach_next_hop, update_mp_reach_next_hop};
 
 use crate::error::ParserError;
 use crate::models::{
@@ -36,7 +37,6 @@ use ipnet::IpNet;
 use log::{error, warn};
 use std::cell::Cell;
 use std::io::Read;
-use std::marker::PhantomData;
 use std::net::IpAddr;
 use zerocopy::big_endian::U32 as BeU32;
 use zerocopy::FromBytes;
@@ -50,6 +50,9 @@ use crate::parser::mrt::frame::{FLAG_ADD_PATH, FLAG_AFI_IPV6, FLAG_SAFI_MULTICAS
 /// Set for an element of a `BGP4MP` update. A dump's entry decodes `NEXT_HOP` with the record's
 /// family; an update's `NEXT_HOP` is always the IPv4 address RFC 4271 defines.
 const FLAG_UPDATE: u8 = 1 << 3;
+
+// One `u8` carries the frame bits and the update bit, so they must not overlap.
+const _: () = assert!(FLAG_UPDATE & (FLAG_AFI_IPV6 | FLAG_SAFI_MULTICAST | FLAG_ADD_PATH) == 0);
 
 const SLOT_UNSCANNED: u64 = u64::MAX;
 const SLOT_ABSENT: u64 = u64::MAX - 1;
@@ -357,39 +360,34 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                     (supported, bgp4mp_is_update(subtype, body))
                 };
                 if !supported {
-                    if would_yield {
-                        // An UPDATE of a served subtype that this could not read is a parse error,
-                        // not a scope limit: report it the way the owned path would, and say so
-                        // only once for records whose AS numbers are two bytes wide.
-                        let as4 = matches!(
-                            Bgp4MpType::try_from(common_header.entry_subtype),
-                            Ok(Bgp4MpType::MessageAs4)
-                                | Ok(Bgp4MpType::MessageAs4Local)
-                                | Ok(Bgp4MpType::MessageAs4Addpath)
-                                | Ok(Bgp4MpType::MessageLocalAs4Addpath)
-                        );
-                        if as4 {
-                            match parser.parse_framed_record(
-                                common_header,
-                                raw_header.as_slice(),
-                                body_len,
-                            ) {
-                                Ok(_) => {}
-                                Err(failure) => {
-                                    if !handle_record_parse_error(
-                                        parser,
-                                        failure.error,
-                                        failure.bytes,
-                                    ) {
-                                        parser.elem_view_state.finished = true;
-                                        return None;
-                                    }
-                                }
+                    // A record the view cannot read is either a parse error or a record kind it
+                    // does not serve. The owned parser answers which: its error goes through the
+                    // same handler, and only a record it parses cleanly is a scope limit.
+                    let as4 = matches!(
+                        Bgp4MpType::try_from(common_header.entry_subtype),
+                        Ok(Bgp4MpType::MessageAs4)
+                            | Ok(Bgp4MpType::MessageAs4Local)
+                            | Ok(Bgp4MpType::MessageAs4Addpath)
+                            | Ok(Bgp4MpType::MessageLocalAs4Addpath)
+                    );
+                    match parser.parse_framed_record(common_header, raw_header.as_slice(), body_len)
+                    {
+                        Ok(_) if as4 && would_yield => {
+                            // The owned path parses it, so the failure is in this walk; say so
+                            // rather than drop the record in silence.
+                            error!(
+                                "next_record_elems could not read a BGP4MP update the parser accepts; use into_elem_iter for this file"
+                            );
+                        }
+                        Ok(_) if !as4 && would_yield => parser
+                            .options
+                            .warn_view_scope_once("BGP4MP record with 2-byte AS numbers"),
+                        Ok(_) => {}
+                        Err(failure) => {
+                            if !handle_record_parse_error(parser, failure.error, failure.bytes) {
+                                parser.elem_view_state.finished = true;
+                                return None;
                             }
-                        } else {
-                            parser
-                                .options
-                                .warn_view_scope_once("BGP4MP record with 2-byte AS numbers");
                         }
                     }
                     continue;
@@ -403,7 +401,15 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 };
             }
             RecordKind::Other => {
-                parser.options.warn_view_scope_once("other");
+                match parser.parse_framed_record(common_header, raw_header.as_slice(), body_len) {
+                    Ok(_) => parser.options.warn_view_scope_once("other"),
+                    Err(failure) => {
+                        if !handle_record_parse_error(parser, failure.error, failure.bytes) {
+                            parser.elem_view_state.finished = true;
+                            return None;
+                        }
+                    }
+                }
                 continue;
             }
         }
@@ -469,10 +475,12 @@ enum RecordSource<'a> {
         entry_count: u16,
         flags: u8,
     },
-    /// `BGP4MP` update: one attribute block, and the NLRI this record announced or withdrew.
+    /// `BGP4MP` update: one attribute block, the NLRI this record announced or withdrew, and the
+    /// next hop every element of it shares.
     Update {
         entries: &'a [UpdateEntry],
         attrs: &'a [u8],
+        next_hop: Option<IpAddr>,
         peer_ip: IpAddr,
         peer_asn: Asn,
         timestamp: f64,
@@ -509,6 +517,7 @@ impl<'a> RecordElems<'a> {
         peer_ip: IpAddr,
         peer_asn: Asn,
         timestamp: f64,
+        next_hop: Option<IpAddr>,
     ) -> Self {
         RecordElems {
             header,
@@ -518,6 +527,7 @@ impl<'a> RecordElems<'a> {
                 peer_ip,
                 peer_asn,
                 timestamp,
+                next_hop,
             },
         }
     }
@@ -550,7 +560,7 @@ impl<'a> RecordElems<'a> {
 
     /// Returns an iterator yielding borrowed [`ElemRef`] views over the record's elements.
     #[inline]
-    pub fn iter(&mut self) -> ElemRefIter<'_> {
+    pub fn iter(&self) -> ElemRefIter<'a> {
         let source = match &self.source {
             RecordSource::Rib {
                 entries_bytes,
@@ -571,6 +581,7 @@ impl<'a> RecordElems<'a> {
                 peer_ip,
                 peer_asn,
                 timestamp,
+                next_hop,
             } => IterSource::Update {
                 entries,
                 attrs,
@@ -578,18 +589,16 @@ impl<'a> RecordElems<'a> {
                 peer_asn: *peer_asn,
                 timestamp: *timestamp,
                 next: 0,
+                next_hop: *next_hop,
             },
         };
-        ElemRefIter {
-            source,
-            _borrow: PhantomData,
-        }
+        ElemRefIter { source }
     }
 }
 
-impl<'a, 'b> IntoIterator for &'b mut RecordElems<'a> {
-    type Item = ElemRef<'b>;
-    type IntoIter = ElemRefIter<'b>;
+impl<'a> IntoIterator for &RecordElems<'a> {
+    type Item = ElemRef<'a>;
+    type IntoIter = ElemRefIter<'a>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -608,7 +617,6 @@ pub(crate) struct UpdateEntry {
 /// Iterator over borrowed [`ElemRef`]s within a single [`RecordElems`] record.
 pub struct ElemRefIter<'a> {
     source: IterSource<'a>,
-    _borrow: PhantomData<&'a mut ()>,
 }
 
 enum IterSource<'a> {
@@ -626,6 +634,7 @@ enum IterSource<'a> {
         peer_asn: Asn,
         timestamp: f64,
         next: usize,
+        next_hop: Option<IpAddr>,
     },
 }
 
@@ -690,6 +699,7 @@ impl<'a> Iterator for ElemRefIter<'a> {
                 peer_asn,
                 timestamp,
                 next,
+                next_hop,
             } => {
                 let entry = entries.get(*next)?;
                 *next += 1;
@@ -699,7 +709,7 @@ impl<'a> Iterator for ElemRefIter<'a> {
                     ElemType::WITHDRAW => &[],
                 };
                 Some(ElemRef::new_update(
-                    entry, *peer_ip, *peer_asn, *timestamp, attr_bytes,
+                    entry, *peer_ip, *peer_asn, *timestamp, attr_bytes, *next_hop,
                 ))
             }
         }
@@ -783,7 +793,7 @@ mod materialise_tests {
 
         let mut parser = BgpkitParser::new(fixture).expect("open fixture");
         let mut borrowed = Vec::new();
-        while let Some(mut record) = parser.next_record_elems() {
+        while let Some(record) = parser.next_record_elems() {
             assert!(!record.is_empty(), "an update record declared no elements");
             for elem in record.iter() {
                 borrowed.push(elem.to_bgp_elem());
@@ -812,7 +822,7 @@ mod materialise_tests {
 
         let mut parser = BgpkitParser::new(RIB_FIXTURE).expect("open fixture");
         let mut borrowed = Vec::new();
-        while let Some(mut record) = parser.next_record_elems() {
+        while let Some(record) = parser.next_record_elems() {
             for elem in record.iter() {
                 borrowed.push(elem.to_bgp_elem());
             }
@@ -966,8 +976,8 @@ mod wire_parity_tests {
     fn borrowed_elems(wire: &[u8]) -> Vec<BgpElem> {
         let mut parser = crate::BgpkitParser::from_reader(Cursor::new(wire.to_vec()));
         let mut elems = Vec::new();
-        while let Some(mut record) = parser.next_record_elems() {
-            for elem in &mut record {
+        while let Some(record) = parser.next_record_elems() {
+            for elem in &record {
                 elems.push(elem.to_bgp_elem());
             }
         }
@@ -1118,8 +1128,8 @@ mod wire_parity_tests {
 
         let mut parser = crate::BgpkitParser::from_reader(Cursor::new(wire));
         let mut seen = 0;
-        while let Some(mut record) = parser.next_record_elems() {
-            for elem in &mut record {
+        while let Some(record) = parser.next_record_elems() {
+            for elem in &record {
                 assert_eq!(elem.prefix().path_id, Some(7));
                 seen += 1;
             }

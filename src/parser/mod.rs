@@ -431,8 +431,10 @@ impl<R: Read> BgpkitParser<R> {
         }
     }
 
-    /// Advance to the next `TABLE_DUMP_V2` `RIB_AFI` record and return a borrowed view over its
-    /// elements without per-element heap allocation.
+    /// Advance to the next record this path serves and return a borrowed view over its elements.
+    ///
+    /// A dump's `RIB_AFI` entry is read straight from the record body. An update's element shares
+    /// its record's attribute block, and the next hop is decoded once for the whole record.
     ///
     /// The returned [`RecordElems`] borrows this parser (its reusable record buffer and active
     /// `PeerIndexTable`); drop `RecordElems` before calling `next_record_elems` again.

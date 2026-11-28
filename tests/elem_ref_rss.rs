@@ -168,7 +168,7 @@ fn rss_stays_flat_across_one_million_borrowed_elems() {
     #[cfg(target_os = "linux")]
     let mut rss_at_10k: Option<usize> = None;
 
-    while let Some(mut record) = parser.next_record_elems() {
+    while let Some(record) = parser.next_record_elems() {
         for elem in record.iter() {
             acc = acc.wrapping_add(u32::from(elem.peer_asn()) as u64);
             acc = acc.wrapping_add(elem.prefix().prefix.prefix_len() as u64);

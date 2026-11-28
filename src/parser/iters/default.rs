@@ -142,7 +142,7 @@ impl<R: Read> ElemIterator<R> {
         use crate::parser::iters::elem_ref::NextBatch;
 
         match self.record_iter.parser.next_elem_batch() {
-            NextBatch::Rib(mut record) => {
+            NextBatch::Rib(record) => {
                 // The declared entry count is attacker-controlled; cap the reservation so a
                 // malformed record cannot ask for a large allocation per record.
                 let mut elems = Vec::with_capacity(record.len().min(1024));

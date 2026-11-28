@@ -224,7 +224,7 @@ fn rib_fixture_field_by_field_parity_with_into_elem_iter() {
 
     let mut idx = 0usize;
     let mut record_count = 0usize;
-    while let Some(mut record) = view_parser.next_record_elems() {
+    while let Some(record) = view_parser.next_record_elems() {
         assert_eq!(record.header().entry_type, EntryType::TABLE_DUMP_V2);
         let declared_len = record.len();
         let mut yielded_in_record = 0usize;
@@ -514,7 +514,7 @@ fn exhaustive_rib_variants_parity_and_segment_views() {
 
     let mut parser = BgpkitParser::from_reader(Cursor::new(wire));
     let mut idx = 0usize;
-    while let Some(mut rec) = parser.next_record_elems() {
+    while let Some(rec) = parser.next_record_elems() {
         for elem_ref in rec.iter() {
             assert_elem_parity(idx, &owned_elems[idx], &elem_ref);
             if idx == 0 {
@@ -660,7 +660,7 @@ fn malformed_and_truncated_attributes_match_into_elem_iter() {
     assert_eq!(owned.len(), 1);
 
     let mut view_parser = BgpkitParser::from_reader(Cursor::new(wire));
-    let mut rec = view_parser.next_record_elems().expect("one RIB record");
+    let rec = view_parser.next_record_elems().expect("one RIB record");
     let elem_ref = rec.iter().next().expect("one RIB entry");
     assert_elem_parity(0, &owned[0], &elem_ref);
     assert!(!elem_ref.as_path().is_present());
@@ -744,7 +744,7 @@ Default local pref 100, local AS 65001\n\n\
     // only one this path cannot read, and it is skipped with a warning.
     let mut mixed_parser = BgpkitParser::from_reader(Cursor::new(mixed));
     let mut total_elems = 0usize;
-    while let Some(mut rec) = mixed_parser.next_record_elems() {
+    while let Some(rec) = mixed_parser.next_record_elems() {
         total_elems += rec.iter().count();
     }
     assert_eq!(total_elems, 6);

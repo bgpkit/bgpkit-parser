@@ -21,7 +21,7 @@ fn main() {
         "view-count" => {
             let mut parser = BgpkitParser::new(&path).expect("open input");
             let mut count = 0usize;
-            while let Some(mut rec) = parser.next_record_elems() {
+            while let Some(rec) = parser.next_record_elems() {
                 for elem in rec.iter() {
                     black_box(&elem);
                     count += 1;
@@ -33,7 +33,7 @@ fn main() {
             let mut parser = BgpkitParser::new(&path).expect("open input");
             let mut count = 0usize;
             let mut acc = 0u64;
-            while let Some(mut rec) = parser.next_record_elems() {
+            while let Some(rec) = parser.next_record_elems() {
                 for elem in rec.iter() {
                     black_box(elem.prefix());
                     black_box(elem.peer_ip());

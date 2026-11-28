@@ -150,7 +150,7 @@ pub(super) fn update_record_elems<'a>(
     peer_asn: Asn,
     timestamp: f64,
 ) -> Option<RecordElems<'a>> {
-    let attrs = fill_update_entries(
+    let (attrs, next_hop) = fill_update_entries(
         &state.body_buf[..body_len],
         header.entry_subtype,
         &mut state.update_entries,
@@ -162,7 +162,23 @@ pub(super) fn update_record_elems<'a>(
         peer_ip,
         peer_asn,
         timestamp,
+        next_hop,
     ))
+}
+
+/// Report a trailing attribute whose length runs past the block, as the owned walker does.
+fn warn_on_truncated_attribute(attrs: &[u8]) {
+    let mut rest = attrs;
+    while let Some((_, value, next)) = next_attr_tlv(rest) {
+        let _ = value;
+        rest = next;
+    }
+    if !rest.is_empty() && rest.len() < 3 {
+        warn!(
+            "attribute block ends with {} octets that cannot hold an attribute header; ignoring them",
+            rest.len()
+        );
+    }
 }
 
 /// Fill `out` with the elements of one `BGP4MP` update and return its attribute block.
@@ -173,11 +189,33 @@ pub(super) fn update_record_elems<'a>(
 ///
 /// The order matches the owned iterator: announcements (plain NLRI, then `MP_REACH_NLRI`), then
 /// withdrawals (plain, then `MP_UNREACH_NLRI`).
+/// The next hop every element of one update shares: `NEXT_HOP` when present, else `MP_REACH_NLRI`,
+/// which is the order the owned path applies.
+fn record_next_hop(attrs: &[u8], add_path: bool) -> Option<IpAddr> {
+    let mut plain = None;
+    let mut from_mp = None;
+    let mut rest = attrs;
+    while let Some((code, value, next)) = next_attr_tlv(rest) {
+        rest = next;
+        match code {
+            3 => {
+                let mut value = value;
+                if let Ok(address) = value.read_address(&Afi::Ipv4) {
+                    plain = Some(address);
+                }
+            }
+            14 => from_mp = update_mp_reach_next_hop(value, add_path).or(from_mp),
+            _ => {}
+        }
+    }
+    plain.or(from_mp)
+}
+
 pub(crate) fn fill_update_entries<'a>(
     body: &'a [u8],
     subtype: u16,
     out: &mut Vec<UpdateEntry>,
-) -> Option<&'a [u8]> {
+) -> Option<(&'a [u8], Option<IpAddr>)> {
     out.clear();
     let add_path = match Bgp4MpType::try_from(subtype).ok()? {
         Bgp4MpType::MessageAs4 | Bgp4MpType::MessageAs4Local => false,
@@ -201,10 +239,12 @@ pub(crate) fn fill_update_entries<'a>(
         return None;
     }
     let message_len = u16::from_be_bytes([rest[16], rest[17]]) as usize;
-    if message_len < 19 || message_len > rest.len() {
+    if message_len < 19 {
         return None;
     }
-    rest = &rest[19..message_len];
+    // The owned parser clamps a declared length that runs past the body instead of rejecting the
+    // record, so the same octets are read here.
+    rest = rest.get(19..message_len.min(rest.len()))?;
     if rest.len() < 2 {
         return None;
     }
@@ -227,10 +267,15 @@ pub(crate) fn fill_update_entries<'a>(
     if !attribute_block_walks(attrs) {
         return None;
     }
+    // One record, one warning: a trailing attribute that runs past the block is reported here
+    // instead of once per element the record yields.
+    warn_on_truncated_attribute(attrs);
 
     // MP_REACH and MP_UNREACH sit in the attribute block; find them without decoding anything else.
-    let mut mp_reach: Option<&[u8]> = None;
-    let mut mp_unreach: Option<&[u8]> = None;
+    // Every occurrence is kept: a malformed duplicate must not hide an earlier valid attribute, so
+    // each is tried and the last one that decodes wins, as it does on the owned path.
+    let mut mp_reach: Vec<&[u8]> = Vec::new();
+    let mut mp_unreach: Vec<&[u8]> = Vec::new();
     let mut pos = 0usize;
     while pos + 3 <= attrs.len() {
         let flags = attrs[pos];
@@ -252,8 +297,8 @@ pub(crate) fn fill_update_entries<'a>(
             break;
         }
         match code {
-            14 => mp_reach = Some(&attrs[start..end]),
-            15 => mp_unreach = Some(&attrs[start..end]),
+            14 => mp_reach.push(&attrs[start..end]),
+            15 => mp_unreach.push(&attrs[start..end]),
             _ => {}
         }
         pos = end;
@@ -267,9 +312,12 @@ pub(crate) fn fill_update_entries<'a>(
         ElemType::ANNOUNCE,
         out,
     );
-    if let Some(body) = mp_reach {
+    for body in &mp_reach {
         append_mp_nlri(body, true, add_path, out);
     }
+    // The record's next hop is decoded once here: every element it yields shares it, and decoding
+    // it per element would re-parse the NLRI of every prefix for each one.
+    let next_hop = record_next_hop(attrs, add_path);
     append_nlri(
         withdrawn,
         Afi::Ipv4,
@@ -278,8 +326,8 @@ pub(crate) fn fill_update_entries<'a>(
         ElemType::WITHDRAW,
         out,
     );
-    if let Some(body) = mp_unreach {
+    for body in &mp_unreach {
         append_mp_nlri(body, false, add_path, out);
     }
-    Some(attrs)
+    Some((attrs, next_hop))
 }

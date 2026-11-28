@@ -6,8 +6,9 @@ use super::*;
 
 /// Borrowed view over a single BGP element inside a [`RecordElems`] batch.
 ///
-/// Attributes are decoded lazily from `attr_bytes` when their accessors are called, without heap
-/// allocation.
+/// Attributes are decoded lazily from `attr_bytes` when their accessors are called. The borrowed
+/// accessors do not allocate; materialising an element (`to_bgp_elem`) does, since the result owns
+/// its AS path and communities.
 #[derive(Clone)]
 pub struct ElemRef<'a> {
     attr_bytes: &'a [u8],
@@ -21,6 +22,8 @@ pub struct ElemRef<'a> {
     path_id: Option<u32>,
     flags: u8,
     elem_type: ElemType,
+    /// The next hop an update's elements share, decoded once for the record.
+    update_next_hop: Option<IpAddr>,
     warned_truncation: Cell<bool>,
 }
 
@@ -44,7 +47,7 @@ const _: () = assert!(!std::mem::needs_drop::<AsPathView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<AsnsView<'static>>());
 const _: () = assert!(!std::mem::needs_drop::<CommunitiesView<'static>>());
 // A borrowed element carries its peer inline so one type serves both dumps and updates.
-const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 104);
+const _: () = assert!(std::mem::size_of::<ElemRef<'static>>() <= 128);
 
 impl<'a> ElemRef<'a> {
     #[inline]
@@ -66,6 +69,7 @@ impl<'a> ElemRef<'a> {
             path_id: None,
             flags,
             elem_type: ElemType::ANNOUNCE,
+            update_next_hop: None,
             warned_truncation: Cell::new(false),
         }
     }
@@ -78,6 +82,7 @@ impl<'a> ElemRef<'a> {
         peer_asn: Asn,
         timestamp: f64,
         attr_bytes: &'a [u8],
+        next_hop: Option<IpAddr>,
     ) -> Self {
         Self {
             attr_bytes,
@@ -90,6 +95,7 @@ impl<'a> ElemRef<'a> {
             path_id: entry.prefix.path_id,
             flags: entry.flags | FLAG_UPDATE,
             elem_type: entry.elem_type,
+            update_next_hop: next_hop,
             warned_truncation: Cell::new(false),
         }
     }
@@ -130,6 +136,11 @@ impl<'a> ElemRef<'a> {
     #[cold]
     #[inline(never)]
     fn warn_truncated_attr_once(&self, raw_code: u8, attr_length: usize, bytes_left: usize) {
+        // An update's elements all share one attribute block, which the record-level walk reports;
+        // warning per element would repeat the same line for every prefix the record carries.
+        if (self.flags & FLAG_UPDATE) != 0 {
+            return;
+        }
         if !self.warned_truncation.replace(true) {
             let attr_type = AttrType::from(raw_code);
             warn!(
@@ -317,6 +328,13 @@ impl<'a> ElemRef<'a> {
 
     /// Returns the effective next-hop address (`NEXT_HOP`, or `MP_REACH_NLRI`'s global next hop).
     pub fn next_hop(&self) -> Option<IpAddr> {
+        // A withdrawal carries no attributes, so it has no next hop on the owned path either.
+        if self.elem_type == ElemType::WITHDRAW {
+            return None;
+        }
+        if (self.flags & FLAG_UPDATE) != 0 {
+            return self.update_next_hop;
+        }
         let bytes = self.attr_bytes;
         let len = bytes.len();
         let afi = self.afi();
@@ -352,7 +370,9 @@ impl<'a> ElemRef<'a> {
                     next_hop = Some(addr);
                 }
             } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
-                match mp_reach_next_hop(
+                // A body the owned parser rejects becomes raw bytes there and leaves the earlier
+                // value in place, so the earlier next hop stands here too.
+                if let Ok(address) = mp_reach_next_hop(
                     &bytes[val_start..val_end],
                     self.prefix(),
                     afi,
@@ -360,9 +380,7 @@ impl<'a> ElemRef<'a> {
                     is_add_path,
                     (self.flags & FLAG_UPDATE) != 0,
                 ) {
-                    Ok(address) => mp_next_hop = address,
-                    // A body the owned parser rejects carries no usable next hop.
-                    Err(()) => mp_next_hop = None,
+                    mp_next_hop = address;
                 }
             }
             pos = val_end;
@@ -422,7 +440,9 @@ impl<'a> ElemRef<'a> {
         let mut only_to_customer: Option<Asn> = None;
         let mut med: Option<u32> = None;
         let mut local_pref: Option<u32> = None;
-        let mut next_hop: Option<IpAddr> = None;
+        // An update's next hop was decoded once for the whole record.
+        let from_update = (self.flags & FLAG_UPDATE) != 0;
+        let mut next_hop: Option<IpAddr> = self.update_next_hop;
         let mut mp_next_hop: Option<IpAddr> = None;
         let mut as_path_wire: Option<&[u8]> = None;
         let mut as4_path_wire: Option<&[u8]> = None;
@@ -489,6 +509,7 @@ impl<'a> ElemRef<'a> {
                         undecoded = true;
                     }
                 }
+                AttrType::NEXT_HOP if from_update => {}
                 AttrType::NEXT_HOP => {
                     let mut value = val;
                     match value.read_address(&self.next_hop_afi()) {
@@ -511,9 +532,15 @@ impl<'a> ElemRef<'a> {
                     }
                 }
                 AttrType::ATOMIC_AGGREGATE => atomic = true,
-                // The owned parsers reject these two unless their length is exact.
-                AttrType::ORIGINATOR_ID | AttrType::CLUSTER_LIST => {
-                    if val.len() < 4 || !val.len().is_multiple_of(4) {
+                // ORIGINATOR_ID is exactly one identifier; CLUSTER_LIST is any number of them,
+                // including none, which is what the owned parsers accept.
+                AttrType::ORIGINATOR_ID => {
+                    if val.len() != 4 {
+                        undecoded = true;
+                    }
+                }
+                AttrType::CLUSTER_LIST => {
+                    if !val.len().is_multiple_of(4) {
                         undecoded = true;
                     }
                 }
@@ -593,15 +620,9 @@ impl<'a> ElemRef<'a> {
                         undecoded = true;
                     }
                 }
+                AttrType::MP_REACHABLE_NLRI if from_update => {}
                 AttrType::MP_REACHABLE_NLRI => {
-                    match mp_reach_next_hop(
-                        val,
-                        self.prefix(),
-                        afi,
-                        safi,
-                        is_add_path,
-                        (self.flags & FLAG_UPDATE) != 0,
-                    ) {
+                    match mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, false) {
                         Ok(address) => mp_next_hop = address,
                         Err(()) => undecoded = true,
                     }
@@ -627,7 +648,32 @@ impl<'a> ElemRef<'a> {
                     code,
                     bytes: Bytes::copy_from_slice(val),
                 }),
-                _ => {}
+                // Every remaining typed attribute is decoded by the owned dispatcher: if it comes
+                // back raw there, its bytes belong in `unknown` here too.
+                _ => {
+                    let tlv = &bytes[pos..val_end];
+                    let parsed = crate::parser::bgp::attributes::parse_attributes(
+                        bytes::Bytes::copy_from_slice(tlv),
+                        &AsnLength::Bits32,
+                        is_add_path,
+                        Some(afi),
+                        Some(safi),
+                        None,
+                    );
+                    let raw = match parsed {
+                        Ok(attributes) => attributes.inner.iter().any(|attribute| {
+                            matches!(
+                                attribute.value,
+                                crate::models::AttributeValue::Raw(_)
+                                    | crate::models::AttributeValue::Unknown(_)
+                            )
+                        }),
+                        Err(_) => true,
+                    };
+                    if raw {
+                        undecoded = true;
+                    }
+                }
             }
             if undecoded {
                 unknown.push(AttrRaw {
@@ -673,7 +719,12 @@ impl<'a> ElemRef<'a> {
                 prefix: self.prefix,
                 path_id: self.path_id,
             },
-            next_hop: next_hop.or(mp_next_hop),
+            // A withdrawal carries no attributes, so it has no next hop on either path.
+            next_hop: if is_withdrawal {
+                None
+            } else {
+                next_hop.or(mp_next_hop)
+            },
             as_path,
             origin,
             origin_asns,
