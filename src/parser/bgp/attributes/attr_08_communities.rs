@@ -3,26 +3,31 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
+pub(crate) const COMMUNITY_NO_EXPORT: u32 = 0xFFFFFF01;
 const COMMUNITY_NO_ADVERTISE: u32 = 0xFFFFFF02;
 const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFFFF03;
+
+/// Decode one 32-bit community, the unit both the attribute parser and the borrowed element view
+/// read.
+pub(crate) fn decode_regular_community(value: u32) -> Community {
+    match value {
+        COMMUNITY_NO_EXPORT => Community::NoExport,
+        COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
+        COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
+        value => {
+            let asn = ((value >> 16) & 0xffff) as u16;
+            let data = (value & 0xffff) as u16;
+            Community::Custom(Asn::new_16bit(asn), data)
+        }
+    }
+}
 
 pub fn parse_regular_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     // RFC 1997: [..] Communities are treated as 32 bit values [..]
     let mut communities = Vec::with_capacity(input.remaining() / 4);
 
     while input.remaining() > 0 {
-        let community_val = input.read_u32()?;
-        communities.push(match community_val {
-            COMMUNITY_NO_EXPORT => Community::NoExport,
-            COMMUNITY_NO_ADVERTISE => Community::NoAdvertise,
-            COMMUNITY_NO_EXPORT_SUBCONFED => Community::NoExportSubConfed,
-            value => {
-                let asn = ((value >> 16) & 0xffff) as u16;
-                let data = (value & 0xffff) as u16;
-                Community::Custom(Asn::new_16bit(asn), data)
-            }
-        });
+        communities.push(decode_regular_community(input.read_u32()?));
     }
 
     Ok(AttributeValue::Communities(communities))

@@ -37,7 +37,11 @@ pub(crate) use crate::parser::bgp::attributes::attr_02_17_as_path::{
 use crate::parser::bgp::attributes::attr_03_next_hop::{encode_next_hop, parse_next_hop};
 use crate::parser::bgp::attributes::attr_04_med::{encode_med, parse_med};
 use crate::parser::bgp::attributes::attr_05_local_pref::{encode_local_pref, parse_local_pref};
+pub(crate) use crate::parser::bgp::attributes::attr_07_18_aggregator::parse_aggregator as parse_aggregator_slice;
 use crate::parser::bgp::attributes::attr_07_18_aggregator::{encode_aggregator, parse_aggregator};
+pub(crate) use crate::parser::bgp::attributes::attr_08_communities::{
+    decode_regular_community, parse_regular_communities as parse_communities_attribute,
+};
 use crate::parser::bgp::attributes::attr_08_communities::{
     encode_regular_communities, parse_regular_communities,
 };
@@ -51,6 +55,11 @@ use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
     encode_extended_communities, encode_ipv6_extended_communities, parse_extended_community,
     parse_ipv6_extended_community,
 };
+pub(crate) use crate::parser::bgp::attributes::attr_16_25_extended_communities::{
+    parse_extended_community as parse_extended_communities_attribute, parse_extended_community_one,
+    parse_ipv6_extended_community as parse_ipv6_extended_communities_attribute,
+    parse_ipv6_extended_community_one,
+};
 use crate::parser::bgp::attributes::attr_23_tunnel_encap::{
     encode_tunnel_encapsulation_attribute, parse_tunnel_encapsulation_attribute,
 };
@@ -61,6 +70,7 @@ use crate::parser::bgp::attributes::attr_26_aigp::{encode_aigp, parse_aigp};
 use crate::parser::bgp::attributes::attr_29_linkstate::{
     encode_link_state_attribute, parse_link_state_attribute,
 };
+pub(crate) use crate::parser::bgp::attributes::attr_32_large_communities::parse_large_communities as parse_large_communities_attribute;
 use crate::parser::bgp::attributes::attr_32_large_communities::{
     encode_large_communities, parse_large_communities,
 };

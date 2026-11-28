@@ -3,15 +3,21 @@ use crate::parser::ReadUtils;
 use crate::ParserError;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+/// Decode one 12-octet large community, the unit both the attribute parser and the borrowed element
+/// view read.
+pub(crate) fn decode_large_community(input: &mut Bytes) -> Result<LargeCommunity, ParserError> {
+    let global_administrator = input.read_u32()?;
+    let local_data = [input.read_u32()?, input.read_u32()?];
+    Ok(LargeCommunity::new(global_administrator, local_data))
+}
+
 pub fn parse_large_communities(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     // RFC 8092, section 3: Each BGP Large Community value is encoded as a 12-octet quantity [..]
     let num_communities = input.remaining() / 12;
 
     let mut communities = Vec::with_capacity(num_communities);
     while input.remaining() > 0 {
-        let global_administrator = input.read_u32()?;
-        let local_data = [input.read_u32()?, input.read_u32()?];
-        communities.push(LargeCommunity::new(global_administrator, local_data));
+        communities.push(decode_large_community(&mut input)?);
     }
 
     debug_assert!(communities.len() == num_communities);

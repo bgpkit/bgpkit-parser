@@ -1,5 +1,5 @@
 mod geo_peer_table;
-mod peer_index_table;
+pub(crate) mod peer_index_table;
 mod rib_afi_entries;
 
 use crate::error::ParserError;
