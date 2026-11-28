@@ -6,9 +6,10 @@ use super::*;
 
 /// Borrowed view over a single BGP element inside a [`RecordElems`] batch.
 ///
-/// Attributes are decoded lazily from `attr_bytes` when their accessors are called. The borrowed
-/// accessors do not allocate; materialising an element (`to_bgp_elem`) does, since the result owns
-/// its AS path and communities.
+/// Attributes are decoded lazily from `attr_bytes` when their accessors are called. The AS path and
+/// community accessors do not allocate; `next_hop()` allocates for a dump entry whose next hop comes
+/// from `MP_REACH_NLRI`, and materialising an element (`to_bgp_elem`) allocates, since the result
+/// owns its AS path and communities.
 #[derive(Clone)]
 pub struct ElemRef<'a> {
     attr_bytes: &'a [u8],
@@ -327,6 +328,10 @@ impl<'a> ElemRef<'a> {
     }
 
     /// Returns the effective next-hop address (`NEXT_HOP`, or `MP_REACH_NLRI`'s global next hop).
+    ///
+    /// An update's elements read the address their record decoded once. A dump entry decodes
+    /// `MP_REACH_NLRI` here, through the owned NLRI parser, which allocates for the copied body and
+    /// the prefix list it validates.
     pub fn next_hop(&self) -> Option<IpAddr> {
         // A withdrawal carries no attributes, so it has no next hop on the owned path either.
         if self.elem_type == ElemType::WITHDRAW {
@@ -477,6 +482,13 @@ impl<'a> ElemRef<'a> {
                 continue;
             }
 
+            if crate::parser::bgp::attributes::is_raw_retained_attr(AttrType::from(code)) {
+                unknown.push(AttrRaw {
+                    code,
+                    bytes: Bytes::copy_from_slice(val),
+                });
+                continue;
+            }
             // A known attribute this cannot decode keeps its bytes in `unknown`, which is what the
             // owned path does with an attribute it falls back to `AttributeValue::Raw`.
             let mut undecoded = false;
@@ -504,8 +516,11 @@ impl<'a> ElemRef<'a> {
                     }
                 }
                 AttrType::NEXT_HOP if from_update => {
-                    // Decoded once per record above; a value that is not four octets is raw there.
-                    if val.len() != 4 {
+                    // Decoded once per record above; whether the value is usable is the owned
+                    // parser's decision, not a length test here.
+                    if crate::parser::bgp::attributes::attr_03_next_hop::parse_next_hop(val, &None)
+                        .is_err()
+                    {
                         undecoded = true;
                     }
                 }
@@ -643,12 +658,7 @@ impl<'a> ElemRef<'a> {
                         undecoded = true;
                     }
                 }
-                AttrType::Unknown(_)
-                | AttrType::RESERVED
-                | AttrType::PMSI_TUNNEL
-                | AttrType::PE_DISTINGUISHER_LABELS
-                | AttrType::BGPSEC_PATH
-                | AttrType::ATTR_SET => unknown.push(AttrRaw {
+                AttrType::Unknown(_) => unknown.push(AttrRaw {
                     code,
                     bytes: Bytes::copy_from_slice(val),
                 }),

@@ -26,8 +26,7 @@ pub(super) fn wire_route_len(mut wire: &[u8]) -> usize {
 /// The owned NLRI parser decides it: the families it accepts, the reserved octet, the next-hop
 /// widths, and the RFC 6396 §4.3.4 rule that a dump's entry may omit the attribute's own address
 /// family all behave here exactly as they do there. A body it rejects has no next hop, which is what
-/// the owned element path reports too. It allocates the copied body and the decoded prefix list, so
-/// a caller that must not allocate should read `unknown`/`next_hop` through `to_bgp_elem` instead.
+/// the owned element path reports too. It allocates the copied body and the prefix list it decodes.
 pub(super) fn mp_reach_next_hop(
     value: &[u8],
     prefix: NetworkPrefix,

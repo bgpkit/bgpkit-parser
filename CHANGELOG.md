@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-* **`BgpkitParser::next_record_elems`**: iterates the elements of a record as borrowed views (`RecordElems`, `ElemRef`) that read the framework's own buffer, so a caller that walks every element of a dump allocates nothing per element. It serves `TABLE_DUMP_V2` `RIB_AFI` records and `BGP4MP_AS4` message records; a record it cannot serve says so once, and a parser carrying filters refuses the path rather than return unfiltered elements. `ElemRef` exposes the hot fields directly, `to_bgp_elem` materialises the rest.
+* **`BgpkitParser::next_record_elems`**: iterates the elements of a record as borrowed views (`RecordElems`, `ElemRef`) that read the framework's own buffer. The AS path and community accessors allocate nothing; a dump entry's `next_hop()` and every `to_bgp_elem()` do, and an update's next hop is decoded once per record. It serves `TABLE_DUMP_V2` `RIB_AFI` records and `BGP4MP_AS4` message records; a record it cannot serve says so once, and a parser carrying filters refuses the path rather than return unfiltered elements. `ElemRef` exposes the hot fields directly, `to_bgp_elem` materialises the rest.
 
 ### Changed
 

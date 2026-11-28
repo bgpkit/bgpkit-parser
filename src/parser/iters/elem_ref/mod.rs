@@ -18,7 +18,9 @@ mod view;
 pub use element::ElemRef;
 pub use view::*;
 
-use update::{attribute_block_walks, parse_peer_index_vec, update_record_elems};
+use update::{
+    attribute_block_walks, fill_update_entries, parse_peer_index_vec, update_record_elems,
+};
 use view::mp_reach_next_hop;
 
 use crate::error::ParserError;
@@ -75,6 +77,11 @@ pub(crate) struct ElemViewState {
     peers: Option<Vec<Peer>>,
     /// NLRI of the `BGP4MP` update the current [`RecordElems`] batch covers.
     pub(crate) update_entries: Vec<UpdateEntry>,
+    /// Byte range of that update's attribute block inside `body_buf`, filled by the walk that also
+    /// produced `update_entries` so no record is decoded twice.
+    pub(crate) update_attrs: (usize, usize),
+    /// The next hop that update's elements share, decoded by the same walk.
+    pub(crate) update_next_hop: Option<IpAddr>,
     /// Set once EOF or a non-recoverable framing/core-dump error ends iteration.
     finished: bool,
 }
@@ -350,30 +357,34 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 peer_asn,
                 timestamp,
             } => {
-                // Support is decided from the header, not by decoding the record: the walk itself
-                // runs once, in `update_record_elems`, for the record this loop returns.
+                // Support is decided from the header. The walk then runs here, once, and its result
+                // is kept in the state so the batch can be built without decoding again.
                 let subtype = common_header.entry_subtype;
+                let as4 = matches!(
+                    Bgp4MpType::try_from(subtype),
+                    Ok(Bgp4MpType::MessageAs4)
+                        | Ok(Bgp4MpType::MessageAs4Local)
+                        | Ok(Bgp4MpType::MessageAs4Addpath)
+                        | Ok(Bgp4MpType::MessageLocalAs4Addpath)
+                );
                 let would_yield =
                     bgp4mp_is_update(subtype, &parser.elem_view_state.body_buf[..body_len]);
-                let supported = would_yield
-                    && matches!(
-                        Bgp4MpType::try_from(subtype),
-                        Ok(Bgp4MpType::MessageAs4)
-                            | Ok(Bgp4MpType::MessageAs4Local)
-                            | Ok(Bgp4MpType::MessageAs4Addpath)
-                            | Ok(Bgp4MpType::MessageLocalAs4Addpath)
-                    );
-                if !supported {
+                let walked = if as4 && would_yield {
+                    let state = &mut parser.elem_view_state;
+                    let body = &state.body_buf[..body_len];
+                    let outcome = fill_update_entries(body, subtype, &mut state.update_entries);
+                    outcome.map(|(attrs, next_hop)| {
+                        let offset = attrs.as_ptr() as usize - state.body_buf.as_ptr() as usize;
+                        state.update_attrs = (offset, attrs.len());
+                        state.update_next_hop = next_hop;
+                    })
+                } else {
+                    None
+                };
+                if walked.is_none() {
                     // A record the view cannot read is either a parse error or a record kind it
                     // does not serve. The owned parser answers which: its error goes through the
                     // same handler, and only a record it parses cleanly is a scope limit.
-                    let as4 = matches!(
-                        Bgp4MpType::try_from(common_header.entry_subtype),
-                        Ok(Bgp4MpType::MessageAs4)
-                            | Ok(Bgp4MpType::MessageAs4Local)
-                            | Ok(Bgp4MpType::MessageAs4Addpath)
-                            | Ok(Bgp4MpType::MessageLocalAs4Addpath)
-                    );
                     match parser.parse_framed_record(common_header, raw_header.as_slice(), body_len)
                     {
                         Ok(_) if as4 && would_yield => {

@@ -108,6 +108,7 @@ fn afi_flags(afi: &Afi, safi: Safi, add_path: bool) -> u8 {
 }
 
 /// The borrowed elements of the update record currently in the frame buffer.
+/// Build the element batch for the update whose walk already ran.
 pub(super) fn update_record_elems<'a>(
     state: &'a mut ElemViewState,
     body_len: usize,
@@ -116,19 +117,15 @@ pub(super) fn update_record_elems<'a>(
     peer_asn: Asn,
     timestamp: f64,
 ) -> Option<RecordElems<'a>> {
-    let (attrs, next_hop) = fill_update_entries(
-        &state.body_buf[..body_len],
-        header.entry_subtype,
-        &mut state.update_entries,
-    )?;
+    let (offset, len) = state.update_attrs;
+    let (entries, next_hop) = (&state.update_entries, state.update_next_hop);
+    let attrs = state.body_buf.get(offset..offset.checked_add(len)?)?;
+    // `body_len` bounds the active record; a range outside it means the walk and this read disagree.
+    if offset + len > body_len {
+        return None;
+    }
     Some(RecordElems::update(
-        header,
-        &state.update_entries,
-        attrs,
-        peer_ip,
-        peer_asn,
-        timestamp,
-        next_hop,
+        header, entries, attrs, peer_ip, peer_asn, timestamp, next_hop,
     ))
 }
 

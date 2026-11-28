@@ -158,7 +158,7 @@ fn validate_attribute_flags(
     }
 }
 
-fn is_raw_retained_attr(attr_type: AttrType) -> bool {
+pub(crate) fn is_raw_retained_attr(attr_type: AttrType) -> bool {
     matches!(
         attr_type,
         AttrType::RESERVED
