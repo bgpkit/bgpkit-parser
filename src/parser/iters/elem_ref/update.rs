@@ -212,25 +212,9 @@ pub(crate) fn fill_update_entries<'a>(
     let mut unreach: Option<crate::models::Nlri> = None;
     let mut plain_next_hop: Option<IpAddr> = None;
     let mut pos = 0usize;
-    while pos + 3 <= attrs.len() {
-        let flags = attrs[pos];
-        let code = attrs[pos + 1];
-        let (header_len, body_len) = if flags & 0x10 != 0 {
-            if pos + 4 > attrs.len() {
-                break;
-            }
-            (
-                4usize,
-                u16::from_be_bytes([attrs[pos + 2], attrs[pos + 3]]) as usize,
-            )
-        } else {
-            (3usize, attrs[pos + 2] as usize)
-        };
-        let start = pos + header_len;
-        let end = start + body_len;
-        if end > attrs.len() {
-            break;
-        }
+    // A truncated attribute is reported once per record by `warn_on_truncated_attribute`, so the
+    // walk simply stops when the next header does not fit.
+    while let Some((code, start, end)) = next_attr_bounds(attrs, pos) {
         let value = &attrs[start..end];
         match code {
             3 => {

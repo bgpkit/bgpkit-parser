@@ -705,6 +705,74 @@ impl<'a> IntoIterator for &CommunitiesView<'a> {
     }
 }
 
+/// Where the next attribute in a block sits, or why the block cannot be walked further.
+pub(super) enum AttrStep {
+    /// The block ends here.
+    End,
+    /// The attribute whose header starts here declares more bytes than the block holds. `available`
+    /// is what remains after its header.
+    Truncated {
+        code: u8,
+        declared: usize,
+        available: usize,
+    },
+    /// One attribute: its type code and the byte range of its value within the block.
+    Attr {
+        code: u8,
+        value_start: usize,
+        value_end: usize,
+    },
+}
+
+/// The type code and value bounds of the attribute at `pos`, when it fits in the block.
+pub(super) fn next_attr_bounds(bytes: &[u8], pos: usize) -> Option<(u8, usize, usize)> {
+    match step_attr(bytes, pos) {
+        AttrStep::Attr {
+            code,
+            value_start,
+            value_end,
+        } => Some((code, value_start, value_end)),
+        AttrStep::Truncated { .. } | AttrStep::End => None,
+    }
+}
+
+/// Decode the attribute header at `pos` without copying anything.
+///
+/// The block ends at a header that does not fit, which is how a block with a stray trailing byte or two
+/// is read: the owned decoder accepts it and stops there too.
+pub(super) fn step_attr(bytes: &[u8], pos: usize) -> AttrStep {
+    if pos + 3 > bytes.len() {
+        return AttrStep::End;
+    }
+    let flags = bytes[pos];
+    let code = bytes[pos + 1];
+    let (header_len, declared) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
+        (3usize, bytes[pos + 2] as usize)
+    } else {
+        if pos + 4 > bytes.len() {
+            return AttrStep::End;
+        }
+        (
+            4usize,
+            u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
+        )
+    };
+    let value_start = pos + header_len;
+    let value_end = value_start + declared;
+    if value_end > bytes.len() {
+        return AttrStep::Truncated {
+            code,
+            declared,
+            available: bytes.len() - value_start,
+        };
+    }
+    AttrStep::Attr {
+        code,
+        value_start,
+        value_end,
+    }
+}
+
 #[inline]
 pub(super) fn next_attr_tlv(bytes: &[u8]) -> Option<(u8, &[u8], &[u8])> {
     if bytes.len() < 3 {

@@ -155,43 +155,40 @@ impl<'a> ElemRef<'a> {
     #[inline(never)]
     fn scan_merged_as_paths(&self) -> (&'a [u8], &'a [u8]) {
         let bytes = self.attr_bytes;
-        let len = bytes.len();
         let mut pos = 0usize;
         let mut p2: &'a [u8] = &[];
         let mut p4: &'a [u8] = &[];
 
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (hdr_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + hdr_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
-            }
-            if code == u8::from(AttrType::AS_PATH) {
-                let slice = &bytes[val_start..val_end];
-                if validate_as_path_wire(slice) {
-                    p2 = slice;
-                }
-            } else if code == u8::from(AttrType::AS4_PATH) {
-                let slice = &bytes[val_start..val_end];
-                if validate_as_path_wire(slice) {
-                    p4 = slice;
+                AttrStep::Attr {
+                    code,
+                    value_start: val_start,
+                    value_end: val_end,
+                } => {
+                    if code == u8::from(AttrType::AS_PATH) {
+                        let slice = &bytes[val_start..val_end];
+                        if validate_as_path_wire(slice) {
+                            p2 = slice;
+                        }
+                    } else if code == u8::from(AttrType::AS4_PATH) {
+                        let slice = &bytes[val_start..val_end];
+                        if validate_as_path_wire(slice) {
+                            p4 = slice;
+                        }
+                    }
+                    pos = val_end;
                 }
             }
-            pos = val_end;
         }
         (p2, p4)
     }
@@ -215,41 +212,38 @@ impl<'a> ElemRef<'a> {
         }
 
         let bytes = self.attr_bytes;
-        let len = bytes.len();
         let mut pos = 0usize;
         let mut as_path_span: Option<(u16, u16)> = None;
         let mut as4_path_span: Option<(u16, u16)> = None;
 
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (hdr_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + hdr_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
-            }
-            if code == u8::from(AttrType::AS_PATH) {
-                if validate_as_path_wire(&bytes[val_start..val_end]) {
-                    as_path_span = Some((val_start as u16, attr_len as u16));
+                AttrStep::Attr {
+                    code,
+                    value_start: val_start,
+                    value_end: val_end,
+                } => {
+                    if code == u8::from(AttrType::AS_PATH) {
+                        if validate_as_path_wire(&bytes[val_start..val_end]) {
+                            as_path_span = Some((val_start as u16, (val_end - val_start) as u16));
+                        }
+                    } else if code == u8::from(AttrType::AS4_PATH)
+                        && validate_as_path_wire(&bytes[val_start..val_end])
+                    {
+                        as4_path_span = Some((val_start as u16, (val_end - val_start) as u16));
+                    }
+                    pos = val_end;
                 }
-            } else if code == u8::from(AttrType::AS4_PATH)
-                && validate_as_path_wire(&bytes[val_start..val_end])
-            {
-                as4_path_span = Some((val_start as u16, attr_len as u16));
             }
-            pos = val_end;
         }
 
         match (as_path_span, as4_path_span) {
@@ -341,7 +335,6 @@ impl<'a> ElemRef<'a> {
             return self.update_next_hop;
         }
         let bytes = self.attr_bytes;
-        let len = bytes.len();
         let afi = self.afi();
         let safi = self.safi();
         let is_add_path = self.is_add_path();
@@ -349,46 +342,44 @@ impl<'a> ElemRef<'a> {
         let mut next_hop: Option<IpAddr> = None;
         let mut mp_next_hop: Option<IpAddr> = None;
 
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (hdr_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + hdr_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
-            }
-            if code == u8::from(AttrType::NEXT_HOP) {
-                let mut val = &bytes[val_start..val_end];
-                if let Ok(addr) = val.read_address(&self.next_hop_afi()) {
-                    next_hop = Some(addr);
-                }
-            } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
-                // A body the owned parser rejects becomes raw bytes there and leaves the earlier
-                // value in place, so the earlier next hop stands here too.
-                if let Ok(address) = mp_reach_next_hop(
-                    &bytes[val_start..val_end],
-                    self.prefix(),
-                    afi,
-                    safi,
-                    is_add_path,
-                    (self.flags & FLAG_UPDATE) != 0,
-                ) {
-                    mp_next_hop = address;
+                AttrStep::Attr {
+                    code,
+                    value_start: val_start,
+                    value_end: val_end,
+                } => {
+                    if code == u8::from(AttrType::NEXT_HOP) {
+                        let mut val = &bytes[val_start..val_end];
+                        if let Ok(addr) = val.read_address(&self.next_hop_afi()) {
+                            next_hop = Some(addr);
+                        }
+                    } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
+                        // A body the owned parser rejects becomes raw bytes there and leaves the earlier
+                        // value in place, so the earlier next hop stands here too.
+                        if let Ok(address) = mp_reach_next_hop(
+                            &bytes[val_start..val_end],
+                            self.prefix(),
+                            afi,
+                            safi,
+                            is_add_path,
+                            (self.flags & FLAG_UPDATE) != 0,
+                        ) {
+                            mp_next_hop = address;
+                        }
+                    }
+                    pos = val_end;
                 }
             }
-            pos = val_end;
         }
 
         next_hop.or(mp_next_hop)
@@ -448,137 +439,134 @@ impl<'a> ElemRef<'a> {
         let mut unknown: Vec<AttrRaw> = Vec::new();
         let mut deprecated: Vec<AttrRaw> = Vec::new();
 
-        let len = bytes.len();
         let mut pos = 0usize;
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (header_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + header_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
-            }
-            let val = &bytes[val_start..val_end];
-            let tlv_start = pos;
-            pos = val_end;
-
-            if get_deprecated_attr_type(code).is_some() {
-                deprecated.push(AttrRaw {
+                AttrStep::Attr {
                     code,
-                    bytes: Bytes::copy_from_slice(val),
-                });
-                continue;
-            }
+                    value_start: val_start,
+                    value_end: val_end,
+                } => {
+                    let val = &bytes[val_start..val_end];
+                    let tlv_start = pos;
+                    pos = val_end;
 
-            if crate::parser::bgp::attributes::is_raw_retained_attr(AttrType::from(code)) {
-                unknown.push(AttrRaw {
-                    code,
-                    bytes: Bytes::copy_from_slice(val),
-                });
-                continue;
-            }
-            // A known attribute this cannot decode keeps its bytes in `unknown`, which is what the
-            // owned path does with an attribute it falls back to `AttributeValue::Raw`.
-            let mut undecoded = false;
-            match AttrType::from(code) {
-                // A value the owned path cannot parse becomes raw bytes and leaves the earlier
-                // attribute of the same type in place, so keep what is already known here too.
-                AttrType::ORIGIN => {
-                    match val.first().and_then(|value| Origin::try_from(*value).ok()) {
-                        Some(decoded) => origin = Some(decoded),
-                        None => undecoded = true,
+                    if get_deprecated_attr_type(code).is_some() {
+                        deprecated.push(AttrRaw {
+                            code,
+                            bytes: Bytes::copy_from_slice(val),
+                        });
+                        continue;
                     }
-                }
-                AttrType::AS_PATH => {
-                    if validate_as_path_wire(val) {
-                        as_path_wire = Some(val);
-                    } else {
-                        undecoded = true;
+
+                    if crate::parser::bgp::attributes::is_raw_retained_attr(AttrType::from(code)) {
+                        unknown.push(AttrRaw {
+                            code,
+                            bytes: Bytes::copy_from_slice(val),
+                        });
+                        continue;
                     }
-                }
-                AttrType::AS4_PATH => {
-                    if validate_as_path_wire(val) {
-                        as4_path_wire = Some(val);
-                    } else {
-                        undecoded = true;
-                    }
-                }
-                AttrType::NEXT_HOP if from_update => {
-                    // Decoded once per record above; whether the value is usable is the owned
-                    // parser's decision, not a length test here.
-                    if crate::parser::bgp::attributes::attr_03_next_hop::parse_next_hop(val, &None)
-                        .is_err()
-                    {
-                        undecoded = true;
-                    }
-                }
-                AttrType::NEXT_HOP => {
-                    let mut value = val;
-                    match value.read_address(&self.next_hop_afi()) {
-                        Ok(address) => next_hop = Some(address),
-                        Err(_) => undecoded = true,
-                    }
-                }
-                AttrType::MULTI_EXIT_DISCRIMINATOR => {
-                    let mut value = val;
-                    match value.read_u32() {
-                        Ok(number) => med = Some(number),
-                        Err(_) => undecoded = true,
-                    }
-                }
-                AttrType::LOCAL_PREFERENCE => {
-                    let mut value = val;
-                    match value.read_u32() {
-                        Ok(number) => local_pref = Some(number),
-                        Err(_) => undecoded = true,
-                    }
-                }
-                AttrType::ATOMIC_AGGREGATE => atomic = true,
-                // ORIGINATOR_ID is exactly one identifier; CLUSTER_LIST is any number of them,
-                // including none, which is what the owned parsers accept.
-                AttrType::ORIGINATOR_ID => {
-                    if val.len() != 4 {
-                        undecoded = true;
-                    }
-                }
-                AttrType::CLUSTER_LIST => {
-                    if !val.len().is_multiple_of(4) {
-                        undecoded = true;
-                    }
-                }
-                AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
-                    match crate::parser::bgp::attributes::parse_aggregator_slice(
-                        bytes::Bytes::copy_from_slice(val),
-                        &AsnLength::Bits32,
-                    )
-                    .ok()
-                    {
-                        Some(decoded) => aggregator = Some(decoded),
-                        None => undecoded = true,
-                    }
-                }
-                // Each community attribute is decoded by the owned parser for that attribute, at the
-                // position it appears, so an unsupported sub-type, a length that is not a whole
-                // element, and the special values all follow the owned rules and the raw bytes of a
-                // malformed one land in `unknown` where the owned path puts them.
-                AttrType::COMMUNITIES
-                | AttrType::EXTENDED_COMMUNITIES
-                | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
-                | AttrType::LARGE_COMMUNITIES => {
-                    let input = bytes::Bytes::copy_from_slice(val);
-                    let decoded = match AttrType::from(code) {
+                    // A known attribute this cannot decode keeps its bytes in `unknown`, which is what the
+                    // owned path does with an attribute it falls back to `AttributeValue::Raw`.
+                    let mut undecoded = false;
+                    match AttrType::from(code) {
+                        // A value the owned path cannot parse becomes raw bytes and leaves the earlier
+                        // attribute of the same type in place, so keep what is already known here too.
+                        AttrType::ORIGIN => {
+                            match val.first().and_then(|value| Origin::try_from(*value).ok()) {
+                                Some(decoded) => origin = Some(decoded),
+                                None => undecoded = true,
+                            }
+                        }
+                        AttrType::AS_PATH => {
+                            if validate_as_path_wire(val) {
+                                as_path_wire = Some(val);
+                            } else {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::AS4_PATH => {
+                            if validate_as_path_wire(val) {
+                                as4_path_wire = Some(val);
+                            } else {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::NEXT_HOP if from_update => {
+                            // Decoded once per record above; whether the value is usable is the owned
+                            // parser's decision, not a length test here.
+                            if crate::parser::bgp::attributes::attr_03_next_hop::parse_next_hop(
+                                val, &None,
+                            )
+                            .is_err()
+                            {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::NEXT_HOP => {
+                            let mut value = val;
+                            match value.read_address(&self.next_hop_afi()) {
+                                Ok(address) => next_hop = Some(address),
+                                Err(_) => undecoded = true,
+                            }
+                        }
+                        AttrType::MULTI_EXIT_DISCRIMINATOR => {
+                            let mut value = val;
+                            match value.read_u32() {
+                                Ok(number) => med = Some(number),
+                                Err(_) => undecoded = true,
+                            }
+                        }
+                        AttrType::LOCAL_PREFERENCE => {
+                            let mut value = val;
+                            match value.read_u32() {
+                                Ok(number) => local_pref = Some(number),
+                                Err(_) => undecoded = true,
+                            }
+                        }
+                        AttrType::ATOMIC_AGGREGATE => atomic = true,
+                        // ORIGINATOR_ID is exactly one identifier; CLUSTER_LIST is any number of them,
+                        // including none, which is what the owned parsers accept.
+                        AttrType::ORIGINATOR_ID => {
+                            if val.len() != 4 {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::CLUSTER_LIST => {
+                            if !val.len().is_multiple_of(4) {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
+                            match crate::parser::bgp::attributes::parse_aggregator_slice(
+                                bytes::Bytes::copy_from_slice(val),
+                                &AsnLength::Bits32,
+                            )
+                            .ok()
+                            {
+                                Some(decoded) => aggregator = Some(decoded),
+                                None => undecoded = true,
+                            }
+                        }
+                        // Each community attribute is decoded by the owned parser for that attribute, at the
+                        // position it appears, so an unsupported sub-type, a length that is not a whole
+                        // element, and the special values all follow the owned rules and the raw bytes of a
+                        // malformed one land in `unknown` where the owned path puts them.
+                        AttrType::COMMUNITIES
+                        | AttrType::EXTENDED_COMMUNITIES
+                        | AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+                        | AttrType::LARGE_COMMUNITIES => {
+                            let input = bytes::Bytes::copy_from_slice(val);
+                            let decoded = match AttrType::from(code) {
                         AttrType::COMMUNITIES => {
                             crate::parser::bgp::attributes::parse_communities_attribute(input).map(
                                 |value| match value {
@@ -621,88 +609,98 @@ impl<'a> ElemRef<'a> {
                                 _ => false,
                             }),
                     };
-                    if !decoded.unwrap_or(false) {
-                        undecoded = true;
-                    }
-                }
-                AttrType::ONLY_TO_CUSTOMER => {
-                    if val.len() >= 4 {
-                        only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
-                            val[0], val[1], val[2], val[3],
-                        ])));
-                    } else {
-                        undecoded = true;
-                    }
-                }
-                AttrType::MP_REACHABLE_NLRI if from_update => {
-                    if mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, true).is_err()
-                    {
-                        undecoded = true;
-                    }
-                }
-                AttrType::MP_REACHABLE_NLRI => {
-                    match mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, false) {
-                        Ok(address) => mp_next_hop = address,
-                        Err(()) => undecoded = true,
-                    }
-                }
-                // Types the element path keeps as raw bytes, mirroring `get_relevant_attributes`.
-                // A valid traffic-engineering attribute is parsed by the owned path and then
-                // discarded from the element, so only a malformed one is kept raw.
-                AttrType::TRAFFIC_ENGINEERING => {
-                    if crate::parser::bgp::attributes::parse_traffic_engineering(
-                        bytes::Bytes::copy_from_slice(val),
-                    )
-                    .is_err()
-                    {
-                        undecoded = true;
-                    }
-                }
-                AttrType::Unknown(_) => unknown.push(AttrRaw {
-                    code,
-                    bytes: Bytes::copy_from_slice(val),
-                }),
-                // Every remaining typed attribute is decoded by the owned dispatcher: if it comes
-                // back raw there, its bytes belong in `unknown` here too.
-                _ => {
-                    // The owned parser is asked about this one attribute with the same context the
-                    // record kind gives it: an update carries its own family, a dump entry hands in
-                    // the record's prefix.
-                    let tlv = &bytes[tlv_start..val_end];
-                    let own_prefix = [self.prefix()];
-                    let (afi, safi, prefixes) = if from_update {
-                        (None, None, None)
-                    } else {
-                        (Some(afi), Some(safi), Some(&own_prefix[..]))
-                    };
-                    let parsed = crate::parser::bgp::attributes::parse_attributes(
-                        bytes::Bytes::copy_from_slice(tlv),
-                        &AsnLength::Bits32,
-                        is_add_path,
-                        afi,
-                        safi,
-                        prefixes,
-                    );
-                    let raw = match parsed {
-                        Ok(attributes) => attributes.inner.iter().any(|attribute| {
-                            matches!(
-                                attribute.value,
-                                crate::models::AttributeValue::Raw(_)
-                                    | crate::models::AttributeValue::Unknown(_)
+                            if !decoded.unwrap_or(false) {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::ONLY_TO_CUSTOMER => {
+                            if val.len() >= 4 {
+                                only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
+                                    val[0], val[1], val[2], val[3],
+                                ])));
+                            } else {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::MP_REACHABLE_NLRI if from_update => {
+                            if mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, true)
+                                .is_err()
+                            {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::MP_REACHABLE_NLRI => {
+                            match mp_reach_next_hop(
+                                val,
+                                self.prefix(),
+                                afi,
+                                safi,
+                                is_add_path,
+                                false,
+                            ) {
+                                Ok(address) => mp_next_hop = address,
+                                Err(()) => undecoded = true,
+                            }
+                        }
+                        // Types the element path keeps as raw bytes, mirroring `get_relevant_attributes`.
+                        // A valid traffic-engineering attribute is parsed by the owned path and then
+                        // discarded from the element, so only a malformed one is kept raw.
+                        AttrType::TRAFFIC_ENGINEERING => {
+                            if crate::parser::bgp::attributes::parse_traffic_engineering(
+                                bytes::Bytes::copy_from_slice(val),
                             )
+                            .is_err()
+                            {
+                                undecoded = true;
+                            }
+                        }
+                        AttrType::Unknown(_) => unknown.push(AttrRaw {
+                            code,
+                            bytes: Bytes::copy_from_slice(val),
                         }),
-                        Err(_) => true,
-                    };
-                    if raw {
-                        undecoded = true;
+                        // Every remaining typed attribute is decoded by the owned dispatcher: if it comes
+                        // back raw there, its bytes belong in `unknown` here too.
+                        _ => {
+                            // The owned parser is asked about this one attribute with the same context the
+                            // record kind gives it: an update carries its own family, a dump entry hands in
+                            // the record's prefix.
+                            let tlv = &bytes[tlv_start..val_end];
+                            let own_prefix = [self.prefix()];
+                            let (afi, safi, prefixes) = if from_update {
+                                (None, None, None)
+                            } else {
+                                (Some(afi), Some(safi), Some(&own_prefix[..]))
+                            };
+                            let parsed = crate::parser::bgp::attributes::parse_attributes(
+                                bytes::Bytes::copy_from_slice(tlv),
+                                &AsnLength::Bits32,
+                                is_add_path,
+                                afi,
+                                safi,
+                                prefixes,
+                            );
+                            let raw = match parsed {
+                                Ok(attributes) => attributes.inner.iter().any(|attribute| {
+                                    matches!(
+                                        attribute.value,
+                                        crate::models::AttributeValue::Raw(_)
+                                            | crate::models::AttributeValue::Unknown(_)
+                                    )
+                                }),
+                                Err(_) => true,
+                            };
+                            if raw {
+                                undecoded = true;
+                            }
+                        }
+                    }
+                    if undecoded {
+                        unknown.push(AttrRaw {
+                            code,
+                            bytes: Bytes::copy_from_slice(val),
+                        });
                     }
                 }
-            }
-            if undecoded {
-                unknown.push(AttrRaw {
-                    code,
-                    bytes: Bytes::copy_from_slice(val),
-                });
             }
         }
 
@@ -780,39 +778,36 @@ impl<'a> ElemRef<'a> {
 
     fn scan_u32_attr(&self, target_code: u8) -> Option<u32> {
         let bytes = self.attr_bytes;
-        let len = bytes.len();
         let mut pos = 0usize;
         let mut found = None;
 
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (hdr_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + hdr_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
+                AttrStep::Attr {
+                    code,
+                    value_start: val_start,
+                    value_end: val_end,
+                } => {
+                    if code == target_code && val_end - val_start >= 4 {
+                        found = Some(u32::from_be_bytes([
+                            bytes[val_start],
+                            bytes[val_start + 1],
+                            bytes[val_start + 2],
+                            bytes[val_start + 3],
+                        ]));
+                    }
+                    pos = val_end;
+                }
             }
-            if code == target_code && attr_len >= 4 {
-                found = Some(u32::from_be_bytes([
-                    bytes[val_start],
-                    bytes[val_start + 1],
-                    bytes[val_start + 2],
-                    bytes[val_start + 3],
-                ]));
-            }
-            pos = val_end;
         }
         found
     }
@@ -820,29 +815,24 @@ impl<'a> ElemRef<'a> {
     #[inline]
     fn usable_attr_prefix(&self) -> &'a [u8] {
         let bytes = self.attr_bytes;
-        let len = bytes.len();
         let mut pos = 0usize;
-        while pos + 3 <= len {
-            let flags = bytes[pos];
-            let code = bytes[pos + 1];
-            let (hdr_len, attr_len) = if (flags & AttrFlags::EXTENDED.bits()) == 0 {
-                (3usize, bytes[pos + 2] as usize)
-            } else {
-                if pos + 4 > len {
+        loop {
+            match step_attr(bytes, pos) {
+                AttrStep::End => break,
+                AttrStep::Truncated {
+                    code,
+                    declared,
+                    available,
+                } => {
+                    self.warn_truncated_attr_once(code, declared, available);
                     break;
                 }
-                (
-                    4usize,
-                    u16::from_be_bytes([bytes[pos + 2], bytes[pos + 3]]) as usize,
-                )
-            };
-            let val_start = pos + hdr_len;
-            let val_end = val_start + attr_len;
-            if val_end > len {
-                self.warn_truncated_attr_once(code, attr_len, len - val_start);
-                break;
+                AttrStep::Attr {
+                    value_end: val_end, ..
+                } => {
+                    pos = val_end;
+                }
             }
-            pos = val_end;
         }
         &bytes[..pos]
     }

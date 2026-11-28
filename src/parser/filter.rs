@@ -798,11 +798,7 @@ pub(crate) fn has_record_level_constraint(filters: &[Filter]) -> bool {
         | Filter::TsEnd(_)
         | Filter::OriginAsn(_)
         | Filter::OriginAsns(_)
-        | Filter::Origin(_)
-        // Community and AS path are decided from attribute bytes for the shapes `attr_scan`
-        // recognises; anything else it cannot decide and the record is parsed as usual.
-        | Filter::Community(_)
-        | Filter::AsPath(_) => true,
+        | Filter::Origin(_) => true,
         Filter::Negated(inner) => matches!(
             inner.as_ref(),
             Filter::Prefix(..)

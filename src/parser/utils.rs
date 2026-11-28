@@ -452,12 +452,6 @@ impl ComparableRegex {
     pub fn is_match<S: AsRef<str>>(&self, text: S) -> bool {
         self.regex.is_match(text.as_ref())
     }
-
-    /// The pattern this regex was built from, for callers that recognise simple shapes instead of
-    /// running the engine.
-    pub(crate) fn pattern(&self) -> &str {
-        &self.pattern
-    }
 }
 
 #[cfg(test)]
