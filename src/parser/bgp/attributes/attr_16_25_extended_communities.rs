@@ -4,11 +4,212 @@
 //! IANA Codes: <https://www.iana.org/assignments/bgp-extended-communities/bgp-extended-communities.xhtml>
 
 use crate::models::*;
-use crate::parser::ReadUtils;
 use crate::ParserError;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::net::Ipv4Addr;
+
+/// Decode one 8-octet extended community, which is the unit both the attribute parser and the
+/// borrowed element view read.
+pub(crate) fn parse_extended_community_one<R: crate::parser::ReadUtils>(
+    input: &mut R,
+) -> Result<ExtendedCommunity, ParserError> {
+    let ec_type_u8 = input.read_u8()?;
+    let ec: ExtendedCommunity = match ExtendedCommunityType::from(ec_type_u8) {
+        ExtendedCommunityType::TransitiveTwoOctetAs => {
+            let sub_type = input.read_u8()?;
+            match sub_type {
+                0x04 => {
+                    // BGP Link Bandwidth - RFC 10005
+                    let global_admin = input.read_u16()?;
+                    let bandwidth_bits = input.read_u32()?;
+                    let bandwidth = f32::from_bits(bandwidth_bits);
+                    ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                        global_admin,
+                        bandwidth,
+                        transitive: true,
+                    })
+                }
+                _ => {
+                    // Standard TransitiveTwoOctetAs
+                    let global = input.read_u16()?;
+                    let mut local: [u8; 4] = [0; 4];
+                    input.read_exact(&mut local[..])?;
+                    ExtendedCommunity::TransitiveTwoOctetAs(TwoOctetAsExtCommunity {
+                        subtype: sub_type,
+                        global_admin: Asn::new_16bit(global),
+                        local_admin: local,
+                    })
+                }
+            }
+        }
+        ExtendedCommunityType::NonTransitiveTwoOctetAs => {
+            let sub_type = input.read_u8()?;
+            match sub_type {
+                0x04 => {
+                    // BGP Link Bandwidth - RFC 10005
+                    let global_admin = input.read_u16()?;
+                    let bandwidth_bits = input.read_u32()?;
+                    let bandwidth = f32::from_bits(bandwidth_bits);
+                    ExtendedCommunity::LinkBandwidth(LinkBandwidth {
+                        global_admin,
+                        bandwidth,
+                        transitive: false,
+                    })
+                }
+                0x06 => {
+                    // Flow-Spec Traffic Rate
+                    let as_number = input.read_u16()?;
+                    let rate_bytes = input.read_u32()?;
+                    let rate = f32::from_bits(rate_bytes);
+                    ExtendedCommunity::FlowSpecTrafficRate(FlowSpecTrafficRate::new(
+                        as_number, rate,
+                    ))
+                }
+                0x07 => {
+                    // Flow-Spec Traffic Action
+                    let as_number = input.read_u16()?;
+                    let flags = input.read_u32()?;
+                    let terminal = (flags & 0x01) != 0;
+                    let sample = (flags & 0x02) != 0;
+                    ExtendedCommunity::FlowSpecTrafficAction(FlowSpecTrafficAction::new(
+                        as_number, terminal, sample,
+                    ))
+                }
+                0x08 => {
+                    // Flow-Spec Redirect (same as TwoOctetAsExtCommunity but different variant)
+                    let global = input.read_u16()?;
+                    let mut local: [u8; 4] = [0; 4];
+                    input.read_exact(&mut local)?;
+                    ExtendedCommunity::FlowSpecRedirect(TwoOctetAsExtCommunity {
+                        subtype: sub_type,
+                        global_admin: Asn::new_16bit(global),
+                        local_admin: local,
+                    })
+                }
+                0x09 => {
+                    // Flow-Spec Traffic Marking
+                    let as_number = input.read_u16()?;
+                    let dscp = input.read_u8()?;
+                    let _reserved1 = input.read_u8()?; // reserved
+                    let _reserved2 = input.read_u16()?; // reserved
+                    ExtendedCommunity::FlowSpecTrafficMarking(FlowSpecTrafficMarking::new(
+                        as_number, dscp,
+                    ))
+                }
+                _ => {
+                    // Standard NonTransitiveTwoOctetAs
+                    let global = input.read_u16()?;
+                    let mut local: [u8; 4] = [0; 4];
+                    input.read_exact(&mut local)?;
+                    ExtendedCommunity::NonTransitiveTwoOctetAs(TwoOctetAsExtCommunity {
+                        subtype: sub_type,
+                        global_admin: Asn::new_16bit(global),
+                        local_admin: local,
+                    })
+                }
+            }
+        }
+
+        ExtendedCommunityType::TransitiveIpv4Addr => {
+            let sub_type = input.read_u8()?;
+            let global = Ipv4Addr::from(input.read_u32()?);
+            let mut local: [u8; 2] = [0; 2];
+            input.read_exact(&mut local)?;
+            ExtendedCommunity::TransitiveIpv4Addr(Ipv4AddrExtCommunity {
+                subtype: sub_type,
+                global_admin: global,
+                local_admin: local,
+            })
+        }
+        ExtendedCommunityType::NonTransitiveIpv4Addr => {
+            let sub_type = input.read_u8()?;
+            let global = Ipv4Addr::from(input.read_u32()?);
+            let mut local: [u8; 2] = [0; 2];
+            input.read_exact(&mut local)?;
+            ExtendedCommunity::NonTransitiveIpv4Addr(Ipv4AddrExtCommunity {
+                subtype: sub_type,
+                global_admin: global,
+                local_admin: local,
+            })
+        }
+        ExtendedCommunityType::TransitiveFourOctetAs => {
+            let sub_type = input.read_u8()?;
+            let global = input.read_u32()?;
+            let mut local: [u8; 2] = [0; 2];
+            input.read_exact(&mut local)?;
+            ExtendedCommunity::TransitiveFourOctetAs(FourOctetAsExtCommunity {
+                subtype: sub_type,
+                global_admin: Asn::new_32bit(global),
+                local_admin: local,
+            })
+        }
+        ExtendedCommunityType::NonTransitiveFourOctetAs => {
+            let sub_type = input.read_u8()?;
+            let global = input.read_u32()?;
+            let mut local: [u8; 2] = [0; 2];
+            input.read_exact(&mut local)?;
+            ExtendedCommunity::NonTransitiveFourOctetAs(FourOctetAsExtCommunity {
+                subtype: sub_type,
+                global_admin: Asn::new_32bit(global),
+                local_admin: local,
+            })
+        }
+
+        ExtendedCommunityType::TransitiveOpaque => {
+            let sub_type = input.read_u8()?;
+            let mut value: [u8; 6] = [0; 6];
+            input.read_exact(&mut value)?;
+            ExtendedCommunity::TransitiveOpaque(OpaqueExtCommunity {
+                subtype: sub_type,
+                value,
+            })
+        }
+        ExtendedCommunityType::NonTransitiveOpaque => {
+            let sub_type = input.read_u8()?;
+            let mut value: [u8; 6] = [0; 6];
+            input.read_exact(&mut value)?;
+            ExtendedCommunity::NonTransitiveOpaque(OpaqueExtCommunity {
+                subtype: sub_type,
+                value,
+            })
+        }
+        ExtendedCommunityType::Evpn => {
+            let sub_type = input.read_u8()?;
+            match sub_type {
+                // MAC Mobility - RFC 7432 §7.7
+                0x00 => {
+                    let flags = input.read_u8()?;
+                    // Reserved octet, sent as zero and ignored on receipt.
+                    input.read_u8()?;
+                    let sequence = input.read_u32()?;
+                    ExtendedCommunity::MacMobility(MacMobility {
+                        sticky: flags & 0x01 != 0,
+                        sequence,
+                    })
+                }
+                // Other EVPN sub-types (ESI Label, ES-Import Route Target,
+                // Router's MAC, Layer 2 Attributes, E-Tree, Default Gateway,
+                // ARP/ND) and anything newer keep their octets verbatim.
+                _ => {
+                    let mut buffer: [u8; 8] = [0; 8];
+                    buffer[0] = ec_type_u8;
+                    buffer[1] = sub_type;
+                    input.read_exact(&mut buffer[2..])?;
+                    ExtendedCommunity::Raw(buffer)
+                }
+            }
+        }
+        ExtendedCommunityType::Unknown(_) => {
+            let mut buffer: [u8; 8] = [0; 8];
+            buffer[0] = ec_type_u8;
+            input.read_exact(&mut buffer[1..])?;
+
+            ExtendedCommunity::Raw(buffer)
+        }
+    };
+    Ok(ec)
+}
 
 pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
     // RFC 4360, section 2: Each Extended Community is encoded as an 8-octet quantity [..]
@@ -17,206 +218,30 @@ pub fn parse_extended_community(mut input: Bytes) -> Result<AttributeValue, Pars
     let mut communities = Vec::with_capacity(num_communities);
 
     while input.remaining() > 0 {
-        let ec_type_u8 = input.read_u8()?;
-        let ec: ExtendedCommunity = match ExtendedCommunityType::from(ec_type_u8) {
-            ExtendedCommunityType::TransitiveTwoOctetAs => {
-                let sub_type = input.read_u8()?;
-                match sub_type {
-                    0x04 => {
-                        // BGP Link Bandwidth - RFC 10005
-                        let global_admin = input.read_u16()?;
-                        let bandwidth_bits = input.read_u32()?;
-                        let bandwidth = f32::from_bits(bandwidth_bits);
-                        ExtendedCommunity::LinkBandwidth(LinkBandwidth {
-                            global_admin,
-                            bandwidth,
-                            transitive: true,
-                        })
-                    }
-                    _ => {
-                        // Standard TransitiveTwoOctetAs
-                        let global = input.read_u16()?;
-                        let mut local: [u8; 4] = [0; 4];
-                        input.read_exact(&mut local[..])?;
-                        ExtendedCommunity::TransitiveTwoOctetAs(TwoOctetAsExtCommunity {
-                            subtype: sub_type,
-                            global_admin: Asn::new_16bit(global),
-                            local_admin: local,
-                        })
-                    }
-                }
-            }
-            ExtendedCommunityType::NonTransitiveTwoOctetAs => {
-                let sub_type = input.read_u8()?;
-                match sub_type {
-                    0x04 => {
-                        // BGP Link Bandwidth - RFC 10005
-                        let global_admin = input.read_u16()?;
-                        let bandwidth_bits = input.read_u32()?;
-                        let bandwidth = f32::from_bits(bandwidth_bits);
-                        ExtendedCommunity::LinkBandwidth(LinkBandwidth {
-                            global_admin,
-                            bandwidth,
-                            transitive: false,
-                        })
-                    }
-                    0x06 => {
-                        // Flow-Spec Traffic Rate
-                        let as_number = input.read_u16()?;
-                        let rate_bytes = input.read_u32()?;
-                        let rate = f32::from_bits(rate_bytes);
-                        ExtendedCommunity::FlowSpecTrafficRate(FlowSpecTrafficRate::new(
-                            as_number, rate,
-                        ))
-                    }
-                    0x07 => {
-                        // Flow-Spec Traffic Action
-                        let as_number = input.read_u16()?;
-                        let flags = input.read_u32()?;
-                        let terminal = (flags & 0x01) != 0;
-                        let sample = (flags & 0x02) != 0;
-                        ExtendedCommunity::FlowSpecTrafficAction(FlowSpecTrafficAction::new(
-                            as_number, terminal, sample,
-                        ))
-                    }
-                    0x08 => {
-                        // Flow-Spec Redirect (same as TwoOctetAsExtCommunity but different variant)
-                        let global = input.read_u16()?;
-                        let mut local: [u8; 4] = [0; 4];
-                        input.read_exact(&mut local)?;
-                        ExtendedCommunity::FlowSpecRedirect(TwoOctetAsExtCommunity {
-                            subtype: sub_type,
-                            global_admin: Asn::new_16bit(global),
-                            local_admin: local,
-                        })
-                    }
-                    0x09 => {
-                        // Flow-Spec Traffic Marking
-                        let as_number = input.read_u16()?;
-                        let dscp = input.read_u8()?;
-                        let _reserved1 = input.read_u8()?; // reserved
-                        let _reserved2 = input.read_u16()?; // reserved
-                        ExtendedCommunity::FlowSpecTrafficMarking(FlowSpecTrafficMarking::new(
-                            as_number, dscp,
-                        ))
-                    }
-                    _ => {
-                        // Standard NonTransitiveTwoOctetAs
-                        let global = input.read_u16()?;
-                        let mut local: [u8; 4] = [0; 4];
-                        input.read_exact(&mut local)?;
-                        ExtendedCommunity::NonTransitiveTwoOctetAs(TwoOctetAsExtCommunity {
-                            subtype: sub_type,
-                            global_admin: Asn::new_16bit(global),
-                            local_admin: local,
-                        })
-                    }
-                }
-            }
-
-            ExtendedCommunityType::TransitiveIpv4Addr => {
-                let sub_type = input.read_u8()?;
-                let global = Ipv4Addr::from(input.read_u32()?);
-                let mut local: [u8; 2] = [0; 2];
-                input.read_exact(&mut local)?;
-                ExtendedCommunity::TransitiveIpv4Addr(Ipv4AddrExtCommunity {
-                    subtype: sub_type,
-                    global_admin: global,
-                    local_admin: local,
-                })
-            }
-            ExtendedCommunityType::NonTransitiveIpv4Addr => {
-                let sub_type = input.read_u8()?;
-                let global = Ipv4Addr::from(input.read_u32()?);
-                let mut local: [u8; 2] = [0; 2];
-                input.read_exact(&mut local)?;
-                ExtendedCommunity::NonTransitiveIpv4Addr(Ipv4AddrExtCommunity {
-                    subtype: sub_type,
-                    global_admin: global,
-                    local_admin: local,
-                })
-            }
-            ExtendedCommunityType::TransitiveFourOctetAs => {
-                let sub_type = input.read_u8()?;
-                let global = input.read_u32()?;
-                let mut local: [u8; 2] = [0; 2];
-                input.read_exact(&mut local)?;
-                ExtendedCommunity::TransitiveFourOctetAs(FourOctetAsExtCommunity {
-                    subtype: sub_type,
-                    global_admin: Asn::new_32bit(global),
-                    local_admin: local,
-                })
-            }
-            ExtendedCommunityType::NonTransitiveFourOctetAs => {
-                let sub_type = input.read_u8()?;
-                let global = input.read_u32()?;
-                let mut local: [u8; 2] = [0; 2];
-                input.read_exact(&mut local)?;
-                ExtendedCommunity::NonTransitiveFourOctetAs(FourOctetAsExtCommunity {
-                    subtype: sub_type,
-                    global_admin: Asn::new_32bit(global),
-                    local_admin: local,
-                })
-            }
-
-            ExtendedCommunityType::TransitiveOpaque => {
-                let sub_type = input.read_u8()?;
-                let mut value: [u8; 6] = [0; 6];
-                input.read_exact(&mut value)?;
-                ExtendedCommunity::TransitiveOpaque(OpaqueExtCommunity {
-                    subtype: sub_type,
-                    value,
-                })
-            }
-            ExtendedCommunityType::NonTransitiveOpaque => {
-                let sub_type = input.read_u8()?;
-                let mut value: [u8; 6] = [0; 6];
-                input.read_exact(&mut value)?;
-                ExtendedCommunity::NonTransitiveOpaque(OpaqueExtCommunity {
-                    subtype: sub_type,
-                    value,
-                })
-            }
-            ExtendedCommunityType::Evpn => {
-                let sub_type = input.read_u8()?;
-                match sub_type {
-                    // MAC Mobility - RFC 7432 §7.7
-                    0x00 => {
-                        let flags = input.read_u8()?;
-                        // Reserved octet, sent as zero and ignored on receipt.
-                        input.read_u8()?;
-                        let sequence = input.read_u32()?;
-                        ExtendedCommunity::MacMobility(MacMobility {
-                            sticky: flags & 0x01 != 0,
-                            sequence,
-                        })
-                    }
-                    // Other EVPN sub-types (ESI Label, ES-Import Route Target,
-                    // Router's MAC, Layer 2 Attributes, E-Tree, Default Gateway,
-                    // ARP/ND) and anything newer keep their octets verbatim.
-                    _ => {
-                        let mut buffer: [u8; 8] = [0; 8];
-                        buffer[0] = ec_type_u8;
-                        buffer[1] = sub_type;
-                        input.read_exact(&mut buffer[2..])?;
-                        ExtendedCommunity::Raw(buffer)
-                    }
-                }
-            }
-            ExtendedCommunityType::Unknown(_) => {
-                let mut buffer: [u8; 8] = [0; 8];
-                buffer[0] = ec_type_u8;
-                input.read_exact(&mut buffer[1..])?;
-
-                ExtendedCommunity::Raw(buffer)
-            }
-        };
-
-        communities.push(ec);
+        communities.push(parse_extended_community_one(&mut input)?);
     }
 
     debug_assert!(communities.len() == num_communities);
     Ok(AttributeValue::ExtendedCommunities(communities))
+}
+
+/// Decode one 20-octet IPv6 address-specific extended community, the unit both the attribute
+/// parser and the borrowed element view read.
+pub(crate) fn parse_ipv6_extended_community_one<R: crate::parser::ReadUtils>(
+    input: &mut R,
+) -> Result<Ipv6AddrExtCommunity, ParserError> {
+    let ec_type_u8 = input.read_u8()?;
+    let sub_type = input.read_u8()?;
+    let global = input.read_ipv6_address()?;
+    let mut local: [u8; 2] = [0; 2];
+    local[0] = input.read_u8()?;
+    local[1] = input.read_u8()?;
+    Ok(Ipv6AddrExtCommunity {
+        community_type: ExtendedCommunityType::from(ec_type_u8),
+        subtype: sub_type,
+        global_admin: global,
+        local_admin: local,
+    })
 }
 
 pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue, ParserError> {
@@ -225,19 +250,7 @@ pub fn parse_ipv6_extended_community(mut input: Bytes) -> Result<AttributeValue,
 
     let mut communities = Vec::with_capacity(num_communities);
     while input.remaining() > 0 {
-        let ec_type_u8 = input.read_u8()?;
-        let sub_type = input.read_u8()?;
-        let global = input.read_ipv6_address()?;
-        let mut local: [u8; 2] = [0; 2];
-        local[0] = input.read_u8()?;
-        local[1] = input.read_u8()?;
-        let ec = Ipv6AddrExtCommunity {
-            community_type: ExtendedCommunityType::from(ec_type_u8),
-            subtype: sub_type,
-            global_admin: global,
-            local_admin: local,
-        };
-        communities.push(ec);
+        communities.push(parse_ipv6_extended_community_one(&mut input)?);
     }
 
     debug_assert!(communities.len() == num_communities);

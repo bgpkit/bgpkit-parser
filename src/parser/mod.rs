@@ -8,6 +8,7 @@ pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIte
 
 #[macro_use]
 pub mod utils;
+pub(crate) mod attr_scan;
 pub mod bgp;
 pub mod bmp;
 pub mod filter;
@@ -50,12 +51,16 @@ pub struct BgpkitParser<R> {
     /// Streaming element iterator for text dumps. `None` for MRT input,
     /// which is parsed lazily through [`Self::next_record`].
     text_dump_iter: Option<Box<dyn Iterator<Item = BgpElem> + Send>>,
+    /// Reusable buffer/table state for [`Self::next_record_elems`].
+    elem_view_state: iters::elem_ref::ElemViewState,
 }
 
 pub(crate) struct ParserOptions {
     show_warnings: bool,
     warned_zebra_compat: bool,
     logged_parse_error: bool,
+    warned_view_scope: bool,
+    warned_view_filters: bool,
 }
 impl Default for ParserOptions {
     fn default() -> Self {
@@ -63,11 +68,33 @@ impl Default for ParserOptions {
             show_warnings: true,
             warned_zebra_compat: false,
             logged_parse_error: false,
+            warned_view_scope: false,
+            warned_view_filters: false,
         }
     }
 }
 
 impl ParserOptions {
+    /// Say once, per parser, that the borrowed element view met a record kind it does not serve.
+    pub(crate) fn warn_view_scope_once(&mut self, kind: &str) {
+        if self.show_warnings && !self.warned_view_scope {
+            warn!(
+                "next_record_elems cannot serve {kind}; skipping them (further occurrences for this parser will not be logged). Use into_elem_iter for every record kind."
+            );
+            self.warned_view_scope = true;
+        }
+    }
+
+    /// Say once, per parser, that the borrowed view refuses a parser that carries filters.
+    pub(crate) fn warn_view_filters_once(&mut self) {
+        if self.show_warnings && !self.warned_view_filters {
+            warn!(
+                "next_record_elems does not apply filters, so it returns no records for this parser; use into_elem_iter when filters are set (further calls will not be logged)."
+            );
+            self.warned_view_filters = true;
+        }
+    }
+
     pub(crate) fn warn_zebra_compat_once(&mut self) {
         if self.show_warnings && !self.warned_zebra_compat {
             warn!(
@@ -110,6 +137,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -142,6 +170,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -163,6 +192,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         })
     }
 
@@ -241,6 +271,7 @@ impl<R: Read> BgpkitParser<R> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: None,
+            elem_view_state: Default::default(),
         }
     }
 
@@ -259,6 +290,172 @@ impl<R: Read> BgpkitParser<R> {
             self.warn_zebra_compat_once();
         }
         Ok(record)
+    }
+
+    /// Advance to the next record, skipping records that provably yield no element `filters` keeps.
+    ///
+    /// A record is skipped when the filter is decidable from bytes already read: the prefix and
+    /// address family of a `TABLE_DUMP_V2` RIB record, the peer, timestamp and address family of a
+    /// `BGP4MP` record, and the attribute block of either. Skipping such a record returns the same
+    /// elements as parsing it and then filtering.
+    ///
+    /// A record whose match cannot be decided this way is parsed normally, including a malformed
+    /// one: a framing or parse error is reported exactly as [`Self::next_record`] reports it.
+    fn next_record_prefiltered(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
+        loop {
+            let (header, raw_header, body_len) = {
+                let state = &mut self.elem_view_state;
+                match state.framer.next(&mut self.reader, &mut state.body_buf) {
+                    Ok(frame) => (frame.header, frame.raw_header, frame.body.len()),
+                    Err(failure) => {
+                        return Err(ParserErrorWithBytes {
+                            error: failure.error,
+                            bytes: failure.bytes,
+                        })
+                    }
+                }
+            };
+
+            // Record-level predicates: a dump record covers one prefix; an update names one peer
+            // and one time in its header. A record whose predicate is not decidable here falls
+            // through to the general parser unchanged.
+            match mrt::frame::classify(&header, &self.elem_view_state.body_buf[..body_len]) {
+                mrt::frame::RecordKind::Rib {
+                    prefix,
+                    flags,
+                    entries_offset,
+                    ..
+                } => {
+                    // A dump record whose every entry fails a prefix or origin constraint
+                    // contributes no element, so it is skipped before its body is parsed.
+                    if filter::rib_record_excluded(&self.filters, &prefix)
+                        || attr_scan::rib_record_excluded(
+                            &self.filters,
+                            &self.elem_view_state.body_buf[..body_len],
+                            entries_offset,
+                            flags,
+                        )
+                    {
+                        continue;
+                    }
+                }
+                mrt::frame::RecordKind::Bgp4Mp {
+                    peer_ip,
+                    peer_asn,
+                    timestamp,
+                } if filter::peer_excludes_record(&self.filters, &peer_ip, &peer_asn)
+                    || filter::timestamp_excludes_record(&self.filters, timestamp)
+                    || attr_scan::bgp4mp_record_excluded(
+                        &self.filters,
+                        &self.elem_view_state.body_buf[..body_len],
+                        header.entry_subtype,
+                    ) =>
+                {
+                    continue
+                }
+                _ => {}
+            }
+
+            let body = bytes::Bytes::copy_from_slice(&self.elem_view_state.body_buf[..body_len]);
+            let used_zebra_compat =
+                matches!(
+                    header.entry_type,
+                    crate::models::EntryType::BGP4MP | crate::models::EntryType::BGP4MP_ET
+                ) && mrt::messages::bgp4mp::uses_zebra_compat(header.entry_subtype, &body);
+            let message = match mrt::mrt_record::parse_mrt_body(
+                header.entry_type as u16,
+                header.entry_subtype,
+                body,
+            ) {
+                Ok(message) => message,
+                Err(error) => {
+                    return Err(ParserErrorWithBytes {
+                        error,
+                        bytes: Some(mrt::frame::assemble_error_bytes(
+                            raw_header.as_slice(),
+                            &self.elem_view_state.body_buf[..body_len],
+                        )),
+                    })
+                }
+            };
+            if used_zebra_compat {
+                self.warn_zebra_compat_once();
+            }
+            return Ok(MrtRecord {
+                common_header: header,
+                message,
+            });
+        }
+    }
+
+    /// Advance to the next record, serving RIB records from the borrowed element engine.
+    ///
+    /// `Other` means the record is not a RIB dump record; its bytes are still in the record buffer,
+    /// and [`Self::parse_framed_record`] turns them into an owned record.
+    pub(crate) fn next_elem_batch(&mut self) -> iters::elem_ref::NextBatch<'_>
+    where
+        R: std::io::Read,
+    {
+        iters::elem_ref::next_batch(self)
+    }
+
+    /// Parse the record the last [`Self::next_elem_batch`] call left in the record buffer.
+    pub(crate) fn parse_framed_record(
+        &mut self,
+        header: crate::models::CommonHeader,
+        raw_header: &[u8],
+        body_len: usize,
+    ) -> Result<MrtRecord, ParserErrorWithBytes> {
+        let body = bytes::Bytes::copy_from_slice(&self.elem_view_state.body_buf[..body_len]);
+        if matches!(
+            header.entry_type,
+            crate::models::EntryType::BGP4MP | crate::models::EntryType::BGP4MP_ET
+        ) && mrt::messages::bgp4mp::uses_zebra_compat(header.entry_subtype, &body)
+        {
+            self.warn_zebra_compat_once();
+        }
+        match mrt::mrt_record::parse_mrt_body(header.entry_type as u16, header.entry_subtype, body)
+        {
+            Ok(message) => Ok(MrtRecord {
+                common_header: header,
+                message,
+            }),
+            // A core dump must replay as MRT, so the header travels with the body.
+            Err(error) => Err(ParserErrorWithBytes {
+                error,
+                bytes: Some(mrt::frame::assemble_error_bytes(
+                    raw_header,
+                    &self.elem_view_state.body_buf[..body_len],
+                )),
+            }),
+        }
+    }
+
+    /// Advance to the next record this path serves and return a borrowed view over its elements.
+    ///
+    /// A dump's `RIB_AFI` entry is read straight from the record body. An update's element shares
+    /// its record's attribute block, and the next hop is decoded once for the whole record.
+    ///
+    /// The returned [`RecordElems`] borrows this parser (its reusable record buffer and active
+    /// `PeerIndexTable`); drop `RecordElems` before calling `next_record_elems` again.
+    ///
+    /// # Scope
+    ///
+    /// Serves `TABLE_DUMP_V2` `RIB_AFI` records (`PeerIndexTable` records update the active peer
+    /// table internally) and `BGP4MP_AS4` message records, for both dumps and updates. Records that
+    /// carry no elements by design (a `KEEPALIVE`, a state change, another family) are skipped
+    /// silently. A record that would produce elements but is not served here, today a `BGP4MP`
+    /// record with 2-byte AS numbers, is skipped and logs one warning naming that reason, so a
+    /// caller cannot mistake "this path does not cover this file" for "this file has no
+    /// elements"; use [`into_elem_iter`](Self::into_elem_iter) for every record kind. Text-dump
+    /// parsers return `None` immediately.
+    ///
+    /// A parser with filters returns `None` on the first call, reads nothing, and logs one warning:
+    /// this path does not apply them, and silently returning unfiltered elements to a caller that
+    /// asked for a filter is worse than refusing. Use [`into_elem_iter`](Self::into_elem_iter) when
+    /// the parser carries filters.
+    pub fn next_record_elems(&mut self) -> Option<RecordElems<'_>> {
+        iters::elem_ref::next_record_elems_impl(self)
     }
 }
 
@@ -287,6 +484,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
             filters: vec![],
             options: ParserOptions::default(),
             text_dump_iter: Some(Box::new(iter)),
+            elem_view_state: Default::default(),
         })
     }
 
@@ -317,6 +515,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
                 filters: vec![],
                 options: ParserOptions::default(),
                 text_dump_iter: Some(Box::new(iter)),
+                elem_view_state: Default::default(),
             })
         } else {
             Ok(BgpkitParser {
@@ -325,6 +524,7 @@ impl BgpkitParser<Box<dyn Read + Send>> {
                 filters: vec![],
                 options: ParserOptions::default(),
                 text_dump_iter: None,
+                elem_view_state: Default::default(),
             })
         }
     }
@@ -348,6 +548,7 @@ impl<R> BgpkitParser<R> {
             filters: self.filters,
             options: self.options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         }
     }
 
@@ -360,6 +561,7 @@ impl<R> BgpkitParser<R> {
             filters: self.filters,
             options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         }
     }
 
@@ -439,6 +641,7 @@ impl<R> BgpkitParser<R> {
             filters,
             options: self.options,
             text_dump_iter: self.text_dump_iter,
+            elem_view_state: self.elem_view_state,
         })
     }
 

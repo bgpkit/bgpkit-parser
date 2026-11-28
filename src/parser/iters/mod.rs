@@ -19,6 +19,7 @@ Rust's iterator syntax.
 
 pub mod default;
 mod diagnostic;
+pub(crate) mod elem_ref;
 pub mod fallible;
 mod raw;
 mod recovery;
@@ -30,6 +31,11 @@ pub use default::{ElemIterator, RecordIterator};
 pub use diagnostic::{
     record_validation_warnings, span_record_warnings, DiagnosticEvent, DiagnosticIterator,
     DissectedDiagnosticEvent, DissectingDiagnosticIterator,
+};
+pub use elem_ref::{
+    AsPathIter, AsPathView, AsnsIter, AsnsView, CommunitiesIter, CommunitiesView,
+    CommunityWordsIter, ElemRef, ElemRefIter, ExtendedCommunitiesIter, Ipv6ExtendedCommunitiesIter,
+    LargeCommunitiesIter, PlainCommunitiesIter, RecordElems,
 };
 pub use fallible::{FallibleElemIterator, FallibleRecordIterator};
 pub use raw::{FilteredRawRecordIterator, RawRecordIterator};

@@ -265,30 +265,6 @@ impl<T: Display> Display for OptionToStr<'_, T> {
     }
 }
 
-/// Helper struct to convert Option<Vec<T>> to Vec<String>
-///
-/// This struct provides a convenient way to convert an `Option<Vec<T>>` into a `Vec<String>`.
-/// It is used for converting the `Option<Vec<MetaCommunity>>` and `Option<Vec<AttrRaw>>` fields
-/// of the `BgpElem` struct into a printable format.
-struct OptionToStrVec<'a, T>(&'a Option<Vec<T>>);
-
-impl<T: Display> Display for OptionToStrVec<'_, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            None => Ok(()),
-            Some(v) => write!(
-                f,
-                "{}",
-                v.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<String>>()
-                    .join(" ")
-            ),
-        }
-    }
-}
-
-#[inline(always)]
 pub fn option_to_string_communities(o: &Option<Vec<MetaCommunity>>) -> String {
     if let Some(v) = o {
         v.iter().join(" ")
@@ -411,29 +387,9 @@ impl BgpElem {
     /// println!("{}", psv_string);
     /// ```
     pub fn to_psv(&self) -> String {
-        let t = match self.elem_type {
-            ElemType::ANNOUNCE => "A",
-            ElemType::WITHDRAW => "W",
-        };
-        format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-            t,
-            self.timestamp,
-            self.peer_ip,
-            self.peer_asn,
-            self.prefix,
-            OptionToStr(&self.as_path),
-            OptionToStrVec(&self.origin_asns),
-            OptionToStr(&self.origin),
-            OptionToStr(&self.next_hop),
-            OptionToStr(&self.local_pref),
-            OptionToStr(&self.med),
-            option_to_string_communities(&self.communities),
-            self.atomic,
-            OptionToStr(&self.aggr_asn),
-            OptionToStr(&self.aggr_ip),
-            OptionToStr(&self.only_to_customer),
-        )
+        let mut out = String::with_capacity(256);
+        crate::render::psv::write_elem(self, &mut out);
+        out
     }
 }
 
@@ -555,8 +511,5 @@ mod tests {
         assert_eq!(OptionToStr(&asn_opt).to_string(), "12");
         let none_opt: Option<u32> = None;
         assert_eq!(OptionToStr(&none_opt).to_string(), "");
-        let asns_opt = Some(vec![12, 34]);
-        assert_eq!(OptionToStrVec(&asns_opt).to_string(), "12 34");
-        assert_eq!(OptionToStrVec(&None::<Vec<u32>>).to_string(), "");
     }
 }

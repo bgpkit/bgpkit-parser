@@ -534,7 +534,9 @@ impl Elementor {
             PendingElems::Empty => RecordElemIter::Empty,
             PendingElems::TableDump(elem) => RecordElemIter::TableDump(elem),
             PendingElems::TableDumpBatch(entries) => RecordElemIter::TableDumpBatch(entries),
-            PendingElems::RibAfi { prefix, entries } => RecordElemIter::RibAfi {
+            PendingElems::RibAfi {
+                prefix, entries, ..
+            } => RecordElemIter::RibAfi {
                 peer_table: self
                     .peer_table
                     .as_ref()

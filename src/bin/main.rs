@@ -416,29 +416,40 @@ fn run_elems<I>(
 where
     I: IntoIterator<Item = Result<RecoveryEvent<BgpElem>, String>>,
 {
-    let mut stdout = std::io::stdout();
     let mut elems_count = 0usize;
     let mut elem_index = 0usize;
     let mut stats = RecoveryStats::new(report_recovery);
     let mut terminal_error = None;
 
-    for event in events {
-        match event {
-            Err(error) => {
-                terminal_error = Some(error);
-                break;
+    {
+        let stdout = std::io::stdout();
+        // Elements are many; one buffered writer keeps the per-row syscall cost off the hot path.
+        let mut writer = std::io::BufWriter::with_capacity(1 << 20, stdout.lock());
+
+        for event in events {
+            match event {
+                Err(error) => {
+                    terminal_error = Some(error);
+                    break;
+                }
+                Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
+                Ok(RecoveryEvent::Item(elem)) => {
+                    elems_count += 1;
+                    if count_requested {
+                        continue;
+                    }
+                    let output = format_elem(&elem, output_format, elem_index);
+                    elem_index += 1;
+                    if !write_output(&mut writer, &output)? {
+                        return Ok(());
+                    }
+                }
             }
-            Ok(RecoveryEvent::Gap(gap)) => stats.observe(&gap),
-            Ok(RecoveryEvent::Item(elem)) => {
-                elems_count += 1;
-                if count_requested {
-                    continue;
-                }
-                let output = format_elem(&elem, output_format, elem_index);
-                elem_index += 1;
-                if !write_output(&mut stdout, &output)? {
-                    return Ok(());
-                }
+        }
+
+        if let Err(error) = writer.flush() {
+            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(error.to_string());
             }
         }
     }
@@ -527,8 +538,8 @@ fn run_hex_records(
     Ok(())
 }
 
-fn write_output(stdout: &mut std::io::Stdout, output: &str) -> Result<bool, String> {
-    if let Err(error) = writeln!(stdout, "{output}") {
+fn write_output(writer: &mut impl std::io::Write, output: &str) -> Result<bool, String> {
+    if let Err(error) = writeln!(writer, "{output}") {
         if error.kind() == std::io::ErrorKind::BrokenPipe {
             return Ok(false);
         }

@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+* **`BgpkitParser::next_record_elems`**: iterates the elements of a record as borrowed views (`RecordElems`, `ElemRef`) that read the framework's own buffer. The AS path and community accessors allocate nothing; a dump entry's `next_hop()` and every `to_bgp_elem()` do, and an update's next hop is decoded once per record. It serves `TABLE_DUMP_V2` `RIB_AFI` records and `BGP4MP_AS4` message records; a record it cannot serve says so once, and a parser carrying filters refuses the path rather than return unfiltered elements. `ElemRef` exposes the hot fields directly, `to_bgp_elem` materialises the rest.
+
 ### Changed
+
+* **A skipped record no longer reports a parse error**: when a filter decides a record from its header or attribute bytes, that record is never parsed, so a malformed record the filter rejects no longer logs a parse error, a Zebra-compatibility warning, or an attribute-truncation warning. Output is unchanged.
+
+* **Element iteration is faster, with unchanged output**: MRT records are now framed once into a reusable buffer and elements are built from borrowed views of that buffer instead of from an owned decode of every attribute. On the rrc00 `bview` of 2026-10-14, a RIB element scan costs 145 G instructions against 271 G before (1.87x), a full PSV export 540 G against 1361 G (2.52x), and a single-prefix query 47 G against 321 G (6.86x); the 15-minute updates file improves 1.45x. Every rendered byte is identical to the previous release.
+* **Filters are pushed down before elements are built**: a filter that can be decided from the record header (prefix, address family, peer, timestamp, type) now skips the record, and an origin filter, which the attribute bytes can decide, now skips the entry. The decision refuses to answer whenever the bytes cannot decide it (a truncated attribute, `AS4_PATH`, an `AS_SET` at the end of the path, a 2-byte-ASN `BGP4MP` record), so it only ever skips work that could not have produced a match. A community or AS path expression is not decided from bytes: those values are written out by the renderer, so such a filter reads every element. Record iteration still drops records that produce no matching element.
 
 * **A filter no longer doubles the elem conversion work**: an elem iterator now filters the elems it builds instead of making the record iterator test each record first. The record-level test cloned the record and converted every elem of it to decide whether the record matched, and the elem iterator then converted the same record again, so a filtered run parsed every record twice. On the rrc00 bview of 2026-10-14 a prefix filter cost 29.8% more instructions than no filter at all; it now costs 2.9%. Output is unchanged. Record iteration still drops records that produce no matching elem.
 

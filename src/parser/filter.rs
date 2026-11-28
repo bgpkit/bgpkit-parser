@@ -752,10 +752,8 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
             if exact {
                 exact
             } else if !same_family(match_prefix, input_prefix) {
-                // version not match
                 false
             } else {
-                // input_prefix is super prefix of match_prefix
                 match_prefix.addr() >= input_prefix.addr()
                     && match_prefix.broadcast() <= input_prefix.broadcast()
             }
@@ -764,10 +762,8 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
             if exact {
                 exact
             } else if !same_family(match_prefix, input_prefix) {
-                // version not match
                 false
             } else {
-                // input_prefix is sub prefix of match_prefix
                 match_prefix.addr() <= input_prefix.addr()
                     && match_prefix.broadcast() >= input_prefix.broadcast()
             }
@@ -776,10 +772,8 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
             if exact {
                 exact
             } else if !same_family(match_prefix, input_prefix) {
-                // version not match
                 false
             } else {
-                // input_prefix is super prefix of match_prefix
                 (match_prefix.addr() >= input_prefix.addr()
                     && match_prefix.broadcast() <= input_prefix.broadcast())
                     || (match_prefix.addr() <= input_prefix.addr()
@@ -787,6 +781,106 @@ fn prefix_match(match_prefix: &IpNet, input_prefix: &IpNet, t: &PrefixMatchType)
             }
         }
     }
+}
+
+/// Whether any filter can be decided from the record itself, so the prefiltered path is worth it.
+pub(crate) fn has_record_level_constraint(filters: &[Filter]) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::Prefix(..)
+        | Filter::Prefixes(..)
+        | Filter::IpVersion(_)
+        | Filter::Type(_)
+        | Filter::PeerIp(_)
+        | Filter::PeerIps(_)
+        | Filter::PeerAsn(_)
+        | Filter::PeerAsns(_)
+        | Filter::TsStart(_)
+        | Filter::TsEnd(_)
+        | Filter::OriginAsn(_)
+        | Filter::OriginAsns(_)
+        | Filter::Origin(_) => true,
+        Filter::Negated(inner) => matches!(
+            inner.as_ref(),
+            Filter::Prefix(..)
+                | Filter::Prefixes(..)
+                | Filter::IpVersion(_)
+                | Filter::Type(_)
+                | Filter::PeerIp(_)
+                | Filter::PeerIps(_)
+                | Filter::PeerAsn(_)
+                | Filter::PeerAsns(_)
+                | Filter::TsStart(_)
+                | Filter::TsEnd(_)
+        ),
+        _ => false,
+    })
+}
+
+/// Returns `true` only when every element stamped `timestamp` fails a time constraint.
+pub(crate) fn timestamp_excludes_record(filters: &[Filter], timestamp: f64) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::TsStart(start) => timestamp < *start,
+        Filter::TsEnd(end) => timestamp > *end,
+        Filter::Negated(inner) => match inner.as_ref() {
+            // A negated constraint keeps only the elements outside its range.
+            Filter::TsStart(start) => timestamp >= *start,
+            Filter::TsEnd(end) => timestamp <= *end,
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+/// Returns `true` only when no element of a `BGP4MP` record whose header names this peer can pass
+/// `filters`.
+///
+/// The peer of an update is fixed for the whole record, so a definite failure here lets the record
+/// be dropped before its BGP message is parsed. Undecidable filters return `false`.
+pub(crate) fn peer_excludes_record(filters: &[Filter], peer_ip: &IpAddr, peer_asn: &Asn) -> bool {
+    filters.iter().any(|filter| match filter {
+        Filter::PeerIp(expected) => peer_ip != expected,
+        Filter::PeerIps(expected) => !expected.iter().any(|candidate| peer_ip == candidate),
+        Filter::PeerAsn(expected) => peer_asn != expected,
+        Filter::PeerAsns(expected) => !expected.iter().any(|candidate| peer_asn == candidate),
+        Filter::Negated(inner) => match inner.as_ref() {
+            Filter::PeerIp(expected) => peer_ip == expected,
+            Filter::PeerIps(expected) => expected.iter().any(|candidate| peer_ip == candidate),
+            Filter::PeerAsn(expected) => peer_asn == expected,
+            Filter::PeerAsns(expected) => expected.iter().any(|candidate| peer_asn == candidate),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+/// Returns `true` only when no element of a record covering `prefix` can pass `filters`.
+///
+/// Every element of a `TABLE_DUMP_V2` RIB record shares this one prefix, so a definite failure here
+/// lets the record be dropped before any attribute is parsed. Undecidable filters return `false`.
+pub(crate) fn rib_record_excluded(filters: &[Filter], prefix: &NetworkPrefix) -> bool {
+    let input = &prefix.prefix;
+    filters.iter().any(|filter| match filter {
+        // Every element of a RIB record is an announcement.
+        Filter::Type(kind) => *kind != ElemType::ANNOUNCE,
+        Filter::Negated(inner) if matches!(inner.as_ref(), Filter::Type(_)) => {
+            matches!(inner.as_ref(), Filter::Type(kind) if *kind == ElemType::ANNOUNCE)
+        }
+        Filter::Prefix(expected, kind) => !prefix_match(expected, input, kind),
+        Filter::Prefixes(expected, kind) => !expected
+            .iter()
+            .any(|candidate| prefix_match(candidate, input, kind)),
+        Filter::IpVersion(version) => (*version == IpVersion::Ipv4) != input.addr().is_ipv4(),
+        Filter::Negated(inner) => match inner.as_ref() {
+            // Negated: every element must fall outside the set, so a match here rejects them all.
+            Filter::IpVersion(version) => (*version == IpVersion::Ipv4) == input.addr().is_ipv4(),
+            Filter::Prefix(expected, kind) => prefix_match(expected, input, kind),
+            Filter::Prefixes(expected, kind) => expected
+                .iter()
+                .any(|candidate| prefix_match(candidate, input, kind)),
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 fn match_route_view_filter<T: RouteFilterView>(view: &T, filter: &Filter) -> bool {
@@ -2232,5 +2326,193 @@ mod tests {
         assert!(Filter::new("aggr_asn", "not_a_number").is_err());
         assert!(Filter::new("aggr_ip", "not_an_ip").is_err());
         assert!(Filter::new("peer_bgp_id", "not_an_ip").is_err());
+    }
+}
+
+#[cfg(test)]
+mod record_predicate_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn prefix(text: &str) -> NetworkPrefix {
+        NetworkPrefix::from_str(text).expect("valid prefix")
+    }
+
+    fn net(text: &str) -> IpNet {
+        IpNet::from_str(text).expect("valid prefix")
+    }
+
+    #[test]
+    fn rib_prefix_predicate_covers_match_types() {
+        let record = prefix("10.1.2.0/24");
+        assert!(!rib_record_excluded(
+            &[Filter::Prefix(net("10.1.2.0/24"), PrefixMatchType::Exact)],
+            &record
+        ));
+        assert!(rib_record_excluded(
+            &[Filter::Prefix(net("10.1.3.0/24"), PrefixMatchType::Exact)],
+            &record
+        ));
+        // The record's prefix is a sub-prefix of the filter's.
+        assert!(!rib_record_excluded(
+            &[Filter::Prefix(
+                net("10.1.0.0/16"),
+                PrefixMatchType::IncludeSub
+            )],
+            &record
+        ));
+        // The record's prefix is a super-prefix of the filter's.
+        assert!(!rib_record_excluded(
+            &[Filter::Prefix(
+                net("10.1.2.0/25"),
+                PrefixMatchType::IncludeSuper
+            )],
+            &record
+        ));
+        assert!(rib_record_excluded(
+            &[Filter::Prefix(
+                net("10.1.2.0/25"),
+                PrefixMatchType::IncludeSub
+            )],
+            &record
+        ));
+    }
+
+    #[test]
+    fn rib_prefix_predicate_handles_lists_and_negation() {
+        let record = prefix("10.1.2.0/24");
+        assert!(!rib_record_excluded(
+            &[Filter::Prefixes(
+                vec![net("192.0.2.0/24"), net("10.1.2.0/24")],
+                PrefixMatchType::Exact
+            )],
+            &record
+        ));
+        assert!(rib_record_excluded(
+            &[Filter::Prefixes(
+                vec![net("192.0.2.0/24")],
+                PrefixMatchType::Exact
+            )],
+            &record
+        ));
+        // Negated: only a record inside the set is excluded.
+        assert!(rib_record_excluded(
+            &[Filter::Negated(Box::new(Filter::Prefix(
+                net("10.1.2.0/24"),
+                PrefixMatchType::Exact
+            )))],
+            &record
+        ));
+        assert!(!rib_record_excluded(
+            &[Filter::Negated(Box::new(Filter::Prefix(
+                net("192.0.2.0/24"),
+                PrefixMatchType::Exact
+            )))],
+            &record
+        ));
+    }
+
+    #[test]
+    fn rib_record_predicate_covers_ip_version_and_type() {
+        let v4 = prefix("10.1.2.0/24");
+        let v6 = prefix("2001:db8::/32");
+        assert!(rib_record_excluded(
+            &[Filter::IpVersion(IpVersion::Ipv6)],
+            &v4
+        ));
+        assert!(!rib_record_excluded(
+            &[Filter::IpVersion(IpVersion::Ipv4)],
+            &v4
+        ));
+        assert!(rib_record_excluded(
+            &[Filter::IpVersion(IpVersion::Ipv4)],
+            &v6
+        ));
+        // RIB entries are announcements.
+        assert!(rib_record_excluded(
+            &[Filter::Type(ElemType::WITHDRAW)],
+            &v4
+        ));
+        assert!(!rib_record_excluded(
+            &[Filter::Type(ElemType::ANNOUNCE)],
+            &v4
+        ));
+        assert!(rib_record_excluded(
+            &[Filter::Negated(Box::new(Filter::Type(ElemType::ANNOUNCE)))],
+            &v4
+        ));
+    }
+
+    #[test]
+    fn undecidable_filters_never_exclude() {
+        let record = prefix("10.1.2.0/24");
+        assert!(!rib_record_excluded(&[Filter::OriginAsn(1)], &record));
+        assert!(!rib_record_excluded(&[Filter::TsStart(1.0)], &record));
+        assert!(!peer_excludes_record(
+            &[Filter::OriginAsn(1)],
+            &IpAddr::from_str("192.0.2.1").expect("ip"),
+            &Asn::new_32bit(64512)
+        ));
+    }
+
+    #[test]
+    fn update_peer_predicate_covers_lists_and_negation() {
+        let peer_ip = IpAddr::from_str("192.0.2.1").expect("ip");
+        let peer_asn = Asn::new_32bit(64512);
+        assert!(!peer_excludes_record(
+            &[Filter::PeerIp(peer_ip)],
+            &peer_ip,
+            &peer_asn
+        ));
+        assert!(peer_excludes_record(
+            &[Filter::PeerIps(vec![
+                IpAddr::from_str("198.51.100.1").expect("ip")
+            ])],
+            &peer_ip,
+            &peer_asn
+        ));
+        assert!(!peer_excludes_record(
+            &[Filter::PeerAsns(vec![64512])],
+            &peer_ip,
+            &peer_asn
+        ));
+        assert!(peer_excludes_record(
+            &[Filter::Negated(Box::new(Filter::PeerAsn(u32::from(
+                peer_asn
+            ))))],
+            &peer_ip,
+            &peer_asn
+        ));
+    }
+
+    #[test]
+    fn update_timestamp_predicate_covers_ranges_and_negation() {
+        assert!(timestamp_excludes_record(&[Filter::TsStart(100.0)], 99.0));
+        assert!(!timestamp_excludes_record(&[Filter::TsStart(100.0)], 100.0));
+        assert!(timestamp_excludes_record(&[Filter::TsEnd(100.0)], 101.0));
+        assert!(!timestamp_excludes_record(&[Filter::TsEnd(100.0)], 100.0));
+        assert!(timestamp_excludes_record(
+            &[Filter::Negated(Box::new(Filter::TsStart(100.0)))],
+            100.0
+        ));
+        assert!(!timestamp_excludes_record(
+            &[Filter::Negated(Box::new(Filter::TsStart(100.0)))],
+            99.0
+        ));
+    }
+
+    #[test]
+    fn gate_matches_every_pushable_filter_shape() {
+        assert!(has_record_level_constraint(&[Filter::Prefix(
+            net("10.0.0.0/8"),
+            PrefixMatchType::Exact
+        )]));
+        assert!(has_record_level_constraint(&[Filter::Negated(Box::new(
+            Filter::Prefix(net("10.0.0.0/8"), PrefixMatchType::Exact)
+        ))]));
+        assert!(has_record_level_constraint(&[Filter::PeerAsns(vec![1])]));
+        assert!(has_record_level_constraint(&[Filter::TsEnd(1.0)]));
+        assert!(!has_record_level_constraint(&[Filter::LocalPref(100)]));
+        assert!(!has_record_level_constraint(&[]));
     }
 }

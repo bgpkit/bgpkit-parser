@@ -15,6 +15,29 @@ pub fn parse_as_path(input: Bytes, asn_len: &AsnLength) -> Result<AsPath, Parser
     parse_as_path_slice(input.as_ref(), asn_len)
 }
 
+/// Whether an `AS_PATH` payload frames as segments, without building one.
+///
+/// Both the owned attribute path and the borrowed element view ask this before decoding, so the
+/// segment-type and segment-length rule lives here once.
+pub(crate) fn validate_as_path_slice(mut input: &[u8], asn_len: &AsnLength) -> bool {
+    let asn_bytes = match asn_len {
+        AsnLength::Bits16 => 2,
+        AsnLength::Bits32 => 4,
+    };
+    while !input.is_empty() {
+        if input.len() < 2 {
+            return false;
+        }
+        let segment_type = input[0];
+        let segment_bytes = input[1] as usize * asn_bytes;
+        if !(1..=4).contains(&segment_type) || input.len() < 2 + segment_bytes {
+            return false;
+        }
+        input = &input[2 + segment_bytes..];
+    }
+    true
+}
+
 /// [`parse_as_path`] over a borrowed slice.
 ///
 /// AS_PATH is the attribute that appears in essentially every record, so it decodes straight from

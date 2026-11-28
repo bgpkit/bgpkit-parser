@@ -138,9 +138,16 @@ pub(crate) struct FramedHeader {
 ///
 /// The default parse path only needs the raw header bytes when something goes wrong, so capturing
 /// them on the stack avoids one small heap allocation per record.
+#[derive(Clone, Copy)]
 pub(crate) struct HeaderBuf {
     bytes: [u8; 16],
     len: usize,
+}
+
+impl Default for HeaderBuf {
+    fn default() -> Self {
+        HeaderBuf::new()
+    }
 }
 
 impl HeaderBuf {
