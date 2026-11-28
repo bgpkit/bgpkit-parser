@@ -21,32 +21,13 @@ pub(super) fn wire_route_len(mut wire: &[u8]) -> usize {
     total
 }
 
-/// The next hop of an `MP_REACH_NLRI` value that carries its own address family and SAFI, which is
-/// what a `BGP4MP` update has.
-pub(super) fn update_mp_reach_next_hop(value: &[u8], add_path: bool) -> Option<IpAddr> {
-    let decoded = crate::parser::bgp::attributes::parse_nlri(
-        bytes::Bytes::copy_from_slice(value),
-        &None,
-        &None,
-        &None,
-        true,
-        add_path,
-    )
-    .ok()?;
-    match decoded {
-        crate::models::AttributeValue::MpReachNlri(nlri) => {
-            nlri.next_hop.map(|next_hop| next_hop.global_addr())
-        }
-        _ => None,
-    }
-}
-
 /// The global next hop of an `MP_REACH_NLRI` value.
 ///
 /// The owned NLRI parser decides it: the families it accepts, the reserved octet, the next-hop
 /// widths, and the RFC 6396 §4.3.4 rule that a dump's entry may omit the attribute's own address
 /// family all behave here exactly as they do there. A body it rejects has no next hop, which is what
-/// the owned element path reports too.
+/// the owned element path reports too. It allocates the copied body and the decoded prefix list, so
+/// a caller that must not allocate should read `unknown`/`next_hop` through `to_bgp_elem` instead.
 pub(super) fn mp_reach_next_hop(
     value: &[u8],
     prefix: NetworkPrefix,
@@ -94,7 +75,7 @@ pub(super) enum AsPathSource<'a> {
 
 /// Segment kind in a wire `AS_PATH` attribute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AsPathSegmentType {
+pub(super) enum AsPathSegmentType {
     AsSet,
     AsSequence,
     ConfedSequence,
@@ -118,55 +99,10 @@ impl AsPathSegmentType {
 
 /// Borrowed view over one segment in a wire `AS_PATH`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AsPathSegmentRef<'a> {
+pub(super) struct AsPathSegmentRef<'a> {
     seg_type: AsPathSegmentType,
     asn_bytes: &'a [u8],
 }
-
-impl<'a> AsPathSegmentRef<'a> {
-    /// Iterates over the [`Asn`]s in this segment in wire order without allocating.
-    #[inline]
-    pub fn asns(&self) -> SegmentAsns<'a> {
-        SegmentAsns {
-            words: bytes_as_be_u32_words(self.asn_bytes),
-        }
-    }
-}
-
-impl<'a> IntoIterator for AsPathSegmentRef<'a> {
-    type Item = Asn;
-    type IntoIter = SegmentAsns<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.asns()
-    }
-}
-
-/// Iterator over the 4-octet [`Asn`]s of one borrowed `AS_PATH` segment.
-#[derive(Clone, Debug)]
-pub struct SegmentAsns<'a> {
-    words: &'a [BeU32],
-}
-
-impl<'a> Iterator for SegmentAsns<'a> {
-    type Item = Asn;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let (first, rest) = self.words.split_first()?;
-        self.words = rest;
-        Some(Asn::new_32bit(first.get()))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = self.words.len();
-        (n, Some(n))
-    }
-}
-
-impl ExactSizeIterator for SegmentAsns<'_> {}
 
 /// Zero-allocation borrowed view over an element's effective `AS_PATH`.
 ///
@@ -343,7 +279,7 @@ impl<'a> IntoIterator for &AsPathView<'a> {
 
 /// Iterator over borrowed [`AsPathSegmentRef`]s of an [`AsPathView`].
 #[derive(Clone, Debug)]
-pub struct AsPathSegments<'a> {
+pub(super) struct AsPathSegments<'a> {
     lead: &'a [u8],
     lead_remaining: usize,
     tail: &'a [u8],
@@ -742,8 +678,8 @@ impl<'a> CommunitiesView<'a> {
     /// Iterates over all [`MetaCommunity`] values in wire attribute order, matching
     /// [`BgpElem::communities`](crate::BgpElem::communities).
     #[inline]
-    pub fn iter(&self) -> MetaCommunitiesIter<'a> {
-        MetaCommunitiesIter {
+    pub fn iter(&self) -> CommunitiesIter<'a> {
+        CommunitiesIter {
             rest_attrs: self.attr_bytes,
             cur_kind: ActiveCommunityAttr::None,
         }
@@ -752,7 +688,7 @@ impl<'a> CommunitiesView<'a> {
 
 impl<'a> IntoIterator for CommunitiesView<'a> {
     type Item = MetaCommunity;
-    type IntoIter = MetaCommunitiesIter<'a>;
+    type IntoIter = CommunitiesIter<'a>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -762,7 +698,7 @@ impl<'a> IntoIterator for CommunitiesView<'a> {
 
 impl<'a> IntoIterator for &CommunitiesView<'a> {
     type Item = MetaCommunity;
-    type IntoIter = MetaCommunitiesIter<'a>;
+    type IntoIter = CommunitiesIter<'a>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -957,12 +893,12 @@ enum ActiveCommunityAttr<'a> {
 
 /// Iterator over all [`MetaCommunity`] items in wire attribute order.
 #[derive(Clone, Debug)]
-pub struct MetaCommunitiesIter<'a> {
+pub struct CommunitiesIter<'a> {
     rest_attrs: &'a [u8],
     cur_kind: ActiveCommunityAttr<'a>,
 }
 
-impl Iterator for MetaCommunitiesIter<'_> {
+impl Iterator for CommunitiesIter<'_> {
     type Item = MetaCommunity;
 
     #[inline]

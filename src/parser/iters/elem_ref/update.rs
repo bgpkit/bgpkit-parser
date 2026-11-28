@@ -5,40 +5,6 @@
 
 use super::*;
 
-/// Append the prefixes of one `MP_REACH_NLRI` or `MP_UNREACH_NLRI` body.
-///
-/// The body goes to the owned NLRI parser, so every family it understands (labelled, VPN, flow-spec,
-/// EVPN, link-state), the reserved octet, the next-hop widths it accepts, and the ADD-PATH guess in
-/// a block that starts with zero all behave exactly as they do on the owned path.
-fn append_mp_nlri(body: &[u8], reachable: bool, add_path: bool, out: &mut Vec<UpdateEntry>) {
-    let Ok(value) = crate::parser::bgp::attributes::parse_nlri(
-        bytes::Bytes::copy_from_slice(body),
-        &None,
-        &None,
-        &None,
-        reachable,
-        add_path,
-    ) else {
-        return;
-    };
-    let nlri = match value {
-        crate::models::AttributeValue::MpReachNlri(nlri)
-        | crate::models::AttributeValue::MpUnreachNlri(nlri) => nlri,
-        _ => return,
-    };
-    let elem_type = if reachable {
-        ElemType::ANNOUNCE
-    } else {
-        ElemType::WITHDRAW
-    };
-    let flags = afi_flags(&nlri.afi, nlri.safi, add_path);
-    out.extend(nlri.prefixes.into_iter().map(|prefix| UpdateEntry {
-        prefix,
-        elem_type,
-        flags,
-    }));
-}
-
 /// The peers of a `PEER_INDEX_TABLE` body, in the order their indices name.
 ///
 /// The owned parser decodes the table; this only turns its map back into a vector, so the hot path
@@ -173,42 +139,13 @@ fn warn_on_truncated_attribute(attrs: &[u8]) {
         let _ = value;
         rest = next;
     }
-    if !rest.is_empty() && rest.len() < 3 {
+    // The owned walker stops at three octets and reports the truncated attribute; a shorter tail is
+    // silence there, so it is silence here.
+    if rest.len() >= 3 {
         warn!(
-            "attribute block ends with {} octets that cannot hold an attribute header; ignoring them",
-            rest.len()
+            "attribute encodes a length longer than the remaining attribute data; ignoring the rest"
         );
     }
-}
-
-/// Fill `out` with the elements of one `BGP4MP` update and return its attribute block.
-///
-/// Only the AS4 message subtypes are served: the borrowed attribute views read 4-byte AS numbers,
-/// which is what those subtypes carry. Anything else returns `None` so the caller can say so and
-/// leave the record to the owned path.
-///
-/// The order matches the owned iterator: announcements (plain NLRI, then `MP_REACH_NLRI`), then
-/// withdrawals (plain, then `MP_UNREACH_NLRI`).
-/// The next hop every element of one update shares: `NEXT_HOP` when present, else `MP_REACH_NLRI`,
-/// which is the order the owned path applies.
-fn record_next_hop(attrs: &[u8], add_path: bool) -> Option<IpAddr> {
-    let mut plain = None;
-    let mut from_mp = None;
-    let mut rest = attrs;
-    while let Some((code, value, next)) = next_attr_tlv(rest) {
-        rest = next;
-        match code {
-            3 => {
-                let mut value = value;
-                if let Ok(address) = value.read_address(&Afi::Ipv4) {
-                    plain = Some(address);
-                }
-            }
-            14 => from_mp = update_mp_reach_next_hop(value, add_path).or(from_mp),
-            _ => {}
-        }
-    }
-    plain.or(from_mp)
 }
 
 pub(crate) fn fill_update_entries<'a>(
@@ -271,11 +208,12 @@ pub(crate) fn fill_update_entries<'a>(
     // instead of once per element the record yields.
     warn_on_truncated_attribute(attrs);
 
-    // MP_REACH and MP_UNREACH sit in the attribute block; find them without decoding anything else.
-    // Every occurrence is kept: a malformed duplicate must not hide an earlier valid attribute, so
-    // each is tried and the last one that decodes wins, as it does on the owned path.
-    let mut mp_reach: Vec<&[u8]> = Vec::new();
-    let mut mp_unreach: Vec<&[u8]> = Vec::new();
+    // Each MP attribute is decoded here, once: the last one that decodes wins, as it does on the
+    // owned path, and the record's next hop comes out of the same decode.
+    let mut next_hop: Option<IpAddr> = None;
+    let mut reach: Option<crate::models::Nlri> = None;
+    let mut unreach: Option<crate::models::Nlri> = None;
+    let mut plain_next_hop: Option<IpAddr> = None;
     let mut pos = 0usize;
     while pos + 3 <= attrs.len() {
         let flags = attrs[pos];
@@ -296,13 +234,48 @@ pub(crate) fn fill_update_entries<'a>(
         if end > attrs.len() {
             break;
         }
+        let value = &attrs[start..end];
         match code {
-            14 => mp_reach.push(&attrs[start..end]),
-            15 => mp_unreach.push(&attrs[start..end]),
+            3 => {
+                let mut value = value;
+                if let Ok(address) = value.read_address(&Afi::Ipv4) {
+                    plain_next_hop = Some(address);
+                }
+            }
+            14 => {
+                if let Ok(crate::models::AttributeValue::MpReachNlri(nlri)) =
+                    crate::parser::bgp::attributes::parse_nlri(
+                        bytes::Bytes::copy_from_slice(value),
+                        &None,
+                        &None,
+                        &None,
+                        true,
+                        add_path,
+                    )
+                {
+                    next_hop = nlri.next_hop.map(|next_hop| next_hop.global_addr());
+                    reach = Some(nlri);
+                }
+            }
+            15 => {
+                if let Ok(crate::models::AttributeValue::MpUnreachNlri(nlri)) =
+                    crate::parser::bgp::attributes::parse_nlri(
+                        bytes::Bytes::copy_from_slice(value),
+                        &None,
+                        &None,
+                        &None,
+                        false,
+                        add_path,
+                    )
+                {
+                    unreach = Some(nlri);
+                }
+            }
             _ => {}
         }
         pos = end;
     }
+    let next_hop = plain_next_hop.or(next_hop);
 
     append_nlri(
         announced,
@@ -312,12 +285,9 @@ pub(crate) fn fill_update_entries<'a>(
         ElemType::ANNOUNCE,
         out,
     );
-    for body in &mp_reach {
-        append_mp_nlri(body, true, add_path, out);
+    if let Some(nlri) = reach {
+        push_nlri_entries(nlri, add_path, ElemType::ANNOUNCE, out);
     }
-    // The record's next hop is decoded once here: every element it yields shares it, and decoding
-    // it per element would re-parse the NLRI of every prefix for each one.
-    let next_hop = record_next_hop(attrs, add_path);
     append_nlri(
         withdrawn,
         Afi::Ipv4,
@@ -326,8 +296,23 @@ pub(crate) fn fill_update_entries<'a>(
         ElemType::WITHDRAW,
         out,
     );
-    for body in &mp_unreach {
-        append_mp_nlri(body, false, add_path, out);
+    if let Some(nlri) = unreach {
+        push_nlri_entries(nlri, add_path, ElemType::WITHDRAW, out);
     }
     Some((attrs, next_hop))
+}
+
+/// Append the prefixes one decoded `MP_REACH_NLRI` / `MP_UNREACH_NLRI` carries.
+fn push_nlri_entries(
+    nlri: crate::models::Nlri,
+    _add_path: bool,
+    elem_type: ElemType,
+    out: &mut Vec<UpdateEntry>,
+) {
+    let flags = afi_flags(&nlri.afi, nlri.safi, _add_path);
+    out.extend(nlri.prefixes.into_iter().map(|prefix| UpdateEntry {
+        prefix,
+        elem_type,
+        flags,
+    }));
 }

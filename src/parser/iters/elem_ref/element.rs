@@ -414,13 +414,6 @@ impl<'a> ElemRef<'a> {
         )
     }
 
-    /// Materialise this entry as an owned [`BgpElem`].
-    ///
-    /// Walks the attribute TLVs once for the scalar attributes, then reuses the borrowed views for
-    /// the AS path, the communities, the next hop and the two u32 attributes. Values match an elem
-    /// built from a parsed `MrtRecord`, including the `Some(0)` defaults for MED and LOCAL_PREF,
-    /// with one documented difference: a known attribute that fails to parse is dropped here,
-    /// while the owned path keeps it in `BgpElem::unknown`.
     /// This entry's attribute block, for the predicates that can decide an entry from bytes.
     pub(crate) fn attrs_bytes(&self) -> &'a [u8] {
         self.attr_bytes
@@ -473,6 +466,7 @@ impl<'a> ElemRef<'a> {
                 break;
             }
             let val = &bytes[val_start..val_end];
+            let tlv_start = pos;
             pos = val_end;
 
             if get_deprecated_attr_type(code).is_some() {
@@ -509,7 +503,12 @@ impl<'a> ElemRef<'a> {
                         undecoded = true;
                     }
                 }
-                AttrType::NEXT_HOP if from_update => {}
+                AttrType::NEXT_HOP if from_update => {
+                    // Decoded once per record above; a value that is not four octets is raw there.
+                    if val.len() != 4 {
+                        undecoded = true;
+                    }
+                }
                 AttrType::NEXT_HOP => {
                     let mut value = val;
                     match value.read_address(&self.next_hop_afi()) {
@@ -620,7 +619,12 @@ impl<'a> ElemRef<'a> {
                         undecoded = true;
                     }
                 }
-                AttrType::MP_REACHABLE_NLRI if from_update => {}
+                AttrType::MP_REACHABLE_NLRI if from_update => {
+                    if mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, true).is_err()
+                    {
+                        undecoded = true;
+                    }
+                }
                 AttrType::MP_REACHABLE_NLRI => {
                     match mp_reach_next_hop(val, self.prefix(), afi, safi, is_add_path, false) {
                         Ok(address) => mp_next_hop = address,
@@ -651,14 +655,23 @@ impl<'a> ElemRef<'a> {
                 // Every remaining typed attribute is decoded by the owned dispatcher: if it comes
                 // back raw there, its bytes belong in `unknown` here too.
                 _ => {
-                    let tlv = &bytes[pos..val_end];
+                    // The owned parser is asked about this one attribute with the same context the
+                    // record kind gives it: an update carries its own family, a dump entry hands in
+                    // the record's prefix.
+                    let tlv = &bytes[tlv_start..val_end];
+                    let own_prefix = [self.prefix()];
+                    let (afi, safi, prefixes) = if from_update {
+                        (None, None, None)
+                    } else {
+                        (Some(afi), Some(safi), Some(&own_prefix[..]))
+                    };
                     let parsed = crate::parser::bgp::attributes::parse_attributes(
                         bytes::Bytes::copy_from_slice(tlv),
                         &AsnLength::Bits32,
                         is_add_path,
-                        Some(afi),
-                        Some(safi),
-                        None,
+                        afi,
+                        safi,
+                        prefixes,
                     );
                     let raw = match parsed {
                         Ok(attributes) => attributes.inner.iter().any(|attribute| {

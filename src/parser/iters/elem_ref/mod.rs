@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 /*!
-Borrowed element views over MRT `TABLE_DUMP_V2` RIB records.
+Borrowed element views over the records this path serves: `TABLE_DUMP_V2` `RIB_AFI` entries and
+`BGP4MP_AS4` updates.
 
 [`BgpkitParser::next_record_elems`](crate::BgpkitParser::next_record_elems) reads one record body
 into a reusable buffer owned by the parser and lends a [`RecordElems`] batch over its RIB entries.
 Each [`ElemRef`] yielded by [`RecordElems::iter`] borrows directly from the record body and the
-active peer index table. Its accessors decode on demand; a next hop or a merged AS path is decoded
-at most once per element, and materialising the element allocates.
+active peer index table. Its accessors decode on demand. An update's next hop is decoded once for
+the whole record; a dump entry's `MP_REACH_NLRI` next hop is decoded per call and allocates, and
+materialising an element allocates its AS path and communities.
 */
 
 mod element;
@@ -16,10 +18,8 @@ mod view;
 pub use element::ElemRef;
 pub use view::*;
 
-use update::{
-    attribute_block_walks, fill_update_entries, parse_peer_index_vec, update_record_elems,
-};
-use view::{mp_reach_next_hop, update_mp_reach_next_hop};
+use update::{attribute_block_walks, parse_peer_index_vec, update_record_elems};
+use view::mp_reach_next_hop;
 
 use crate::error::ParserError;
 use crate::models::{
@@ -350,15 +350,19 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                 peer_asn,
                 timestamp,
             } => {
-                // Only the AS4 message subtypes are served; anything else says so once and moves on.
-                let (supported, would_yield) = {
-                    let state = &mut parser.elem_view_state;
-                    let subtype = common_header.entry_subtype;
-                    let body = &state.body_buf[..body_len];
-                    let supported =
-                        fill_update_entries(body, subtype, &mut state.update_entries).is_some();
-                    (supported, bgp4mp_is_update(subtype, body))
-                };
+                // Support is decided from the header, not by decoding the record: the walk itself
+                // runs once, in `update_record_elems`, for the record this loop returns.
+                let subtype = common_header.entry_subtype;
+                let would_yield =
+                    bgp4mp_is_update(subtype, &parser.elem_view_state.body_buf[..body_len]);
+                let supported = would_yield
+                    && matches!(
+                        Bgp4MpType::try_from(subtype),
+                        Ok(Bgp4MpType::MessageAs4)
+                            | Ok(Bgp4MpType::MessageAs4Local)
+                            | Ok(Bgp4MpType::MessageAs4Addpath)
+                            | Ok(Bgp4MpType::MessageLocalAs4Addpath)
+                    );
                 if !supported {
                     // A record the view cannot read is either a parse error or a record kind it
                     // does not serve. The owned parser answers which: its error goes through the
@@ -445,14 +449,24 @@ pub(crate) fn next_record_elems_impl<R: Read>(
             peer_asn,
             timestamp,
             body_len,
-        } => update_record_elems(
-            &mut parser.elem_view_state,
-            body_len,
-            header,
-            peer_ip,
-            peer_asn,
-            timestamp,
-        ),
+        } => {
+            let record = update_record_elems(
+                &mut parser.elem_view_state,
+                body_len,
+                header,
+                peer_ip,
+                peer_asn,
+                timestamp,
+            );
+            if record.is_none() {
+                // The header said this record yields elements but the walk could not read it, so it
+                // is reported once instead of dropped in silence.
+                error!(
+                    "next_record_elems could not read a BGP4MP update the parser accepts; use into_elem_iter for this file"
+                );
+            }
+            record
+        }
     }
 }
 
