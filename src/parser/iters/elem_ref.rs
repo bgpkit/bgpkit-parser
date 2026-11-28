@@ -1019,7 +1019,7 @@ impl<'a> Iterator for ElemRefIter<'a> {
 ///
 /// Attributes are decoded lazily from `attr_bytes` when their accessors are called, without heap
 /// allocation.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ElemRef<'a> {
     attr_bytes: &'a [u8],
     peer_ip: IpAddr,
@@ -1033,6 +1033,20 @@ pub struct ElemRef<'a> {
     flags: u8,
     elem_type: ElemType,
     warned_truncation: Cell<bool>,
+}
+
+impl std::fmt::Debug for ElemRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The derived form printed the raw attribute bytes and the lazily filled cache slot, which
+        // changed between two calls on the same element.
+        f.debug_struct("ElemRef")
+            .field("elem_type", &self.elem_type)
+            .field("timestamp", &self.timestamp)
+            .field("peer_ip", &self.peer_ip)
+            .field("peer_asn", &self.peer_asn)
+            .field("prefix", &self.prefix())
+            .finish_non_exhaustive()
+    }
 }
 
 // Structural invariant: none of the borrowed view types own heap allocations or require Drop.
