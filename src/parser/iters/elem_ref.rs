@@ -205,7 +205,23 @@ pub(crate) fn next_batch<R: Read>(parser: &mut BgpkitParser<R>) -> NextBatch<'_>
                 }
                 continue;
             }
-            RecordKind::GeoPeer => continue,
+            RecordKind::GeoPeer => {
+                if let Err(err) =
+                    validate_geo_peer_table(&parser.elem_view_state.body_buf[..body_len])
+                {
+                    let raw = parser.core_dump.then(|| {
+                        assemble_error_bytes(
+                            raw_header.as_slice(),
+                            &parser.elem_view_state.body_buf[..body_len],
+                        )
+                    });
+                    if !handle_record_parse_error(parser, err, raw) {
+                        parser.elem_view_state.finished = true;
+                        return NextBatch::End;
+                    }
+                }
+                continue;
+            }
             RecordKind::Rib {
                 prefix,
                 entry_count,
@@ -393,12 +409,40 @@ pub(crate) fn next_record_elems_impl<R: Read>(
                     (supported, bgp4mp_is_update(subtype, body))
                 };
                 if !supported {
-                    // A record that carries no prefixes by design is not a gap in the view; only a
-                    // record that would have produced elements and did not is worth a warning.
                     if would_yield {
-                        parser
-                            .options
-                            .warn_view_scope_once("BGP4MP record with 2-byte AS numbers");
+                        // An UPDATE of a served subtype that this could not read is a parse error,
+                        // not a scope limit: report it the way the owned path would, and say so
+                        // only once for records whose AS numbers are two bytes wide.
+                        let as4 = matches!(
+                            Bgp4MpType::try_from(common_header.entry_subtype),
+                            Ok(Bgp4MpType::MessageAs4)
+                                | Ok(Bgp4MpType::MessageAs4Local)
+                                | Ok(Bgp4MpType::MessageAs4Addpath)
+                                | Ok(Bgp4MpType::MessageLocalAs4Addpath)
+                        );
+                        if as4 {
+                            match parser.parse_framed_record(
+                                common_header,
+                                raw_header.as_slice(),
+                                body_len,
+                            ) {
+                                Ok(_) => {}
+                                Err(failure) => {
+                                    if !handle_record_parse_error(
+                                        parser,
+                                        failure.error,
+                                        failure.bytes,
+                                    ) {
+                                        parser.elem_view_state.finished = true;
+                                        return None;
+                                    }
+                                }
+                            }
+                        } else {
+                            parser
+                                .options
+                                .warn_view_scope_once("BGP4MP record with 2-byte AS numbers");
+                        }
                     }
                     continue;
                 }
@@ -784,8 +828,12 @@ impl<'a> RecordElems<'a> {
         &self.header
     }
 
-    /// Returns how many elements the record declares: the RIB entry count, or the number of NLRI
-    /// this update announced and withdrew.
+    /// The number of entries the record declares: the RIB entry count, or the number of NLRI this
+    /// update announced and withdrew.
+    ///
+    /// This is what the header says, not a promise about how many elements the iterator yields: an
+    /// entry naming a peer outside the table, or one the record cannot decode, produces fewer.
+    /// Never size a buffer from it without a ceiling, since the count comes from the input.
     #[inline]
     pub fn len(&self) -> usize {
         match &self.source {
