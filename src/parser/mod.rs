@@ -8,7 +8,7 @@ pub use text_dump::{detect_text_dump, infer_timestamp_from_path, TextDumpElemIte
 
 #[macro_use]
 pub mod utils;
-pub mod attr_scan;
+pub(crate) mod attr_scan;
 pub mod bgp;
 pub mod bmp;
 pub mod filter;
@@ -292,14 +292,15 @@ impl<R: Read> BgpkitParser<R> {
         Ok(record)
     }
 
-    /// Advance to the next record, skipping RIB records whose prefix cannot satisfy `filters`.
+    /// Advance to the next record, skipping records that provably yield no element `filters` keeps.
     ///
-    /// A `TABLE_DUMP_V2` RIB record covers exactly one prefix, so when that prefix fails a prefix or
-    /// IP-version constraint, every element the record would yield fails it too. Skipping such a
-    /// record before parsing it returns the same elements as parsing and then filtering.
+    /// A record is skipped when the filter is decidable from bytes already read: the prefix and
+    /// address family of a `TABLE_DUMP_V2` RIB record, the peer, timestamp and address family of a
+    /// `BGP4MP` record, and the attribute block of either. Skipping such a record returns the same
+    /// elements as parsing it and then filtering.
     ///
-    /// Records whose prefix cannot be decided this way are parsed normally, including malformed
-    /// ones: a framing or parse error is reported exactly as [`Self::next_record`] reports it.
+    /// A record whose match cannot be decided this way is parsed normally, including a malformed
+    /// one: a framing or parse error is reported exactly as [`Self::next_record`] reports it.
     fn next_record_prefiltered(&mut self) -> Result<MrtRecord, ParserErrorWithBytes> {
         loop {
             let (header, raw_header, body_len) = {

@@ -752,8 +752,9 @@ Default local pref 100, local AS 65001\n\n\
 /// iterator in the crate.
 #[test]
 fn filtered_parser_refuses_the_borrowed_path() {
-    let url = "https://spaces.bgpkit.org/parser/rib-example-small.bz2";
-    let mut parser = BgpkitParser::new(url)
+    // A local fixture: this path returns before reading a byte, so the file only has to exist.
+    let fixture = "tests/fixtures/routeviews/bview.slice.gz";
+    let mut parser = BgpkitParser::new(fixture)
         .expect("open RIB fixture")
         .add_filter("prefix", "10.0.0.0/8")
         .expect("valid filter");

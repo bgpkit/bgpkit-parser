@@ -1,6 +1,6 @@
 mod attr_01_origin;
 mod attr_02_17_as_path;
-mod attr_03_next_hop;
+pub(crate) mod attr_03_next_hop;
 mod attr_04_med;
 mod attr_05_local_pref;
 mod attr_07_18_aggregator;

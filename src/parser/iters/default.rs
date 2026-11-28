@@ -108,8 +108,8 @@ pub struct ElemIterator<R> {
     screen: Option<std::sync::Arc<crate::parser::attr_scan::EntryScreen>>,
     /// Elements materialised from one borrowed RIB record, drained before anything else.
     batch: std::vec::IntoIter<BgpElem>,
-    /// Whether records are dispatched per frame. False when filters or core dumps need the owned
-    /// iterator to read the stream itself.
+    /// Whether records are dispatched per frame. A core dump needs the owned iterator to read the
+    /// stream itself, because it has to hand back the bytes around a parse error.
     framed: bool,
     record_iter: RecordIterator<R>,
     elementor: Elementor,

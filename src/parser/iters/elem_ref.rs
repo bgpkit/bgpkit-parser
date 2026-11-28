@@ -14,8 +14,8 @@ use crate::models::{
     AttrType, Bgp4MpType, BgpIdentifier, CommonHeader, Community, ElemType, ExtendedCommunity,
     ExtendedCommunityType, FlowSpecTrafficAction, FlowSpecTrafficMarking, FlowSpecTrafficRate,
     FourOctetAsExtCommunity, Ipv4AddrExtCommunity, Ipv6AddrExtCommunity, LargeCommunity,
-    LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix, NextHopAddress, OpaqueExtCommunity,
-    Origin, Peer, PeerType, Safi, TwoOctetAsExtCommunity,
+    LinkBandwidth, MacMobility, MetaCommunity, NetworkPrefix, OpaqueExtCommunity, Origin, Peer,
+    PeerType, Safi, TwoOctetAsExtCommunity,
 };
 use crate::parser::iters::handle_record_parse_error;
 use crate::parser::mrt::frame::{assemble_error_bytes, FrameError, Framer};
@@ -44,6 +44,9 @@ const COMMUNITY_NO_EXPORT_SUBCONFED: u32 = 0xFFFF_FF03;
 const FLAG_AFI_IPV6: u8 = 1 << 0;
 const FLAG_SAFI_MULTICAST: u8 = 1 << 1;
 const FLAG_ADD_PATH: u8 = 1 << 2;
+/// Set for an element of a `BGP4MP` update. A dump's entry decodes `NEXT_HOP` with the record's
+/// family; an update's `NEXT_HOP` is always the IPv4 address RFC 4271 defines.
+const FLAG_UPDATE: u8 = 1 << 3;
 
 const SLOT_UNSCANNED: u64 = u64::MAX;
 const SLOT_ABSENT: u64 = u64::MAX - 1;
@@ -457,64 +460,64 @@ pub(crate) fn next_record_elems_impl<R: Read>(
 
 /// Append the prefixes of one `MP_REACH_NLRI` or `MP_UNREACH_NLRI` body.
 ///
-/// Families that are not IP prefixes contribute nothing on the owned path either, so they contribute
-/// nothing here; a body this cannot read contributes nothing, like a failed attribute there.
+/// The body goes to the owned NLRI parser, so every family it understands (labelled, VPN, flow-spec,
+/// EVPN, link-state), the reserved octet, the next-hop widths it accepts, and the ADD-PATH guess in
+/// a block that starts with zero all behave exactly as they do on the owned path.
 fn append_mp_nlri(body: &[u8], reachable: bool, add_path: bool, out: &mut Vec<UpdateEntry>) {
-    if body.len() < 3 {
+    let Ok(value) = crate::parser::bgp::attributes::parse_nlri(
+        bytes::Bytes::copy_from_slice(body),
+        &None,
+        &None,
+        &None,
+        reachable,
+        add_path,
+    ) else {
         return;
-    }
-    let afi = match u16::from_be_bytes([body[0], body[1]]) {
-        1 => Afi::Ipv4,
-        2 => Afi::Ipv6,
+    };
+    let nlri = match value {
+        crate::models::AttributeValue::MpReachNlri(nlri)
+        | crate::models::AttributeValue::MpUnreachNlri(nlri) => nlri,
         _ => return,
     };
-    let Ok(safi) = Safi::try_from(body[2]) else {
-        return;
-    };
-    let mut rest = &body[3..];
-    if reachable {
-        let Some(&next_hop_len) = rest.first() else {
-            return;
-        };
-        let Some(after_next_hop) = rest.get(1 + next_hop_len as usize..) else {
-            return;
-        };
-        // RFC 4760 puts a reserved octet in front of reachable NLRI. The owned parser reads it and
-        // carries on regardless of its value; so does this.
-        rest = after_next_hop.get(1..).unwrap_or(&[]);
-    }
     let elem_type = if reachable {
         ElemType::ANNOUNCE
     } else {
         ElemType::WITHDRAW
     };
-    match safi {
-        Safi::Unicast | Safi::Multicast => append_nlri(rest, afi, safi, add_path, elem_type, out),
-        // RFC 8277 §2.4: a labelled withdrawal carries a three-byte compatibility field ahead of the
-        // prefix, which the owned parser strips with the same helper used here.
-        Safi::MplsLabel if !reachable => {
-            let mut input = bytes::Bytes::copy_from_slice(rest);
-            // Same configuration the owned attribute parser builds for SAFI 4.
-            let config = crate::models::LabeledNlriConfig {
-                add_path,
-                mode: crate::models::LabeledNlriMode::MultiLabel,
-                max_labels: 16,
-                peer_max_labels: None,
-            };
-            let Ok(prefixes) =
-                crate::models::parse_labeled_withdrawal_nlri(&mut input, afi, &config)
-            else {
-                return;
-            };
-            let flags = afi_flags(&afi, safi);
-            out.extend(prefixes.into_iter().map(|prefix| UpdateEntry {
-                prefix,
-                elem_type,
-                flags,
-            }));
+    let flags = afi_flags(&nlri.afi, nlri.safi);
+    out.extend(nlri.prefixes.into_iter().map(|prefix| UpdateEntry {
+        prefix,
+        elem_type,
+        flags,
+    }));
+}
+
+/// Whether every attribute header in the block can be read.
+///
+/// The owned path fails the record when a header itself is unreadable, because it cannot tell where
+/// the next attribute begins: three octets left with the extended-length flag set is that case. A
+/// body that runs past the end is different — the owned path keeps the attributes it already read
+/// and records a finding — so that ends the walk instead of failing it.
+fn attribute_block_walks(mut attrs: &[u8]) -> bool {
+    loop {
+        if attrs.is_empty() {
+            return true;
         }
-        // EVPN, link state and a labelled announcement produce no elements on the owned path either.
-        _ => {}
+        if attrs.len() < 3 {
+            return false;
+        }
+        let (header_len, body_len) = if attrs[0] & 0x10 != 0 {
+            if attrs.len() < 4 {
+                return false;
+            }
+            (4usize, u16::from_be_bytes([attrs[2], attrs[3]]) as usize)
+        } else {
+            (3usize, attrs[2] as usize)
+        };
+        match attrs.get(header_len + body_len..) {
+            Some(rest) => attrs = rest,
+            None => return true,
+        }
     }
 }
 
@@ -613,11 +616,17 @@ pub(crate) fn fill_update_entries<'a>(
         _ => return None,
     };
     rest = rest.get(4 + ip_len * 2..)?;
-    // The BGP message: 16-byte marker, two-byte length, one-byte type; only UPDATE carries NLRI.
+    // The BGP message: 16-byte marker, a two-byte length counting the whole message, and a one-byte
+    // type. Only an UPDATE carries NLRI, and the length bounds what follows: the owned parser
+    // rejects a body that runs past it, and octets after it are not NLRI.
     if rest.len() < 19 || rest[18] != 2 {
         return None;
     }
-    rest = &rest[19..];
+    let message_len = u16::from_be_bytes([rest[16], rest[17]]) as usize;
+    if message_len < 19 || message_len > rest.len() {
+        return None;
+    }
+    rest = &rest[19..message_len];
     if rest.len() < 2 {
         return None;
     }
@@ -635,6 +644,11 @@ pub(crate) fn fill_update_entries<'a>(
     }
     let attrs = &rest[..attr_len];
     let announced = &rest[attr_len..];
+    // An attribute block that cannot be walked fails the whole UPDATE on the owned path, including
+    // when the walker never reaches an MP attribute.
+    if !attribute_block_walks(attrs) {
+        return None;
+    }
 
     // MP_REACH and MP_UNREACH sit in the attribute block; find them without decoding anything else.
     let mut mp_reach: Option<&[u8]> = None;
@@ -913,6 +927,12 @@ impl<'a> Iterator for ElemRefIter<'a> {
                     *remaining = 0;
                     return None;
                 };
+                // One unreadable attribute block fails the whole record on the owned path, so this
+                // record yields nothing rather than a subset the other path would not produce.
+                if !attribute_block_walks(attrs) {
+                    *remaining = 0;
+                    return None;
+                }
                 Some(ElemRef::new(*prefix, peer, originated_time, *flags, attrs))
             }
             IterSource::Update {
@@ -1017,7 +1037,7 @@ impl<'a> ElemRef<'a> {
             timestamp,
             prefix: entry.prefix.prefix,
             path_id: entry.prefix.path_id,
-            flags: entry.flags,
+            flags: entry.flags | FLAG_UPDATE,
             elem_type: entry.elem_type,
             warned_truncation: Cell::new(false),
         }
@@ -1038,6 +1058,16 @@ impl<'a> ElemRef<'a> {
             Safi::Multicast
         } else {
             Safi::Unicast
+        }
+    }
+
+    /// The family `NEXT_HOP` is encoded with: the record's for a dump, IPv4 for an update.
+    #[inline]
+    fn next_hop_afi(&self) -> Afi {
+        if (self.flags & FLAG_UPDATE) != 0 {
+            Afi::Ipv4
+        } else {
+            self.afi()
         }
     }
 
@@ -1188,10 +1218,10 @@ impl<'a> ElemRef<'a> {
         }
     }
 
-    /// Returns the prefix announced by this RIB entry.
+    /// Returns the prefix this element announces, with the ADD-PATH identifier it carried.
     #[inline]
     pub fn prefix(&self) -> NetworkPrefix {
-        NetworkPrefix::new(self.prefix, None)
+        NetworkPrefix::new(self.prefix, self.path_id)
     }
 
     /// Returns the IP address of the peer that exported this RIB entry.
@@ -1266,10 +1296,8 @@ impl<'a> ElemRef<'a> {
                 break;
             }
             if code == u8::from(AttrType::NEXT_HOP) {
-                // RFC 4271 defines NEXT_HOP as an IPv4 address; decoding it with the entry's family
-                // would read sixteen bytes out of a four-byte value on every IPv6 entry.
                 let mut val = &bytes[val_start..val_end];
-                if let Ok(addr) = val.read_address(&Afi::Ipv4) {
+                if let Ok(addr) = val.read_address(&self.next_hop_afi()) {
                     next_hop = Some(addr);
                 }
             } else if code == u8::from(AttrType::MP_REACHABLE_NLRI) {
@@ -1322,9 +1350,9 @@ impl<'a> ElemRef<'a> {
         self.attr_bytes
     }
 
-    #[doc = ""]
-    #[doc = "Materialise this entry as an owned [`BgpElem`]."]
-    pub(crate) fn to_bgp_elem(&self) -> BgpElem {
+    /// Materialise this entry as an owned [`BgpElem`], for the fields the borrowed accessors do
+    /// not expose.
+    pub fn to_bgp_elem(&self) -> BgpElem {
         let bytes = self.usable_attr_prefix();
         let afi = self.afi();
         let safi = self.safi();
@@ -1383,21 +1411,31 @@ impl<'a> ElemRef<'a> {
             // owned path does with an attribute it falls back to `AttributeValue::Raw`.
             let mut undecoded = false;
             match AttrType::from(code) {
+                // A value the owned path cannot parse becomes raw bytes and leaves the earlier
+                // attribute of the same type in place, so keep what is already known here too.
                 AttrType::ORIGIN => {
-                    origin = val.first().and_then(|value| Origin::try_from(*value).ok());
-                    undecoded = origin.is_none();
+                    match val.first().and_then(|value| Origin::try_from(*value).ok()) {
+                        Some(decoded) => origin = Some(decoded),
+                        None => undecoded = true,
+                    }
                 }
                 AttrType::AS_PATH => {
-                    as_path_wire = validate_as_path_wire(val).then_some(val);
-                    undecoded = as_path_wire.is_none();
+                    if validate_as_path_wire(val) {
+                        as_path_wire = Some(val);
+                    } else {
+                        undecoded = true;
+                    }
                 }
                 AttrType::AS4_PATH => {
-                    as4_path_wire = validate_as_path_wire(val).then_some(val);
-                    undecoded = as4_path_wire.is_none();
+                    if validate_as_path_wire(val) {
+                        as4_path_wire = Some(val);
+                    } else {
+                        undecoded = true;
+                    }
                 }
                 AttrType::NEXT_HOP => {
                     let mut value = val;
-                    match value.read_address(&Afi::Ipv4) {
+                    match value.read_address(&self.next_hop_afi()) {
                         Ok(address) => next_hop = Some(address),
                         Err(_) => undecoded = true,
                     }
@@ -1418,8 +1456,10 @@ impl<'a> ElemRef<'a> {
                 }
                 AttrType::ATOMIC_AGGREGATE => atomic = true,
                 AttrType::AGGREGATOR | AttrType::AS4_AGGREGATOR => {
-                    aggregator = decode_aggregator_slice(val);
-                    undecoded = aggregator.is_none();
+                    match decode_aggregator_slice(val) {
+                        Some(decoded) => aggregator = Some(decoded),
+                        None => undecoded = true,
+                    }
                 }
                 AttrType::COMMUNITIES
                 | AttrType::EXTENDED_COMMUNITIES
@@ -1430,6 +1470,8 @@ impl<'a> ElemRef<'a> {
                         only_to_customer = Some(Asn::new_32bit(u32::from_be_bytes([
                             val[0], val[1], val[2], val[3],
                         ])));
+                    } else {
+                        undecoded = true;
                     }
                 }
                 AttrType::MP_REACHABLE_NLRI => {
@@ -1439,6 +1481,7 @@ impl<'a> ElemRef<'a> {
                 }
                 // Types the element path keeps as raw bytes, mirroring `get_relevant_attributes`.
                 AttrType::Unknown(_)
+                | AttrType::TRAFFIC_ENGINEERING
                 | AttrType::RESERVED
                 | AttrType::PMSI_TUNNEL
                 | AttrType::PE_DISTINGUISHER_LABELS
@@ -1490,13 +1533,17 @@ impl<'a> ElemRef<'a> {
                         communities.push(MetaCommunity::Plain(decode_plain_community(word.get())));
                     }
                 }
-                AttrType::EXTENDED_COMMUNITIES => {
+                // An attribute whose length is not a whole number of communities fails to parse on
+                // the owned path, so nothing from it is rendered and its bytes are kept raw.
+                AttrType::EXTENDED_COMMUNITIES if val.len().is_multiple_of(8) => {
                     for chunk in val.as_chunks::<8>().0 {
                         communities
                             .push(MetaCommunity::Extended(decode_extended_community(*chunk)));
                     }
                 }
-                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES => {
+                AttrType::IPV6_ADDRESS_SPECIFIC_EXTENDED_COMMUNITIES
+                    if val.len().is_multiple_of(20) =>
+                {
                     for chunk in val.as_chunks::<20>().0 {
                         communities.push(MetaCommunity::Ipv6Extended(
                             decode_ipv6_extended_community(chunk),
@@ -1512,7 +1559,11 @@ impl<'a> ElemRef<'a> {
                         )));
                     }
                 }
-                _ => {}
+                // Anything left is a community attribute the owned path keeps raw.
+                _ => unknown.push(AttrRaw {
+                    code,
+                    bytes: Bytes::copy_from_slice(val),
+                }),
             }
         }
 
@@ -1674,103 +1725,28 @@ fn wire_route_len(mut wire: &[u8]) -> usize {
 }
 
 /// Decode `MP_REACH_NLRI` in a `TABLE_DUMP_V2` `RIB_AFI` entry to its resolved global next-hop IP,
-/// handling both RFC 6396 §4.3.4 abbreviated next-hop payloads and full RFC 4760 payloads.
+/// The global next hop of an `MP_REACH_NLRI` value.
+///
+/// A `RIB_AFI` entry may omit the attribute's own address family and SAFI (RFC 6396 §4.3.4), which
+/// is what a leading zero decides. The next-hop field itself is decoded by the owned parser, so the
+/// widths it accepts and rejects are the same on both paths.
 fn parse_mp_reach_next_hop(
     mut input: &[u8],
-    rib_afi: Afi,
-    rib_safi: Safi,
-    is_add_path: bool,
+    _rib_afi: Afi,
+    _rib_safi: Safi,
+    _is_add_path: bool,
 ) -> Result<Option<IpAddr>, ()> {
-    let first_byte_zero = input.first().copied() == Some(0);
-    let (afi, safi) = if first_byte_zero {
-        let afi = input.read_afi().map_err(|_| ())?;
-        let safi = input.read_safi().map_err(|_| ())?;
-        (afi, safi)
-    } else {
-        (rib_afi, rib_safi)
-    };
-
+    if input.first().copied() == Some(0) {
+        input.read_afi().map_err(|_| ())?;
+        input.read_safi().map_err(|_| ())?;
+    }
     let nh_len = input.read_u8().map_err(|_| ())? as usize;
-    if input.len() < nh_len {
-        return Err(());
-    }
-    let nh_bytes = &input[..nh_len];
-    input = &input[nh_len..];
-
-    let nh = match nh_len {
-        0 => None,
-        4 => Some(NextHopAddress::Ipv4(Ipv4Addr::new(
-            nh_bytes[0],
-            nh_bytes[1],
-            nh_bytes[2],
-            nh_bytes[3],
-        ))),
-        16 => {
-            let octets: [u8; 16] = nh_bytes.try_into().expect("16 bytes");
-            Some(NextHopAddress::Ipv6(Ipv6Addr::from(octets)))
-        }
-        24 => {
-            let octets: [u8; 16] = nh_bytes[8..24].try_into().expect("16 bytes");
-            Some(NextHopAddress::Ipv6(Ipv6Addr::from(octets)))
-        }
-        32 => {
-            let a: [u8; 16] = nh_bytes[0..16].try_into().expect("16 bytes");
-            let b: [u8; 16] = nh_bytes[16..32].try_into().expect("16 bytes");
-            Some(NextHopAddress::Ipv6LinkLocal(
-                Ipv6Addr::from(a),
-                Ipv6Addr::from(b),
-            ))
-        }
-        48 => {
-            let a: [u8; 16] = nh_bytes[8..24].try_into().expect("16 bytes");
-            let b: [u8; 16] = nh_bytes[32..48].try_into().expect("16 bytes");
-            Some(NextHopAddress::Ipv6LinkLocal(
-                Ipv6Addr::from(a),
-                Ipv6Addr::from(b),
-            ))
-        }
-        _ => return Err(()),
-    };
-
-    if first_byte_zero {
-        if afi == Afi::L2vpn
-            || safi == Safi::Evpn
-            || afi == Afi::LinkState
-            || safi == Safi::MplsLabel
-        {
-            // Full non-IP-unicast/multicast MP_REACH inside RIB_AFI: fall back to the NLRI parser
-            // to match exact validation semantics.
-            return Err(());
-        }
-        let reserved = input.read_u8().map_err(|_| ())?;
-        if reserved != 0 {
-            warn!("NLRI reserved byte not 0 (parsing NLRI prefixes)");
-        }
-        if !validate_nlri_prefixes(input, is_add_path, &afi) {
-            return Err(());
-        }
-    }
-
-    Ok(nh.map(|n| n.global_addr()))
-}
-
-fn validate_nlri_prefixes_exact(mut data: &[u8], add_path: bool, afi: &Afi) -> bool {
-    while !data.is_empty() {
-        if data.read_nlri_prefix(afi, add_path).is_err() {
-            return false;
-        }
-    }
-    true
-}
-
-fn validate_nlri_prefixes(data: &[u8], add_path: bool, afi: &Afi) -> bool {
-    if add_path {
-        return validate_nlri_prefixes_exact(data, true, afi);
-    }
-    if data.first() == Some(&0) && validate_nlri_prefixes_exact(data, true, afi) {
-        return true;
-    }
-    validate_nlri_prefixes_exact(data, false, afi)
+    let nh_bytes = input.get(..nh_len).ok_or(())?;
+    let next_hop = crate::parser::bgp::attributes::attr_03_next_hop::parse_mp_next_hop(
+        bytes::Bytes::copy_from_slice(nh_bytes),
+    )
+    .map_err(|_| ())?;
+    Ok(next_hop.map(|next_hop| next_hop.global_addr()))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -3203,6 +3179,52 @@ mod wire_parity_tests {
         elems
     }
 
+    /// Wrap a body in an MRT header of an explicit entry type and subtype.
+    fn mrt_typed(entry: EntryType, subtype: u16, body: Vec<u8>) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1_600_000_000u32.to_be_bytes());
+        wire.extend_from_slice(&(entry as u16).to_be_bytes());
+        wire.extend_from_slice(&subtype.to_be_bytes());
+        wire.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&body);
+        wire
+    }
+
+    /// A `PEER_INDEX_TABLE` record with one peer, then one `RIB_AFI` record for the prefix, mirroring
+    /// what a dump carries.
+    fn rib_record(
+        rib_subtype: u16,
+        prefix_len: u8,
+        prefix_bytes: &[u8],
+        attributes: &[u8],
+    ) -> Vec<u8> {
+        let mut peer_table = Vec::new();
+        peer_table.extend_from_slice(&[192, 0, 2, 10]); // collector BGP id
+        peer_table.extend_from_slice(&0u16.to_be_bytes()); // empty view name
+        peer_table.extend_from_slice(&1u16.to_be_bytes()); // one peer
+        peer_table.push(0); // peer type
+        peer_table.extend_from_slice(&[192, 0, 2, 20]); // peer BGP id
+        peer_table.extend_from_slice(&[192, 0, 2, 30]); // peer address
+        peer_table.extend_from_slice(&64496u32.to_be_bytes()); // peer ASN
+        let mut wire = mrt_typed(
+            EntryType::TABLE_DUMP_V2,
+            TableDumpV2Type::PeerIndexTable as u16,
+            peer_table,
+        );
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&1u32.to_be_bytes()); // sequence number
+        body.push(prefix_len);
+        body.extend_from_slice(prefix_bytes);
+        body.extend_from_slice(&1u16.to_be_bytes()); // one entry
+        body.extend_from_slice(&0u16.to_be_bytes()); // peer index
+        body.extend_from_slice(&1_600_000_000u32.to_be_bytes()); // originated time
+        body.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
+        body.extend_from_slice(attributes);
+        wire.extend_from_slice(&mrt_typed(EntryType::TABLE_DUMP_V2, rib_subtype, body));
+        wire
+    }
+
     /// Both paths must produce the same elements for a shape that is legal but rare in real traffic.
     fn assert_same(wire: &[u8]) -> Vec<BgpElem> {
         let owned = owned_elems(wire);
@@ -3255,6 +3277,59 @@ mod wire_parity_tests {
         assert_eq!(elems.len(), 1);
         assert_eq!(elems[0].prefix.prefix.to_string(), "203.0.113.0/24");
         assert_eq!(elems[0].elem_type, ElemType::WITHDRAW);
+    }
+
+    /// A dump's `NEXT_HOP` is encoded with the record's family, so an IPv6 entry carries sixteen
+    /// bytes. Reading it as IPv4 would report the first four octets as the next hop.
+    #[test]
+    fn ipv6_dump_entry_reads_a_sixteen_byte_next_hop() {
+        let next_hop = [0x20u8, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let attributes: Vec<u8> = [
+            origin_igp(),
+            as_path(&[3356, 174], AsnLength::Bits32),
+            attr(3, &next_hop),
+        ]
+        .concat();
+        // RIB_IPV6_UNICAST, 2001:db8::/32
+        let wire = rib_record(4, 32, &[0x20, 0x01, 0x0d, 0xb8], &attributes);
+        let elems = assert_same(&wire);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].next_hop, Some("2001:db8::1".parse().unwrap()));
+    }
+
+    /// The prefix accessor must carry the ADD-PATH identifier the record declared.
+    #[test]
+    fn add_path_identifier_survives_the_prefix_accessor() {
+        let attributes: Vec<u8> = [
+            origin_igp(),
+            as_path(&[3356, 174], AsnLength::Bits32),
+            next_hop(),
+        ]
+        .concat();
+        let mut announced = 7u32.to_be_bytes().to_vec();
+        announced.extend_from_slice(&nlri("203.0.113.0/24"));
+        let wire = mrt(
+            Bgp4MpType::MessageAs4Addpath,
+            bgp4mp_body(
+                AsnLength::Bits32,
+                Afi::Ipv4,
+                2,
+                &update_payload(&[], &attributes, &announced),
+            ),
+        );
+        let elems = assert_same(&wire);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].prefix.path_id, Some(7));
+
+        let mut parser = crate::BgpkitParser::from_reader(Cursor::new(wire));
+        let mut seen = 0;
+        while let Some(mut record) = parser.next_record_elems() {
+            for elem in &mut record {
+                assert_eq!(elem.prefix().path_id, Some(7));
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 1);
     }
 
     /// A 2-byte-ASN BGP4MP record is outside the borrowed view's scope: it produces no elements

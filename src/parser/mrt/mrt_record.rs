@@ -159,8 +159,7 @@ pub(crate) fn chunk_mrt_record_with_context(
     })
 }
 
-/// Read one MRT record, keeping the header bytes in a stack buffer.
-/// Frame the next record into an owned body, using the same framing path as every other consumer.
+/// Read one MRT record, keeping the header bytes in a stack buffer and the body in an owned `Vec`.
 fn read_chunk(input: &mut impl Read) -> Result<ChunkedRecord, RawMrtRecordError> {
     let mut framer = crate::parser::mrt::frame::Framer::default();
     let mut body = Vec::new();

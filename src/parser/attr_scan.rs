@@ -82,8 +82,18 @@ fn read_entry(attrs: &[u8]) -> EntryFacts<'_> {
         }
         let body = &rest[header_len..header_len + body_len];
         match attr_type {
-            1 => facts.origin_at = body.first().copied(),
-            2 => facts.path = Some(body),
+            // The owned path keeps the earlier value when a later attribute of the same type cannot
+            // be parsed: the malformed one becomes raw bytes in `unknown`.
+            1 => {
+                if let Some(at) = body.first().filter(|at| **at <= 2) {
+                    facts.origin_at = Some(*at);
+                }
+            }
+            2 => {
+                if path_validates(body) {
+                    facts.path = Some(body);
+                }
+            }
             8 => {
                 facts.duplicate_community |= facts.communities.is_some();
                 facts.communities = Some(body);
@@ -106,6 +116,25 @@ fn read_entry(attrs: &[u8]) -> EntryFacts<'_> {
     facts
 }
 
+/// Whether every segment of a 4-byte `AS_PATH` is well formed.
+///
+/// The owned path rejects the whole attribute when any segment is invalid, so a malformed duplicate
+/// must not replace a valid path this module already read.
+fn path_validates(mut body: &[u8]) -> bool {
+    while !body.is_empty() {
+        if body.len() < 2 {
+            return false;
+        }
+        let segment_type = body[0];
+        let len = body[1] as usize * 4;
+        if !(1..=4).contains(&segment_type) || body.len() < 2 + len {
+            return false;
+        }
+        body = &body[2 + len..];
+    }
+    true
+}
+
 /// The origin of a 4-byte `AS_PATH`: `Ok(None)` for a path that has none.
 ///
 /// Mirrors `AsPath::iter_origins`: only the last segment decides, a sequence contributes its last ASN,
@@ -119,7 +148,7 @@ fn path_origin(mut body: &[u8]) -> Result<Option<Asn>, ()> {
         let segment_type = body[0];
         let count = body[1] as usize;
         let len = count * 4;
-        if body.len() < 2 + len {
+        if !(1..=4).contains(&segment_type) || body.len() < 2 + len {
             return Err(());
         }
         last = Some((segment_type, &body[2..2 + len]));
@@ -623,6 +652,34 @@ mod tests {
             &body,
             Bgp4MpType::Message as u16
         ));
+    }
+
+    /// A valid attribute followed by a malformed duplicate keeps its value on the owned path: the
+    /// duplicate becomes raw bytes and the earlier parse stands. The byte scan must agree.
+    #[test]
+    fn a_malformed_duplicate_does_not_overwrite_a_valid_origin() {
+        let block = attrs(&[(1, &[0]), (1, &[99])]);
+        let facts = read_entry(&block);
+        assert_eq!(
+            entry_satisfies(&facts, &AttrPredicate::OriginValue(Origin::IGP)),
+            Some(true)
+        );
+    }
+
+    /// Same shape for the AS path: an invalid segment in a later duplicate must not replace the
+    /// path that decides the origin.
+    #[test]
+    fn a_malformed_duplicate_does_not_overwrite_a_valid_as_path() {
+        let valid = as_path(&[(2, &[13335])]);
+        let mut malformed = vec![9u8, 0];
+        malformed.extend_from_slice(&[2u8, 1]);
+        malformed.extend_from_slice(&64512u32.to_be_bytes());
+        let block = attrs(&[(2, &valid), (2, &malformed)]);
+        let facts = read_entry(&block);
+        assert_eq!(
+            entry_satisfies(&facts, &AttrPredicate::OriginAsn(13335)),
+            Some(true)
+        );
     }
 
     /// An empty AS_PATH segment still renders a separator, so the rendered positions no longer
